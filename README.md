@@ -27,8 +27,12 @@ cd MicoFx
 
 **3) Gerisi otomatik:**
 ```powershell
-.\bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 ```
+(`.\bootstrap.ps1` tek basina "calisan script'ler devre disi" hatasi
+verebilir - Windows'un varsayilan PowerShell kisitlamasi, yukaridaki komut
+bunu asar.)
+
 Bu, Python/Node.js/Claude Code yoksa kurar (once `winget` dener, olmazsa
 resmi siteden dogrudan indirip sessizce kurar) ve `KURULUM.bat`'i
 calistirir - hicbir soruya cevap vermen gerekmez.

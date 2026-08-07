@@ -40,8 +40,13 @@ hesabinla giris yapip onaylarsin.
 
 ### 3) Gerisi tek komutla otomatik
 ```powershell
-.\bootstrap.ps1
+powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 ```
+(`.\bootstrap.ps1` tek basina calistirinca "calisan script'ler devre disi
+birakildi" hatasi verebilir - Windows'un varsayilan PowerShell kisitlamasi
+budur, yukaridaki komut sadece bu script icin gecici olarak asar, kalici
+bir ayar degistirmez.)
+
 Bu script sirayla: Python, Node.js ve Claude Code yoksa kurar (once
 `winget` dener, olmazsa resmi siteden dogrudan indirip sessizce kurar),
 sonra `KURULUM.bat`'i calistirip bagimsiz sanal ortami (`C:\MicoFX-venv`)
