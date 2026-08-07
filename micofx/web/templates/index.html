@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MicoFX Terminal</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">MicoFX</span>
+    <span class="sub">MT5 Trading Terminal</span>
+  </div>
+
+  <div class="topstats" id="topstats"></div>
+
+  <div class="topctl">
+    <button class="btn btn-go" id="btn-start">Bot Baslat</button>
+    <button class="btn btn-stop" id="btn-stop">Durdur</button>
+    <button class="btn btn-danger" id="btn-panic" title="Botu durdur ve tum pozisyonlari kapat">Acil</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="panel">Panel</button>
+  <button class="tab" data-tab="semboller">Semboller</button>
+  <button class="tab" data-tab="opt">Optimizasyon</button>
+  <button class="tab" data-tab="ai">AI Denetleyici</button>
+  <button class="tab" data-tab="sistem">Sistem</button>
+  <button class="tab" data-tab="log">Log</button>
+  <span class="tabs-spacer"></span>
+  <span class="pulse" id="pulse" title="Son guncelleme"></span>
+</nav>
+
+<main>
+  <section class="page active" id="page-panel">
+    <div class="cards" id="account-cards"></div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Islem Kapasitesi</h2>
+        <div class="panel-note" id="capacity-summary"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="capacity-table">
+          <thead>
+            <tr>
+              <th>Sembol</th><th>Grup</th><th>Durum</th>
+              <th class="num">Lot</th><th class="num">Avantaj</th><th class="num">Lot Modu</th>
+              <th class="num">Acik</th><th class="num">Limit</th>
+              <th class="num">Acilabilir</th>
+              <th class="num">Marj / Islem</th>
+              <th class="num">Risk / Islem (1R)</th>
+              <th class="num">Maliyet / Islem</th>
+              <th class="num">Beklenen / Islem</th>
+              <th class="num">Acik K/Z</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <div class="panel-head"><h2>Acik Pozisyonlar</h2>
+          <button class="btn btn-sm btn-danger" id="btn-close-all">Tumunu Kapat</button>
+        </div>
+        <div class="table-wrap">
+          <table class="grid" id="positions-table">
+            <thead>
+              <tr><th>Sembol</th><th>Yon</th><th class="num">Lot</th><th class="num">Giris</th>
+                  <th class="num">Fiyat</th><th class="num">SL</th><th class="num">TP</th>
+                  <th class="num">K/Z</th><th>Sure</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Gunluk Ozet</h2><div class="panel-note" id="day-note"></div></div>
+        <div class="table-wrap">
+          <table class="grid" id="day-table">
+            <thead><tr><th>Sembol</th><th class="num">Islem</th><th class="num">Kazanc</th>
+                       <th class="num">Kayip</th><th class="num">Net</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Gerceklesme Kalitesi (Kayma)</h2>
+        <div class="panel-note" id="exec-note"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="exec-table">
+          <thead>
+            <tr><th>Sembol</th><th class="num">Ornek</th><th class="num">Aleyhte</th>
+                <th class="num">Lehte</th><th class="num">Aleyhte/Lehte</th>
+                <th class="num">Ort. puan</th><th class="num">En kotu</th>
+                <th class="num">Ort. R</th><th class="num">Net etki</th><th>Durum</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Canli Sembol Durumu</h2>
+        <div class="panel-note">Sinyal motoru her kapanan barda yeniden hesaplar</div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="live-table">
+          <thead>
+            <tr><th>Sembol</th><th>Strateji</th><th>TF</th><th>Seans</th><th>T3</th><th>UST TF</th>
+                <th class="num">%K</th><th class="num">%D</th><th class="num">ADX</th>
+                <th class="num">ATR</th><th class="num">Spread</th>
+                <th>Sinyal</th><th>Not</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="page" id="page-semboller">
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button class="btn btn-sm" data-bulk="enable">Tumunu Ac</button>
+        <button class="btn btn-sm" data-bulk="disable">Tumunu Kapat</button>
+        <button class="btn btn-sm" id="btn-opt-all">Tum Sembolleri Optimize Et</button>
+      </div>
+      <div class="toolbar-group">
+        <input class="filter" id="symbol-filter" placeholder="Sembol ara...">
+        <select id="group-filter">
+          <option value="">Tum gruplar</option>
+          <option value="forex">Forex</option>
+          <option value="index">Endeks</option>
+          <option value="commodity">Emtia</option>
+          <option value="crypto">Kripto</option>
+        </select>
+      </div>
+    </div>
+    <div id="symbol-list" class="symbol-list"></div>
+  </section>
+
+  <section class="page" id="page-opt">
+    <div class="panel">
+      <div class="panel-head"><h2>Optimizasyon Ayarlari</h2>
+        <div class="panel-group">
+          <button class="btn btn-sm" id="btn-opt-save">Kaydet</button>
+          <button class="btn btn-sm btn-ghost" id="btn-opt-reset">Varsayilana Don</button>
+        </div>
+      </div>
+      <div class="form-grid" id="opt-settings"></div>
+      <details class="field-wide">
+        <summary>Ileri duzey / Arama Parametreleri (nadiren degisir)</summary>
+        <div class="form-grid" id="opt-settings-advanced"></div>
+        <h3 class="section-title">Parametre Izgarasi <span class="hint">virgulle ayirin</span></h3>
+        <div class="form-grid" id="opt-grid"></div>
+      </details>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Calisma</h2>
+        <div class="panel-group">
+          <label class="chk"><input type="checkbox" id="opt-apply" checked> En iyiyi otomatik uygula</label>
+          <button class="btn btn-go btn-sm" id="btn-opt-run">Secilenleri Calistir</button>
+          <button class="btn btn-sm btn-danger" id="btn-opt-cancel">Iptal</button>
+        </div>
+      </div>
+      <div id="opt-picker" class="chip-row"></div>
+      <div class="panel-note">Zaman dilimi <span class="hint">bos = kayitli ayardaki tumu</span></div>
+      <div id="opt-tf-picker" class="chip-row"></div>
+      <div class="progress"><div class="progress-bar" id="opt-progress"></div></div>
+      <div class="panel-note" id="opt-status">Bekliyor</div>
+      <div class="table-wrap">
+        <table class="grid" id="opt-results">
+          <thead><tr><th>Sembol</th><th>Strateji</th><th>TF</th><th class="num">Skor</th>
+                     <th class="num">Segment +</th>
+                     <th class="num">Secim Islem</th><th class="num">Secim PF</th>
+                     <th class="num">Secmeli PF</th><th class="num">Secmeli R</th>
+                     <th class="num">Test Islem</th><th class="num">Test PF</th>
+                     <th class="num">Test R</th>
+                     <th class="num" title="Test beklentisi, secim/dogrulamanin zayif olaninin ne kadarini koruyor">Kalicilik</th>
+                     <th>Durum</th><th>Parametreler</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="panel-note">
+        Gecmis uc parcaya bolunur ve her parca yalnizca bir is yapar: <b>Secim</b> segmentleri
+        parametreleri arar, <b>Secmeli</b> segment kazanani ve hangi strateji/zaman diliminin
+        calisacagini secer, <b>Test</b> segmentine hic dokunulmaz. Guvenilecek sayi Test'tir;
+        parametreler ancak her ikisi de kar ederse uygulanir.
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Gecmis Sonuclar</h2>
+        <div class="panel-group">
+          <select id="opt-history-sort">
+            <option value="score">Skora gore (buyukten kucuge)</option>
+            <option value="time">Zamana gore (yeniden eskiye)</option>
+          </select>
+          <button class="btn btn-sm btn-ghost" id="btn-opt-history">Yenile</button>
+          <button class="btn btn-sm btn-danger" id="btn-opt-history-clear">Gecmisi Temizle</button>
+        </div>
+      </div>
+      <div class="table-wrap table-wrap-scroll">
+        <table class="grid" id="opt-history">
+          <thead><tr><th>Zaman</th><th>Sembol</th><th>Strateji</th><th>TF</th><th class="num">Skor</th>
+                     <th class="num">Secmeli R</th>
+                     <th class="num">Test Islem</th><th class="num">Test PF</th>
+                     <th class="num">Test R</th>
+                     <th class="num" title="Test beklentisi, secim/dogrulamanin zayif olaninin ne kadarini koruyor">Kalicilik</th>
+                     <th>Uygulandi</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="page" id="page-ai">
+    <div class="cards" id="ai-cards"></div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>AI Denetleyici</h2>
+        <div class="panel-group">
+          <label class="chk"><input type="checkbox" id="ai-enabled"> Aktif</label>
+          <button class="btn btn-sm btn-go" id="btn-ai-review">Simdi Degerlendir</button>
+          <button class="btn btn-sm btn-ghost" id="btn-ai-clear">Tum Kararlari Sifirla</button>
+        </div>
+      </div>
+      <div class="panel-note" id="ai-note"></div>
+      <div class="table-wrap">
+        <table class="grid" id="ai-table">
+          <thead>
+            <tr><th>Sembol</th><th>Karar</th><th>Gerekce</th>
+                <th class="num">Islem</th><th class="num">Kazanc</th><th class="num">PF</th>
+                <th class="num">Net</th><th class="num">Beklenen R</th><th class="num">Saglik</th>
+                <th class="num">Oncelik</th>
+                <th class="num">Ust uste zarar</th>
+                <th class="num">Lot carpani</th><th>Kapali saatler</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Denetleyici Ayarlari</h2>
+        <div class="panel-note">Degisiklikler aninda kaydedilir</div>
+      </div>
+      <div class="form-grid" id="ai-settings"></div>
+    </div>
+  </section>
+
+  <section class="page" id="page-sistem">
+    <div class="split">
+      <div class="panel">
+        <div class="panel-head"><h2>Bot Kontrolu</h2></div>
+        <div class="btn-row">
+          <button class="btn btn-go" id="sys-start">Baslat</button>
+          <button class="btn btn-stop" id="sys-stop">Durdur</button>
+          <button class="btn btn-stop" id="sys-stop-close">Durdur + Pozisyonlari Kapat</button>
+          <button class="btn btn-danger" id="sys-panic">Acil Durdurma</button>
+        </div>
+        <div class="panel-note" id="sys-bot-note"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>MT5 Baglantisi</h2>
+          <button class="btn btn-sm" id="sys-reconnect">Yeniden Baglan</button>
+        </div>
+        <div class="kv" id="sys-mt5"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Sistem Ayarlari</h2>
+        <div class="panel-note">Degisiklikler aninda kaydedilir</div>
+      </div>
+      <div class="form-grid" id="sys-settings"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Urun Portfoyu</h2>
+        <div class="panel-group">
+          <button class="btn btn-sm" id="btn-portfolio-fill">Eksik urunleri ekle</button>
+          <button class="btn btn-sm btn-ghost" id="btn-portfolio-sort">Grupla + Alfabetik Sirala</button>
+          <button class="btn btn-sm btn-ghost" id="btn-portfolio-defaults">Varsayilan listeye don</button>
+        </div>
+      </div>
+      <div class="panel-note">
+        Urun ekle / sil / ac-kapa buradan. Bagli MT5 terminalindeki isimler farkliysa
+        broker esleme alanina yazin veya asagidan arayip ekleyin. Yol degisince
+        (Pepperstone/NCM) urun listesini bu ekrandan guncelleyebilirsiniz.
+      </div>
+      <div class="portfolio-add">
+        <input class="filter" id="portfolio-symbol" placeholder="Sembol (orn. EURUSD)" spellcheck="false">
+        <input class="filter" id="portfolio-broker" placeholder="Broker adi (bos = ayni)" spellcheck="false">
+        <select class="filter" id="portfolio-group">
+          <option value="forex">Forex</option>
+          <option value="index">Endeks</option>
+          <option value="commodity">Emtia</option>
+          <option value="crypto">Kripto</option>
+        </select>
+        <input class="filter" id="portfolio-minlot" type="number" step="0.01" min="0"
+               placeholder="Min lot (opsiyonel)" style="width:150px" title="Sabit lot referansi olarak kullanilir">
+        <input class="filter" id="portfolio-openhour" type="time"
+               style="width:130px" title="Seans acilis saati (broker saati, opsiyonel)">
+        <input class="filter" id="portfolio-closehour" type="time"
+               style="width:130px" title="Seans/Cuma kapanis saati (broker saati, opsiyonel)">
+        <button class="btn btn-sm btn-go" id="btn-portfolio-add">Ekle</button>
+      </div>
+      <div class="panel-note">
+        Lot modu (tumu):
+        <button class="btn btn-sm btn-ghost" data-lotmode-bulk="fixed">Hepsini Sabit Yap</button>
+        <button class="btn btn-sm btn-ghost" data-lotmode-bulk="risk">Hepsini Risk% Yap</button>
+        <button class="btn btn-sm btn-ghost" id="btn-lotmode-check">Risk Modu Kontrolu</button>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="portfolio-table">
+          <thead><tr>
+            <th>Urun</th><th>Grup</th><th>Acik</th><th>Lot modu</th>
+            <th>Broker esleme</th><th>Eslesen</th><th>Durum</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Broker Sembol Arama</h2>
+        <div class="panel-group">
+          <input class="filter" id="broker-search" placeholder="Broker sembolu ara (orn: EUR, NAS)">
+          <button class="btn btn-sm btn-ghost" id="btn-broker-search">Ara</button>
+        </div>
+      </div>
+      <div class="panel-note">
+        Sonuca tiklayinca portfoye eklenir (yoksa) veya broker eslemesi doldurulur.
+      </div>
+      <div id="broker-results"></div>
+    </div>
+
+    <div class="panel danger-zone">
+      <div class="panel-head"><h2>Tehlikeli Islemler</h2></div>
+      <div class="btn-row">
+        <button class="btn btn-danger" id="sys-close-all">Tum Pozisyonlari Kapat</button>
+        <button class="btn btn-ghost" id="sys-resume-day">Gunu Devam Ettir (Limit Kilidini Ac)</button>
+        <button class="btn btn-danger" id="sys-shutdown">Uygulamayi Kapat</button>
+        <button class="btn btn-danger" id="sys-restart">Uygulamayi Yeniden Baslat</button>
+      </div>
+      <div class="panel-note" id="sys-day-note"></div>
+    </div>
+  </section>
+
+  <section class="page" id="page-log">
+    <div class="panel">
+      <div class="panel-head"><h2>Terminal Kaydi</h2>
+        <div class="panel-group">
+          <div class="chip-row" id="log-levels"></div>
+          <label class="chk"><input type="checkbox" id="log-follow" checked> Takip et</label>
+          <button class="btn btn-sm btn-ghost" id="btn-log-clear">Temizle</button>
+          <a class="btn btn-sm btn-ghost" href="/api/logs/download">Indir</a>
+        </div>
+      </div>
+      <div class="logview" id="logview"></div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

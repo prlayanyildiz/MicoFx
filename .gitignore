@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/*.db
+data/*.db-journal
+logs/
+_probe_*.py
+.env
+.pytest_cache/
+.claude/
+.cursor/
+.vscode/
