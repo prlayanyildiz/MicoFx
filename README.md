@@ -7,6 +7,20 @@ Dort bagimsiz strateji ailesi, ATR tabanli stop/hedef/trailing, gunluk zarar
 kesici, sembol bazli islem saatleri ve gerceklesmis sonuclara gore karar veren
 bir risk denetleyicisi.
 
+## Hizli kurulum (yeni/bos bir Windows makinede)
+
+PowerShell'i ac (Yonetici gerekmez) ve tek satiri yapistir:
+
+```powershell
+irm https://raw.githubusercontent.com/prlayanyildiz/MicoFx/main/bootstrap.ps1 | iex
+```
+
+Bu komut Git ve Python yoksa kurar, kodu `%USERPROFILE%\MicoFx` altina
+indirir (zaten varsa gunceller) ve bagimliliklari kurar. Bitince MetaTrader 5
+terminaline giris yapip "Algoritmik alim satima izin ver" kutusunu isaretle,
+sonra `start.bat` ile baslat. Ayrintili adimlar ve sorun giderme icin
+[BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
+
 ## Bu surum: birlestirilmis / genisletilmis surum
 
 Bu agac urun ailesinin (MicoFX / MicoFX Orj / MicoAi / MicoFXAntigravit)
