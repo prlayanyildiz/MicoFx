@@ -9,17 +9,33 @@ bir risk denetleyicisi.
 
 ## Hizli kurulum (yeni/bos bir Windows makinede)
 
-PowerShell'i ac (Yonetici gerekmez) ve tek satiri yapistir:
+Depo **ozel (private)** oldugu icin tek-satirlik anonim indirme linki
+calismaz (`raw.githubusercontent.com` sadece herkese acik depolarda
+calisir) - Git'i once elle kurmak gerekiyor, sonrasi tam otomatik.
 
+**1) Git'i kur** (tek manuel adim):
+[git-scm.com/download/win](https://git-scm.com/download/win) adresinden
+indir, kurulum ekranlarinda hep "Next" de, bitince PowerShell'i kapat/ac.
+
+**2) Kodu cek** (ozel depo oldugu icin giris istenebilir, tarayicidan
+hesabinla onaylarsin):
 ```powershell
-irm https://raw.githubusercontent.com/prlayanyildiz/MicoFx/main/bootstrap.ps1 | iex
+cd $env:USERPROFILE
+git clone https://github.com/prlayanyildiz/MicoFx.git
+cd MicoFx
 ```
 
-Bu komut Git ve Python yoksa kurar, kodu `%USERPROFILE%\MicoFx` altina
-indirir (zaten varsa gunceller) ve bagimliliklari kurar. Bitince MetaTrader 5
-terminaline giris yapip "Algoritmik alim satima izin ver" kutusunu isaretle,
-sonra `start.bat` ile baslat. Ayrintili adimlar ve sorun giderme icin
-[BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
+**3) Gerisi otomatik:**
+```powershell
+.\bootstrap.ps1
+```
+Bu, Python/Node.js/Claude Code yoksa kurar (once `winget` dener, olmazsa
+resmi siteden dogrudan indirip sessizce kurar) ve `KURULUM.bat`'i
+calistirir - hicbir soruya cevap vermen gerekmez.
+
+Bitince MetaTrader 5 terminaline giris yapip "Algoritmik alim satima izin
+ver" kutusunu isaretle, sonra `start.bat` ile baslat. Ayrintili adimlar ve
+sorun giderme icin [BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
 
 ## Bu surum: birlestirilmis / genisletilmis surum
 

@@ -8,18 +8,18 @@ depoda duruyor: **github.com/prlayanyildiz/MicoFx**
 
 ## Ilk kurulum (bir kerelik)
 
-### 1) Python kur
-Zaten kuruluysa atla. Yoksa `KURULUM.bat` bunu otomatik yapmaya calisir,
-calismazsa tarayicidan [python.org/downloads](https://www.python.org/downloads/)
-adresinden indirip kur - kurulum ekraninda **"Add python.exe to PATH"**
-kutucugunu MUTLAKA isaretle.
+Depo **ozel (private)** - bu yuzden tek-satirlik anonim bir indirme linki
+(`raw.githubusercontent.com`) hicbir zaman calismaz, o linkler sadece
+herkese acik depolarda calisir. Git'i once elle kurmak sart, sonrasinin
+tamami otomatik.
 
-### 2) Git kur
+### 1) Git'i kur (tek manuel adim)
 `winget` varsa:
 ```powershell
 winget install -e --id Git.Git
 ```
-`winget` yoksa (bazi Windows Server surumlerinde gelmiyor), tarayicidan
+`winget` yoksa (bazi Windows Server surumlerinde gelmiyor - bu bize daha
+once oldu), tarayicidan
 [git-scm.com/download/win](https://git-scm.com/download/win) adresinden
 indirip kur - kurulum ekranlarinda hep "Next" demek yeterli.
 
@@ -29,30 +29,45 @@ guncellensin diye), sonra dogrula:
 git --version
 ```
 
-### 3) Kodu indir (clone)
-Istedigin klasore git (orn. `cd Desktop`), sonra:
+### 2) Kodu indir (clone)
 ```powershell
+cd $env:USERPROFILE
 git clone https://github.com/prlayanyildiz/MicoFx.git
 cd MicoFx
 ```
 Ozel (private) depo oldugu icin GitHub giris istenebilir - tarayici acilir,
 hesabinla giris yapip onaylarsin.
 
-### 4) MicoFX'i kur
+### 3) Gerisi tek komutla otomatik
 ```powershell
-.\KURULUM.bat
+.\bootstrap.ps1
 ```
-Bu, bagimsiz bir sanal ortam (`C:\MicoFX-venv`) kurup gerekli paketleri
-(MetaTrader5, fastapi, numpy vb.) indirir.
+Bu script sirayla: Python, Node.js ve Claude Code yoksa kurar (once
+`winget` dener, olmazsa resmi siteden dogrudan indirip sessizce kurar),
+sonra `KURULUM.bat`'i calistirip bagimsiz sanal ortami (`C:\MicoFX-venv`)
+ve gerekli paketleri (MetaTrader5, fastapi, numpy vb.) hazirlar. Hicbir
+soruya cevap vermen gerekmez, sonuna kadar kendi kendine gider.
 
-### 5) MetaTrader 5
+(Sadece MicoFX'i kurup Node.js/Claude Code'a ihtiyacin yoksa, `bootstrap.ps1`
+yerine tek basina `.\KURULUM.bat` de calistirabilirsin.)
+
+### 4) MetaTrader 5
 - MT5 terminalini kur, hesabina giris yap.
 - Ust menu **Araclar > Secenekler > Uzman Danismanlar** sekmesinde
   **"Algoritmik alim satima izin ver"** kutusunu isaretle.
 
-### 6) Baslat
+### 5) Baslat
 `start.bat` dosyasina cift tikla (sessiz, tarayicida panel acar) ya da
 hata ayiklamak istersen `start_console.bat` (konsol acik kalir).
+
+### 6) Claude Code ile devam etmek istersen
+```powershell
+cd $env:USERPROFILE\MicoFx
+claude
+```
+Yeni bir oturum acilir (bu konusmanin hafizasi otomatik gelmez), ama proje
+dosyalari (bu dosya, `MASTER_PROMPT.md`, kod) zaten orada oldugu icin hizli
+baglam kazanir.
 
 ### 7) Panel ayarlarini kontrol et
 Ilk acilista Sistem sekmesinde su yollari **bu makineye gore** guncelle:
@@ -94,3 +109,8 @@ dosyalari guncellenir. Botu yeniden baslatman gerekebilir (`stop.bat` ->
 4. Bir `.bat`/`.vbs` dosyasi calistirinca "No Python at ..." hatasi
    verirse: `.venv` baska bir makineden kopyalanmis/senkronlanmis demektir
    - sil, `KURULUM.bat`'i o makinede tekrar calistir.
+5. **Depo ozel oldugu surece `raw.githubusercontent.com/.../bootstrap.ps1`
+   linki hicbir zaman calismaz** (404 doner) - bu linkler sadece herkese
+   acik depolarda calisir. Once Git'i elle kur, `git clone` ile depoyu cek,
+   sonra `.\bootstrap.ps1`'i klasorun icinden calistir (yukaridaki 1-3.
+   adimlar).
