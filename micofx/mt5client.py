@@ -1027,10 +1027,28 @@ class MT5Client:
         return True
 
     def close_all(self, magics: set[int] | None = None, symbol: str | None = None) -> int:
-        closed = 0
-        for p in self.positions(symbol=symbol):
-            if magics is not None and p["magic"] not in magics:
-                continue
-            if self.close_position(p["ticket"]):
-                closed += 1
-        return closed
+        """Flatten every matching position, retrying what a single pass leaves open.
+
+        close_position() reports TRADE_RETCODE_DONE_PARTIAL as success (the
+        remainder is still genuinely open on the broker - see its docstring),
+        and one IOC pass can leave several tickets like that. A caller like
+        panic() that runs this once and reports "N kapatildi" needs that count
+        to mean actually flat, not "handled", so re-check and retry the
+        tickets still open instead of leaving them for whatever the next
+        unrelated close_all call happens to be.
+        """
+        before = {p["ticket"] for p in self.positions(symbol=symbol)
+                 if magics is None or p["magic"] in magics}
+        remaining = before
+        for _ in range(4):
+            if not remaining:
+                break
+            progressed = False
+            for ticket in list(remaining):
+                if self.close_position(ticket):
+                    progressed = True
+            if not progressed:
+                break
+            remaining = {p["ticket"] for p in self.positions(symbol=symbol)
+                        if p["ticket"] in before and (magics is None or p["magic"] in magics)}
+        return len(before) - len(remaining)

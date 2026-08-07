@@ -179,7 +179,7 @@ arasindaki beklenti farki kucuk degil - en iyi ile en kotu arasinda kat kat
 fark cikiyor - dolayisiyla riski esit bolmek en zayif enstrumana en guclusu
 kadar butce ayirmak demek. Oran **karekoku alinarak** uygulanir (birkac
 duzine islemle olculmus bir beklenti gurultulu bir tahmindir, tam kaldirac
-hak etmez) ve `x0.60` ile `x1.80` arasina sikistirilir. Panel'deki **Avantaj**
+hak etmez) ve `x0.60` ile `x2.20` arasina sikistirilir. Panel'deki **Avantaj**
 sutunu her sembolun aldigi carpani gosterir.
 
 Onemli sinir: broker lot adimi 0.01 oldugu icin lotlar minimumdayken

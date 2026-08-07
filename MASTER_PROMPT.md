@@ -309,7 +309,7 @@ If tick value missing in risk mode: fall back to fixed lot **via normalize_volum
 
 ### Edge scale (`size_by_edge`)
 Holdout expectancy vs median of enabled symbols with positive expectancy (≥3 such):  
-`clamp[0.6, 1.8](sqrt(mine / median))`.  
+`clamp[0.6, 2.2](sqrt(mine / median))`.  
 Note: at broker min lot, scale often has nowhere to round — Panel shows both Avantaj and Lot.
 
 ### DailyGuard
@@ -377,7 +377,7 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 | MIN_OOS_PF | 1.10 | OOS slice |
 | MAX_COST_PER_TRADE_R | 0.25 | Apply gate |
 | STOCH_MID | 50 | Band midpoint |
-| EDGE_MIN / EDGE_MAX | 0.6 / 1.8 | Size-by-edge |
+| EDGE_MIN / EDGE_MAX | 0.6 / 2.2 | Size-by-edge |
 | Default port | 8900 | Web |
 | Default lookback | 180 days | Opt |
 | Default segments | 5 | Opt |

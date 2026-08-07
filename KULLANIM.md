@@ -58,7 +58,7 @@ yakalayan son kapı budur.
 
 ## Avantaj
 
-Panel'deki çarpan: sembolün test dilimindeki beklentisi, diğer sembollerin ortancasına göre ölçeklenir (`x0.60` … `x1.80`).
+Panel'deki çarpan: sembolün test dilimindeki beklentisi, diğer sembollerin ortancasına göre ölçeklenir (`x0.60` … `x2.20`).
 
 | Örnek | Okuma |
 |---|---|

@@ -393,13 +393,23 @@ class Engine:
             return
         if now - self._reopt_at < every:
             return
+        # Missing the exact weekday+hour once (bot offline through that whole
+        # hour, market closed, etc.) used to mean waiting a full extra
+        # ``every`` for the next match - the window never catches up on its
+        # own. Two days past due is well past any single missed slot, so
+        # drop the weekday/hour gate at that point and just run on the next
+        # cycle instead of silently skipping a week (or more) of re-opt.
+        catch_up = now - self._reopt_at - every >= 2 * 86400.0
         broker = time.gmtime(self.client.server_now())
         weekday = int(sys_cfg.auto_reopt_weekday)
-        if 0 <= weekday <= 6 and broker.tm_wday != weekday:
+        if not catch_up and 0 <= weekday <= 6 and broker.tm_wday != weekday:
             return                       # wait for the preferred broker-time weekday
         hour = int(sys_cfg.auto_reopt_hour)
-        if 0 <= hour <= 23 and broker.tm_hour != hour:
+        if not catch_up and 0 <= hour <= 23 and broker.tm_hour != hour:
             return                       # wait for the preferred broker-time hour
+        if catch_up:
+            LOG.emit("Haftalik yeniden optimizasyon: planlanan pencere kacirilmisti, "
+                     "telafi olarak simdi baslatiliyor.", "OPT")
         if optimizer.busy:
             LOG.emit("Haftalik yeniden optimizasyon ertelendi: optimizer mesgul.", "OPT")
             return
@@ -461,17 +471,23 @@ class Engine:
                 state.sec_bars = None
         self._merge_signals(cfg, state, primary_fresh, sec_fresh)
         fresh = primary_fresh or sec_fresh
-        bar_key = (state.last_bar, state.sec_last_bar)
-        if fresh and state.signal:
-            # Claim the retry slot the instant a fresh signal appears, before
-            # any gate below gets a chance at it. Marking this after those
-            # gates (allow_entry/should_flatten/cooldown/symbol_halt) meant a
-            # signal that was fresh but blocked by one of them on this exact
-            # poll never got marked pending at all - fresh only holds for one
-            # poll per bar, so every later poll fell through to "not fresh,
-            # nothing pending" and the signal was lost for the rest of the bar
-            # regardless of whether the block itself cleared seconds later.
-            state.pending_bar_key = bar_key
+        # Keyed on the leg actually driving state.signal, not the combined
+        # (primary_bar, sec_bar) pair. With the combined key, a secondary
+        # signal sitting stale (unchanged for several of its own bars) got
+        # re-armed for a fresh retry window every time the *primary* leg
+        # closed an unrelated new bar - primary_fresh alone made ``fresh``
+        # true, and the pair's primary half changing was enough to look like
+        # a new bar_key. That let one real secondary signal get retried
+        # indefinitely across many primary bars instead of the single live
+        # bar the backtest gives it. Each leg now only rearms/matches off its
+        # own bar timestamp.
+        bar_key = (state.last_bar if state.signal_source == "primary" else state.sec_last_bar)
+        driving_fresh = (
+            (state.signal_source == "primary" and primary_fresh)
+            or (state.signal_source == "secondary" and sec_fresh)
+        )
+        if driving_fresh and state.signal:
+            state.pending_bar_key = (state.signal_source, bar_key)
         elif not state.signal:
             state.pending_bar_key = (0, 0)
 
@@ -526,7 +542,7 @@ class Engine:
         if not state.signal:
             state.note = state.note if state.note else "sinyal yok"
             return False
-        if state.pending_bar_key == bar_key:
+        if state.pending_bar_key == (state.signal_source, bar_key):
             # Same bar as when the signal first appeared (see the marking
             # above) and not yet filled - keep offering it every poll until
             # the block clears, the position fills (_try_entry's success path
@@ -988,9 +1004,10 @@ class Engine:
             LOG.emit(f"Gerceklesme olcumu hatasi: {exc}", "WARN")
 
     def _close_tracked(self, pos: dict[str, Any], comment: str, leg: str,
-                       volume: float | None = None) -> bool:
+                       volume: float | None = None, fill: dict[str, Any] | None = None) -> bool:
         """``close_position`` that also books the requested-vs-filled sample."""
-        fill: dict[str, Any] = {}
+        if fill is None:
+            fill = {}
         ok = self.client.close_position(pos["ticket"], self.store.system.slippage_points,
                                         comment, volume=volume, fill=fill)
         if ok and fill:
@@ -1134,40 +1151,94 @@ class Engine:
             wick_dist = max(profit_dist, (wick_ref - entry) if is_buy else (entry - wick_ref))
         sl_dist = max(atr * cfg.sl_atr_mult, self.client.min_stop_distance(cfg.symbol))
         rungs = backtest._ladder(Params.from_config(cfg), entry, sl_dist, is_buy)
-        taken = int(book["rungs"])
-        if taken >= len(rungs):
-            book["done"] = 1.0
-            self._save_partials()
-            return False
-
-        _, r_mult, frac = rungs[taken]
-        if wick_dist < sl_dist * r_mult:
-            return False
 
         info = self.client.info(cfg.symbol)
         if not info:
             return False
         step, minimum = info["volume_step"], info["volume_min"]
-        slice_lot = self.client.normalize_volume(cfg.symbol, book["orig"] * frac)
-        # Only scale out when both sides of the split stay above the broker's
-        # minimum volume - otherwise the ladder would either fail or close out.
-        if slice_lot < minimum or (pos["volume"] - slice_lot) < minimum - step / 2:
-            book["done"] = 1.0
-            self._save_partials()
-            return False
 
-        if self._close_tracked(pos, f"MicoFX kismi kar {taken + 1}", "exit",
-                               volume=slice_lot):
+        ticket = pos["ticket"]
+        tp = pos["tp"]
+        remaining = float(pos["volume"])
+        filled_any = False
+        # Loop rather than stopping after one rung: manage_positions only
+        # calls this once per newly-closed bar (self._stop_bar), but a single
+        # bar's wick can cross several rung thresholds at once - the backtest
+        # ladder books every rung the bar's high/low reaches, not just the
+        # first. Capping live at one rung per bar under-realised partials on
+        # any bar that moved fast, quietly diverging from the walk-forward's
+        # blended-R number.
+        while True:
+            taken = int(book["rungs"])
+            if taken >= len(rungs):
+                book["done"] = 1.0
+                self._save_partials()
+                break
+            _, r_mult, frac = rungs[taken]
+            if wick_dist < sl_dist * r_mult:
+                break
+
+            slice_lot = self.client.normalize_volume(cfg.symbol, book["orig"] * frac)
+            # Only scale out when both sides of the split stay above the
+            # broker's minimum volume - otherwise the ladder would either
+            # fail or close out.
+            if slice_lot < minimum or (remaining - slice_lot) < minimum - step / 2:
+                book["done"] = 1.0
+                self._save_partials()
+                break
+
+            fill: dict[str, Any] = {}
+            pos_view = dict(pos, volume=remaining)
+            if not self._close_tracked(pos_view, f"MicoFX kismi kar {taken + 1}", "exit",
+                                       volume=slice_lot, fill=fill):
+                break
+            filled_any = True
+            # close_position() returns True on TRADE_RETCODE_DONE_PARTIAL too
+            # (IOC filled less than requested) - advancing the rung on that
+            # would book the full fraction while real volume is still open,
+            # desyncing ``book`` from the actual position. Only advance on a
+            # fill that covers the requested slice; a genuine shortfall stops
+            # the loop here and retries the same rung next cycle, clamped to
+            # whatever volume is left by then (close_position already does
+            # that clamping).
+            filled = float(fill.get("volume", slice_lot))
+            if filled < slice_lot - step / 2:
+                LOG.emit(f"Kismi kar {taken + 1}. kademe eksik doldu: {filled:g}/{slice_lot:g} lot, "
+                         "kademe tekrar denenecek", "WARN", cfg.symbol)
+                break
+            remaining -= filled
             book["rungs"] = taken + 1
             self._save_partials()
             if taken == 0:
                 # First slice off: the remainder rides risk-free from here.
-                self.client.modify_position(ticket, entry, pos["tp"], cfg.symbol)
+                # Exact entry can sit inside the broker's min-stop distance
+                # from the live price (small first rung, e.g. 0.5R) - an
+                # unclamped modify then gets rejected and the remainder
+                # silently keeps its original, wider SL while the backtest
+                # already credited this rung as risk-free. Clamp the same
+                # way _update_stop does and only move the stop, never widen it.
+                tick = self.client.tick(cfg.symbol)
+                be = entry
+                if tick is not None:
+                    live = tick["bid"] if is_buy else tick["ask"]
+                    min_stop = self.client.min_stop_distance(cfg.symbol)
+                    limit = live - min_stop if is_buy else live + min_stop
+                    be = min(entry, limit) if is_buy else max(entry, limit)
+                current_sl = pos["sl"]
+                # A trail/BE from _update_stop can already sit ahead of plain
+                # entry by the time this first rung fills (both run off the
+                # same cycle's manage_positions pass) - only move the stop
+                # when it actually tightens the current one, same guard
+                # _update_stop itself uses, or this would give back protection
+                # that was already earned.
+                improves = current_sl == 0 or (be > current_sl if is_buy else be < current_sl)
+                if improves and not self.client.modify_position(ticket, be, tp, cfg.symbol):
+                    LOG.emit(f"BE'ye cekilemedi (min-stop) #{ticket}, eski SL korunuyor",
+                             "WARN", cfg.symbol)
             LOG.emit(f"Kismi kar {taken + 1}. kademe: {slice_lot:g} lot ({r_mult:.1f}R), "
                      f"kalan {'risksiz ' if taken == 0 else ''}devam ediyor",
                      "TRADE", cfg.symbol)
-            return True
-        return False
+        return filled_any
 
     # ---------------------------------------------------------------- reports
 

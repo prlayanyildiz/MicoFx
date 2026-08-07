@@ -82,8 +82,10 @@ class RiskManager:
     # How far edge weighting may push a single symbol away from the pack.
     # Ceiling raised 1.8->2.2 on request: proven symbols (XAUUSD etc.) get
     # more headroom to size up; the floor stays put so an unproven/decaying
-    # symbol doesn't get pulled up with it.
-    EDGE_MIN, EDGE_MAX = 0.6, 3.0
+    # symbol doesn't get pulled up with it. Was drifting at 3.0, out of sync
+    # with this comment and every doc (README/KULLANIM/MASTER_PROMPT all say
+    # 1.80-2.2) - restored to the documented, intentional value.
+    EDGE_MIN, EDGE_MAX = 0.6, 2.2
     # Broker minimum lot may force more risk than configured; beyond this
     # multiple of the intended risk the trade is skipped instead of oversized.
     # Raised from 2.0x on request - exposure is tracked via account margin
