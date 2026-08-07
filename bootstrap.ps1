@@ -1,53 +1,113 @@
-# MicoFX - tek komutla bulut sunucu kurulumu.
+# MicoFX - tek komutla, ele hic dokunmadan bulut sunucu kurulumu.
 # Calistirma: PowerShell'de (Yonetici degil, normal kullanici yeterli):
 #   irm https://raw.githubusercontent.com/prlayanyildiz/MicoFx/main/bootstrap.ps1 | iex
 #
-# Yapar: Git yoksa kurar, Python yoksa kurar, depoyu klonlar/gunceller,
-# KURULUM.bat'i calistirir. Zaten klonlanmis bir klasorde tekrar
-# calistirilirsa "git pull" ile gunceller, yeniden klonlamaz.
+# Yapar: Git, Python, Node.js, Claude Code yoksa kurar (once winget dener,
+# yoksa resmi siteden dogrudan indirip sessizce kurar), depoyu klonlar/
+# gunceller, KURULUM.bat'i calistirir. Hicbir adimda kullanici etkilesimi
+# beklemez - tum kurulumlar sessiz (silent) modda calisir.
 
 $ErrorActionPreference = "Stop"
 
 $RepoUrl = "https://github.com/prlayanyildiz/MicoFx.git"
 $Dest = "$env:USERPROFILE\MicoFx"
+$TempDir = "$env:TEMP\micofx_bootstrap"
 
-function Ensure-Winget {
-    if (Get-Command winget -ErrorAction SilentlyContinue) { return $true }
-    Write-Host "winget bulunamadi - Git ve Python'u elle kurman gerekecek." -ForegroundColor Yellow
-    Write-Host "  Git:    https://git-scm.com/download/win" -ForegroundColor Yellow
-    Write-Host "  Python: https://www.python.org/downloads/ (kurulumda 'Add python.exe to PATH' isaretle)" -ForegroundColor Yellow
-    return $false
+function Refresh-Path {
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
-Write-Host "=== MicoFX bulut kurulumu ===" -ForegroundColor Cyan
-
-$hasWinget = Ensure-Winget
-
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    if ($hasWinget) {
-        Write-Host "[1/4] Git kuruluyor..." -ForegroundColor Cyan
-        winget install -e --id Git.Git --silent --accept-package-agreements --accept-source-agreements
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-    } else {
-        throw "Git kurulu degil ve winget yok. Once Git'i elle kurup bu scripti tekrar calistir."
+function Install-ViaWinget($id) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return $false }
+    try {
+        winget install -e --id $id --silent --accept-package-agreements --accept-source-agreements
+        Refresh-Path
+        return $true
+    } catch {
+        return $false
     }
-} else {
-    Write-Host "[1/4] Git zaten kurulu." -ForegroundColor Cyan
 }
 
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    if ($hasWinget) {
-        Write-Host "[2/4] Python kuruluyor..." -ForegroundColor Cyan
-        winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-    } else {
-        throw "Python kurulu degil ve winget yok. Once Python'u elle kurup bu scripti tekrar calistir."
+function Download-File($url, $outFile) {
+    if (-not (Test-Path $TempDir)) { New-Item -ItemType Directory -Path $TempDir -Force | Out-Null }
+    $path = Join-Path $TempDir $outFile
+    Invoke-WebRequest -Uri $url -OutFile $path -UseBasicParsing
+    return $path
+}
+
+function Ensure-Git {
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        Write-Host "[1/5] Git zaten kurulu." -ForegroundColor Cyan
+        return
     }
-} else {
-    Write-Host "[2/4] Python zaten kurulu." -ForegroundColor Cyan
+    Write-Host "[1/5] Git kuruluyor..." -ForegroundColor Cyan
+    Install-ViaWinget "Git.Git" | Out-Null
+    if (Get-Command git -ErrorAction SilentlyContinue) { return }
+
+    # winget yok/basarisiz - GitHub'dan son surumun 64-bit kurulumunu dogrudan indir.
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/git-for-windows/git/releases/latest" -UseBasicParsing
+    $asset = $release.assets | Where-Object { $_.name -like "*64-bit.exe" } | Select-Object -First 1
+    $installer = Download-File $asset.browser_download_url $asset.name
+    Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-" -Wait
+    Refresh-Path
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "Git kurulamadi." }
 }
 
-Write-Host "[3/4] Kod indiriliyor/guncelleniyor..." -ForegroundColor Cyan
+function Ensure-Python {
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        Write-Host "[2/5] Python zaten kurulu." -ForegroundColor Cyan
+        return
+    }
+    Write-Host "[2/5] Python kuruluyor..." -ForegroundColor Cyan
+    Install-ViaWinget "Python.Python.3.12" | Out-Null
+    if (Get-Command python -ErrorAction SilentlyContinue) { return }
+
+    # winget yok/basarisiz - python.org'dan dogrudan indir.
+    $url = "https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe"
+    $installer = Download-File $url "python-installer.exe"
+    Start-Process -FilePath $installer -ArgumentList "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0" -Wait
+    Refresh-Path
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "Python kurulamadi." }
+}
+
+function Ensure-Node {
+    if (Get-Command node -ErrorAction SilentlyContinue) {
+        Write-Host "[3/5] Node.js zaten kurulu." -ForegroundColor Cyan
+        return
+    }
+    Write-Host "[3/5] Node.js kuruluyor (Claude Code icin gerekli)..." -ForegroundColor Cyan
+    Install-ViaWinget "OpenJS.NodeJS.LTS" | Out-Null
+    if (Get-Command node -ErrorAction SilentlyContinue) { return }
+
+    # winget yok/basarisiz - nodejs.org'dan en son LTS surumunu bulup dogrudan indir.
+    $index = Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" -UseBasicParsing
+    $lts = $index | Where-Object { $_.lts -ne $false } | Select-Object -First 1
+    $url = "https://nodejs.org/dist/$($lts.version)/node-$($lts.version)-x64.msi"
+    $installer = Download-File $url "node-installer.msi"
+    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i", "`"$installer`"", "/quiet", "/norestart" -Wait
+    Refresh-Path
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw "Node.js kurulamadi." }
+}
+
+function Ensure-ClaudeCode {
+    if (Get-Command claude -ErrorAction SilentlyContinue) {
+        Write-Host "[4/5] Claude Code zaten kurulu." -ForegroundColor Cyan
+        return
+    }
+    Write-Host "[4/5] Claude Code kuruluyor..." -ForegroundColor Cyan
+    npm install -g @anthropic-ai/claude-code
+    Refresh-Path
+}
+
+Write-Host "=== MicoFX bulut kurulumu (tam otomatik) ===" -ForegroundColor Cyan
+
+Ensure-Git
+Ensure-Python
+Ensure-Node
+Ensure-ClaudeCode
+
+Write-Host "[5/5] Kod indiriliyor/guncelleniyor ve MicoFX kuruluyor..." -ForegroundColor Cyan
 if (Test-Path "$Dest\.git") {
     Push-Location $Dest
     git pull
@@ -56,10 +116,16 @@ if (Test-Path "$Dest\.git") {
     git clone $RepoUrl $Dest
 }
 
-Write-Host "[4/4] MicoFX kuruluyor (KURULUM.bat)..." -ForegroundColor Cyan
 Push-Location $Dest
-cmd /c KURULUM.bat
+# "< NUL": KURULUM.bat'in sonundaki/hata yollarindaki "pause" komutlari bir
+# tus basimi bekler - girdi NUL'dan gelince hemen gecer, script kimseyi
+# beklemeden sonuna kadar gider.
+cmd /c "KURULUM.bat < NUL"
 Pop-Location
 
 Write-Host ""
-Write-Host "Bitti. Simdi MT5'e giris yap, sonra '$Dest\start.bat' ile baslat." -ForegroundColor Green
+Write-Host "Bitti. Simdi MT5'e giris yap, `"Algoritmik alim satima izin ver`" kutusunu" -ForegroundColor Green
+Write-Host "isaretle, sonra '$Dest\start.bat' ile baslat." -ForegroundColor Green
+Write-Host ""
+Write-Host "Claude Code ile devam etmek icin:" -ForegroundColor Green
+Write-Host "  cd `"$Dest`"; claude" -ForegroundColor Green
