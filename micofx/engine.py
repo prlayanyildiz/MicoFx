@@ -1309,6 +1309,7 @@ class Engine:
             remaining -= filled
             book["rungs"] = taken + 1
             self._save_partials()
+            reached_breakeven = False
             if taken == 0:
                 # First slice off: the remainder rides risk-free from here.
                 # Exact entry can sit inside the broker's min-stop distance
@@ -1332,11 +1333,21 @@ class Engine:
                 # _update_stop itself uses, or this would give back protection
                 # that was already earned.
                 improves = current_sl == 0 or (be > current_sl if is_buy else be < current_sl)
+                # min_stop against a live price that has already retraced can
+                # clamp ``be`` to something short of true entry - still moved
+                # (an improvement over the old, much wider stop is better than
+                # none), but it is not actually risk-free, so it must not be
+                # reported as such below.
+                reached_breakeven = (be >= entry) if is_buy else (be <= entry)
                 if improves and not self.client.modify_position(ticket, be, tp, cfg.symbol):
                     LOG.emit(f"BE'ye cekilemedi (min-stop) #{ticket}, eski SL korunuyor",
                              "WARN", cfg.symbol)
+                    reached_breakeven = False
+                elif improves and not reached_breakeven:
+                    LOG.emit(f"Kismi kar sonrasi stop sikildi ama tam BE'ye ulasamadi "
+                             f"(canli fiyat geri cekilmis) #{ticket}", "WARN", cfg.symbol)
             LOG.emit(f"Kismi kar {taken + 1}. kademe: {slice_lot:g} lot ({r_mult:.1f}R), "
-                     f"kalan {'risksiz ' if taken == 0 else ''}devam ediyor",
+                     f"kalan {'risksiz ' if taken == 0 and reached_breakeven else ''}devam ediyor",
                      "TRADE", cfg.symbol)
         return filled_any
 
