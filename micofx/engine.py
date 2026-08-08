@@ -1310,11 +1310,15 @@ class Engine:
         return ""
 
     def day_stats(self, max_age: float = 5.0) -> dict[str, Any]:
-        """Closed-trade totals for the current broker day, per symbol."""
+        """Closed-trade totals for the current local (Windows) day, per symbol."""
         if self._day_cache and time.time() - self._day_cache_at < max_age:
             return self._day_cache
         guard = self.risk.daily
-        # Deal timestamps live in broker-clock epoch, the same space as day_key.
+        # Raw MT5 deal timestamps are naive epochs encoding the broker's own
+        # wall-clock reading (not true UTC) - the same naive-epoch encoding
+        # calendar.timegm() below produces from day_key's local calendar date,
+        # so the two line up as long as the broker's clock and this machine's
+        # local clock read the same wall-clock time (true for this setup).
         day_start = self.client.server_now() - 86400
         if guard.day_key:
             try:

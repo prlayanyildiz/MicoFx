@@ -16,8 +16,13 @@ root = fso.GetParentFolderName(WScript.ScriptFullName)
 shell.CurrentDirectory = root
 
 ' restart.bat "restart" argumaniyla cagirir: kullanicinin zaten acik olan
-' sekmesi var, yeni bir tane daha acmayalim.
-isRestart = (WScript.Arguments.Count > 0) And (LCase(WScript.Arguments(0)) = "restart")
+' sekmesi var, yeni bir tane daha acmayalim. VBScript'te "And" kisa devre
+' yapmaz - Count=0 iken tek satirda Arguments(0)'a bakmak "Subscript out of
+' range" ile scripti tamamen durdurur, o yuzden ayri bir If ile korunuyor.
+isRestart = False
+If WScript.Arguments.Count > 0 Then
+  isRestart = (LCase(WScript.Arguments(0)) = "restart")
+End If
 
 ' Tarayiciyi bu script aciyor; run.py ikinci bir sekme acmasin.
 Set env = shell.Environment("Process")
