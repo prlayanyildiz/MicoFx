@@ -488,7 +488,7 @@ class SystemConfig:
     # Where the scheduled evening backup (backup.py, run via Windows Task
     # Scheduler) drops its timestamped zip. Read at run time, not baked into
     # the script, so changing it here is the only place that needs editing.
-    backup_dir: str = "D:\\MicoFX_Yedek"
+    backup_dir: str = "C:\\MicoFX_Yedek"
     backup_keep: int = 3              # how many most-recent backups to retain
 
     # ---- execution ----

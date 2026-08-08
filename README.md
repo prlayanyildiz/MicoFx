@@ -20,7 +20,7 @@ indir, kurulum ekranlarinda hep "Next" de, bitince PowerShell'i kapat/ac.
 **2) Kodu cek** (ozel depo oldugu icin giris istenebilir, tarayicidan
 hesabinla onaylarsin):
 ```powershell
-cd $env:USERPROFILE
+cd $env:USERPROFILE\Desktop
 git clone https://github.com/prlayanyildiz/MicoFx.git
 cd MicoFx
 ```
@@ -44,7 +44,7 @@ sorun giderme icin [BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
 **4) Claude Code ile devam etmek istersen** (kod uzerinde birlikte
 calismak icin, opsiyonel):
 ```powershell
-cd $env:USERPROFILE\MicoFx
+cd $env:USERPROFILE\Desktop\MicoFx
 claude
 ```
 Yeni bir oturum acilir (bu makinede daha once konusulmus bir sohbetin

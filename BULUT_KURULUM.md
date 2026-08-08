@@ -31,7 +31,7 @@ git --version
 
 ### 2) Kodu indir (clone)
 ```powershell
-cd $env:USERPROFILE
+cd $env:USERPROFILE\Desktop
 git clone https://github.com/prlayanyildiz/MicoFx.git
 cd MicoFx
 ```
@@ -67,7 +67,7 @@ hata ayiklamak istersen `start_console.bat` (konsol acik kalir).
 
 ### 6) Claude Code ile devam etmek istersen
 ```powershell
-cd $env:USERPROFILE\MicoFx
+cd $env:USERPROFILE\Desktop\MicoFx
 claude
 ```
 Yeni bir oturum acilir (bu konusmanin hafizasi otomatik gelmez), ama proje
@@ -76,8 +76,8 @@ baglam kazanir.
 
 ### 7) Panel ayarlarini kontrol et
 Ilk acilista Sistem sekmesinde su yollari **bu makineye gore** guncelle:
-- Yedek konumu (`backup_dir`) - varsayilan `D:\MicoFX_Yedek`, bu sunucuda
-  D: suruculu yoksa degistir.
+- Yedek konumu (`backup_dir`) - varsayilan `C:\MicoFX_Yedek`, farkli bir
+  yer istersen degistir.
 - MT5 terminal yolu - kurulum yerin farkliysa guncelle.
 
 ---
