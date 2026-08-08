@@ -120,6 +120,17 @@ def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYM
 _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
 
 
+def _reject_bad_dict_fields(patch: dict[str, Any], keys: tuple) -> None:
+    # SymbolConfig.from_dict() silently coerces a non-dict value for these
+    # fields to {} (see models.py) - a client sending a string/list/number
+    # instead of an object wiped the field to empty with a 200, completely
+    # bypassing the exit-field-changing guards above, which only look at the
+    # patch when it IS a dict.
+    for key in keys:
+        if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
+            raise HTTPException(400, f"{key} bir nesne (object) olmali, {type(patch[key]).__name__} degil")
+
+
 def _reject_internal_fields(patch: dict[str, Any]) -> None:
     found = [k for k in _INTERNAL_ONLY_FIELDS if k in patch]
     if found:
@@ -279,6 +290,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
         patch = body.model_dump()
         _reject_internal_fields(patch)
+        _reject_bad_dict_fields(patch, ("secondary_params",))
         _validate_risk_bounds(patch)
         current = store.symbols.get(symbol)
         # Same hazard as DELETE: the magic number is the only thing that maps
@@ -490,6 +502,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/symbols-bulk")
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
         _reject_internal_fields(body.patch)
+        _reject_bad_dict_fields(body.patch, ("secondary_params",))
         _validate_risk_bounds(body.patch)
         targets = body.symbols or list(store.symbols)
         needs_tf_check = "strategy" in body.patch or "timeframe" in body.patch

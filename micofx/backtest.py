@@ -182,6 +182,25 @@ def flatten_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False,
     # getting cut exactly where live cuts it.
     if str(getattr(cfg, "group", "") or "").strip().lower() not in WEEKEND_OPEN_GROUPS:
         mask |= (days == 6) | (days == 7)
+        # FX/index bar data has no Saturday/Sunday rows at all - the market
+        # simply produces no candles while closed, so the check above (which
+        # only matches a bar's OWN day) never fires for exactly the symbols
+        # this is meant to protect: a position rides straight from Friday's
+        # last bar into Monday's first with no weekend-timestamped bar in
+        # between to ever flag. Detect the gap itself instead - flatten the
+        # bar right before any calendar day skipped over by the jump to the
+        # next bar was a Saturday or Sunday. Bounded to a 10-day lookahead,
+        # comfortably more than any realistic FX/index holiday closure.
+        if times.size > 1:
+            day_num = times // 86400
+            next_day_num = np.empty_like(day_num)
+            next_day_num[:-1] = day_num[1:]
+            next_day_num[-1] = day_num[-1]           # no bar after the last one
+            gap_days = next_day_num - day_num
+            for offset in range(1, 11):
+                candidate_day = day_num + offset
+                candidate_weekday = ((candidate_day + 3) % 7) + 1
+                mask |= (offset <= gap_days) & ((candidate_weekday == 6) | (candidate_weekday == 7))
 
     # Day-end: independent of all_hours/sessions, same as sessions.day_end_close.
     if day_end_flatten_min > 0:

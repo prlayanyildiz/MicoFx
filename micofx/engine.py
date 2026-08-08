@@ -150,6 +150,15 @@ class Engine:
         # that validated it ever did. Not persisted: worst case after a restart
         # is one extra evaluation on the first cycle, not a correctness issue.
         self._stop_bar: dict[int, int] = {}
+        # Tickets whose weekend force-close failed at least once - kept sticky
+        # across the Sat/Sun -> Monday boundary so a broker that rejected the
+        # close all weekend doesn't just quietly resume normal trailing the
+        # instant weekend_closed() flips False, without ever actually landing
+        # that close. Not persisted, same tradeoff as _stop_bar: worst case
+        # after a restart during the very rare failed-all-weekend window is
+        # one fewer retry, not a correctness issue - the next weekend still
+        # catches it fresh.
+        self._weekend_pending: set[int] = set()
         self._partials: dict[int, dict[str, float]] = {
             int(k): {"rungs": float(v.get("rungs", 0.0)), "orig": float(v.get("orig", 0.0)),
                      "done": float(v.get("done", 0.0))}
@@ -970,6 +979,7 @@ class Engine:
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         live = {p["ticket"] for p in self._positions}
         self._stop_bar = {t: v for t, v in self._stop_bar.items() if t in live}
+        self._weekend_pending &= live
         # forget scale-out bookkeeping whose position is gone
         pruned = {t: v for t, v in self._partials.items() if t in live}
         if pruned != self._partials:
@@ -994,7 +1004,15 @@ class Engine:
             # position that was already open going into the weekend. Crypto
             # is exempt (weekend_closed() itself returns False for it).
             if sessions.weekend_closed(cfg, server_now):
+                self._weekend_pending.add(pos["ticket"])
+            if pos["ticket"] in self._weekend_pending:
+                # Sticky: once flagged during Sat/Sun, keep retrying every
+                # cycle - including past the Monday boundary - until the
+                # close actually lands, instead of a failed weekend attempt
+                # silently falling through to normal trailing the moment the
+                # calendar flips back to a weekday.
                 if self._close_tracked(pos, "MicoFX hafta sonu", "exit"):
+                    self._weekend_pending.discard(pos["ticket"])
                     LOG.emit("Hafta sonu: pozisyon kapatildi.", "TRADE", cfg.symbol)
                 continue
             # Same "a loss limit should stop the loss, not just further
