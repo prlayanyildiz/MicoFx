@@ -391,7 +391,19 @@ class Engine:
             self._reopt_at = now
             self.store.set_setting("auto_reopt_at", self._reopt_at)
             return
-        if now - self._reopt_at < every:
+        weekday = int(sys_cfg.auto_reopt_weekday)
+        # A preferred weekday recurs every 7 days no matter what ``every`` is
+        # set to. If the last successful run happened to land on a different
+        # day of the week than the preference (e.g. whatever day the bot
+        # first ran on, or a week it caught up late), the raw interval and
+        # the weekday permanently disagree: by the time ``every`` has fully
+        # elapsed the preferred weekday has already passed for that cycle, so
+        # it waits a full extra week and lands one day short again - the
+        # configured day is never actually hit. A couple of days of early
+        # tolerance lets the preferred weekday catch the window before the
+        # raw interval technically elapses, locking the cadence onto it.
+        tolerance = min(2 * 86400.0, every / 3.0) if 0 <= weekday <= 6 else 0.0
+        if now - self._reopt_at < every - tolerance:
             return
         # Missing the exact weekday+hour once (bot offline through that whole
         # hour, market closed, etc.) used to mean waiting a full extra
@@ -401,7 +413,6 @@ class Engine:
         # cycle instead of silently skipping a week (or more) of re-opt.
         catch_up = now - self._reopt_at - every >= 2 * 86400.0
         broker = time.gmtime(self.client.server_now())
-        weekday = int(sys_cfg.auto_reopt_weekday)
         if not catch_up and 0 <= weekday <= 6 and broker.tm_wday != weekday:
             return                       # wait for the preferred broker-time weekday
         hour = int(sys_cfg.auto_reopt_hour)
