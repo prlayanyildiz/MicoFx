@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from .. import APP_NAME, __version__
 from ..engine import Engine
 from ..logbus import LOG
-from ..models import strategy_allows_timeframe
+from ..models import EXIT_RISK_FIELDS, strategy_allows_timeframe
 from ..mt5client import MT5Client
 from ..optimizer import Optimizer
 from ..paths import ROOT, WEB_DIR
@@ -288,7 +288,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             ("secondary_strategy" in patch and next_sec_strat != current.secondary_strategy)
             or ("secondary_timeframe" in patch and next_sec_tf != current.secondary_timeframe)
         ))
-        guarded = magic_changing or primary_changing or secondary_changing
+        # optimizer.apply() holds back exit/risk fields while a position is
+        # open (see EXIT_RISK_FIELDS there) because manage_positions()/
+        # _update_stop()/_take_partial() re-read cfg live every cycle, not a
+        # snapshot from entry - this endpoint is the other door to those same
+        # fields and had no equivalent guard, so a manual edit (or a script
+        # hitting the API directly) could change an open position's stop/
+        # trail/partial-ladder math mid-trade. Reject outright rather than
+        # replicate optimizer's hold-and-defer machinery a second time here.
+        exit_fields_changing = current is not None and any(
+            key in patch and patch[key] != getattr(current, key) for key in EXIT_RISK_FIELDS)
+        guarded = magic_changing or primary_changing or secondary_changing or exit_fields_changing
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -316,6 +326,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                             409, f"{symbol}: ikincil strateji degistirilemedi, "
                                  f"{len(live_tagged)} acik ikincil-sinyal pozisyonu var "
                                  f"(once kapanmasini bekleyin)")
+                if exit_fields_changing and not (magic_changing or primary_changing):
+                    open_here = _open_under_magic(current.magic)
+                    if open_here:
+                        changed_fields = sorted(k for k in EXIT_RISK_FIELDS
+                                                if k in patch and patch[k] != getattr(current, k))
+                        raise HTTPException(
+                            409, f"{symbol}: cikis/risk parametreleri ({', '.join(changed_fields)}) "
+                                 f"degistirilemedi, {len(open_here)} acik pozisyon var "
+                                 f"(once kapatin veya pozisyon kapanmasini bekleyin)")
             if primary_changing:
                 tf_allow = store.opt_params().get("strategy_timeframes")
                 allow = tf_allow if isinstance(tf_allow, dict) else None
@@ -449,7 +468,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # through update_symbol directly with no such check at all. One lock
         # for the whole batch (bulk edits are rare, not hot-path) rather than
         # acquiring per symbol.
-        guarded = needs_tf_check or magic_changing or secondary_fields
+        # Same gap patch_symbol() closes per-symbol: bulk went through
+        # update_symbol directly with no exit/risk-field holdback at all.
+        exit_fields = [k for k in EXIT_RISK_FIELDS if k in body.patch]
+        guarded = needs_tf_check or magic_changing or secondary_fields or bool(exit_fields)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -483,6 +505,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     sec_changing = (next_sec != current.secondary_strategy
                                     or next_stf != current.secondary_timeframe)
                     if sec_changing and current.magic in tagged_magics:
+                        rejected.append(symbol)
+                        continue
+                if exit_fields and current is not None:
+                    exit_changing = any(body.patch[k] != getattr(current, k) for k in exit_fields)
+                    if exit_changing and current.magic in open_magics:
                         rejected.append(symbol)
                         continue
                 if store.update_symbol(symbol, body.patch) is not None:

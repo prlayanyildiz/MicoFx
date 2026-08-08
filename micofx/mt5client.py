@@ -1050,6 +1050,13 @@ class MT5Client:
             return 0, -1
         before = {p["ticket"] for p in self.positions(symbol=symbol)
                  if magics is None or p["magic"] in magics}
+        if not self.connected:
+            # positions() itself can flip this False mid-call (see its own
+            # docstring) - the ensure() check above only proves the
+            # connection was alive a moment earlier, not through this exact
+            # call. An empty ``before`` from a call that just failed is not
+            # "flat", so it must not be trusted as one either.
+            return 0, -1
         remaining = before
         for _ in range(4):
             if not remaining:
@@ -1062,4 +1069,10 @@ class MT5Client:
                 break
             remaining = {p["ticket"] for p in self.positions(symbol=symbol)
                         if p["ticket"] in before and (magics is None or p["magic"] in magics)}
+            if not self.connected:
+                # Same mid-call failure, now partway through closing - what
+                # is left in ``remaining`` is stale/unverified, not a real
+                # count. closed-so-far is still real (each close_position()
+                # call it came from succeeded before this happened).
+                return len(before) - len(remaining), -1
         return len(before) - len(remaining), len(remaining)

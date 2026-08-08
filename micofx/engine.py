@@ -1088,24 +1088,31 @@ class Engine:
         else:
             open_magics = {p["magic"] for p in self._positions}
             sec_open_magics = {p["magic"] for p in self._positions if p["ticket"] in self._sec_tickets}
-        for cfg in list(self.store.symbols.values()):
-            if cfg.pending_exit_patch and cfg.magic not in open_magics:
-                pending = dict(cfg.pending_exit_patch)
-                updated = self.store.update_symbol(cfg.symbol, {**pending, "pending_exit_patch": {}})
-                if updated is not None:
-                    LOG.emit(f"{cfg.symbol}: bekletilen cikis/risk parametreleri "
-                             f"({', '.join(sorted(pending))}) artik acik pozisyon yok, uygulandi.",
-                             "OPT", cfg.symbol)
-                    cfg = updated
-            if cfg.pending_secondary_exit_patch and cfg.magic not in sec_open_magics:
-                pending_sec = dict(cfg.pending_secondary_exit_patch)
-                merged_params = {**cfg.secondary_params, **pending_sec}
-                self.store.update_symbol(cfg.symbol, {
-                    "secondary_params": merged_params, "pending_secondary_exit_patch": {},
-                })
-                LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis/risk parametreleri "
-                         f"({', '.join(sorted(pending_sec))}) artik acik ikincil pozisyon yok, "
-                         f"uygulandi.", "OPT", cfg.symbol)
+        # Same lock optimizer.apply()/web PATCH hold across their own
+        # open-position check + write - without it, a concurrent apply() on
+        # the web thread could land a fresh patch (correctly clearing
+        # pending_exit_patch) in the gap between this method reading the OLD
+        # cfg snapshot and writing it, and this call's stale pending patch
+        # would silently overwrite that fresh one right back.
+        with self.entry_lock:
+            for cfg in list(self.store.symbols.values()):
+                if cfg.pending_exit_patch and cfg.magic not in open_magics:
+                    pending = dict(cfg.pending_exit_patch)
+                    updated = self.store.update_symbol(cfg.symbol, {**pending, "pending_exit_patch": {}})
+                    if updated is not None:
+                        LOG.emit(f"{cfg.symbol}: bekletilen cikis/risk parametreleri "
+                                 f"({', '.join(sorted(pending))}) artik acik pozisyon yok, uygulandi.",
+                                 "OPT", cfg.symbol)
+                        cfg = updated
+                if cfg.pending_secondary_exit_patch and cfg.magic not in sec_open_magics:
+                    pending_sec = dict(cfg.pending_secondary_exit_patch)
+                    merged_params = {**cfg.secondary_params, **pending_sec}
+                    self.store.update_symbol(cfg.symbol, {
+                        "secondary_params": merged_params, "pending_secondary_exit_patch": {},
+                    })
+                    LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis/risk parametreleri "
+                             f"({', '.join(sorted(pending_sec))}) artik acik ikincil pozisyon yok, "
+                             f"uygulandi.", "OPT", cfg.symbol)
 
     def _close_tracked(self, pos: dict[str, Any], comment: str, leg: str,
                        volume: float | None = None, fill: dict[str, Any] | None = None) -> bool:
@@ -1409,10 +1416,11 @@ class Engine:
         one only trips on total equity, so a single misbehaving symbol can burn
         most of the day's allowed loss while every other symbol keeps trading
         normally, right up until the whole account crosses the global line.
-        Sourced from real MT5 deal history (``day_stats``), not a persisted
-        flag, so it is correct again immediately after any restart without
-        needing its own recovery bookkeeping - the day resets when the broker
-        day (and therefore the cached stats) does.
+        Sourced from real MT5 deal history (``day_stats``) plus this symbol's
+        current floating P/L, not a persisted flag, so it is correct again
+        immediately after any restart without needing its own recovery
+        bookkeeping - the day resets when the broker day (and therefore the
+        cached stats) does.
         """
         if cfg.symbol_daily_loss_pct <= 0:
             return ""
@@ -1421,9 +1429,16 @@ class Engine:
             return ""
         row = next((r for r in self.day_stats().get("per_symbol", [])
                     if r["symbol"] == cfg.symbol), None)
-        if row is None:
+        realised = row["profit"] if row is not None else 0.0
+        # Realised-only missed a symbol that was already deep in a floating
+        # loss on an open position - closed trades hadn't caught up yet, so
+        # the halt (and the flatten it now triggers - see manage_positions())
+        # never fired until that position finally closed and booked it.
+        floating = sum(p.get("profit", 0.0) + p.get("swap", 0.0)
+                       for p in self._positions if p["magic"] == cfg.magic)
+        if row is None and floating == 0.0:
             return ""
-        loss_pct = -row["profit"] / guard.start_balance * 100.0
+        loss_pct = -(realised + floating) / guard.start_balance * 100.0
         if loss_pct >= cfg.symbol_daily_loss_pct:
             return f"gunluk sembol zarar limiti ({loss_pct:.2f}%)"
         return ""

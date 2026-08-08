@@ -709,8 +709,8 @@ function secondaryNote(cfg) {
   const when = cfg.secondary_updated_at
     ? new Date(cfg.secondary_updated_at * 1000).toLocaleDateString("tr-TR")
     : "-";
-  return `Aday: <b>${STRATEGY_LABEL[cfg.secondary_strategy] || cfg.secondary_strategy}</b>`
-    + ` / ${cfg.secondary_timeframe} - skor ${num(cfg.secondary_score, 2)}`
+  return `Aday: <b>${esc(STRATEGY_LABEL[cfg.secondary_strategy] || cfg.secondary_strategy)}</b>`
+    + ` / ${esc(cfg.secondary_timeframe)} - skor ${num(cfg.secondary_score, 2)}`
     + ` | dokunulmamis test ${h.trades != null ? h.trades : "-"} islem`
     + ` PF ${num(h.profit_factor, 2)} net ${signed(h.net_r, 1)}R (${when}).`
     + " Acikken iki sinyal de giris uretebilir; ayni anda ters yone bakarlarsa bar atlanir.";
