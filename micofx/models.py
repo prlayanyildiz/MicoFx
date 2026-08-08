@@ -497,6 +497,10 @@ class SystemConfig:
     # Optional live cost gate (default off — cost is already modelled in the optimizer).
     block_high_cost: bool = False
     max_cost_pct_of_risk: float = 25.0
+    # Optimizer parallel process cap: 0 = auto (CPU core count - 2, memory
+    # permitting). A weaker/shared cloud VM can set this lower so a walk-forward
+    # sweep does not starve the live trading loop and MT5 terminal of CPU.
+    opt_max_workers: int = 0
 
     # ---- scheduled re-optimization ----
     # Markets drift; a parameter set validated three months ago is a different

@@ -1347,6 +1347,8 @@ const SYS_FIELDS_ADVANCED = [
   { k: "min_free_margin", label: "Min serbest marj", t: "num", step: 10, min: 0 },
   { k: "slippage_points", label: "Slippage (point)", t: "int", min: 0, max: 500 },
   { k: "poll_interval_sec", label: "Dongu araligi (sn)", t: "num", step: 0.5, min: 0.5 },
+  { k: "opt_max_workers", label: "Maks optimizasyon paralel surec (0=otomatik)", t: "int", min: 0, max: 32,
+    hint: "Zayif/paylasimli bir bulut sunucuda dusuk tut, optimizasyon calisirken canli motoru ve MT5'i yormasin." },
   { k: "mt5_terminal_path", label: "MT5 terminal yolu (terminal64.exe - hangi platform olursa)", t: "text", wide: true },
   { k: "autostart_mt5", label: "Acilista MT5 terminalini baslat (yol ayarliysa ve kapaliysa)", t: "bool" },
   { k: "autostart_mt5_wait_sec", label: "MT5 baglanti bekleme (sn)", t: "int", min: 15, max: 300 },

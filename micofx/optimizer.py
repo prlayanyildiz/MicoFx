@@ -148,11 +148,14 @@ def _free_memory_gb() -> float:
 _WORKER_MEMORY_GB = 0.6
 
 
-def _worker_count() -> int:
+def _worker_count(configured: int = 0) -> int:
     """How many sweeps to run at once, leaving the machine usable.
 
-    ``MICO_OPT_WORKERS`` overrides. One core is left for the engine's live poll
-    loop and one for the OS, then memory decides the rest.
+    ``MICO_OPT_WORKERS`` env var overrides everything (debugging/ops escape
+    hatch). Otherwise ``configured`` (Sistem > opt_max_workers) wins when set -
+    a weaker/shared cloud VM can cap this from the UI without an env var. 0
+    falls back to the automatic guess: one core left for the engine's live
+    poll loop and one for the OS, then memory decides the rest.
     """
     try:
         override = int(os.environ.get("MICO_OPT_WORKERS", "0"))
@@ -160,6 +163,8 @@ def _worker_count() -> int:
         override = 0
     if override > 0:
         return override
+    if configured > 0:
+        return configured
     workers = max(1, min(16, (os.cpu_count() or 2) - 2))
     free_gb = _free_memory_gb()
     if free_gb > 0:
@@ -278,7 +283,7 @@ class Optimizer:
                  f"cikis modlari {styles_txt} ({len(variants)} tarama/zaman dilimi) | "
                  f"scalp TF kilidi acik | "
                  f"max {max_combos} kombinasyon | "
-                 f"{_worker_count()} paralel surec", "OPT")
+                 f"{_worker_count(self.store.system.opt_max_workers)} paralel surec", "OPT")
 
         self._run_all(targets, lookback_days, bar_cap, variants, min_trades, segments,
                       max_combos, min_positive, plateau, timeframes, refine_rounds,
@@ -456,7 +461,7 @@ class Optimizer:
             return plan["jobs"]
 
         _limit_blas_threads()
-        workers = _worker_count()
+        workers = _worker_count(self.store.system.opt_max_workers)
         if workers > 1:
             try:
                 self._search_parallel(targets, plan_next, note, workers)

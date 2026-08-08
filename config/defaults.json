@@ -5,7 +5,7 @@
   "system": {
     "running": false,
     "autostart_bot": false,
-    "poll_interval_sec": 1.0,
+    "poll_interval_sec": 2.0,
     "max_total_positions": 10,
     "lot_multiplier": 1.0,
     "size_by_edge": true,
