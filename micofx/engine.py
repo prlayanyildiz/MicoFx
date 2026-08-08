@@ -906,6 +906,16 @@ class Engine:
             )
             if result.get("ok"):
                 self._positions = self.client.positions()
+                if secondary and result.get("position"):
+                    # Tagged inside the same lock as the fill itself - moved
+                    # here from after the lock's release because
+                    # apply_secondary() also takes entry_lock and reads
+                    # self._sec_tickets to decide whether a secondary
+                    # position is open. With the tag written only after the
+                    # lock released, a family-changing apply_secondary()
+                    # call landing in that gap saw this brand new ticket as
+                    # untagged and let the identity/exit rewrite through.
+                    self._tag_secondary({int(result["position"])})
         if not result.get("ok"):
             state.note = result.get("error", "emir hatasi")
             LOG.emit(result.get("error", "emir hatasi"), "ERROR", cfg.symbol)
@@ -950,11 +960,6 @@ class Engine:
         state.primary_signal = ""
         state.sec_signal = ""
         state.note = "islem acildi"
-        if secondary and result.get("position"):
-            # Tag the exact position the fill resolved to (deal.position_id,
-            # not a before/after positions() diff) so the exit rules keep
-            # matching the entry that opened it, even after a restart.
-            self._tag_secondary({int(result["position"])})
         LOG.emit(
             f"{side.upper()} {result['volume']:g} lot @ {result['price']:.5f} "
             f"SL={result['sl']:.5f} TP={result['tp']:.5f} | lot: {note}"
@@ -1010,9 +1015,16 @@ class Engine:
                 # cycle - including past the Monday boundary - until the
                 # close actually lands, instead of a failed weekend attempt
                 # silently falling through to normal trailing the moment the
-                # calendar flips back to a weekday.
+                # calendar flips back to a weekday. Deliberately NOT removed
+                # from _weekend_pending here on a True return -
+                # close_position() reports TRADE_RETCODE_DONE_PARTIAL as
+                # success too (remaining volume genuinely still open on the
+                # same ticket), so "the call succeeded" does not mean "fully
+                # flat". The prune at the top of this method (against the
+                # freshly re-queried self._positions) is what actually
+                # confirms the ticket is gone, and clears it correctly either
+                # way - full close this pass, or a later one after retries.
                 if self._close_tracked(pos, "MicoFX hafta sonu", "exit"):
-                    self._weekend_pending.discard(pos["ticket"])
                     LOG.emit("Hafta sonu: pozisyon kapatildi.", "TRADE", cfg.symbol)
                 continue
             # Same "a loss limit should stop the loss, not just further
