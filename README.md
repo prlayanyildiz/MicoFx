@@ -41,6 +41,16 @@ Bitince MetaTrader 5 terminaline giris yapip "Algoritmik alim satima izin
 ver" kutusunu isaretle, sonra `start.bat` ile baslat. Ayrintili adimlar ve
 sorun giderme icin [BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
 
+**4) Claude Code ile devam etmek istersen** (kod uzerinde birlikte
+calismak icin, opsiyonel):
+```powershell
+cd $env:USERPROFILE\MicoFx
+claude
+```
+Yeni bir oturum acilir (bu makinede daha once konusulmus bir sohbetin
+hafizasi otomatik gelmez), ama proje dosyalari zaten orada oldugu icin
+hizli baglam kazanir.
+
 ## Bu surum: birlestirilmis / genisletilmis surum
 
 Bu agac urun ailesinin (MicoFX / MicoFX Orj / MicoAi / MicoFXAntigravit)
@@ -116,11 +126,8 @@ Sifir bilgisayara ilk kurulum icin bakiniz: **[KURULUM.md](KURULUM.md)**
 
 ## Kurulum
 
-```powershell
-cd C:\Users\prlay\OneDrive\Desktop\MicoFX
-python -m venv .venv
-.\.venv\Scripts\pip install -r requirements.txt
-```
+Yeni/bos bir makinede kurulum icin yukaridaki "Hizli kurulum" bolumune veya
+[BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
 
 MetaTrader 5 terminali kurulu ve hesaba giris yapmis olmali. Terminalde
 **Araclar > Secenekler > Uzman Danismanlar > Algoritmik alim satima izin ver**
