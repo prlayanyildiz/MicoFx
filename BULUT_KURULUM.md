@@ -31,7 +31,7 @@ git --version
 
 ### 2) Kodu indir (clone)
 ```powershell
-cd $env:USERPROFILE\Desktop
+cd $env:USERPROFILE
 git clone https://github.com/prlayanyildiz/MicoFx.git
 cd MicoFx
 ```
@@ -67,7 +67,7 @@ hata ayiklamak istersen `start_console.bat` (konsol acik kalir).
 
 ### 6) Claude Code ile devam etmek istersen
 ```powershell
-cd $env:USERPROFILE\Desktop\MicoFx
+cd $env:USERPROFILE\MicoFx
 claude
 ```
 Yeni bir oturum acilir (bu konusmanin hafizasi otomatik gelmez), ama proje
