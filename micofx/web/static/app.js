@@ -387,7 +387,7 @@ const POSITION_SECTION = {
     { k: "fixed_lot", t: "num", label: "Sabit lot", step: 0.01, min: 0.01 },
     { k: "risk_percent", t: "num", label: "Risk %", step: 0.05, min: 0.05 },
     { k: "max_lot", t: "num", label: "Maks lot", step: 0.01, min: 0.01 },
-    { k: "max_positions", t: "int", label: "Maks pozisyon", min: 1, max: 10 },
+    { k: "max_positions", t: "int", label: "Maks pozisyon", min: 1, max: 50 },
     { k: "symbol_daily_loss_pct", t: "num", label: "Sembol gunluk zarar limiti % (0=kapali)", step: 0.1, min: 0,
       hint: "Bu sembol bugun bakiyenin bu kadarini kaybedince, hesabin genel gunluk limiti dolmasa bile "
           + "sadece bu sembolde yeni giris durur." },
@@ -1918,7 +1918,7 @@ function wire() {
     "Tum sembollerin maks pozisyonu bu deger olacak. Onayliyor musunuz?",
     async () => {
       const val = parseInt($("#portfolio-maxpos-bulk").value, 10);
-      if (!(val > 0)) { toast("Once bir maks pozisyon degeri yazin", "err"); return; }
+      if (!(val > 0) || val > 50) { toast("Maks pozisyon 1-50 arasinda olmali", "err"); return; }
       const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { max_positions: val } } });
       SYMBOLS = res.symbols;
       cardsBuilt = false;
