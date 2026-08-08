@@ -8,12 +8,16 @@
 ' once konsolsuz pythonw.exe aranıyor.
 Option Explicit
 
-Dim fso, shell, env, root, exe, port, url
+Dim fso, shell, env, root, exe, port, url, isRestart
 
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
 root = fso.GetParentFolderName(WScript.ScriptFullName)
 shell.CurrentDirectory = root
+
+' restart.bat "restart" argumaniyla cagirir: kullanicinin zaten acik olan
+' sekmesi var, yeni bir tane daha acmayalim.
+isRestart = (WScript.Arguments.Count > 0) And (LCase(WScript.Arguments(0)) = "restart")
 
 ' Tarayiciyi bu script aciyor; run.py ikinci bir sekme acmasin.
 Set env = shell.Environment("Process")
@@ -35,8 +39,10 @@ port = env("MICO_PORT")
 If port = "" Then port = "8900"
 url = "http://127.0.0.1:" & port
 
-WScript.Sleep 2500
-shell.Run url, 1, False
+If Not isRestart Then
+  WScript.Sleep 2500
+  shell.Run url, 1, False
+End If
 
 Function FindPythonw(fso, shell, root)
   Dim candidates, path, i

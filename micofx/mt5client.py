@@ -99,7 +99,6 @@ class MT5Client:
         self._tick_cache: dict[str, tuple[float, dict[str, float]]] = {}
         self._name_map: dict[str, str] = {}
         self._overrides: dict[str, str] = {}
-        self._server_offset: int | None = None
         self._symbol_names_cache: list[str] = []
         self._symbol_names_at: float = 0.0
 
@@ -548,33 +547,19 @@ class MT5Client:
     # ------------------------------------------------------------------ time
 
     def server_now(self) -> float:
-        return time.time() + self.server_offset_hours() * 3600.0
+        """The clock every session/day-boundary decision is measured against.
 
-    def server_offset_hours(self, fallback: int = 3) -> int:
-        if self._server_offset is not None:
-            return self._server_offset
-        return fallback
-
-    def detect_server_offset(self, probe: str = "EURUSD") -> int | None:
-        """Derive the broker's UTC offset from a fresh tick; None while closed."""
-        real = self.select(probe)
-        if real is None:
-            return None
-        with self._lock:
-            t = mt5.symbol_info_tick(real)
-        if t is None or t.time <= 0:
-            return None
-        delta = t.time - time.time()
-        if abs(delta) > 14 * 3600:
-            return None
-        offset = int(round(delta / 3600.0))
-        if abs(delta - offset * 3600) > 180:  # stale tick, market is closed
-            return None
-        self._server_offset = offset
-        return offset
-
-    def set_server_offset(self, hours: int) -> None:
-        self._server_offset = int(hours)
+        This is deliberately just the machine's own clock: session windows,
+        trade days and the daily PnL anchor are all configured by the user in
+        their own local (Windows) time, so that is the clock that must be used
+        to evaluate them. An earlier version tried to auto-detect the broker's
+        own UTC offset from live tick timestamps and add it on top, but that
+        detection could go wrong (e.g. a bad tick, or the machine's own clock
+        being off while not yet NTP-corrected) and silently shift every
+        time-based gate - keep the Windows clock authoritative and synced via
+        Windows' own time service instead of re-deriving it here.
+        """
+        return time.time()
 
     # ------------------------------------------------------------------ bars
 
@@ -701,10 +686,9 @@ class MT5Client:
     def deals_since(self, ts: float) -> list[dict[str, Any]]:
         from datetime import datetime, timezone
 
-        # ``ts`` and deal ``time`` fields share the broker-clock epoch used by
-        # ``server_now()`` (tick.time ≈ wall + offset). The window end must use
-        # the same clock - ``time.time()+86400`` truncated the last
-        # ``server_utc_offset`` hours of history and starved day/AI stats.
+        # ``ts`` and deal ``time`` are both plain Unix epochs, same as
+        # ``server_now()``. Widening the window end to at least "now" (instead
+        # of always ``ts+86400``) matters when ``ts`` is stale.
         end_ts = max(float(ts), self.server_now()) + 86400.0
         with self._lock:
             if not self.connected:

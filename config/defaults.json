@@ -17,7 +17,6 @@
     "min_free_margin": 50.0,
     "slippage_points": 20,
     "close_on_stop": false,
-    "server_utc_offset": 3,
     "auto_reopt": true,
     "auto_reopt_days": 7.0,
     "auto_reopt_hour": -1,

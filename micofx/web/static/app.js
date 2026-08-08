@@ -131,7 +131,7 @@ function renderTop() {
   const items = [
     ["Bot", botText, bot.running ? "pos" : (bot.watching ? "muted" : "dim")],
     ["MT5", mt5.connected ? "BAGLI" : "KOPUK", mt5.connected ? "pos" : "neg"],
-    ["Sunucu", (mt5.server_time || "").slice(11, 16) + ` UTC${mt5.server_utc_offset >= 0 ? "+" : ""}${mt5.server_utc_offset}`, ""],
+    ["Saat", (mt5.server_time || "").slice(11, 16), ""],
     ["Bakiye", num(acc.balance), ""],
     ["Varlik", num(acc.equity), ""],
     ["Acik K/Z", signed(acc.profit), cls(acc.profit)],
@@ -281,7 +281,6 @@ function renderExecution() {
 
 function renderPositions() {
   const now = Date.now() / 1000;
-  const offset = (STATE.mt5 || {}).server_utc_offset || 0;
   const rows = (STATE.positions || []).map((p) => {
     const digits = (SYMBOLS.find((s) => s.resolved_symbol === p.symbol) || {}).digits ?? 5;
     const tr = el("tr");
@@ -294,7 +293,7 @@ function renderPositions() {
       <td class="num ${p.sl ? "" : "dim"}">${price(p.sl, digits)}</td>
       <td class="num ${p.tp ? "" : "dim"}">${price(p.tp, digits)}</td>
       <td class="num ${cls(p.profit + p.swap)}">${signed(p.profit + p.swap)}</td>
-      <td class="dim mono">${duration(now + offset * 3600 - p.time)}</td>`;
+      <td class="dim mono">${duration(now - p.time)}</td>`;
     tr.appendChild(el("td", {}, el("button", {
       class: "btn btn-sm btn-danger",
       text: "Kapat",
@@ -761,7 +760,7 @@ function buildSymbolCard(cfg) {
   flat.addEventListener("change", () => saveSymbol(cfg.symbol, { flat_before_close_min: parseInt(flat.value, 10) || 0 }, flat));
 
   body.appendChild(el("div", { class: "subgrid" }, [
-    el("div", { class: "title", text: "Islem Saatleri (broker sunucu saati)" }),
+    el("div", { class: "title", text: "Islem Saatleri (bilgisayarin yerel saati)" }),
     el("div", { class: "form-grid" }, [
       el("div", { class: "field" }, [
         el("label", { text: "Saat filtresi" }),
@@ -1329,8 +1328,8 @@ const SYS_FIELDS = [
   { k: "auto_reopt_weekday", label: "Tercih edilen gun", t: "select",
     opts: [["-1", "Farketmez"], ["0", "Pazartesi"], ["1", "Sali"], ["2", "Carsamba"],
            ["3", "Persembe"], ["4", "Cuma"], ["5", "Cumartesi"], ["6", "Pazar"]],
-    hint: "Varsayilan Cumartesi: agir walk-forward piyasa sakinken kosar. Saat filtresiyle birlikte broker saatine bakar." },
-  { k: "auto_reopt_hour", label: "Tercih edilen saat (sunucu/broker saati)", t: "select",
+    hint: "Varsayilan Cumartesi: agir walk-forward piyasa sakinken kosar. Saat filtresiyle birlikte bilgisayarin yerel (Windows) saatine bakar." },
+  { k: "auto_reopt_hour", label: "Tercih edilen saat (bilgisayarin yerel/Windows saati)", t: "select",
     opts: [["-1", "Farketmez"], ...Array.from({ length: 24 }, (_, h) => [String(h), `${String(h).padStart(2, "0")}:00`])] },
 ];
 
@@ -1348,7 +1347,6 @@ const SYS_FIELDS_ADVANCED = [
   { k: "min_free_margin", label: "Min serbest marj", t: "num", step: 10, min: 0 },
   { k: "slippage_points", label: "Slippage (point)", t: "int", min: 0, max: 500 },
   { k: "poll_interval_sec", label: "Dongu araligi (sn)", t: "num", step: 0.5, min: 0.5 },
-  { k: "server_utc_offset", label: "Sunucu UTC farki", t: "int", min: -12, max: 14 },
   { k: "mt5_terminal_path", label: "MT5 terminal yolu (terminal64.exe - hangi platform olursa)", t: "text", wide: true },
   { k: "autostart_mt5", label: "Acilista MT5 terminalini baslat (yol ayarliysa ve kapaliysa)", t: "bool" },
   { k: "autostart_mt5_wait_sec", label: "MT5 baglanti bekleme (sn)", t: "int", min: 15, max: 300 },
@@ -1424,7 +1422,7 @@ function renderSystem() {
     ["Isim", acc.name || "-"],
     ["AutoTrading", mt5.trade_allowed ? "Acik" : "KAPALI"],
     ["Terminal build", mt5.build || "-"],
-    ["Sunucu saati", mt5.server_time || "-"],
+    ["Terminal saati", mt5.server_time || "-"],
     ["Ayarlanan yol", sys.mt5_terminal_path || "(bos - baglanmaz)"],
     ["Bagli terminal", mt5.path || "-"],
   ];

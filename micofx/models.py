@@ -494,7 +494,6 @@ class SystemConfig:
     # ---- execution ----
     slippage_points: int = 20
     close_on_stop: bool = False
-    server_utc_offset: int = 3        # refreshed automatically from live ticks
     # Optional live cost gate (default off — cost is already modelled in the optimizer).
     block_high_cost: bool = False
     max_cost_pct_of_risk: float = 25.0
@@ -506,8 +505,8 @@ class SystemConfig:
     # out-of-sample gates, so a stale-but-still-good config simply survives.
     auto_reopt: bool = True
     auto_reopt_days: float = 7.0      # <=0 disables the interval; otherwise clamped to >= 0.5 days
-    auto_reopt_hour: int = -1         # broker-time hour to prefer; -1 = any hour
-    # Broker-time weekday gate (time.tm_wday): 0=Mon ... 5=Sat ... 6=Sun; -1 = any day.
+    auto_reopt_hour: int = -1         # local (Windows) hour to prefer; -1 = any hour
+    # Local-time weekday gate (time.tm_wday): 0=Mon ... 5=Sat ... 6=Sun; -1 = any day.
     # Default Saturday so the heavy walk-forward runs when markets are quiet.
     auto_reopt_weekday: int = 5
 

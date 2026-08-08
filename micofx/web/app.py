@@ -457,8 +457,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         patch = body.model_dump()
         patch.pop("running", None)  # bot state is owned by start/stop
         updated = store.update_system(patch)
-        if "server_utc_offset" in patch:
-            client.set_server_offset(updated.server_utc_offset)
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}
         if "mt5_terminal_path" in patch:
             client.set_terminal_path(updated.mt5_terminal_path)
@@ -486,10 +484,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def mt5_reconnect() -> dict[str, Any]:
         client.set_terminal_path(store.system.mt5_terminal_path)
         ok = client.reconnect()
-        if ok:
-            detected = client.detect_server_offset()
-            if detected is not None:
-                store.update_system({"server_utc_offset": detected})
         return {
             "ok": ok,
             "error": client.last_error,

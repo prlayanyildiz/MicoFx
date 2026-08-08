@@ -23,22 +23,27 @@ class SessionState:
 
 
 def server_clock(server_epoch: float) -> tuple[int, int]:
-    """Return (isoweekday 1..7, minute-of-day) for a broker-time epoch."""
-    st = time.gmtime(server_epoch)
+    """Return (isoweekday 1..7, minute-of-day) for the given epoch, local time.
+
+    Session windows and trade days are configured by the user against their
+    own machine's wall clock, so that - not UTC or a guessed broker offset -
+    is the calendar this must agree with.
+    """
+    st = time.localtime(server_epoch)
     weekday = st.tm_wday + 1  # tm_wday: Monday == 0
     return weekday, st.tm_hour * 60 + st.tm_min
 
 
 def weekend_closed(cfg: SymbolConfig, server_epoch: float) -> bool:
-    """True when this symbol must stay flat because it is the broker's weekend.
+    """True when this symbol must stay flat because it is the weekend.
 
     An explicit calendar rule, not a side effect of the feed. ``trade_all_hours``
     drops the configured windows, and the only thing left standing between it and
     a Saturday order was MT5 refusing the fill - which depends on the broker
     marking the symbol closed and on the last tick looking stale enough. A stale
     Friday quote that still reads as fresh would walk straight past that. The day
-    of week comes from the broker-time epoch (``server_utc_offset`` applied by the
-    client), never the machine's local calendar.
+    of week comes from the machine's own local calendar (the same clock the
+    session windows below are configured against), not UTC or the broker's.
 
     Crypto is exempt: those symbols trade 24/7 and are supposed to.
     """

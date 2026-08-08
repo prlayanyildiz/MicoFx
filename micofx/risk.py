@@ -32,7 +32,7 @@ class DailyGuard:
         self.halt_reason: str = str(store.get_setting("day_halt_reason", ""))
 
     def rollover(self, server_epoch: float, balance: float) -> bool:
-        key = time.strftime("%Y-%m-%d", time.gmtime(server_epoch))
+        key = time.strftime("%Y-%m-%d", time.localtime(server_epoch))
         if key == self.day_key and self.start_balance > 0:
             return False
         self.day_key = key

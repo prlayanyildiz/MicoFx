@@ -422,12 +422,10 @@ class Supervisor:
     def _bad_hours(self, trades: list[dict[str, Any]], nets: list[float],
                    cfgs: dict[str, Any]) -> list[int]:
         """Server-clock hours that lose persistently for this symbol."""
-        offset = self.store.system.server_utc_offset * 3600
         buckets: dict[int, list[float]] = {}
         for deal, net in zip(trades, nets):
             hour = time.gmtime(deal["time"]).tm_hour if deal["time"] > 0 else 0
             buckets.setdefault(hour, []).append(net)
-        del offset  # deal timestamps are already broker-clock
 
         blocked = []
         for hour, values in buckets.items():

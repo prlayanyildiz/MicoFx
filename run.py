@@ -103,12 +103,7 @@ def main() -> int:
                     break
                 time.sleep(2.0)
 
-    if client.connected or client.connect():
-        detected = client.detect_server_offset()
-        if detected is not None:
-            store.update_system({"server_utc_offset": detected})
-        client.set_server_offset(store.system.server_utc_offset)
-    else:
+    if not client.connected and not client.connect():
         LOG.emit(client.last_error or "MT5 baglantisi kurulamadi", "ERROR")
 
     engine = Engine(store, client)

@@ -261,13 +261,6 @@ class Engine:
         if not account:
             return
 
-        if self.cycle_count % 60 == 0:
-            detected = self.client.detect_server_offset()
-            if detected is not None and detected != self.store.system.server_utc_offset:
-                self.store.update_system({"server_utc_offset": detected})
-                LOG.emit(f"Sunucu saat farki guncellendi: UTC{detected:+d}", "INFO")
-        self.client.set_server_offset(self.store.system.server_utc_offset)
-
         server_now = self.client.server_now()
         self.risk.daily.rollover(server_now, account.get("balance", 0.0))
 
@@ -412,12 +405,17 @@ class Engine:
         # drop the weekday/hour gate at that point and just run on the next
         # cycle instead of silently skipping a week (or more) of re-opt.
         catch_up = now - self._reopt_at - every >= 2 * 86400.0
-        broker = time.gmtime(self.client.server_now())
-        if not catch_up and 0 <= weekday <= 6 and broker.tm_wday != weekday:
-            return                       # wait for the preferred broker-time weekday
+        # Gated on the machine's own local clock, not the broker/server time:
+        # server_now() used to depend on a detected MT5 offset that could
+        # drift or be briefly wrong (e.g. a broker/cloud clock hiccup), which
+        # made this fire on the wrong weekday. The System tab's day/hour
+        # pickers should mean exactly what they say against Windows time.
+        local = time.localtime(now)
+        if not catch_up and 0 <= weekday <= 6 and local.tm_wday != weekday:
+            return                       # wait for the preferred local weekday
         hour = int(sys_cfg.auto_reopt_hour)
-        if not catch_up and 0 <= hour <= 23 and broker.tm_hour != hour:
-            return                       # wait for the preferred broker-time hour
+        if not catch_up and 0 <= hour <= 23 and local.tm_hour != hour:
+            return                       # wait for the preferred local hour
         if catch_up:
             LOG.emit("Haftalik yeniden optimizasyon: planlanan pencere kacirilmisti, "
                      "telafi olarak simdi baslatiliyor.", "OPT")
@@ -1389,8 +1387,7 @@ class Engine:
             "mt5": {
                 "connected": self.client.connected,
                 "error": self.client.last_error,
-                "server_utc_offset": self.store.system.server_utc_offset,
-                "server_time": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(self.client.server_now())),
+                "server_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.client.server_now())),
                 **self.client.terminal_flags(),
             },
             "account": account,
