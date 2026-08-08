@@ -922,16 +922,32 @@ class Engine:
             )
             if result.get("ok"):
                 self._positions = self.client.positions()
-                if secondary and result.get("position"):
-                    # Tagged inside the same lock as the fill itself - moved
-                    # here from after the lock's release because
-                    # apply_secondary() also takes entry_lock and reads
-                    # self._sec_tickets to decide whether a secondary
-                    # position is open. With the tag written only after the
-                    # lock released, a family-changing apply_secondary()
-                    # call landing in that gap saw this brand new ticket as
-                    # untagged and let the identity/exit rewrite through.
-                    self._tag_secondary({int(result["position"])})
+                if secondary:
+                    if result.get("position"):
+                        # Tagged inside the same lock as the fill itself -
+                        # moved here from after the lock's release because
+                        # apply_secondary() also takes entry_lock and reads
+                        # self._sec_tickets to decide whether a secondary
+                        # position is open. With the tag written only after
+                        # the lock released, a family-changing
+                        # apply_secondary() call landing in that gap saw this
+                        # brand new ticket as untagged and let the
+                        # identity/exit rewrite through.
+                        self._tag_secondary({int(result["position"])})
+                    else:
+                        # open_market() could not resolve which broker ticket
+                        # this fill became (deal/order/price-match all came
+                        # up empty) - the position is real and open, but it
+                        # will be managed under the PRIMARY's exit params
+                        # (manage_positions only picks secondary exits for a
+                        # tagged ticket), not the secondary strategy it was
+                        # actually validated and sized under. Silent before;
+                        # this is exactly the kind of mismatch an operator
+                        # needs to know happened.
+                        LOG.emit("Ikincil sinyal islemi acildi ama pozisyon ticket'i "
+                                 "cozulemedi - bu pozisyon YANLISLIKLA birincil cikis "
+                                 "parametreleriyle yonetilecek, elle kontrol edin.",
+                                 "ERROR", cfg.symbol)
         if not result.get("ok"):
             state.note = result.get("error", "emir hatasi")
             LOG.emit(result.get("error", "emir hatasi"), "ERROR", cfg.symbol)
@@ -1040,8 +1056,15 @@ class Engine:
                 # freshly re-queried self._positions) is what actually
                 # confirms the ticket is gone, and clears it correctly either
                 # way - full close this pass, or a later one after retries.
-                if self._close_tracked(pos, "MicoFX hafta sonu", "exit"):
-                    LOG.emit("Hafta sonu: pozisyon kapatildi.", "TRADE", cfg.symbol)
+                fill: dict[str, Any] = {}
+                if self._close_tracked(pos, "MicoFX hafta sonu", "exit", fill=fill):
+                    filled = float(fill.get("volume", pos["volume"]))
+                    if filled + 1e-9 >= float(pos["volume"]):
+                        LOG.emit("Hafta sonu: pozisyon kapatildi.", "TRADE", cfg.symbol)
+                    else:
+                        LOG.emit(f"Hafta sonu: pozisyon kismen kapatildi ({filled:g}/"
+                                 f"{pos['volume']:g} lot), kalan tekrar denenecek.",
+                                 "WARN", cfg.symbol)
                 continue
             # Same "a loss limit should stop the loss, not just further
             # entries" reasoning as the account-wide daily guard above -

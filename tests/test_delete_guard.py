@@ -499,3 +499,24 @@ def test_patch_refuses_max_positions_out_of_range():
 
     res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 9999})
     assert res.status_code == 400
+
+
+def test_patch_refuses_nan_in_top_level_exit_field():
+    # sl_atr_mult has no per-field bounds entry (unlike risk_percent/max_lot)
+    # - the general NaN/Infinity sweep is what has to catch this one.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", content=b'{"sl_atr_mult": NaN}',
+                  headers={"Content-Type": "application/json"})
+    assert res.status_code == 400
+    import math
+    assert not math.isnan(store.symbols["XAUUSD"].sl_atr_mult)
+
+
+def test_patch_refuses_invalid_timeframe():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"timeframe": "M1"})
+    assert res.status_code == 400

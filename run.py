@@ -117,10 +117,19 @@ def main() -> int:
     # Only matters once host is not 127.0.0.1 - see create_app()'s docstring.
     api_token = os.getenv("MICO_API_TOKEN", "").strip()
     if host not in ("127.0.0.1", "localhost") and not api_token:
+        # A warning alone left the real default behaviour "wide open" - the
+        # whole point of a kill-switch/panic route is that it must not be
+        # reachable by anyone who can merely reach the port. Auto-generate a
+        # token instead of just complaining, so "exposed and reachable by
+        # anyone" is never actually a state this process can end up in - only
+        # "exposed and needs the token from this log line" is.
+        import secrets
+        api_token = secrets.token_urlsafe(24)
         LOG.emit(
-            f"UYARI: MICO_HOST={host} ile disari aciliyorsunuz ama MICO_API_TOKEN ayarli degil - "
-            f"panic/bot durdur/pozisyon kapat dahil TUM API'ler kimlik dogrulamasiz. "
-            f"MICO_API_TOKEN ortam degiskenini ayarlayin.", "ERROR")
+            f"MICO_HOST={host} ile disari aciliyorsunuz ama MICO_API_TOKEN ayarli degil - "
+            f"rastgele bir token uretildi ve otomatik uygulandi: {api_token} - "
+            f"kalici olmasi icin MICO_API_TOKEN ortam degiskenine yazin, yoksa her "
+            f"baslatmada degisir.", "ERROR")
     app = create_app(store, client, engine, optimizer, api_token=api_token)
 
     # The observation loop always runs so the terminal shows live state; order

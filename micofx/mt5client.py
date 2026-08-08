@@ -414,12 +414,13 @@ class MT5Client:
             "name": a.name, "trade_allowed": bool(a.trade_allowed),
             # Every position-count guard in this app (max_positions,
             # max_total_positions, weekend/secondary ticket tracking) assumes
-            # one ticket per opened trade - true under hedging, but a netting
-            # account auto-merges same-direction trades on a symbol into one
-            # ticket. "5 acik pozisyon" would then just be "one bigger one",
-            # silently defeating every position-count-based risk limit.
-            "netting": getattr(a, "margin_mode", None) == getattr(
-                mt5, "ACCOUNT_MARGIN_MODE_RETAIL_NETTING", 0),
+            # one ticket per opened trade - true only under retail hedging.
+            # Both retail netting AND exchange-traded accounts auto-merge
+            # same-direction trades on a symbol into one ticket, so "not
+            # hedging" (not just "is retail-netting") is the actual
+            # condition that breaks those assumptions.
+            "netting": getattr(a, "margin_mode", None) != getattr(
+                mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", 2),
         }
 
     def terminal_flags(self) -> dict[str, Any]:
@@ -887,11 +888,20 @@ class MT5Client:
                 with self._lock:
                     others = mt5.positions_get(symbol=real) or ()
                 same_magic = [p for p in others if p.magic == magic]
-                if same_magic:
-                    price_matches = [p for p in same_magic
-                                     if abs(p.price_open - fill_price) < self.min_stop_distance(symbol) * 0.1]
-                    pool = price_matches or same_magic
-                    pos_ticket = int(max(pool, key=lambda p: p.time).ticket)
+                # Falling back to "all same-magic positions, newest by time"
+                # when NONE match the fill price used to guess wrong under
+                # exactly the scenario this exists for: primary and secondary
+                # share one magic, and a secondary fill landing close in time
+                # to a primary one could get tagged onto the WRONG ticket -
+                # not just leaving this one unmanaged (safe-ish), but
+                # corrupting the OTHER position's exit tracking too. Better
+                # to come back unresolved (0, logged loudly by the caller)
+                # than guess and silently mismanage a position that was
+                # actually fine.
+                price_matches = [p for p in same_magic
+                                 if abs(p.price_open - fill_price) < self.min_stop_distance(symbol) * 0.1]
+                if price_matches:
+                    pos_ticket = int(max(price_matches, key=lambda p: p.time).ticket)
 
         # SL/TP above were built from the pre-fill tick; a market order can
         # slip within ``deviation``, and rebuilding them from the tick means

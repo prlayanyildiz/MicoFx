@@ -143,16 +143,18 @@ _ENUM_FIELDS = {"group": (GROUPS, False), "strategy": (STRATEGIES, False),
                 "timeframe": (TIMEFRAMES, False), "secondary_timeframe": (TIMEFRAMES, True)}
 
 
-def _reject_non_finite_values(d: dict[str, Any], label: str) -> None:
-    # secondary_params carries an arbitrary OPT_FIELDS subset with no
-    # per-field bounds table of its own (unlike the small, named
-    # _SYMBOL_RISK_BOUNDS set) - this at least closes the NaN/Infinity class
-    # of bug _validate_risk_bounds closes for the top-level fields, since a
-    # NaN sl_atr_mult buried in here would otherwise reach engine.py's live
-    # trailing/breakeven math completely unchecked.
+def _reject_non_finite_values(d: dict[str, Any], label: str = "") -> None:
+    # Both the top-level patch and the nested secondary_params blob carry
+    # plenty of numeric fields (sl_atr_mult, trail_start_atr, adx_min, ...)
+    # with no per-field bounds table of their own (unlike the small, named
+    # _SYMBOL_RISK_BOUNDS set _validate_risk_bounds checks) - this closes the
+    # NaN/Infinity class of bug for all of them, since a NaN reaching
+    # engine.py's live trailing/breakeven math corrupts comparisons silently
+    # (NaN >= x and NaN <= x are both always False).
     for key, value in d.items():
         if isinstance(value, (int, float)) and not math.isfinite(value):
-            raise HTTPException(400, f"{label}.{key} gecersiz ({value!r})")
+            name = f"{label}.{key}" if label else key
+            raise HTTPException(400, f"{name} gecersiz ({value!r})")
 
 
 def _validate_enum_fields(patch: dict[str, Any]) -> None:
@@ -326,6 +328,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         patch = body.model_dump()
         _reject_internal_fields(patch)
         _reject_bad_dict_fields(patch, ("secondary_params",))
+        # _validate_risk_bounds only range-checks the small named set in
+        # _SYMBOL_RISK_BOUNDS - sl_atr_mult, trail_start_atr, adx_min and
+        # every other numeric field outside that set had no NaN/Infinity
+        # check at all, top-level, same class of gap the nested
+        # secondary_params check below closes for the secondary blob.
+        _reject_non_finite_values(patch)
         if isinstance(patch.get("secondary_params"), dict):
             _reject_non_finite_values(patch["secondary_params"], "secondary_params")
         _validate_enum_fields(patch)
@@ -541,6 +549,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
         _reject_internal_fields(body.patch)
         _reject_bad_dict_fields(body.patch, ("secondary_params",))
+        _reject_non_finite_values(body.patch)
         if isinstance(body.patch.get("secondary_params"), dict):
             _reject_non_finite_values(body.patch["secondary_params"], "secondary_params")
         _validate_enum_fields(body.patch)
@@ -678,6 +687,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def patch_system(body: SystemPatch) -> dict[str, Any]:
         patch = body.model_dump()
         patch.pop("running", None)  # bot state is owned by start/stop
+        _reject_non_finite_values(patch)
         _validate_risk_bounds(patch, _SYSTEM_RISK_BOUNDS)
         if "backup_dir" in patch and patch["backup_dir"]:
             path = str(patch["backup_dir"]).strip()
