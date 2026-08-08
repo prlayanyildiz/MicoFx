@@ -45,6 +45,16 @@ async function api(path, options = {}) {
   return data;
 }
 
+// Symbol names (broker_symbol is user/API-settable), broker/account strings
+// and log/error text all land in innerHTML template literals verbatim
+// elsewhere in this file - a symbol saved with a name like
+// "<img src=x onerror=...>" would otherwise execute. Escaping matters even
+// more now that the API token sits in a <meta> tag on this same page: an
+// XSS here could read and exfiltrate it, defeating the token entirely.
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+));
+
 function toast(message, kind = "") {
   const box = document.createElement("div");
   box.className = kind;
@@ -203,7 +213,7 @@ function renderCards() {
     </div>`).join("");
 
   if (day.halted) {
-    $("#day-note").innerHTML = `<span class="pill bad">DURDURULDU</span> ${day.halt_reason || ""}`;
+    $("#day-note").innerHTML = `<span class="pill bad">DURDURULDU</span> ${esc(day.halt_reason || "")}`;
   } else {
     $("#day-note").textContent = `${day.day_key || ""} | baslangic ${num(day.start_balance)}`;
   }
@@ -356,7 +366,7 @@ function renderLive() {
       <td class="num dim">${st.atr ? st.atr.toFixed(cfg.digits ?? 5) : "-"}</td>
       <td class="num ${st.spread_atr > cfg.max_spread_atr ? "neg" : "dim"}">${st.spread_atr ? num(st.spread_atr, 2) + "x" : "-"}</td>
       <td>${cfg.enabled ? sig : '<span class="pill off">kapali</span>'}</td>
-      <td class="dim">${st.note || ""}</td>`;
+      <td class="dim">${esc(st.note || "")}</td>`;
     return tr;
   });
   rowsInto($("#live-table"), rows, "Sembol yok", 13);
@@ -856,7 +866,7 @@ function updateSymbolCards() {
       <span><b>K/D</b> ${st.k != null ? num(st.k, 0) + "/" + num(st.d, 0) : "-"}</span>
       <span><b>opt</b> <span class="opt-badge ${cfg.opt_score > 0 ? "pos" : "dim"}">${num(cfg.opt_score, 1)}</span> <span class="dim">${optAge}</span></span>
       ${sig}
-      <span class="dim">${st.note || ""}</span>`;
+      <span class="dim">${esc(st.note || "")}</span>`;
   });
 }
 
@@ -1059,7 +1069,7 @@ function renderOptJob() {
   const rows = results.map((r) => {
     const tr = el("tr");
     if (!r.ok || !r.best) {
-      tr.innerHTML = `<td class="sym">${r.symbol}</td><td colspan="15" class="neg">${r.error || "sonuc yok"}</td>`;
+      tr.innerHTML = `<td class="sym">${esc(r.symbol)}</td><td colspan="15" class="neg">${esc(r.error || "sonuc yok")}</td>`;
       return tr;
     }
     const h = r.best.holdout;
@@ -1247,7 +1257,7 @@ function renderAI() {
       tr.innerHTML = `
       <td class="sym">${r.symbol}${r.enabled ? "" : ' <span class="pill off">kapali</span>'}</td>
       <td><span class="pill ${pill}">${label}</span>${r.quarantine_left_min ? ` <span class="dim mono">${r.quarantine_left_min}dk</span>` : ""}</td>
-      <td class="dim">${r.reason || ""}</td>
+      <td class="dim">${esc(r.reason || "")}</td>
       <td class="num">${r.trades}</td>
       <td class="num">${r.trades ? num(r.wins / r.trades * 100, 0) + "%" : "-"}</td>
       <td class="num ${r.profit_factor >= 1 ? "pos" : "neg"}">${r.trades ? num(r.profit_factor, 2) : "-"}</td>
@@ -1323,7 +1333,8 @@ const SYS_FIELDS = [
   { k: "size_by_edge", label: "Kaniti guclu sembole buyuk lot", t: "bool" },
   { k: "daily_loss_pct", label: "Gunluk zarar limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
   { k: "daily_loss_flatten", label: "Limit asilinca acik pozisyonlari da kapat", t: "bool",
-    hint: "Kapaliysa limit sadece yeni islemi durdurur, acik pozisyonlar kendi stoplarina birakilir." },
+    hint: "Hesap genelindeki gunluk limit icin - ve sembol bazli 'Gunluk zarar limiti %' asilinca o "
+          + "sembolun pozisyonu icin de. Kapaliysa limit(ler) sadece yeni islemi durdurur." },
   { k: "daily_profit_pct", label: "Gunluk kar hedefi % (0=kapali)", t: "num", step: 0.25, min: 0 },
   { k: "trade_all_hours", label: "Tum saatlerde islem (sembol seanslarini yoksay)", t: "bool",
     hint: "Semboller sekmesindeki seans pencerelerini ve islem gunlerini devre disi birakir. "
@@ -1439,7 +1450,7 @@ function renderSystem() {
     ["Ayarlanan yol", sys.mt5_terminal_path || "(bos - baglanmaz)"],
     ["Bagli terminal", mt5.path || "-"],
   ];
-  $("#sys-mt5").innerHTML = rows.map(([k, v]) => `<div><b>${k}</b><span>${v}</span></div>`).join("");
+  $("#sys-mt5").innerHTML = rows.map(([k, v]) => `<div><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("");
 
   $("#sys-bot-note").textContent =
     (bot.running ? "Islem aciyor" : bot.watching ? "Sadece izliyor - islem acmiyor" : "Motor durdu") +
@@ -1449,7 +1460,7 @@ function renderSystem() {
 
   const day = STATE.day || {};
   $("#sys-day-note").innerHTML = day.halted
-    ? `<span class="pill bad">DURDURULDU</span> ${day.halt_reason} - devam etmek icin asagidaki butona basin`
+    ? `<span class="pill bad">DURDURULDU</span> ${esc(day.halt_reason)} - devam etmek icin asagidaki butona basin`
     : `Gunluk limit normal (${signed(day.pnl_pct, 2)}%)`;
   $("#sys-resume-day").classList.toggle("btn-danger", !!day.halted);
   $("#sys-resume-day").classList.toggle("btn-ghost", !day.halted);
@@ -1546,10 +1557,10 @@ function renderPortfolio() {
     });
 
     const tr = el("tr");
-    tr.innerHTML = `<td class="sym">${cfg.symbol}</td>
+    tr.innerHTML = `<td class="sym">${esc(cfg.symbol)}</td>
       <td><span class="pill ${cfg.group}">${GROUP_LABEL[cfg.group] || cfg.group}</span></td>
       <td></td><td></td><td></td>
-      <td class="mono ${ok ? "" : "dim"}">${cfg.resolved_symbol || "-"}</td>
+      <td class="mono ${ok ? "" : "dim"}">${esc(cfg.resolved_symbol || "-")}</td>
       <td>${status}</td><td></td>`;
     tr.children[2].appendChild(enable);
     tr.children[3].appendChild(lotMode);
@@ -1650,7 +1661,7 @@ async function searchBrokerSymbols() {
     });
     box.appendChild(chips);
   } catch (e) {
-    box.innerHTML = `<div class="panel-note neg">${e.message}</div>`;
+    box.innerHTML = `<div class="panel-note neg">${esc(e.message)}</div>`;
   }
 }
 
@@ -1703,8 +1714,8 @@ async function pollLogs() {
     res.entries.forEach((e) => {
       logAfter = Math.max(logAfter, e.id);
       const line = el("div", { class: `logline lv-${e.level}` });
-      line.innerHTML = `<span class="t">${e.time}</span><span class="l">${e.level}</span>` +
-        `<span class="s">${e.symbol || ""}</span><span>${e.message}</span>`;
+      line.innerHTML = `<span class="t">${esc(e.time)}</span><span class="l">${esc(e.level)}</span>` +
+        `<span class="s">${esc(e.symbol || "")}</span><span>${esc(e.message)}</span>`;
       view.appendChild(line);
     });
     while (view.childElementCount > 1200) view.removeChild(view.firstChild);

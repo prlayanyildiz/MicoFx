@@ -997,6 +997,15 @@ class Engine:
                 if self._close_tracked(pos, "MicoFX hafta sonu", "exit"):
                     LOG.emit("Hafta sonu: pozisyon kapatildi.", "TRADE", cfg.symbol)
                 continue
+            # Same "a loss limit should stop the loss, not just further
+            # entries" reasoning as the account-wide daily guard above -
+            # _symbol_daily_halt() only ever blocked new entries for THIS
+            # symbol, so one instrument could keep bleeding floating loss
+            # past its own configured cap while every other symbol traded on.
+            if self.store.system.daily_loss_flatten and self._symbol_daily_halt(cfg):
+                if self._close_tracked(pos, "MicoFX sembol gunluk zarar limiti", "exit"):
+                    LOG.emit("Sembol gunluk zarar limiti: pozisyon kapatildi.", "TRADE", cfg.symbol)
+                continue
             if sessions.should_flatten(cfg, server_now, self.store.system.trade_all_hours):
                 if self._close_tracked(pos, "MicoFX seans kapanis", "exit"):
                     LOG.emit("Seans kapanisi: pozisyon kapatildi.", "TRADE", cfg.symbol)
