@@ -140,7 +140,12 @@ def _reject_bad_dict_fields(patch: dict[str, Any], keys: tuple) -> None:
 # just a data-integrity problem - it is another XSS entry point.
 _ENUM_FIELDS = {"group": (GROUPS, False), "strategy": (STRATEGIES, False),
                 "secondary_strategy": (STRATEGIES, True),
-                "timeframe": (TIMEFRAMES, False), "secondary_timeframe": (TIMEFRAMES, True)}
+                "timeframe": (TIMEFRAMES, False), "secondary_timeframe": (TIMEFRAMES, True),
+                "lot_mode": (("fixed", "risk"), False),
+                "trail_mode": (("atr", "structure", "hybrid"), False)}
+
+
+_NON_FINITE_TOKENS = {"nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}
 
 
 def _reject_non_finite_values(d: dict[str, Any], label: str = "") -> None:
@@ -150,9 +155,17 @@ def _reject_non_finite_values(d: dict[str, Any], label: str = "") -> None:
     # _SYMBOL_RISK_BOUNDS set _validate_risk_bounds checks) - this closes the
     # NaN/Infinity class of bug for all of them, since a NaN reaching
     # engine.py's live trailing/breakeven math corrupts comparisons silently
-    # (NaN >= x and NaN <= x are both always False).
+    # (NaN >= x and NaN <= x are both always False). The raw-float case
+    # (json={"x": float("nan")}) never even reaches here in practice -
+    # httpx's own encoder refuses to serialise it - but the JSON STRING
+    # "NaN"/"Infinity" serialises just fine, and models.py's _coerce() does
+    # ``float(value)`` on it for any float-typed field, which happily turns
+    # the string right back into a real NaN. Checking only isinstance(...,
+    # (int, float)) missed exactly that path.
     for key, value in d.items():
-        if isinstance(value, (int, float)) and not math.isfinite(value):
+        bad = ((isinstance(value, (int, float)) and not math.isfinite(value))
+              or (isinstance(value, str) and value.strip().lower() in _NON_FINITE_TOKENS))
+        if bad:
             name = f"{label}.{key}" if label else key
             raise HTTPException(400, f"{name} gecersiz ({value!r})")
 
@@ -778,6 +791,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/opt/params")
     def set_opt_params(body: dict[str, Any]) -> dict[str, Any]:
+        # These parameters drive the walk-forward search that ultimately
+        # writes live trading params via apply() - same NaN/Infinity class
+        # of risk as the symbol-level fields, just never checked here at all.
+        _reject_non_finite_values(body)
         return {"ok": True, "params": store.save_opt_params(body)}
 
     @app.post("/api/opt/params/reset")
@@ -849,6 +866,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/ai/settings")
     def ai_settings(body: dict[str, Any]) -> dict[str, Any]:
+        _reject_non_finite_values(body)
         settings = engine.supervisor.update_settings(body)
         LOG.emit("AI denetleyici ayarlari guncellendi.", "AI")
         return {"ok": True, "settings": settings}

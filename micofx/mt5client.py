@@ -793,6 +793,17 @@ class MT5Client:
             "type_filling": self._filling(symbol),
         }
 
+        # Snapshot taken immediately before the send: the last-resort ticket
+        # resolution below (when neither the deal history nor result.order
+        # can be matched) needs to know which same-magic tickets already
+        # existed, so it can identify the genuinely NEW one instead of
+        # guessing by price similarity - a coincidentally close price on an
+        # already-open position (tight ATR/spread day) could otherwise match
+        # the WRONG, pre-existing ticket instead of this fresh fill.
+        with self._lock:
+            before_tickets = {int(p.ticket) for p in (mt5.positions_get(symbol=real) or ())
+                              if p.magic == magic}
+
         with self._lock:
             result = mt5.order_send(request)
 
@@ -888,20 +899,25 @@ class MT5Client:
                 with self._lock:
                     others = mt5.positions_get(symbol=real) or ()
                 same_magic = [p for p in others if p.magic == magic]
-                # Falling back to "all same-magic positions, newest by time"
-                # when NONE match the fill price used to guess wrong under
-                # exactly the scenario this exists for: primary and secondary
-                # share one magic, and a secondary fill landing close in time
-                # to a primary one could get tagged onto the WRONG ticket -
-                # not just leaving this one unmanaged (safe-ish), but
-                # corrupting the OTHER position's exit tracking too. Better
-                # to come back unresolved (0, logged loudly by the caller)
-                # than guess and silently mismanage a position that was
-                # actually fine.
-                price_matches = [p for p in same_magic
-                                 if abs(p.price_open - fill_price) < self.min_stop_distance(symbol) * 0.1]
-                if price_matches:
-                    pos_ticket = int(max(price_matches, key=lambda p: p.time).ticket)
+                # Genuinely-new tickets (not present in the before-send
+                # snapshot) first - this is a strictly more reliable signal
+                # than price similarity, which a pre-existing position at a
+                # coincidentally close price (tight ATR/spread day) could
+                # satisfy despite being the WRONG, older ticket. Price match
+                # only breaks a tie if more than one ticket is new; matching
+                # by price alone (the old behaviour) is not attempted at all
+                # any more - guessing wrong here doesn't just leave this fill
+                # unmanaged, it corrupts the OTHER position's exit tracking.
+                new_tickets = [p for p in same_magic if int(p.ticket) not in before_tickets]
+                if len(new_tickets) == 1:
+                    pos_ticket = int(new_tickets[0].ticket)
+                elif len(new_tickets) > 1:
+                    price_matches = [p for p in new_tickets
+                                     if abs(p.price_open - fill_price) < self.min_stop_distance(symbol) * 0.1]
+                    if len(price_matches) == 1:
+                        pos_ticket = int(price_matches[0].ticket)
+                    # else: still ambiguous even among new tickets - leave
+                    # unresolved (0) rather than guess between them.
 
         # SL/TP above were built from the pre-fill tick; a market order can
         # slip within ``deviation``, and rebuilding them from the tick means

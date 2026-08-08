@@ -424,11 +424,21 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 banked_r += r_mult * frac
                 runner -= frac
                 if rung == 0:
-                    # First slice off: the remainder rides risk-free from here.
-                    if is_buy and entry > sl:
-                        sl = max(sl, entry)
-                    elif not is_buy and entry < sl:
-                        sl = min(sl, entry)
+                    # First slice off: the remainder rides risk-free from
+                    # here - clamped against the broker's min-stop distance
+                    # from the CURRENT bar close, same as live's
+                    # _take_partial(). Live can never place a stop closer to
+                    # the market than min_stop allows; placing it at exactly
+                    # entry unconditionally here credited a "risk-free" rung
+                    # backtest could not have actually achieved live on a
+                    # symbol whose min_stop is wide relative to this rung's
+                    # trigger distance.
+                    be_limit = close[j] - min_stop if is_buy else close[j] + min_stop
+                    be = min(entry, be_limit) if is_buy else max(entry, be_limit)
+                    if is_buy and be > sl:
+                        sl = be
+                    elif not is_buy and be < sl:
+                        sl = be
                     moved_be = True
                 rung += 1
 

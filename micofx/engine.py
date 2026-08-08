@@ -157,8 +157,14 @@ class Engine:
         # that close. Not persisted, same tradeoff as _stop_bar: worst case
         # after a restart during the very rare failed-all-weekend window is
         # one fewer retry, not a correctness issue - the next weekend still
-        # catches it fresh.
-        self._weekend_pending: set[int] = set()
+        # catches it fresh. Persisted (unlike the comment above originally
+        # argued): a restart that lands in the narrow window between a
+        # failed Sat/Sun close and the calendar flipping to Monday would
+        # otherwise drop this in-memory set and let the position resume
+        # normal trailing without ever landing the flatten it still owes.
+        self._weekend_pending: set[int] = {
+            int(t) for t in (store.get_setting("weekend_pending_tickets") or []) if str(t).isdigit()
+        }
         self._netting_warned = False
         self._partials: dict[int, dict[str, float]] = {
             int(k): {"rungs": float(v.get("rungs", 0.0)), "orig": float(v.get("orig", 0.0)),
@@ -910,6 +916,8 @@ class Engine:
         # have this fill land under the now-stale cfg.magic once the lock is
         # acquired - a fresh orphan from the other side of the same race. The
         # re-check below closes that direction too.
+        before_tickets = {p["ticket"] for p in self._positions if p["magic"] == base.magic}
+        orphan_closed = False
         with self.entry_lock:
             live_cfg = self.store.symbols.get(base.symbol)
             if live_cfg is None or live_cfg.magic != base.magic:
@@ -935,19 +943,50 @@ class Engine:
                         # identity/exit rewrite through.
                         self._tag_secondary({int(result["position"])})
                     else:
-                        # open_market() could not resolve which broker ticket
-                        # this fill became (deal/order/price-match all came
-                        # up empty) - the position is real and open, but it
-                        # will be managed under the PRIMARY's exit params
-                        # (manage_positions only picks secondary exits for a
-                        # tagged ticket), not the secondary strategy it was
-                        # actually validated and sized under. Silent before;
-                        # this is exactly the kind of mismatch an operator
-                        # needs to know happened.
-                        LOG.emit("Ikincil sinyal islemi acildi ama pozisyon ticket'i "
-                                 "cozulemedi - bu pozisyon YANLISLIKLA birincil cikis "
-                                 "parametreleriyle yonetilecek, elle kontrol edin.",
-                                 "ERROR", cfg.symbol)
+                        # open_market() itself could not resolve which broker
+                        # ticket this fill became. One more, independent
+                        # attempt here: diff same-magic tickets against the
+                        # snapshot taken before this entry even started.
+                        # Letting an unidentified position run mismanaged
+                        # under the PRIMARY's exit params (wrong stop/trail
+                        # distance for the strategy it was actually sized
+                        # under) is worse than closing it and treating this
+                        # as a failed entry - the signal will simply retry.
+                        after_tickets = {p["ticket"] for p in self._positions
+                                        if p["magic"] == base.magic}
+                        new_tickets = after_tickets - before_tickets
+                        if len(new_tickets) == 1:
+                            orphan = next(iter(new_tickets))
+                            if self.client.close_position(orphan, self.store.system.slippage_points,
+                                                          "MicoFX cozulemeyen ikincil ticket"):
+                                self._positions = self.client.positions()
+                                orphan_closed = True
+                                LOG.emit(f"Ikincil sinyal islemi acildi ama ticket'i "
+                                         f"cozulemedi - pozisyon #{orphan} guvenlik icin "
+                                         f"hemen kapatildi, sinyal tekrar denenecek.",
+                                         "ERROR", cfg.symbol)
+                            else:
+                                LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i cozulemedi "
+                                         f"VE #{orphan} kapatilamadi - YANLISLIKLA birincil "
+                                         f"cikis parametreleriyle yonetilecek, elle kontrol "
+                                         f"edin.", "ERROR", cfg.symbol)
+                        else:
+                            LOG.emit("Ikincil sinyal islemi acildi ama pozisyon ticket'i "
+                                     "cozulemedi (belirsiz aday sayisi) - bu pozisyon "
+                                     "YANLISLIKLA birincil cikis parametreleriyle "
+                                     "yonetilecek, elle kontrol edin.", "ERROR", cfg.symbol)
+        if orphan_closed:
+            # Treat exactly like a failed entry (the position is flat again,
+            # closed a moment after opening) - not the normal successful-fill
+            # path below, which would record execution/cooldown/state.signal
+            # bookkeeping for a "trade" that no longer exists.
+            state.note = "ikincil ticket cozulemedi - guvenlik icin kapatildi"
+            state.signal = ""
+            state.signal_source = ""
+            state.primary_signal = ""
+            state.sec_signal = ""
+            state.pending_bar_key = (0, 0)
+            return
         if not result.get("ok"):
             state.note = result.get("error", "emir hatasi")
             LOG.emit(result.get("error", "emir hatasi"), "ERROR", cfg.symbol)
@@ -1016,7 +1055,9 @@ class Engine:
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         live = {p["ticket"] for p in self._positions}
         self._stop_bar = {t: v for t, v in self._stop_bar.items() if t in live}
-        self._weekend_pending &= live
+        if self._weekend_pending - live:
+            self._weekend_pending &= live
+            self.store.set_setting("weekend_pending_tickets", sorted(self._weekend_pending))
         # forget scale-out bookkeeping whose position is gone
         pruned = {t: v for t, v in self._partials.items() if t in live}
         if pruned != self._partials:
@@ -1040,8 +1081,9 @@ class Engine:
             # weekend_closed() already gated new entries; it never touched a
             # position that was already open going into the weekend. Crypto
             # is exempt (weekend_closed() itself returns False for it).
-            if sessions.weekend_closed(cfg, server_now):
+            if sessions.weekend_closed(cfg, server_now) and pos["ticket"] not in self._weekend_pending:
                 self._weekend_pending.add(pos["ticket"])
+                self.store.set_setting("weekend_pending_tickets", sorted(self._weekend_pending))
             if pos["ticket"] in self._weekend_pending:
                 # Sticky: once flagged during Sat/Sun, keep retrying every
                 # cycle - including past the Monday boundary - until the

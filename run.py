@@ -125,11 +125,17 @@ def main() -> int:
         # "exposed and needs the token from this log line" is.
         import secrets
         api_token = secrets.token_urlsafe(24)
+        # Not printed in full: the log file/console has a wider, less
+        # predictable audience than "whoever loads the web UI this token is
+        # meant to gate" (log shipping, wider file permissions, screen
+        # sharing while debugging). The UI itself gets the real token via the
+        # <meta> tag create_app() injects into the served page - that is the
+        # intended channel, not the log.
         LOG.emit(
             f"MICO_HOST={host} ile disari aciliyorsunuz ama MICO_API_TOKEN ayarli degil - "
-            f"rastgele bir token uretildi ve otomatik uygulandi: {api_token} - "
-            f"kalici olmasi icin MICO_API_TOKEN ortam degiskenine yazin, yoksa her "
-            f"baslatmada degisir.", "ERROR")
+            f"rastgele bir token uretildi ve otomatik uygulandi (...{api_token[-6:]} ile bitiyor, "
+            f"web panelinden erisilebilir). Kalici olmasi icin MICO_API_TOKEN ortam "
+            f"degiskenine yazin, yoksa her baslatmada degisir.", "ERROR")
     app = create_app(store, client, engine, optimizer, api_token=api_token)
 
     # The observation loop always runs so the terminal shows live state; order

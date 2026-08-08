@@ -24,6 +24,8 @@ def _cfg(symbol, magic):
 
 
 class _FakeSystem:
+    slippage_points = 20
+
     def to_dict(self):
         return {}
 
@@ -80,6 +82,7 @@ class _FakeClient:
 
     def __init__(self, positions):
         self._positions = positions
+        self.closed_tickets = []
 
     def positions(self, magic=None, symbol=None):
         out = self._positions
@@ -92,6 +95,10 @@ class _FakeClient:
 
     def info(self, symbol):
         return None
+
+    def close_position(self, ticket, slippage, comment, volume=None, fill=None):
+        self.closed_tickets.append(int(ticket))
+        return True
 
 
 class _FakeSupervisor:
@@ -520,3 +527,115 @@ def test_patch_refuses_invalid_timeframe():
 
     res = tc.post("/api/symbols/XAUUSD", json={"timeframe": "M1"})
     assert res.status_code == 400
+
+
+def test_patch_refuses_invalid_lot_mode():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"lot_mode": "martingale"})
+    assert res.status_code == 400
+
+
+def test_patch_refuses_nan_string_in_top_level_field():
+    # The JSON STRING "NaN" (unlike a raw float NaN, this serialises fine)
+    # bypassed the old isinstance(value, (int, float)) check entirely and
+    # models.py's _coerce() turned it right back into a real NaN via float().
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": "NaN"})
+    assert res.status_code == 400
+
+
+def test_patch_refuses_infinity_string():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"adx_min": "Infinity"})
+    assert res.status_code == 400
+
+
+# ---------------------------------------------------------------- opt/ai params
+
+def test_opt_params_refuses_nan():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/opt/params", json={"min_positive_ratio": "NaN"})
+    assert res.status_code == 400
+
+
+def test_ai_settings_refuses_nan():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/ai/settings", json={"watch_pf": "Infinity"})
+    assert res.status_code == 400
+
+
+# ---------------------------------------------------------------- ticket ownership
+
+def test_close_ticket_refuses_position_with_unowned_magic():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    positions = [{"ticket": 555, "symbol": "XAUUSD", "magic": 123456, "side": "buy"}]
+    tc, store = _client(symbols, positions)
+
+    res = tc.post("/api/positions/555/close")
+    assert res.status_code == 403
+
+
+def test_close_ticket_allows_owned_position():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    positions = [{"ticket": 555, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
+    tc, store = _client(symbols, positions)
+
+    res = tc.post("/api/positions/555/close")
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+
+
+def test_close_ticket_404s_for_unknown_ticket():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/positions/999/close")
+    assert res.status_code == 404
+
+
+# --------------------------------------------------------------------- API token
+
+def test_api_requires_token_when_configured():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    store = _FakeStore(symbols)
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/api/system")
+    assert res.status_code == 401
+
+
+def test_api_accepts_correct_token():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    store = _FakeStore(symbols)
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/api/system", headers={"X-Mico-Token": "secret123"})
+    assert res.status_code == 200
+
+
+def test_index_page_embeds_token_when_configured():
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/")
+    assert res.status_code == 200
+    assert "secret123" in res.text
