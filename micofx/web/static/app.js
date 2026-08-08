@@ -1914,6 +1914,19 @@ function wire() {
     );
   });
 
+  $("#btn-maxlot-bulk").onclick = confirmThen(
+    "Tum sembollerin maks lotu bu deger olacak. Onayliyor musunuz?",
+    async () => {
+      const val = parseFloat($("#portfolio-maxlot-bulk").value);
+      if (!(val > 0)) { toast("Once bir maks lot degeri yazin", "err"); return; }
+      const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { max_lot: val } } });
+      SYMBOLS = res.symbols;
+      cardsBuilt = false;
+      toast(`${res.changed} sembolun maks lotu ${val} yapildi`, "ok");
+      refresh();
+    },
+  );
+
   $("#symbol-filter").addEventListener("input", applySymbolFilter);
   $("#group-filter").addEventListener("change", applySymbolFilter);
   $("#btn-opt-all").onclick = () => runOptimizer(null);
