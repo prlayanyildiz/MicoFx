@@ -192,8 +192,11 @@ class RiskManager:
         else:
             money_per_unit = self.client.money_per_price_unit(cfg.symbol, 1.0)
             if money_per_unit <= 0:
-                lot = max(floor, float(cfg.fixed_lot))
-                return self.client.normalize_volume(cfg.symbol, lot), "tick degeri yok, sabit lota dusuldu"
+                # Fail closed, not "size off fixed_lot instead": that fallback
+                # skipped max_lot, edge/AI scaling and the overshoot guard
+                # entirely - a missing tick value silently produced a trade
+                # with none of this function's other safety checks applied.
+                return 0.0, "tick degeri yok, islem atlandi (risk % hesaplanamadi)"
             # When the broker's own minimum stop distance is what is actually
             # pinning the SL (not the strategy's ATR multiple), the position is
             # already as tight as this symbol allows - a strong edge_scale on

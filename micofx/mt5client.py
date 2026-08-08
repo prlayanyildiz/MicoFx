@@ -1027,7 +1027,7 @@ class MT5Client:
             LOG.emit(f"Pozisyon kapatildi #{ticket} kar={p.profit:.2f}", "TRADE", p.symbol)
         return True
 
-    def close_all(self, magics: set[int] | None = None, symbol: str | None = None) -> int:
+    def close_all(self, magics: set[int] | None = None, symbol: str | None = None) -> tuple[int, int]:
         """Flatten every matching position, retrying what a single pass leaves open.
 
         close_position() reports TRADE_RETCODE_DONE_PARTIAL as success (the
@@ -1037,6 +1037,9 @@ class MT5Client:
         to mean actually flat, not "handled", so re-check and retry the
         tickets still open instead of leaving them for whatever the next
         unrelated close_all call happens to be.
+
+        Returns ``(closed, remaining)`` - a kill-switch caller must look at
+        ``remaining``, not just assume a non-crash means everything is flat.
         """
         before = {p["ticket"] for p in self.positions(symbol=symbol)
                  if magics is None or p["magic"] in magics}
@@ -1052,4 +1055,4 @@ class MT5Client:
                 break
             remaining = {p["ticket"] for p in self.positions(symbol=symbol)
                         if p["ticket"] in before and (magics is None or p["magic"] in magics)}
-        return len(before) - len(remaining)
+        return len(before) - len(remaining), len(remaining)

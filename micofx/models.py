@@ -26,7 +26,14 @@ def _coerce(cls, payload: dict[str, Any]):
         )
         try:
             if t.startswith("bool"):
-                kwargs[key] = bool(value)
+                # bool("false") is True in Python - this only ever receives
+                # real JSON booleans through the FastAPI routes today (pydantic
+                # preserves the type), but this function is also the landing
+                # point for anything read back out of the SQLite JSON blobs
+                # and any future string-based input path, so the string
+                # footgun is worth closing here rather than trusting callers.
+                kwargs[key] = value.strip().lower() not in ("false", "0", "", "no")  \
+                    if isinstance(value, str) else bool(value)
             elif t.startswith("int"):
                 kwargs[key] = int(value)
             elif t.startswith("float"):
@@ -263,6 +270,15 @@ class SymbolConfig:
     opt_score: float = 0.0
     opt_updated_at: float = 0.0
     opt_summary: dict = field(default_factory=dict)
+    # Exit/risk fields from the most recent apply() that were held back
+    # because a position was open under this symbol's magic at the time -
+    # applied automatically (by the engine) the moment that magic is next
+    # seen flat. Empty dict = nothing pending.
+    pending_exit_patch: dict = field(default_factory=dict)
+    # Same idea, but for a same-identity secondary "refine" (see
+    # apply_secondary()): exit/risk keys to merge into secondary_params once
+    # no secondary-tagged position is open under this magic.
+    pending_secondary_exit_patch: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -280,6 +296,10 @@ class SymbolConfig:
             cfg.trade_days = sorted({int(d) for d in days if str(d).isdigit() and 1 <= int(d) <= 7})
         summary = payload.get("opt_summary")
         cfg.opt_summary = summary if isinstance(summary, dict) else {}
+        pending = payload.get("pending_exit_patch")
+        cfg.pending_exit_patch = pending if isinstance(pending, dict) else {}
+        pending_sec = payload.get("pending_secondary_exit_patch")
+        cfg.pending_secondary_exit_patch = pending_sec if isinstance(pending_sec, dict) else {}
         sec = payload.get("secondary_params")
         # Only optimiser-owned parameters may ride along in the secondary blob;
         # anything else would let a stored candidate rewrite magic, lots or
@@ -466,6 +486,11 @@ class SystemConfig:
     size_by_edge: bool = False        # weight each symbol by its validated expectancy
     max_margin_usage_pct: float = 45.0
     daily_loss_pct: float = 3.0
+    # When the loss guard trips, force-close what is still open instead of
+    # only blocking new entries - otherwise the day's damage keeps floating
+    # on whatever stop distance each position already had. Default on: a
+    # "daily loss limit" should stop the daily loss, not just further ones.
+    daily_loss_flatten: bool = True
     daily_profit_pct: float = 0.0     # 0 disables the profit stop
     min_free_margin: float = 50.0
 

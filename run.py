@@ -114,7 +114,14 @@ def main() -> int:
     # apply_secondary()'s open-position check races the exact same way those
     # routes used to before entry_lock existed.
     optimizer.entry_lock = engine.entry_lock
-    app = create_app(store, client, engine, optimizer)
+    # Only matters once host is not 127.0.0.1 - see create_app()'s docstring.
+    api_token = os.getenv("MICO_API_TOKEN", "").strip()
+    if host not in ("127.0.0.1", "localhost") and not api_token:
+        LOG.emit(
+            f"UYARI: MICO_HOST={host} ile disari aciliyorsunuz ama MICO_API_TOKEN ayarli degil - "
+            f"panic/bot durdur/pozisyon kapat dahil TUM API'ler kimlik dogrulamasiz. "
+            f"MICO_API_TOKEN ortam degiskenini ayarlayin.", "ERROR")
+    app = create_app(store, client, engine, optimizer, api_token=api_token)
 
     # The observation loop always runs so the terminal shows live state; order
     # placement always waits for an explicit start. ``system.running`` is

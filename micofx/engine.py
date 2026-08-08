@@ -204,12 +204,16 @@ class Engine:
             self._trading = False
             self.store.update_system({"running": False})
             closed = 0
+            remaining = 0
             if close_positions if close_positions is not None else self.store.system.close_on_stop:
-                closed = self.close_all()
+                closed, remaining = self.close_all()
         if was_trading:
             LOG.emit(f"Bot durduruldu - izleme devam ediyor."
-                     f"{f' {closed} pozisyon kapatildi.' if closed else ''}", "INFO")
-        return {"ok": True, "running": False, "closed": closed, "message": "Bot durduruldu."}
+                     f"{f' {closed} pozisyon kapatildi.' if closed else ''}"
+                     f"{f' {remaining} pozisyon kapatilamadi!' if remaining else ''}",
+                     "ERROR" if remaining else "INFO")
+        return {"ok": remaining == 0, "running": False, "closed": closed, "remaining": remaining,
+                "message": "Bot durduruldu."}
 
     def shutdown(self) -> None:
         """Tear the worker thread down for good (application exit)."""
@@ -222,13 +226,24 @@ class Engine:
         self._thread = None
 
     def panic(self) -> dict[str, Any]:
-        """Stop trading and flatten everything the bot owns."""
-        self.stop(close_positions=False)
-        closed = self.close_all()
-        LOG.emit(f"ACIL DURDURMA: {closed} pozisyon kapatildi.", "WARN")
-        return {"ok": True, "closed": closed}
+        """Stop trading and flatten everything the bot owns.
 
-    def close_all(self, symbol: str | None = None) -> int:
+        ``ok`` reflects whether the account actually ended up flat, not just
+        whether close_all() ran without crashing - a caller relying on this
+        as a kill-switch needs to know the difference between "handled" and
+        "N pozisyon hala acik, elle mudahale gerekiyor".
+        """
+        self.stop(close_positions=False)
+        closed, remaining = self.close_all()
+        if remaining:
+            LOG.emit(f"ACIL DURDURMA: {closed} pozisyon kapatildi, {remaining} pozisyon HALA ACIK "
+                     f"- elle mudahale gerekebilir.", "ERROR")
+        else:
+            LOG.emit(f"ACIL DURDURMA: {closed} pozisyon kapatildi.", "WARN")
+        return {"ok": remaining == 0, "closed": closed, "remaining": remaining}
+
+    def close_all(self, symbol: str | None = None) -> tuple[int, int]:
+        """Returns ``(closed, remaining)`` - see ``MT5Client.close_all``."""
         magics = {c.magic for c in list(self.store.symbols.values())}
         return self.client.close_all(magics=magics, symbol=symbol)
 
@@ -273,6 +288,7 @@ class Engine:
             # it; the next cycle's ensure() will reconnect first.
             return
         self._reap_execution()
+        self._apply_pending_exits()
         # Unconditional: this only manages positions already open (trail/BE/
         # partial/session-flatten/day-end-flatten), never opens new ones.
         # Gating it on _trading meant that with close_on_stop=false (the
@@ -284,6 +300,25 @@ class Engine:
         self.manage_positions(server_now)
 
         guard = self.risk.daily.check(account.get("equity", 0.0), self.store.system)
+        # The loss guard alone only ever blocked NEW entries - an already-open
+        # position kept riding its own (possibly distant) stop while the
+        # account kept bleeding floating loss past the configured limit. When
+        # the halt is specifically the loss side (not the profit-target side,
+        # where letting winners run is a legitimate choice), flatten what is
+        # still open so "daily loss limit" actually stops the daily loss.
+        # Runs every cycle while halted, not just once - self-healing if a
+        # partial close_all() attempt left something behind.
+        sys_cfg = self.store.system
+        loss_halted = (
+            self.risk.daily.halted and sys_cfg.daily_loss_pct > 0
+            and self.risk.daily.pnl_pct(account.get("equity", 0.0)) <= -abs(sys_cfg.daily_loss_pct)
+        )
+        if loss_halted and sys_cfg.daily_loss_flatten and self._positions:
+            closed, remaining = self.close_all()
+            if closed:
+                LOG.emit(f"Gunluk zarar limiti: {closed} pozisyon flatten edildi.", "WARN")
+            if remaining:
+                LOG.emit(f"Gunluk zarar limiti: flatten sonrasi {remaining} pozisyon hala acik.", "ERROR")
         if self.supervisor.due():
             try:
                 self.supervisor.review(self.risk.daily.pnl_pct(account.get("equity", 0.0)))
@@ -947,6 +982,13 @@ class Engine:
                 cfg = self._secondary_config(cfg)
                 atr = state.sec_atr if state and state.sec_atr > 0 else atr
 
+            # weekend_closed() already gated new entries; it never touched a
+            # position that was already open going into the weekend. Crypto
+            # is exempt (weekend_closed() itself returns False for it).
+            if sessions.weekend_closed(cfg, server_now):
+                if self._close_tracked(pos, "MicoFX hafta sonu", "exit"):
+                    LOG.emit("Hafta sonu: pozisyon kapatildi.", "TRADE", cfg.symbol)
+                continue
             if sessions.should_flatten(cfg, server_now, self.store.system.trade_all_hours):
                 if self._close_tracked(pos, "MicoFX seans kapanis", "exit"):
                     LOG.emit("Seans kapanisi: pozisyon kapatildi.", "TRADE", cfg.symbol)
@@ -1012,6 +1054,42 @@ class Engine:
         except Exception as exc:                  # never let diagnostics stop the loop
             LOG.emit(f"Gerceklesme olcumu hatasi: {exc}", "WARN")
 
+    def _apply_pending_exits(self) -> None:
+        """Land exit/risk params an optimizer apply() held back while a position was open.
+
+        ``Optimizer.apply()``/``_apply_secondary_locked()`` store the held-back
+        fields in ``cfg.pending_exit_patch``/``cfg.pending_secondary_exit_patch``
+        instead of applying them immediately. This is the other half of that
+        promise: once the relevant position is no longer open, write them for
+        real. Runs every cycle - cheap (in-memory dict lookups against
+        ``self._positions``, already refreshed this cycle) and self-correcting
+        if a cycle is missed.
+        """
+        if not self._positions:
+            open_magics: set[int] = set()
+            sec_open_magics: set[int] = set()
+        else:
+            open_magics = {p["magic"] for p in self._positions}
+            sec_open_magics = {p["magic"] for p in self._positions if p["ticket"] in self._sec_tickets}
+        for cfg in list(self.store.symbols.values()):
+            if cfg.pending_exit_patch and cfg.magic not in open_magics:
+                pending = dict(cfg.pending_exit_patch)
+                updated = self.store.update_symbol(cfg.symbol, {**pending, "pending_exit_patch": {}})
+                if updated is not None:
+                    LOG.emit(f"{cfg.symbol}: bekletilen cikis/risk parametreleri "
+                             f"({', '.join(sorted(pending))}) artik acik pozisyon yok, uygulandi.",
+                             "OPT", cfg.symbol)
+                    cfg = updated
+            if cfg.pending_secondary_exit_patch and cfg.magic not in sec_open_magics:
+                pending_sec = dict(cfg.pending_secondary_exit_patch)
+                merged_params = {**cfg.secondary_params, **pending_sec}
+                self.store.update_symbol(cfg.symbol, {
+                    "secondary_params": merged_params, "pending_secondary_exit_patch": {},
+                })
+                LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis/risk parametreleri "
+                         f"({', '.join(sorted(pending_sec))}) artik acik ikincil pozisyon yok, "
+                         f"uygulandi.", "OPT", cfg.symbol)
+
     def _close_tracked(self, pos: dict[str, Any], comment: str, leg: str,
                        volume: float | None = None, fill: dict[str, Any] | None = None) -> bool:
         """``close_position`` that also books the requested-vs-filled sample."""
@@ -1064,12 +1142,18 @@ class Engine:
         min_stop = self.client.min_stop_distance(cfg.symbol)
         current_sl = pos["sl"]
         target: float | None = None
+        # Once breakeven has been reached (this cycle or a previous one), the
+        # live-quote min_stop clamp below must never be allowed to land the
+        # final stop worse than entry - that clamp exists to respect the
+        # broker's distance rule, not to override the breakeven guarantee.
+        breakeven_locked = current_sl != 0 and (current_sl >= entry if is_buy else current_sl <= entry)
 
         if cfg.breakeven_atr > 0 and profit_dist >= atr * cfg.breakeven_atr:
             # Exact entry, then the shared min_stop clamp below - matches BT.
             lock = entry
             if current_sl == 0 or (lock > current_sl if is_buy else lock < current_sl):
                 target = lock
+                breakeven_locked = True
 
         if cfg.trail_start_atr > 0 and profit_dist >= atr * cfg.trail_start_atr:
             # ATR-based trailing (always computed as the baseline / fallback)
@@ -1106,6 +1190,13 @@ class Engine:
         # push the stop forward.
         limit = live - min_stop if is_buy else live + min_stop
         target = min(target, limit) if is_buy else max(target, limit)
+        if breakeven_locked and (target < entry if is_buy else target > entry):
+            # Price has retraced enough since the bar closed that even a stop
+            # placed exactly at entry would violate the broker's min-stop
+            # distance from the current live quote right now - moving it
+            # anyway would place a stop worse than breakeven. Skip this
+            # cycle; retry once price allows it.
+            return
         step = max(min_stop * 0.25, atr * cfg.trail_step_atr * 0.1)
         if current_sl != 0 and (target - current_sl < step if is_buy else current_sl - target < step):
             return

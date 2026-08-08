@@ -29,10 +29,14 @@ let portfolioSig = "";
 let aiTableSig = "";
 let refreshBusy = false;
 
+const API_TOKEN = document.querySelector('meta[name="mico-api-token"]')?.content || "";
+
 async function api(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (API_TOKEN) headers["X-Mico-Token"] = API_TOKEN;
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   let data = {};
@@ -782,7 +786,10 @@ function buildSymbolCard(cfg) {
       onclick: async () => {
         try {
           const r = await api(`/api/symbols/${cfg.symbol}/close`, { method: "POST" });
-          toast(`${cfg.symbol}: ${r.closed} pozisyon kapatildi`, "ok");
+          const msg = r.remaining
+            ? `${cfg.symbol}: ${r.closed} kapatildi, ${r.remaining} HALA ACIK`
+            : `${cfg.symbol}: ${r.closed} pozisyon kapatildi`;
+          toast(msg, r.remaining ? "err" : "ok");
           refresh();
         } catch (e) { toast(e.message, "err"); }
       },
@@ -1313,6 +1320,8 @@ const SYS_FIELDS = [
   { k: "lot_multiplier", label: "Global lot carpani", t: "num", step: 0.25, min: 0.1, max: 20 },
   { k: "size_by_edge", label: "Kaniti guclu sembole buyuk lot", t: "bool" },
   { k: "daily_loss_pct", label: "Gunluk zarar limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
+  { k: "daily_loss_flatten", label: "Limit asilinca acik pozisyonlari da kapat", t: "bool",
+    hint: "Kapaliysa limit sadece yeni islemi durdurur, acik pozisyonlar kendi stoplarina birakilir." },
   { k: "daily_profit_pct", label: "Gunluk kar hedefi % (0=kapali)", t: "num", step: 0.25, min: 0 },
   { k: "trade_all_hours", label: "Tum saatlerde islem (sembol seanslarini yoksay)", t: "bool",
     hint: "Semboller sekmesindeki seans pencerelerini ve islem gunlerini devre disi birakir. "
@@ -1752,7 +1761,12 @@ function wire() {
     try {
       const res = await api(path, { method: "POST", body });
       if (res.message) toast(res.message, res.ok ? "ok" : "err");
-      else if (res.closed !== undefined) toast(`${res.closed} pozisyon kapatildi`, "ok");
+      else if (res.closed !== undefined) {
+        const msg = res.remaining
+          ? `${res.closed} pozisyon kapatildi, ${res.remaining} HALA ACIK - elle kontrol edin`
+          : `${res.closed} pozisyon kapatildi`;
+        toast(msg, res.remaining ? "err" : "ok");
+      }
       refresh();
     } catch (e) { toast(e.message, "err"); }
   };

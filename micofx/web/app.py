@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_escape
 import os
 import signal
 import subprocess
@@ -8,7 +9,7 @@ import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -67,9 +68,62 @@ class StopBody(BaseModel):
     close: bool | None = None
 
 
-def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optimizer) -> FastAPI:
+# Sanity bounds on the fields that directly control position size/risk.
+# ``SymbolPatch``/``SystemPatch`` allow arbitrary keys through (needed for the
+# many optimizer-only fields), so nothing before this stopped a client from
+# pushing e.g. risk_percent=500 straight to the API with zero pushback - the
+# UI's own number-input min/max never protected anything but the UI.
+_SYMBOL_RISK_BOUNDS = {
+    "risk_percent": (0.0, 20.0, False),   # (min, max, min_inclusive) - % of balance per trade
+    "max_lot": (0.0, None, False),
+    "fixed_lot": (0.0, None, False),
+    "max_positions": (1, 50, True),
+}
+
+_SYSTEM_RISK_BOUNDS = {
+    "lot_multiplier": (0.0, 50.0, False),
+    "max_margin_usage_pct": (0.0, 100.0, True),   # 0 = uncapped (falls back to free margin), valid
+    "daily_loss_pct": (0.0, 100.0, True),   # 0 = disabled, valid
+    "daily_profit_pct": (0.0, 100.0, True),  # 0 = disabled, valid
+    "max_total_positions": (1, 200, True),
+}
+
+
+def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYMBOL_RISK_BOUNDS) -> None:
+    for key, (lo, hi, lo_inclusive) in bounds.items():
+        if key not in patch or patch[key] is None:
+            continue
+        try:
+            value = float(patch[key])
+        except (TypeError, ValueError):
+            continue
+        if (value < lo) if lo_inclusive else (value <= lo):
+            raise HTTPException(400, f"{key} gecersiz ({value}) - {lo}'dan buyuk olmali")
+        if hi is not None and value > hi:
+            raise HTTPException(400, f"{key} gecersiz ({value}) - en fazla {hi} olabilir")
+
+
+def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optimizer,
+                api_token: str = "") -> FastAPI:
+    """``api_token``: optional shared secret (``MICO_API_TOKEN`` env var, see run.py).
+
+    Empty (the default) means no auth at all - fine for the default 127.0.0.1
+    bind, which nothing outside this machine can reach anyway. It exists for
+    the one case that default doesn't cover: ``MICO_HOST=0.0.0.0``, where
+    every /api/* route (panic, bot start/stop, close-all, symbol edits, MT5
+    path) would otherwise be reachable - and controllable - by anyone who can
+    reach the port, no login of any kind. Set once it is not just localhost.
+    """
     app = FastAPI(title=f"{APP_NAME} Terminal", version=__version__, docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+
+    if api_token:
+        @app.middleware("http")
+        async def _require_api_token(request, call_next):
+            if request.url.path.startswith("/api/"):
+                if request.headers.get("x-mico-token") != api_token:
+                    return JSONResponse({"detail": "gecersiz veya eksik API token"}, status_code=401)
+            return await call_next(request)
 
     _symbol_payload_cache: dict[str, Any] = {"at": 0.0, "rows": []}
 
@@ -101,7 +155,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
-        return HTMLResponse((TEMPLATES / "index.html").read_text(encoding="utf-8"))
+        html = (TEMPLATES / "index.html").read_text(encoding="utf-8")
+        if api_token:
+            # Page and static assets stay unauthenticated (the browser has to
+            # load them before it can know any token) - only /api/* is
+            # gated. This is trusted-origin embedding, not a secret sent
+            # over the wire to a third party: whoever can already fetch this
+            # HTML from this server is exactly who the token is meant to let
+            # in.
+            html = html.replace(
+                "<head>",
+                f'<head>\n<meta name="mico-api-token" content="{html_escape.escape(api_token)}">',
+                1)
+        return HTMLResponse(html)
 
     @app.get("/favicon.ico")
     def favicon() -> PlainTextResponse:
@@ -189,6 +255,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/symbols/{symbol}")
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
         patch = body.model_dump()
+        _validate_risk_bounds(patch)
         current = store.symbols.get(symbol)
         # Same hazard as DELETE: the magic number is the only thing that maps
         # an open position back to its managing config. Changing it out from
@@ -343,11 +410,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/symbols/{symbol}/close")
     def close_symbol(symbol: str) -> dict[str, Any]:
-        closed = engine.close_all(symbol=symbol)
-        return {"ok": True, "closed": closed}
+        closed, remaining = engine.close_all(symbol=symbol)
+        return {"ok": remaining == 0, "closed": closed, "remaining": remaining}
 
     @app.post("/api/symbols-bulk")
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
+        _validate_risk_bounds(body.patch)
         targets = body.symbols or list(store.symbols)
         needs_tf_check = "strategy" in body.patch or "timeframe" in body.patch
         magic_changing = "magic" in body.patch
@@ -456,6 +524,21 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def patch_system(body: SystemPatch) -> dict[str, Any]:
         patch = body.model_dump()
         patch.pop("running", None)  # bot state is owned by start/stop
+        _validate_risk_bounds(patch, _SYSTEM_RISK_BOUNDS)
+        if "backup_dir" in patch and patch["backup_dir"]:
+            path = str(patch["backup_dir"]).strip()
+            # Not a full path-safety audit - just enough to catch a typo/blank
+            # value silently pointing the nightly backup at nothing. Must be a
+            # local absolute path (drive letter) or a UNC share, and not the
+            # bare drive root (never want backups written directly to C:\).
+            valid = (
+                (len(path) >= 3 and path[1] == ":" and path[2] in "\\/" and len(path) > 3)
+                or path.startswith("\\\\")
+            )
+            if not valid:
+                raise HTTPException(
+                    400, f"yedek konumu gecersiz: {path!r} - tam bir yol olmali "
+                         f"(orn. C:\\MicoFX_Yedek), surucu koku olamaz")
         updated = store.update_system(patch)
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}
         if "mt5_terminal_path" in patch:
@@ -505,12 +588,23 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/positions/{ticket}/close")
     def close_ticket(ticket: int) -> dict[str, Any]:
+        # Without this, any ticket number - including a manually/externally
+        # opened position sharing this account - could be closed through
+        # this route; the ticket itself carries no notion of "ours".
+        pos = next((p for p in client.positions() if p["ticket"] == int(ticket)), None)
+        if pos is None:
+            raise HTTPException(404, "pozisyon bulunamadi (zaten kapanmis olabilir)")
+        owned_magics = {c.magic for c in store.symbols.values()}
+        if pos["magic"] not in owned_magics:
+            raise HTTPException(
+                403, f"bu pozisyon MicoFX'e ait degil (magic {pos['magic']}) - buradan kapatilamaz")
         ok = client.close_position(int(ticket), store.system.slippage_points, "MicoFX manuel")
         return {"ok": ok}
 
     @app.post("/api/positions-close-all")
     def close_everything() -> dict[str, Any]:
-        return {"ok": True, "closed": engine.close_all()}
+        closed, remaining = engine.close_all()
+        return {"ok": remaining == 0, "closed": closed, "remaining": remaining}
 
     # ----------------------------------------------------------- optimizer
 

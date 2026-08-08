@@ -932,6 +932,11 @@ class Optimizer:
         # Caller (apply_secondary() or apply()) already holds entry_lock -
         # held across the open-tagged-position check + the write so a fill
         # cannot land in the gap between them (see Engine.entry_lock).
+        # secondary_tickets is engine-owned but persisted, so it is readable
+        # here without an engine reference.
+        tagged = {int(t) for t in (self.store.get_setting("secondary_tickets", []) or [])}
+        live_tagged = ([p for p in self.client.positions(magic=cfg.magic) if p["ticket"] in tagged]
+                       if tagged else [])
         if identity_changing:
             # A position tagged secondary was opened, sized and its exits
             # picked under the CURRENT secondary_strategy/timeframe's ATR.
@@ -940,17 +945,32 @@ class Optimizer:
             # effect immediately, but replacing it with a *different*
             # family/TF would otherwise hand that same still-open ticket
             # to a signal it was never opened or sized under, same hazard
-            # apply() guards for the primary. secondary_tickets is
-            # engine-owned but persisted, so it is readable here without
-            # an engine reference.
-            tagged = {int(t) for t in (self.store.get_setting("secondary_tickets", []) or [])}
-            if tagged:
-                live_tagged = [p for p in self.client.positions(magic=cfg.magic)
-                               if p["ticket"] in tagged]
-                if live_tagged:
-                    return {"ok": False,
-                            "error": f"{symbol}: {len(live_tagged)} acik ikincil-sinyal pozisyonu var, "
-                                     f"ikincil strateji degistirilemedi (once kapanmasini bekleyin)"}
+            # apply() guards for the primary.
+            if live_tagged:
+                return {"ok": False,
+                        "error": f"{symbol}: {len(live_tagged)} acik ikincil-sinyal pozisyonu var, "
+                                 f"ikincil strateji degistirilemedi (once kapanmasini bekleyin)"}
+        elif attempt is not None and live_tagged:
+            # Same family/timeframe, just refined params ("refine"). Engine's
+            # manage_positions() re-reads cfg.secondary_params live every
+            # cycle via _secondary_config(), the same live-reread hazard
+            # apply() holds back exit/risk fields for on the primary side -
+            # this path had no equivalent holdback at all until now.
+            sec_params = patch.get("secondary_params", {})
+            held_back = [k for k in sec_params if k in EXIT_RISK_FIELDS]
+            if held_back:
+                pending = {k: sec_params[k] for k in held_back}
+                patch["secondary_params"] = {k: v for k, v in sec_params.items()
+                                             if k not in EXIT_RISK_FIELDS}
+                if "secondary_summary" in patch:
+                    summary_params = {k: v for k, v in patch["secondary_summary"].get("params", {}).items()
+                                      if k not in EXIT_RISK_FIELDS}
+                    patch["secondary_summary"] = {**patch["secondary_summary"], "params": summary_params,
+                                                  "pending_exit_fields": sorted(held_back)}
+                patch["pending_secondary_exit_patch"] = pending
+                LOG.emit(f"{symbol}: {len(live_tagged)} acik ikincil-sinyal pozisyonu var, "
+                         f"ikincil cikis/risk parametreleri ({', '.join(sorted(held_back))}) "
+                         f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)
         # update_symbol drops None values, so an empty candidate has to be
         # written as empty strings/dicts rather than None to actually clear.
         updated = self.store.update_symbol(symbol, patch)
@@ -1025,7 +1045,24 @@ class Optimizer:
                 # take effect once the position is flat.
                 held_back = [k for k in patch if k in EXIT_RISK_FIELDS]
                 if held_back:
+                    pending = {k: patch[k] for k in held_back}
                     patch = {k: v for k, v in patch.items() if k not in EXIT_RISK_FIELDS}
+                    # Previously the held-back values were only logged, never
+                    # stored - "take effect once flat" was a comment, not
+                    # code, so the new exit/risk candidate was silently lost
+                    # forever unless another apply() happened to land later
+                    # while the symbol was flat. Engine._apply_pending_exits
+                    # writes this the moment this magic is next seen flat.
+                    patch["pending_exit_patch"] = pending
+                    if "opt_summary" in patch:
+                        # opt_summary.params otherwise claimed the held-back
+                        # exit values were live immediately - drop them from
+                        # the reported "applied" set and flag what's pending
+                        # so the UI can show it honestly.
+                        summary_params = {k: v for k, v in patch["opt_summary"].get("params", {}).items()
+                                          if k not in EXIT_RISK_FIELDS}
+                        patch["opt_summary"] = {**patch["opt_summary"], "params": summary_params,
+                                                "pending_exit_fields": sorted(held_back)}
                     LOG.emit(f"{symbol}: {len(open_here)} acik pozisyon var, "
                              f"cikis/risk parametreleri ({', '.join(sorted(held_back))}) "
                              f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)
