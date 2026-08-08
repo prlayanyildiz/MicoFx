@@ -1914,15 +1914,15 @@ function wire() {
     );
   });
 
-  $("#btn-maxlot-bulk").onclick = confirmThen(
-    "Tum sembollerin maks lotu bu deger olacak. Onayliyor musunuz?",
+  $("#btn-maxpos-bulk").onclick = confirmThen(
+    "Tum sembollerin maks pozisyonu bu deger olacak. Onayliyor musunuz?",
     async () => {
-      const val = parseFloat($("#portfolio-maxlot-bulk").value);
-      if (!(val > 0)) { toast("Once bir maks lot degeri yazin", "err"); return; }
-      const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { max_lot: val } } });
+      const val = parseInt($("#portfolio-maxpos-bulk").value, 10);
+      if (!(val > 0)) { toast("Once bir maks pozisyon degeri yazin", "err"); return; }
+      const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { max_positions: val } } });
       SYMBOLS = res.symbols;
       cardsBuilt = false;
-      toast(`${res.changed} sembolun maks lotu ${val} yapildi`, "ok");
+      toast(`${res.changed} sembolun maks pozisyonu ${val} yapildi`, "ok");
       refresh();
     },
   );
