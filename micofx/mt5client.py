@@ -268,6 +268,7 @@ class MT5Client:
         with self._lock:
             if mt5 is None:
                 self.last_error = "MetaTrader5 paketi kurulu degil (pip install MetaTrader5)"
+                LOG.emit(self.last_error, "ERROR")
                 return False
 
             try:
@@ -281,11 +282,13 @@ class MT5Client:
                     "MT5 terminal yolu bos. Sistem > MT5 terminal yoluna "
                     "istediginiz terminal64.exe yolunu yazin (kayit otomatik baglar)."
                 )
+                LOG.emit(self.last_error, "ERROR")
                 return False
 
             exe = self._exe_from_path(self.terminal_path)
             if exe is None:
                 self.last_error = f"MT5 yolu bulunamadi: {self.terminal_path}"
+                LOG.emit(self.last_error, "ERROR")
                 return False
             path = str(exe)
 
@@ -297,6 +300,7 @@ class MT5Client:
                 code, text = mt5.last_error()
                 self.last_error = f"MT5 baglantisi kurulamadi ({code}: {text}) | denenen: {path}"
                 self.connected = False
+                LOG.emit(self.last_error, "ERROR")
                 return False
             return self._after_connect(expected=path)
 
@@ -310,6 +314,7 @@ class MT5Client:
                 pass
             self.connected = False
             self.last_error = "MT5 initialize oldu ama terminal_info bos"
+            LOG.emit(self.last_error, "ERROR")
             return False
 
         if expected:
@@ -349,12 +354,24 @@ class MT5Client:
     def ensure(self) -> bool:
         with self._lock:
             if self.connected:
+                exc_detail = None
                 try:
                     if mt5.terminal_info() is not None:
                         return True
-                except Exception:
-                    pass
+                except Exception as exc:
+                    exc_detail = str(exc)
                 self.connected = False
+                # This is the drop path a running bot actually hits (terminal
+                # closed, VPS network blip, MT5 crash) - ensure() runs every
+                # cycle and used to flip connected=False here with no log at
+                # all, so a live disconnect left only a transient UI flag
+                # behind, nothing in the log to say it happened or why.
+                try:
+                    reason = exc_detail or str(mt5.last_error())
+                except Exception:
+                    reason = exc_detail or "?"
+                self.last_error = f"MT5 baglantisi koptu ({reason})"
+                LOG.emit(self.last_error, "ERROR")
             if time.time() - self._last_attempt < _RECONNECT_COOLDOWN:
                 return False
             self._last_attempt = time.time()
