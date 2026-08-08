@@ -1338,7 +1338,7 @@ const SYS_FIELDS = [
 // (nothing here was deleted) but tucked behind a collapsed <details> so the
 // main list is the dozen dials someone actually turns day to day.
 const SYS_FIELDS_ADVANCED = [
-  { k: "max_scalp_positions", label: "Maks scalp pozisyon (M1/M5, 0=ayri limit yok)", t: "int", min: 0, max: 50,
+  { k: "max_scalp_positions", label: "Maks scalp pozisyon (M5, 0=ayri limit yok)", t: "int", min: 0, max: 50,
     hint: "micro_rev/burst pozisyonlarini toplam icinde ayri bir kovaya koyar, boylece bir seri scalp doldurmasi swing icin yer birakmaz." },
   { k: "max_swing_positions", label: "Maks swing pozisyon (M15+, 0=ayri limit yok)", t: "int", min: 0, max: 50 },
   { k: "block_high_cost", label: "Yuksek maliyetli girisi engelle (opsiyonel)", t: "bool" },

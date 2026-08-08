@@ -249,7 +249,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 if not strategy_allows_timeframe(next_strat, next_tf, allow):
                     raise HTTPException(
                         400, f"{next_strat}/{next_tf} eslesmesi yasak "
-                             f"(scalp yalnizca M1/M5; uzun TF swing ailelerine ait) - "
+                             f"(scalp yalnizca M5; uzun TF swing ailelerine ait) - "
                              f"motor bu kombinasyonda hicbir zaman giris denemez")
             updated = store.update_symbol(symbol, patch)
         finally:

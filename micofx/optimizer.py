@@ -967,7 +967,7 @@ class Optimizer:
         if not strategy_allows_timeframe(next_strat, next_tf, allow):
             return {"ok": False,
                     "error": f"{next_strat}/{next_tf} eslesmesi yasak "
-                             f"(scalp yalnizca M1/M5; uzun TF swing ailelerine ait)"}
+                             f"(scalp yalnizca M5; uzun TF swing ailelerine ait)"}
         primary_changed = (
             (strategy in STRATEGIES and strategy != cfg.strategy)
             or (timeframe in TIMEFRAMES and timeframe != cfg.timeframe)
