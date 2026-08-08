@@ -298,7 +298,20 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # replicate optimizer's hold-and-defer machinery a second time here.
         exit_fields_changing = current is not None and any(
             key in patch and patch[key] != getattr(current, key) for key in EXIT_RISK_FIELDS)
-        guarded = magic_changing or primary_changing or secondary_changing or exit_fields_changing
+        # secondary_params is a nested blob, not individual top-level fields -
+        # the check above only ever looked at top-level keys, so patching
+        # {"secondary_params": {"trail_step_atr": ...}} directly bypassed the
+        # guard entirely even though engine.py's _secondary_config() overlays
+        # this same dict onto live position management every cycle, exactly
+        # like the top-level fields do for the primary.
+        next_sec_params = patch.get("secondary_params")
+        secondary_exit_changing = (
+            current is not None and isinstance(next_sec_params, dict)
+            and any(k in EXIT_RISK_FIELDS and next_sec_params.get(k) != current.secondary_params.get(k)
+                    for k in next_sec_params)
+        )
+        guarded = (magic_changing or primary_changing or secondary_changing
+                  or exit_fields_changing or secondary_exit_changing)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -335,6 +348,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                             409, f"{symbol}: cikis/risk parametreleri ({', '.join(changed_fields)}) "
                                  f"degistirilemedi, {len(open_here)} acik pozisyon var "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
+                if secondary_exit_changing and not secondary_changing:
+                    live_tagged = _open_tagged_secondary(current.magic)
+                    if live_tagged:
+                        changed_fields = sorted(k for k in next_sec_params
+                                                if k in EXIT_RISK_FIELDS
+                                                and next_sec_params.get(k) != current.secondary_params.get(k))
+                        raise HTTPException(
+                            409, f"{symbol}: ikincil cikis/risk parametreleri "
+                                 f"({', '.join(changed_fields)}) degistirilemedi, "
+                                 f"{len(live_tagged)} acik ikincil-sinyal pozisyonu var "
+                                 f"(once kapanmasini bekleyin)")
             if primary_changing:
                 tf_allow = store.opt_params().get("strategy_timeframes")
                 allow = tf_allow if isinstance(tf_allow, dict) else None
@@ -471,7 +495,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # Same gap patch_symbol() closes per-symbol: bulk went through
         # update_symbol directly with no exit/risk-field holdback at all.
         exit_fields = [k for k in EXIT_RISK_FIELDS if k in body.patch]
-        guarded = needs_tf_check or magic_changing or secondary_fields or bool(exit_fields)
+        next_sec_params = body.patch.get("secondary_params")
+        sec_exit_fields = (sorted(k for k in next_sec_params if k in EXIT_RISK_FIELDS)
+                           if isinstance(next_sec_params, dict) else [])
+        guarded = (needs_tf_check or magic_changing or secondary_fields
+                  or bool(exit_fields) or bool(sec_exit_fields))
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -479,7 +507,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             open_magics = ({p["magic"] for p in client.positions()} if guarded else set())
             tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
             tagged_magics = ({p["magic"] for p in client.positions()
-                              if p["ticket"] in tagged} if secondary_fields and tagged else set())
+                              if p["ticket"] in tagged}
+                             if (secondary_fields or sec_exit_fields) and tagged else set())
             for symbol in targets:
                 current = store.symbols.get(symbol) if guarded else None
                 if guarded and current is None:
@@ -510,6 +539,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 if exit_fields and current is not None:
                     exit_changing = any(body.patch[k] != getattr(current, k) for k in exit_fields)
                     if exit_changing and current.magic in open_magics:
+                        rejected.append(symbol)
+                        continue
+                if sec_exit_fields and current is not None:
+                    sec_exit_changing = any(next_sec_params.get(k) != current.secondary_params.get(k)
+                                            for k in sec_exit_fields)
+                    if sec_exit_changing and current.magic in tagged_magics:
                         rejected.append(symbol)
                         continue
                 if store.update_symbol(symbol, body.patch) is not None:

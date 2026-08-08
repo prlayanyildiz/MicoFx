@@ -892,6 +892,14 @@ class Optimizer:
         cfg = self.store.symbols.get(symbol)
         if cfg is None:
             return {"ok": False, "error": "sembol yok"}
+        # Same reasoning as apply(): client.positions() reads [] on disconnect
+        # exactly like "nothing open", which would let live_tagged below fail
+        # closed as empty and skip the holdback - never actually verifying
+        # whether a secondary-tagged position is open.
+        if not self.client.connected:
+            return {"ok": False,
+                    "error": f"{symbol}: MT5 baglantisi yok, acik pozisyon dogrulanamiyor - "
+                             f"islem guvenlik icin reddedildi"}
         next_identity = ((attempt["strategy"], attempt["timeframe"]) if attempt is not None
                         else ("", ""))
         identity_changing = (cfg.secondary_strategy, cfg.secondary_timeframe) != next_identity
@@ -1027,6 +1035,16 @@ class Optimizer:
         # and this patch actually landing - the same race DELETE/PATCH close
         # for the web routes, from the optimizer's side of the same field.
         with (self.entry_lock if self.entry_lock is not None else contextlib.nullcontext()):
+            # self.client.positions() returns [] both when genuinely flat and
+            # when MT5 is disconnected - trusting an empty result during a
+            # disconnect would skip the holdback below entirely and write
+            # exit/risk fields straight onto a position we simply couldn't
+            # see, instead of holding them back like normal. Fail closed the
+            # same way the web PATCH routes already do (_require_connected).
+            if not self.client.connected:
+                return {"ok": False,
+                        "error": f"{symbol}: MT5 baglantisi yok, acik pozisyon dogrulanamiyor - "
+                                 f"islem guvenlik icin reddedildi"}
             # A live position was opened, sized and its trail managed under the
             # CURRENT config's ATR assumptions - checked regardless of whether
             # this is a family swap or a same-family "refine", since engine.py's

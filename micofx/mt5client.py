@@ -1058,6 +1058,7 @@ class MT5Client:
             # "flat", so it must not be trusted as one either.
             return 0, -1
         remaining = before
+        confirmed_closed = 0
         for _ in range(4):
             if not remaining:
                 break
@@ -1065,14 +1066,18 @@ class MT5Client:
             for ticket in list(remaining):
                 if self.close_position(ticket):
                     progressed = True
+                    confirmed_closed += 1
             if not progressed:
                 break
             remaining = {p["ticket"] for p in self.positions(symbol=symbol)
                         if p["ticket"] in before and (magics is None or p["magic"] in magics)}
             if not self.connected:
-                # Same mid-call failure, now partway through closing - what
-                # is left in ``remaining`` is stale/unverified, not a real
-                # count. closed-so-far is still real (each close_position()
-                # call it came from succeeded before this happened).
-                return len(before) - len(remaining), -1
+                # Same mid-call failure, now partway through closing. Do NOT
+                # report ``len(before) - len(remaining)`` here - remaining
+                # just came back [] from the same failed call, which would
+                # inflate "closed" to the full original count regardless of
+                # how many close_position() calls this pass actually
+                # confirmed. confirmed_closed only counts calls that
+                # genuinely returned success, so it cannot overstate.
+                return confirmed_closed, -1
         return len(before) - len(remaining), len(remaining)

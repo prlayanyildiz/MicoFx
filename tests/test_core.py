@@ -325,6 +325,8 @@ class _SecStore:
 
 
 class _SecClient:
+    connected = True
+
     def __init__(self, positions):
         self._positions = positions
 
