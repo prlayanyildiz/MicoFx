@@ -109,6 +109,23 @@ def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYM
             raise HTTPException(400, f"{key} gecersiz ({value}) - en fazla {hi} olabilir")
 
 
+# Engine-internal bookkeeping: Optimizer.apply()/_apply_secondary_locked()
+# write these to defer exit/risk fields until a position is flat (see
+# Engine._apply_pending_exits). They carry no schema/validation of their own
+# - _apply_pending_exits trusts whatever is in them and writes it verbatim
+# once flat - so a client PATCHing this field directly could stage ANY
+# symbol field (not just exit/risk ones) to land later completely
+# unchecked, bypassing every guard above. Never a legitimate thing for a
+# human or external API caller to set.
+_INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
+
+
+def _reject_internal_fields(patch: dict[str, Any]) -> None:
+    found = [k for k in _INTERNAL_ONLY_FIELDS if k in patch]
+    if found:
+        raise HTTPException(400, f"{', '.join(found)} disaridan yazilamaz (motor ici alan)")
+
+
 def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optimizer,
                 api_token: str = "") -> FastAPI:
     """``api_token``: optional shared secret (``MICO_API_TOKEN`` env var, see run.py).
@@ -261,6 +278,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/symbols/{symbol}")
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
         patch = body.model_dump()
+        _reject_internal_fields(patch)
         _validate_risk_bounds(patch)
         current = store.symbols.get(symbol)
         # Same hazard as DELETE: the magic number is the only thing that maps
@@ -305,10 +323,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # this same dict onto live position management every cycle, exactly
         # like the top-level fields do for the primary.
         next_sec_params = patch.get("secondary_params")
+        # secondary_params is written as a full replacement, not a merge - a
+        # new dict that simply OMITS a previously-set exit key (most
+        # obviously {} to wipe it, but any dict missing e.g. trail_step_atr)
+        # silently drops that key too, and _secondary_config() then falls
+        # back to the PRIMARY's value for it. Only diffing keys present in
+        # the new dict missed exactly this "changed by omission" case -
+        # compare the union of both dicts' keys instead.
         secondary_exit_changing = (
             current is not None and isinstance(next_sec_params, dict)
-            and any(k in EXIT_RISK_FIELDS and next_sec_params.get(k) != current.secondary_params.get(k)
-                    for k in next_sec_params)
+            and any(next_sec_params.get(k) != current.secondary_params.get(k)
+                    for k in (set(next_sec_params) | set(current.secondary_params)) & EXIT_RISK_FIELDS)
         )
         guarded = (magic_changing or primary_changing or secondary_changing
                   or exit_fields_changing or secondary_exit_changing)
@@ -351,9 +376,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 if secondary_exit_changing and not secondary_changing:
                     live_tagged = _open_tagged_secondary(current.magic)
                     if live_tagged:
-                        changed_fields = sorted(k for k in next_sec_params
-                                                if k in EXIT_RISK_FIELDS
-                                                and next_sec_params.get(k) != current.secondary_params.get(k))
+                        changed_fields = sorted(
+                            k for k in (set(next_sec_params) | set(current.secondary_params)) & EXIT_RISK_FIELDS
+                            if next_sec_params.get(k) != current.secondary_params.get(k))
                         raise HTTPException(
                             409, f"{symbol}: ikincil cikis/risk parametreleri "
                                  f"({', '.join(changed_fields)}) degistirilemedi, "
@@ -464,6 +489,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/symbols-bulk")
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
+        _reject_internal_fields(body.patch)
         _validate_risk_bounds(body.patch)
         targets = body.symbols or list(store.symbols)
         needs_tf_check = "strategy" in body.patch or "timeframe" in body.patch
@@ -496,10 +522,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # update_symbol directly with no exit/risk-field holdback at all.
         exit_fields = [k for k in EXIT_RISK_FIELDS if k in body.patch]
         next_sec_params = body.patch.get("secondary_params")
-        sec_exit_fields = (sorted(k for k in next_sec_params if k in EXIT_RISK_FIELDS)
-                           if isinstance(next_sec_params, dict) else [])
+        secondary_params_present = isinstance(next_sec_params, dict)
+        # secondary_params is a full replacement, not a merge, and its exit
+        # fields to check depend on each target symbol's OWN current dict
+        # (which key omissions matter varies per symbol) - so unlike
+        # exit_fields above, this can't be reduced to one static key list
+        # up front. Any presence of secondary_params in the patch has to be
+        # treated as guard-worthy; the precise per-symbol diff happens below.
         guarded = (needs_tf_check or magic_changing or secondary_fields
-                  or bool(exit_fields) or bool(sec_exit_fields))
+                  or bool(exit_fields) or secondary_params_present)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -508,7 +539,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
             tagged_magics = ({p["magic"] for p in client.positions()
                               if p["ticket"] in tagged}
-                             if (secondary_fields or sec_exit_fields) and tagged else set())
+                             if (secondary_fields or secondary_params_present) and tagged else set())
             for symbol in targets:
                 current = store.symbols.get(symbol) if guarded else None
                 if guarded and current is None:
@@ -541,9 +572,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     if exit_changing and current.magic in open_magics:
                         rejected.append(symbol)
                         continue
-                if sec_exit_fields and current is not None:
+                if secondary_params_present and current is not None:
+                    sec_keys = (set(next_sec_params) | set(current.secondary_params)) & EXIT_RISK_FIELDS
                     sec_exit_changing = any(next_sec_params.get(k) != current.secondary_params.get(k)
-                                            for k in sec_exit_fields)
+                                            for k in sec_keys)
                     if sec_exit_changing and current.magic in tagged_magics:
                         rejected.append(symbol)
                         continue

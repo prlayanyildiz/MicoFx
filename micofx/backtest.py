@@ -162,17 +162,26 @@ def flatten_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False,
                  day_end_flatten_min: int = 0) -> np.ndarray:
     """Boolean mask of bars where a still-open position must be force-closed.
 
-    Mirrors ``sessions.should_flatten`` + ``sessions.day_end_close`` - the live
-    engine force-closes any open position in these bands (``manage_positions``),
-    but the walk-forward previously only used ``flat_before_close_min`` to keep
-    new entries out of the same band (see ``session_mask``), never to exit a
-    position already holding through it. A trade opened well before the band
-    rode straight through what live would have already flattened, so holdout
-    could look stronger than what live can actually realise.
+    Mirrors ``sessions.should_flatten`` + ``sessions.day_end_close`` +
+    ``sessions.weekend_closed`` - the live engine force-closes any open
+    position in these bands (``manage_positions``), but the walk-forward
+    previously only used ``flat_before_close_min``/``session_mask`` to keep
+    new entries out of the same band, never to exit a position already
+    holding through it. A trade opened well before the band rode straight
+    through what live would have already flattened, so holdout could look
+    stronger than what live can actually realise.
     """
     days = ((times // 86400 + 3) % 7) + 1
     minutes = (times % 86400) // 60
     mask = np.zeros(times.size, dtype=bool)
+
+    # Weekend: unconditional and ahead of everything else here, matching
+    # manage_positions()'s own weekend_closed() check - live force-flattens
+    # this regardless of all_hours, so the backtest must too or a position
+    # that survives into Saturday rides the weekend numerically instead of
+    # getting cut exactly where live cuts it.
+    if str(getattr(cfg, "group", "") or "").strip().lower() not in WEEKEND_OPEN_GROUPS:
+        mask |= (days == 6) | (days == 7)
 
     # Day-end: independent of all_hours/sessions, same as sessions.day_end_close.
     if day_end_flatten_min > 0:

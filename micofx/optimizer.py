@@ -951,6 +951,13 @@ class Optimizer:
         tagged = {int(t) for t in (self.store.get_setting("secondary_tickets", []) or [])}
         live_tagged = ([p for p in self.client.positions(magic=cfg.magic) if p["ticket"] in tagged]
                        if tagged else [])
+        if tagged and not self.client.connected:
+            # Same mid-call disconnect gap as apply(): this positions() call
+            # could have failed and returned [] regardless of what is really
+            # open, which would make live_tagged wrongly look empty.
+            return {"ok": False,
+                    "error": f"{symbol}: MT5 baglantisi koptu, acik ikincil pozisyon "
+                             f"dogrulanamadi - islem guvenlik icin reddedildi"}
         if identity_changing:
             # A position tagged secondary was opened, sized and its exits
             # picked under the CURRENT secondary_strategy/timeframe's ATR.
@@ -1051,6 +1058,14 @@ class Optimizer:
             # manage_positions/_update_stop/_take_partial re-read cfg live every
             # cycle, not a snapshot taken at entry.
             open_here = [p for p in self.client.positions() if p["magic"] == cfg.magic]
+            if not self.client.connected:
+                # positions() itself can flip this False mid-call (same class
+                # of gap as MT5Client.close_all()) - the pre-check above only
+                # proves the connection was alive a moment earlier. An empty
+                # open_here from a call that just failed is not "flat".
+                return {"ok": False,
+                        "error": f"{symbol}: MT5 baglantisi koptu, acik pozisyon dogrulanamadi - "
+                                 f"islem guvenlik icin reddedildi"}
             # Default: this apply() is the new authoritative candidate, so any
             # earlier held-back patch is superseded and must be dropped - the
             # held-back branch below overwrites this with the fresh one when
