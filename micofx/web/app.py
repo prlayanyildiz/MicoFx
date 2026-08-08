@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html as html_escape
+import math
 import os
 import signal
 import subprocess
@@ -97,6 +98,11 @@ def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYM
             value = float(patch[key])
         except (TypeError, ValueError):
             continue
+        if not math.isfinite(value):
+            # NaN compares False against everything (< and > both), so it
+            # would otherwise sail straight through both bound checks below
+            # undetected - json does accept NaN/Infinity by default.
+            raise HTTPException(400, f"{key} gecersiz ({value!r})")
         if (value < lo) if lo_inclusive else (value <= lo):
             raise HTTPException(400, f"{key} gecersiz ({value}) - {lo}'dan buyuk olmali")
         if hi is not None and value > hi:

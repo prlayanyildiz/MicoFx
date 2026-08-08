@@ -208,9 +208,14 @@ class Engine:
             if close_positions if close_positions is not None else self.store.system.close_on_stop:
                 closed, remaining = self.close_all()
         if was_trading:
+            if remaining < 0:
+                extra = " MT5 baglantisi dogrulanamadi - pozisyon durumu bilinmiyor!"
+            elif remaining:
+                extra = f" {remaining} pozisyon kapatilamadi!"
+            else:
+                extra = ""
             LOG.emit(f"Bot durduruldu - izleme devam ediyor."
-                     f"{f' {closed} pozisyon kapatildi.' if closed else ''}"
-                     f"{f' {remaining} pozisyon kapatilamadi!' if remaining else ''}",
+                     f"{f' {closed} pozisyon kapatildi.' if closed else ''}{extra}",
                      "ERROR" if remaining else "INFO")
         return {"ok": remaining == 0, "running": False, "closed": closed, "remaining": remaining,
                 "message": "Bot durduruldu."}
@@ -235,7 +240,10 @@ class Engine:
         """
         self.stop(close_positions=False)
         closed, remaining = self.close_all()
-        if remaining:
+        if remaining < 0:
+            LOG.emit("ACIL DURDURMA: MT5 baglantisi dogrulanamadi - pozisyonlarin gercekten "
+                     "kapandigindan EMIN DEGILIZ, elle kontrol edin.", "ERROR")
+        elif remaining:
             LOG.emit(f"ACIL DURDURMA: {closed} pozisyon kapatildi, {remaining} pozisyon HALA ACIK "
                      f"- elle mudahale gerekebilir.", "ERROR")
         else:

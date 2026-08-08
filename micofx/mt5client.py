@@ -1040,7 +1040,14 @@ class MT5Client:
 
         Returns ``(closed, remaining)`` - a kill-switch caller must look at
         ``remaining``, not just assume a non-crash means everything is flat.
+        ``remaining`` is -1 (never 0, so it always fails a ``remaining == 0``
+        success check) when the connection could not even be verified -
+        ``positions()`` returns an empty list both when genuinely flat and
+        when disconnected, and treating a disconnected "[]" as "0 kaldi" is
+        exactly the false "hepsi kapandi" a kill-switch must never report.
         """
+        if not self.ensure():
+            return 0, -1
         before = {p["ticket"] for p in self.positions(symbol=symbol)
                  if magics is None or p["magic"] in magics}
         remaining = before

@@ -929,6 +929,12 @@ class Optimizer:
                 },
             }
         patch = {k: v for k, v in patch.items() if k in SECONDARY_FIELDS}
+        # Same reasoning as apply()'s pending_exit_patch default: this call is
+        # the new authoritative secondary candidate (or clears it entirely),
+        # so any earlier held-back refine is superseded unless the elif below
+        # holds one back again - otherwise a stale pending_secondary_exit_patch
+        # could get replayed on top of this by Engine._apply_pending_exits.
+        patch["pending_secondary_exit_patch"] = {}
         # Caller (apply_secondary() or apply()) already holds entry_lock -
         # held across the open-tagged-position check + the write so a fill
         # cannot land in the gap between them (see Engine.entry_lock).
@@ -1027,6 +1033,16 @@ class Optimizer:
             # manage_positions/_update_stop/_take_partial re-read cfg live every
             # cycle, not a snapshot taken at entry.
             open_here = [p for p in self.client.positions() if p["magic"] == cfg.magic]
+            # Default: this apply() is the new authoritative candidate, so any
+            # earlier held-back patch is superseded and must be dropped - the
+            # held-back branch below overwrites this with the fresh one when
+            # (and only when) it actually holds something back again. Without
+            # this, a stale pending_exit_patch from a PREVIOUS apply() (while
+            # a position was still open) would survive an unrelated later
+            # apply() that landed directly while flat, and then get replayed
+            # on top of it by Engine._apply_pending_exits the next time this
+            # magic is seen flat - silently reverting the newer values.
+            patch["pending_exit_patch"] = {}
             if open_here:
                 if primary_changed:
                     # Swapping the family out from under it mid-trade hands that
