@@ -412,6 +412,14 @@ class MT5Client:
             "margin": a.margin, "margin_free": a.margin_free,
             "margin_level": a.margin_level, "leverage": a.leverage,
             "name": a.name, "trade_allowed": bool(a.trade_allowed),
+            # Every position-count guard in this app (max_positions,
+            # max_total_positions, weekend/secondary ticket tracking) assumes
+            # one ticket per opened trade - true under hedging, but a netting
+            # account auto-merges same-direction trades on a symbol into one
+            # ticket. "5 acik pozisyon" would then just be "one bigger one",
+            # silently defeating every position-count-based risk limit.
+            "netting": getattr(a, "margin_mode", None) == getattr(
+                mt5, "ACCOUNT_MARGIN_MODE_RETAIL_NETTING", 0),
         }
 
     def terminal_flags(self) -> dict[str, Any]:

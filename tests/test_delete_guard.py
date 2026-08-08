@@ -332,3 +332,170 @@ def test_patch_refuses_secondary_change_with_open_tagged_position():
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_strategy": "burst"})
     assert res.status_code == 409
     assert store.symbols["XAUUSD"].secondary_strategy == "micro_rev"
+
+
+# ------------------------------------------------------------ internal-only fields
+
+def test_patch_refuses_pending_exit_patch_written_directly():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"pending_exit_patch": {"sl_atr_mult": 99.0}})
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].pending_exit_patch == {}
+
+
+def test_patch_refuses_pending_secondary_exit_patch_written_directly():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"pending_secondary_exit_patch": {"magic": 1}})
+    assert res.status_code == 400
+
+
+# --------------------------------------------------------------- exit/risk field guard
+
+def test_patch_refuses_exit_field_change_with_open_position():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    positions = [{"ticket": 1, "symbol": "XAUUSD", "magic": 990021, "side": "sell"}]
+    tc, store = _client(symbols, positions)
+
+    res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
+    assert res.status_code == 409
+    assert store.symbols["XAUUSD"].sl_atr_mult != 2.5
+
+
+def test_patch_allows_exit_field_change_with_no_open_position():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
+    assert res.status_code == 200
+    assert store.symbols["XAUUSD"].sl_atr_mult == 2.5
+
+
+def test_bulk_patch_refuses_exit_field_change_with_open_position():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    positions = [{"ticket": 1, "symbol": "XAUUSD", "magic": 990021, "side": "sell"}]
+    tc, store = _client(symbols, positions)
+
+    res = tc.post("/api/symbols-bulk", json={
+        "symbols": ["XAUUSD"], "patch": {"trail_start_atr": 3.0},
+    })
+    assert res.status_code == 200
+    body = res.json()
+    assert body["rejected"] == ["XAUUSD"]
+    assert store.symbols["XAUUSD"].trail_start_atr != 3.0
+
+
+# ----------------------------------------------------- secondary_params nested guard
+
+def test_patch_refuses_non_dict_secondary_params():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": "wipe"})
+    assert res.status_code == 400
+
+
+def test_patch_refuses_nan_inside_secondary_params():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    # httpx's own json= encoder rejects NaN before it can even be sent - send
+    # the raw body instead so the (Python json-based) server-side parser,
+    # which does accept the NaN literal, is what actually gets exercised.
+    res = tc.post("/api/symbols/XAUUSD", content=b'{"secondary_params": {"sl_atr_mult": NaN}}',
+                  headers={"Content-Type": "application/json"})
+    assert res.status_code == 400
+
+
+def test_patch_refuses_secondary_params_exit_field_change_with_open_tagged_position():
+    symbols = {"XAUUSD": SymbolConfig(
+        symbol="XAUUSD", magic=990021,
+        secondary_strategy="micro_rev", secondary_timeframe="M5",
+        secondary_params={"sl_atr_mult": 1.0, "adx_min": 20.0})}
+    positions = [{"ticket": 100, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
+    tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
+
+    res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"sl_atr_mult": 2.0, "adx_min": 20.0}})
+    assert res.status_code == 409
+    assert store.symbols["XAUUSD"].secondary_params["sl_atr_mult"] == 1.0
+
+
+def test_patch_refuses_secondary_params_wipe_by_omission_with_open_tagged_position():
+    # A replacement dict that simply DROPS a previously-set exit key (instead
+    # of explicitly changing its value) must be caught too - full-replace
+    # semantics mean the omission silently removes it.
+    symbols = {"XAUUSD": SymbolConfig(
+        symbol="XAUUSD", magic=990021,
+        secondary_strategy="micro_rev", secondary_timeframe="M5",
+        secondary_params={"sl_atr_mult": 1.0, "adx_min": 20.0})}
+    positions = [{"ticket": 100, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
+    tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
+
+    res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"adx_min": 20.0}})
+    assert res.status_code == 409
+    assert store.symbols["XAUUSD"].secondary_params["sl_atr_mult"] == 1.0
+
+
+def test_patch_allows_secondary_params_entry_field_change_with_open_tagged_position():
+    # Entry-signal params (not in EXIT_RISK_FIELDS) are safe to land
+    # immediately even with a tagged position open.
+    symbols = {"XAUUSD": SymbolConfig(
+        symbol="XAUUSD", magic=990021,
+        secondary_strategy="micro_rev", secondary_timeframe="M5",
+        secondary_params={"sl_atr_mult": 1.0, "adx_min": 20.0})}
+    positions = [{"ticket": 100, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
+    tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
+
+    res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"sl_atr_mult": 1.0, "adx_min": 25.0}})
+    assert res.status_code == 200
+    assert store.symbols["XAUUSD"].secondary_params["adx_min"] == 25.0
+
+
+# ------------------------------------------------------------------- enum fields
+
+def test_patch_refuses_invalid_group():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"group": "x\"><script>alert(1)</script>"})
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].group != "x\"><script>alert(1)</script>"
+
+
+def test_patch_refuses_invalid_strategy():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "not_a_real_strategy"})
+    assert res.status_code == 400
+
+
+def test_patch_allows_valid_group():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"group": "commodity"})
+    assert res.status_code == 200
+    assert store.symbols["XAUUSD"].group == "commodity"
+
+
+# ------------------------------------------------------------------- risk bounds
+
+def test_patch_refuses_nan_risk_percent():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", content=b'{"risk_percent": NaN}',
+                  headers={"Content-Type": "application/json"})
+    assert res.status_code == 400
+
+
+def test_patch_refuses_max_positions_out_of_range():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 9999})
+    assert res.status_code == 400

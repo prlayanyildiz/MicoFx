@@ -159,6 +159,7 @@ class Engine:
         # one fewer retry, not a correctness issue - the next weekend still
         # catches it fresh.
         self._weekend_pending: set[int] = set()
+        self._netting_warned = False
         self._partials: dict[int, dict[str, float]] = {
             int(k): {"rungs": float(v.get("rungs", 0.0)), "orig": float(v.get("orig", 0.0)),
                      "done": float(v.get("done", 0.0))}
@@ -344,7 +345,22 @@ class Engine:
 
         self._maybe_schedule_reopt()
 
-        allow_entry = self._trading and guard.ok
+        # Every position-count guard here (max_positions, weekend/secondary
+        # ticket tracking, partial-TP ladder bookkeeping) assumes one ticket
+        # per opened trade - a netting account merges same-direction trades
+        # on a symbol into a single ticket instead, silently defeating all of
+        # them ("Maks pozisyon 5" becomes "one ticket, unlimited volume").
+        # Refuse new entries entirely rather than trade under assumptions
+        # that do not hold for this account type.
+        netting = bool(account.get("netting"))
+        if netting and not self._netting_warned:
+            self._netting_warned = True
+            LOG.emit("Hesap NETTING modunda - bu sistemin pozisyon-sayisi tabanli "
+                     "risk kontrolleri (Maks pozisyon, hafta sonu/ikincil ticket "
+                     "takibi) tek ticket = tek pozisyon varsayimina dayaniyor, "
+                     "netting'de gecersiz kaliyor. Yeni islem acilmasi guvenlik "
+                     "icin durduruldu - hedging hesabina gecin.", "ERROR")
+        allow_entry = self._trading and guard.ok and not netting
         # Two-pass cycle: first refresh every symbol, then fill free slots in
         # priority order so a weak signal does not steal the last seat from a
         # stronger one when several bars close in the same poll.

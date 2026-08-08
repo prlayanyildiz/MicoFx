@@ -437,9 +437,18 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             gain = (c - entry) if is_buy else (entry - c)
             if a > 0 and gain > 0:
                 target = None
+                # Mirrors engine._update_stop's breakeven_locked guard: once
+                # breakeven is reached (now, or already from an earlier bar -
+                # sl at/past entry), the min_stop clamp below must never be
+                # allowed to land the final stop worse than entry. Backtest
+                # previously clamped to the bar close unconditionally, which
+                # could bank a "breakeven" bar that live (post-fix) actually
+                # skips, since a stop worse than breakeven is not one.
+                breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
                 if p.breakeven_atr > 0 and not moved_be and gain >= a * p.breakeven_atr:
                     target = entry
                     moved_be = True
+                    breakeven_locked = True
                 if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
                     trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
                     trail = trail_atr
@@ -461,9 +470,13 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         target = trail
                 if target is not None:
                     if is_buy and target > sl:
-                        sl = min(target, c - min_stop)
+                        new_sl = min(target, c - min_stop)
+                        if not (breakeven_locked and new_sl < entry):
+                            sl = new_sl
                     elif not is_buy and target < sl:
-                        sl = max(target, c + min_stop)
+                        new_sl = max(target, c + min_stop)
+                        if not (breakeven_locked and new_sl > entry):
+                            sl = new_sl
             exit_bar = j
 
         if exit_price is None:

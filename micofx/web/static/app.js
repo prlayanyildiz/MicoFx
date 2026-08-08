@@ -152,6 +152,9 @@ function renderTop() {
     ["Gun", `${signed(day.realised)} (${signed(day.pnl_pct, 2)}%)`, cls(day.realised)],
     ["Pozisyon", `${cap.open_total ?? 0} / ${cap.max_total_positions ?? 0}`, ""],
   ];
+  if (acc.netting) {
+    items.push(["Hesap modu", "NETTING - ISLEM DURDU", "neg"]);
+  }
 
   $("#topstats").innerHTML = items.map(([lbl, val, klass]) =>
     `<div class="tstat"><div class="lbl">${lbl}</div><div class="val ${klass}">${val}</div></div>`

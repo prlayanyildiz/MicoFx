@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from .. import APP_NAME, __version__
 from ..engine import Engine
 from ..logbus import LOG
-from ..models import EXIT_RISK_FIELDS, strategy_allows_timeframe
+from ..models import EXIT_RISK_FIELDS, GROUPS, STRATEGIES, TIMEFRAMES, strategy_allows_timeframe
 from ..mt5client import MT5Client
 from ..optimizer import Optimizer
 from ..paths import ROOT, WEB_DIR
@@ -129,6 +129,41 @@ def _reject_bad_dict_fields(patch: dict[str, Any], keys: tuple) -> None:
     for key in keys:
         if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
             raise HTTPException(400, f"{key} bir nesne (object) olmali, {type(patch[key]).__name__} degil")
+
+
+# strategy_allows_timeframe() falls back to "allow every timeframe" for a
+# strategy name it does not recognise (see its own docstring) - it was never
+# meant to double as an enum check, so an arbitrary/garbage strategy string
+# sailed straight through the primary_changing guard. group had no check at
+# all. Both land verbatim in the frontend as CSS classes / innerHTML
+# fragments (Semboller cards, pill badges), so a bogus value here is not
+# just a data-integrity problem - it is another XSS entry point.
+_ENUM_FIELDS = {"group": (GROUPS, False), "strategy": (STRATEGIES, False),
+                "secondary_strategy": (STRATEGIES, True),
+                "timeframe": (TIMEFRAMES, False), "secondary_timeframe": (TIMEFRAMES, True)}
+
+
+def _reject_non_finite_values(d: dict[str, Any], label: str) -> None:
+    # secondary_params carries an arbitrary OPT_FIELDS subset with no
+    # per-field bounds table of its own (unlike the small, named
+    # _SYMBOL_RISK_BOUNDS set) - this at least closes the NaN/Infinity class
+    # of bug _validate_risk_bounds closes for the top-level fields, since a
+    # NaN sl_atr_mult buried in here would otherwise reach engine.py's live
+    # trailing/breakeven math completely unchecked.
+    for key, value in d.items():
+        if isinstance(value, (int, float)) and not math.isfinite(value):
+            raise HTTPException(400, f"{label}.{key} gecersiz ({value!r})")
+
+
+def _validate_enum_fields(patch: dict[str, Any]) -> None:
+    for key, (allowed, empty_ok) in _ENUM_FIELDS.items():
+        if key not in patch or patch[key] is None:
+            continue
+        value = patch[key]
+        if empty_ok and value == "":
+            continue
+        if value not in allowed:
+            raise HTTPException(400, f"{key} gecersiz ({value!r}) - izin verilenler: {', '.join(allowed)}")
 
 
 def _reject_internal_fields(patch: dict[str, Any]) -> None:
@@ -291,6 +326,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         patch = body.model_dump()
         _reject_internal_fields(patch)
         _reject_bad_dict_fields(patch, ("secondary_params",))
+        if isinstance(patch.get("secondary_params"), dict):
+            _reject_non_finite_values(patch["secondary_params"], "secondary_params")
+        _validate_enum_fields(patch)
         _validate_risk_bounds(patch)
         current = store.symbols.get(symbol)
         # Same hazard as DELETE: the magic number is the only thing that maps
@@ -503,6 +541,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
         _reject_internal_fields(body.patch)
         _reject_bad_dict_fields(body.patch, ("secondary_params",))
+        if isinstance(body.patch.get("secondary_params"), dict):
+            _reject_non_finite_values(body.patch["secondary_params"], "secondary_params")
+        _validate_enum_fields(body.patch)
         _validate_risk_bounds(body.patch)
         targets = body.symbols or list(store.symbols)
         needs_tf_check = "strategy" in body.patch or "timeframe" in body.patch

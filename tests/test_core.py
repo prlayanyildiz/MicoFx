@@ -183,6 +183,21 @@ def test_lot_for_ai_scale_within_overshoot_forces_floor():
     assert lot == pytest.approx(0.1)
 
 
+def test_lot_for_risk_mode_fails_closed_without_tick_value():
+    # A missing/zero tick value used to fall back to fixed_lot, silently
+    # skipping max_lot, edge/AI scaling and the overshoot guard entirely -
+    # must refuse the trade instead.
+    class _NoTickClient(_FakeClient):
+        def money_per_price_unit(self, symbol, lot):
+            return 0.0
+
+    risk = RiskManager(_FakeStore(), _NoTickClient())
+    cfg = _cfg(lot_mode="risk", risk_percent=0.5)
+    lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0)
+    assert lot == 0.0
+    assert "tick" in note
+
+
 # --------------------------------------------------------------------------- can_open / ensemble bucket
 
 def test_can_open_counts_secondary_tagged_position_by_its_own_family():
