@@ -227,29 +227,147 @@
   },
   "symbols": [
     {
+      "symbol": "AUDUSD",
+      "group": "forex",
+      "magic": 990101,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "CADJPY",
+      "group": "forex",
+      "magic": 990124,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "CHFJPY",
+      "group": "forex",
+      "magic": 990122,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "EURJPY",
+      "group": "forex",
+      "magic": 990108,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
       "symbol": "EURUSD",
       "group": "forex",
-      "magic": 990001
+      "magic": 990113,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "GBPCHF",
+      "group": "forex",
+      "magic": 990123,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "GBPJPY",
+      "group": "forex",
+      "magic": 990105,
+      "sessions": [
+        {
+          "start": "00:01",
+          "end": "23:55"
+        }
+      ]
     },
     {
       "symbol": "GBPUSD",
       "group": "forex",
-      "magic": 990002
-    },
-    {
-      "symbol": "AUDUSD",
-      "group": "forex",
-      "magic": 990003
-    },
-    {
-      "symbol": "USDCAD",
-      "group": "forex",
-      "magic": 990004
+      "magic": 990114,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
     },
     {
       "symbol": "USDCHF",
       "group": "forex",
-      "magic": 990005
+      "magic": 990005,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "group": "forex",
+      "magic": 990121,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "CA60",
+      "group": "index",
+      "magic": 990117,
+      "sessions": [
+        {
+          "start": "16:30",
+          "end": "23:10"
+        }
+      ]
+    },
+    {
+      "symbol": "EUSTX50",
+      "group": "index",
+      "magic": 990109,
+      "sessions": [
+        {
+          "start": "03:15",
+          "end": "22:55"
+        }
+      ]
+    },
+    {
+      "symbol": "FRA40",
+      "group": "index",
+      "magic": 990102,
+      "sessions": [
+        {
+          "start": "09:00",
+          "end": "22:55"
+        }
+      ]
     },
     {
       "symbol": "GER40",
@@ -257,126 +375,131 @@
       "magic": 990011,
       "sessions": [
         {
-          "start": "10:00",
-          "end": "18:30"
-        }
-      ]
-    },
-    {
-      "symbol": "FRA40",
-      "group": "index",
-      "magic": 990012,
-      "sessions": [
-        {
-          "start": "10:00",
-          "end": "18:30"
-        }
-      ]
-    },
-    {
-      "symbol": "UK100",
-      "group": "index",
-      "magic": 990013,
-      "sessions": [
-        {
-          "start": "10:00",
-          "end": "18:30"
-        }
-      ]
-    },
-    {
-      "symbol": "NAS100",
-      "group": "index",
-      "magic": 990014
-    },
-    {
-      "symbol": "US30",
-      "group": "index",
-      "magic": 990015
-    },
-    {
-      "symbol": "US500",
-      "group": "index",
-      "magic": 990016
-    },
-    {
-      "symbol": "HK50",
-      "group": "index",
-      "magic": 990017,
-      "sessions": [
-        {
-          "start": "04:30",
-          "end": "11:00"
-        }
-      ]
-    },
-    {
-      "symbol": "HSTECH",
-      "group": "index",
-      "magic": 990018,
-      "sessions": [
-        {
-          "start": "04:30",
-          "end": "11:00"
+          "start": "03:15",
+          "end": "22:55"
         }
       ]
     },
     {
       "symbol": "JPN225",
       "group": "index",
-      "magic": 990019,
+      "magic": 990106,
       "sessions": [
         {
-          "start": "03:00",
-          "end": "09:00"
-        },
-        {
-          "start": "15:30",
-          "end": "22:00"
+          "start": "01:00",
+          "end": "23:55"
         }
       ]
     },
     {
-      "symbol": "AUS200",
+      "symbol": "NAS100",
       "group": "index",
-      "magic": 990020,
+      "magic": 990014,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "SPA35",
+      "group": "index",
+      "magic": 990116,
+      "sessions": [
+        {
+          "start": "09:00",
+          "end": "22:55"
+        }
+      ]
+    },
+    {
+      "symbol": "UK100",
+      "group": "index",
+      "magic": 990103,
       "sessions": [
         {
           "start": "03:00",
-          "end": "09:00"
+          "end": "22:55"
+        }
+      ]
+    },
+    {
+      "symbol": "US2000",
+      "group": "index",
+      "magic": 990115,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "US30",
+      "group": "index",
+      "magic": 990120,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "US500",
+      "group": "index",
+      "magic": 990016,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "COFFEE",
+      "group": "commodity",
+      "magic": 990104,
+      "sessions": [
+        {
+          "start": "11:15",
+          "end": "20:25"
+        }
+      ]
+    },
+    {
+      "symbol": "COPPER",
+      "group": "commodity",
+      "magic": 990107,
+      "sessions": [
+        {
+          "start": "01:01",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "SpotBrent",
+      "group": "commodity",
+      "magic": 990022,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
         }
       ]
     },
     {
       "symbol": "XAUUSD",
       "group": "commodity",
-      "magic": 990021
-    },
-    {
-      "symbol": "SpotBrent",
-      "group": "commodity",
-      "magic": 990022
-    },
-    {
-      "symbol": "NatGas",
-      "group": "commodity",
-      "magic": 990023,
+      "magic": 990021,
       "sessions": [
         {
-          "start": "15:00",
-          "end": "23:00"
+          "start": "01:01",
+          "end": "23:55"
         }
       ]
-    },
-    {
-      "symbol": "BTCUSD",
-      "group": "crypto",
-      "magic": 990031
-    },
-    {
-      "symbol": "ETHUSD",
-      "group": "crypto",
-      "magic": 990032
     }
   ],
   "optimizer": {
@@ -411,20 +534,82 @@
       "aroon_flip"
     ],
     "strategy_timeframes": {
-      "micro_rev": ["M5", "M10"],
-      "burst": ["M5", "M10"],
-      "flow_rev": ["M5", "M15", "M30"],
-      "dual_t3": ["M5", "M10", "M15", "M30", "H1"],
-      "mtf_pullback": ["M5", "M15", "M30", "H1"],
-      "t3_stoch": ["M5", "M15", "M30", "H1"],
-      "t3_flip": ["M15", "M30", "H1"],
-      "st_trend": ["M15", "M30", "H1"],
-      "macd_flip": ["M5", "M15", "M30", "H1"],
-      "wavetrend_flip": ["M5", "M15", "M30", "H1"],
-      "stoch_flip": ["M5", "M15", "M30", "H1"],
-      "parabolic_flip": ["M15", "M30", "H1"],
-      "trix_flip": ["M15", "M30", "H1"],
-      "aroon_flip": ["M5", "M15", "M30", "H1"]
+      "micro_rev": [
+        "M5",
+        "M10"
+      ],
+      "burst": [
+        "M5",
+        "M10"
+      ],
+      "flow_rev": [
+        "M5",
+        "M15",
+        "M30"
+      ],
+      "dual_t3": [
+        "M5",
+        "M10",
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "mtf_pullback": [
+        "M5",
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "t3_stoch": [
+        "M5",
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "t3_flip": [
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "st_trend": [
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "macd_flip": [
+        "M5",
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "wavetrend_flip": [
+        "M5",
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "stoch_flip": [
+        "M5",
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "parabolic_flip": [
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "trix_flip": [
+        "M15",
+        "M30",
+        "H1"
+      ],
+      "aroon_flip": [
+        "M5",
+        "M15",
+        "M30",
+        "H1"
+      ]
     },
     "strategy_grids": {
       "t3_stoch": {
