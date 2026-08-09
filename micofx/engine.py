@@ -1687,11 +1687,13 @@ class Engine:
         # or any earlier bar - the live-quote min_stop clamp below must never
         # be allowed to put it back on the losing side. That clamp exists to
         # respect the broker's distance rule, not to hand back protection the
-        # trade has already earned. There is no separate breakeven step that
-        # sets this: once trail_start_atr exceeds trail_step_atr the trail
-        # crosses entry by itself, which is the same guarantee without the
-        # "snap exactly to entry" move that turns ordinary noise into a
-        # scratched winner.
+        # trade has already earned. There is no separate breakeven step: the
+        # trail target is ``ref - trail_step_atr * atr``, so it is above entry
+        # exactly when profit_dist exceeds ``trail_step_atr * atr`` - true
+        # regardless of trail_start_atr, which only decides how early the
+        # trail starts tightening the stop below entry. A config with
+        # trail_start_atr <= trail_step_atr is legal and reaches breakeven at
+        # the same point; see SymbolConfig's note.
         breakeven_locked = current_sl != 0 and (current_sl >= entry if is_buy else current_sl <= entry)
 
         if cfg.trail_start_atr > 0 and profit_dist >= atr * cfg.trail_start_atr:

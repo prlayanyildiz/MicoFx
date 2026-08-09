@@ -15,7 +15,7 @@ At the start of a task, detect which tree is the workspace root and enable only 
 
 Read this before touching anything that closes a position.
 
-A trade leaves **only through its stop**:
+The trade's **own** exit logic is the stop and nothing else:
 
 1. **Hard stop.** `max(sl_atr_mult * ATR, broker min_stop)`, attached to the
    entry order and never lifted. It is the only protection that survives the
@@ -24,8 +24,41 @@ A trade leaves **only through its stop**:
    follows `trail_step_atr * ATR` behind the **closed bar's** price. Ratchet
    only: never widens, never lands worse than the original hard stop.
 
-Plus three flattens that are calendar/risk limits, not opinions about the
-trade: session end, day end, daily-loss halt.
+**But three flattens close positions over the top of that, and they do fire on
+winners.** Say so plainly — "the trail is the only way out" is true of the
+trade's logic, not of the system:
+
+| Flatten | Source | Currently |
+|---|---|---|
+| Session end | `cfg.flat_before_close_min` | **5 min, on every symbol** |
+| Day end | `system.day_end_flatten_min` | **5 min** |
+| Daily loss halt | `system.daily_loss_flatten` | on |
+| Weekend | `sessions.weekend_closed` | on (crypto exempt) |
+
+With near-24h session windows the first two mean **no position survives the
+local day**, so an H1 trend follower cannot hold a multi-day move. That is an
+account-risk / overnight-gap decision, not a bug — but it is a real limit on
+"let trends run" and must not be described away.
+
+### Breakeven — state it exactly
+
+The trail target is `close - trail_step_atr * ATR`, so it is above entry
+**exactly when open profit exceeds `trail_step_atr * ATR`**. Unconditional;
+`trail_start_atr` does not enter into it.
+
+`trail_start_atr <= trail_step_atr` is therefore **legal and often better**,
+not a misconfiguration. It only means the trail starts tightening the stop
+while it is still below entry, cutting risk earlier. Measured on a
+ramp-then-collapse replay (`tests/test_trail_breakeven_invariant.py`):
+
+| pair | +1.0 ATR | +1.5 ATR | +2.0 ATR | +3.0 ATR |
+|---|---|---|---|---|
+| 0.5 / 1.6 (`start < step`) | −0.60R | −0.10R | +0.40R | +1.40R |
+| 2.0 / 1.6 (`start > step`) | −1.00R | −1.00R | +0.40R | +1.40R |
+
+Identical past breakeven, strictly better before it. **Do not add a grid rule,
+apply validation or UI check forbidding `start <= step`** — an earlier, looser
+wording of this section caused exactly that proposal.
 
 **Deliberately removed. Do not reintroduce, and do not accept a config,
 grid axis or UI field that reimplements one:**
@@ -36,7 +69,7 @@ grid axis or UI field that reimplements one:**
 | `partial_tp_r` / `partial2_tp_r` + fractions | Scale-outs truncate the same tail for the same reason, and split one trade's R across rungs. |
 | `max_bars_in_trade` (time stop) | Closes a position because the clock ran out — exactly the trends worth holding. |
 | `stale_exit_ratio` | Same, for losers; the hard stop already bounds them. |
-| `breakeven_atr` | A separate "snap to exact entry" step scratches winners on ordinary noise. With `trail_start_atr > trail_step_atr` the trail crosses entry by itself. |
+| `breakeven_atr` | A separate "snap to exact entry" step scratches winners on ordinary noise. The trail crosses entry on its own — see the exact rule above. |
 
 Three numbers per symbol carry the whole model — `sl_atr_mult`,
 `trail_start_atr`, `trail_step_atr` — and they are what the optimizer
@@ -507,7 +540,7 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 
 ### Variant `ai` → `D:\MicoAi`
 Experimental trading richness — **do not copy into FX unless asked**:
-- `orb_retest`, `trail_mode` (atr|structure|hybrid) + `trail_lookback`, swing H/L, `stale_exit_ratio`
+- `orb_retest`, `trail_mode` (atr|structure|hybrid) + `trail_lookback`, swing H/L. (`stale_exit_ratio` used to be listed here too; it is removed from FX entirely — see §0 — so do not port it back.)
 - Backtest score with trade-R consistency / DD penalties (diverges from FX formula)
 - Supervisor `hour_risk_scales`, live PF edge-decay halving risk
 - `autostart_mt5` / wait / terminal process helpers / watchdog scripts

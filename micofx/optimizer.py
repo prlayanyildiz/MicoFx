@@ -1064,8 +1064,8 @@ class Optimizer:
             # A live position was opened, sized and its trail managed under the
             # CURRENT config's ATR assumptions - checked regardless of whether
             # this is a family swap or a same-family "refine", since engine.py's
-            # manage_positions/_update_stop/_take_partial re-read cfg live every
-            # cycle, not a snapshot taken at entry.
+            # manage_positions/_update_stop re-read cfg live every cycle, not a
+            # snapshot taken at entry.
             open_here = [p for p in self.client.positions() if p["magic"] == cfg.magic]
             if not self.client.connected:
                 # positions() itself can flip this False mid-call (same class
@@ -1109,10 +1109,10 @@ class Optimizer:
                                      f"(parametre iyilestirmesi degil, aile degisikligi)"}
                 # Same family/timeframe: entry-signal params (t3_length, adx_min,
                 # etc.) are safe to land immediately - they only shape the NEXT
-                # entry. Exit/risk params (stop, trail, partial ladder, time
-                # stop) are held back so the open position keeps trading under
-                # the numbers it was actually opened and sized against; they
-                # take effect once the position is flat.
+                # entry. Exit/risk params (the hard stop and the trail) are
+                # held back so the open position keeps trading under the numbers
+                # it was actually opened and sized against; they take effect
+                # once the position is flat.
                 held_back = [k for k in patch if k in EXIT_RISK_FIELDS]
                 if held_back:
                     pending = {k: patch[k] for k in held_back}

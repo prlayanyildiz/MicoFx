@@ -566,7 +566,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         ))
         # optimizer.apply() holds back exit/risk fields while a position is
         # open (see EXIT_RISK_FIELDS there) because manage_positions()/
-        # _update_stop()/_take_partial() re-read cfg live every cycle, not a
+        # _update_stop() re-read cfg live every cycle, not a
         # snapshot from entry - this endpoint is the other door to those same
         # fields and had no equivalent guard, so a manual edit (or a script
         # hitting the API directly) could change an open position's stop/

@@ -15,8 +15,8 @@ speaks:
   * **entry fills** - the requested price is the tick the order was built from
     and the filled price comes back on the order result, so the comparison is
     exact and is recorded at the moment of the fill;
-  * **our own closes** - same thing on the way out (time stop, session flatten,
-    partial rung, day-end flatten);
+  * **our own closes** - same thing on the way out (session flatten, day-end
+    flatten, daily-loss flatten);
   * **broker-side stop/target fills** - the expected price is the SL or TP that
     was on the position the last time the engine saw it (so a trailed stop is
     compared against where it actually sat, not against where it started), and

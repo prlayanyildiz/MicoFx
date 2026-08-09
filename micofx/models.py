@@ -227,9 +227,9 @@ class SymbolConfig:
     htf_factor: int = 6              # base timeframe multiple; 0/1 disables
     htf_mode: str = "t3"             # "t3" | "off"
 
-    # ---- ATR risk model: hard stop, then trail. Nothing else closes a trade. ----
+    # ---- ATR risk model: hard stop, then trail. ----
     #
-    # There is exactly one exit regime and it has two parts:
+    # The trade's own exit logic has exactly two parts:
     #
     #   1. a hard stop at ``sl_atr_mult`` x ATR, sent to the broker with the
     #      entry and never removed - it is what is standing there if this
@@ -238,13 +238,30 @@ class SymbolConfig:
     #      ``trail_step_atr`` x ATR behind the best closed price seen since
     #      entry, ratcheting forward only.
     #
+    # Separately, three flattens can close a position over the top of that:
+    # session end (``flat_before_close_min``), day end
+    # (``system.day_end_flatten_min``) and the daily-loss halt. They are
+    # calendar and account-risk limits, not judgements about the trade, and
+    # they do fire on winners - "the trail is the only way out" is true of the
+    # trade's own logic, not of the whole system.
+    #
     # Deliberately absent: take-profit, scale-out ladders, breakeven jumps,
     # time stops and stale-trade exits. Every one of them caps or truncates a
-    # winner, which is the opposite of what a trailing system is for - the
-    # trail decides when a move is over, nothing else gets a vote. Breakeven
-    # in particular is not a separate mechanism here: once trail_start exceeds
-    # trail_step the trail crosses entry on its own, without the "snap exactly
-    # to entry" step that turns ordinary noise into a scratched winner.
+    # winner, which is the opposite of what a trailing system is for.
+    #
+    # BREAKEVEN, precisely - the earlier wording of this comment was loose
+    # enough to invent a bug out of. The trail sits at
+    # ``close - trail_step_atr * ATR``, so it is above entry exactly when open
+    # profit exceeds ``trail_step_atr * ATR``. That is unconditional and has
+    # nothing to do with ``trail_start_atr``.
+    #
+    # So ``trail_start_atr <= trail_step_atr`` is LEGAL, common, and often the
+    # better setting - it only means the trail begins tightening the stop while
+    # it is still below entry, cutting risk earlier instead of waiting. On a
+    # ramp-then-collapse replay, NAS100's live 0.5/1.6 pair gives back 0.10R
+    # where a "start > step" 2.0/1.6 pair gives back the full 1.00R, and the
+    # two are identical once past breakeven. Do NOT add a grid rule or apply
+    # validation forbidding it; see test_trail_breakeven_invariant.py.
     atr_period: int = 14
     sl_atr_mult: float = 1.2
     trail_start_atr: float = 0.8

@@ -1158,11 +1158,10 @@ def _st_trend(cache: IndicatorCache, p: Params) -> Signals:
     is free to keep it off). It is a single scalar threshold on trend strength,
     not a second signal - it can only veto a flip, never create one.
 
-    Exits are the shared ATR mechanics. This family is meant to be searched with
-    ``tp_atr_mult = 0`` (no fixed target) and the partial ladder off, so a hard
-    ATR stop opens the trade and the ATR trail is the only thing that closes a
-    winner. That combination is not special-cased here - it is an exit-mode any
-    family or symbol can select - but it is the exit this entry was built for.
+    Exits are the shared ATR mechanics, and there is only one set of them: a
+    hard ATR stop opens the trade and the ATR trail is the only thing that
+    closes a winner. Nothing here is special-cased - every family gets that
+    same exit - but it is the exit this entry was built for.
     """
     close = cache.close
     size = close.size
@@ -1239,10 +1238,10 @@ def _t3_flip(cache: IndicatorCache, p: Params) -> Signals:
     can only veto a flip, never create one. Whether it is worth its place is
     decided by the walk-forward per symbol, not assumed here.
 
-    Exits are the shared ATR mechanics. This entry is built to be searched with
-    ``tp_atr_mult = 0`` - a hard ATR stop at entry, no fixed target, the ATR
-    trail as the only way out of a winner - because a direction-change entry has
-    no level to aim at; it either keeps curving or it flips back.
+    Exits are the shared ATR mechanics: a hard ATR stop at entry and the ATR
+    trail as the only way out of a winner. That suits a direction-change entry
+    particularly well - it has no level to aim at; it either keeps curving or
+    it flips back.
     """
     close = cache.close
     size = close.size

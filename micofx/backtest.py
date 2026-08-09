@@ -381,8 +381,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 # Mirrors engine._update_stop's breakeven_locked guard: once the
                 # trail has ratcheted the stop to or past entry, the min_stop
                 # clamp below must never put it back on the losing side. There
-                # is no separate breakeven step - the trail reaches entry by
-                # itself once trail_start_atr exceeds trail_step_atr.
+                # is no separate breakeven step - the trail is above entry
+                # once ``gain`` exceeds ``trail_step_atr * a``, whatever
+                # trail_start_atr is.
                 breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
                 if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
                     trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
