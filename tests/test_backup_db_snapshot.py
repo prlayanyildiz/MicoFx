@@ -172,3 +172,86 @@ def test_no_secondary_configured_is_the_plain_single_destination_path(tmp_path, 
 
     assert backup.main() == 0
     assert len(list(dest.glob("MicoFX_*.zip"))) == 1
+
+
+# ------------------------------------------------ on/off switch + bad paths
+
+class _FakeStore3(_FakeStore):
+    def __init__(self, dest, enabled=True, second=""):
+        super().__init__(dest)
+        self.system.backup_enabled = enabled
+        self.system.backup_dir_secondary = str(second) if second else ""
+        self.system.backup_keep = 5
+
+
+def test_disabled_backup_writes_nothing_and_still_exits_zero(tmp_path, monkeypatch):
+    """Off is a deliberate state, not a failure.
+
+    The Windows task keeps firing nightly either way. Returning non-zero here
+    would leave a permanently red scheduled task, which is exactly how a real
+    failure later gets ignored.
+    """
+    root, db, con = _project(tmp_path)
+    con.close()
+    dest = tmp_path / "dest"
+    monkeypatch.setattr(backup, "ROOT", root)
+    monkeypatch.setattr(backup, "Store", lambda: _FakeStore3(dest, enabled=False))
+
+    assert backup.main() == 0
+    assert not dest.exists() or not list(dest.glob("MicoFX_*.zip"))
+
+
+def test_enabled_backup_still_writes(tmp_path, monkeypatch):
+    """Guard against the switch defaulting to off by accident."""
+    root, db, con = _project(tmp_path)
+    con.close()
+    dest = tmp_path / "dest"
+    monkeypatch.setattr(backup, "ROOT", root)
+    monkeypatch.setattr(backup, "Store", lambda: _FakeStore3(dest, enabled=True))
+
+    assert backup.main() == 0
+    assert len(list(dest.glob("MicoFX_*.zip"))) == 1
+
+
+def test_missing_drive_reports_instead_of_crashing(tmp_path, monkeypatch, capsys):
+    """A destination that is not there must not raise out of the task.
+
+    Unplugged USB stick, a D: that only exists on the developer's machine, a
+    disconnected network drive - all reached mkdir and threw FileNotFoundError
+    straight into a console nobody watches.
+    """
+    root, db, con = _project(tmp_path)
+    con.close()
+    monkeypatch.setattr(backup, "ROOT", root)
+    monkeypatch.setattr(backup, "Store",
+                        lambda: _FakeStore3(r"Z:\MicoFX_Yedek_yok"))
+
+    assert backup.main() == 1        # a real failure, unlike "switched off"
+    out = capsys.readouterr().out
+    assert "yedek konumu kullanilamiyor" in out
+    assert "kapatin" in out          # tells the operator both ways out
+
+
+def test_shipped_defaults_match_the_dataclass(tmp_path):
+    """defaults.json and SystemConfig must not drift apart.
+
+    A fresh install seeds from defaults.json while any field missing there
+    falls back to the dataclass - so a value set in only one of the two makes
+    "reset to defaults" land somewhere neither of them describes.
+    """
+    from micofx.models import SystemConfig
+    from micofx.paths import load_defaults
+
+    shipped = load_defaults()["system"]
+    fallback = SystemConfig()
+    for key in ("backup_enabled", "backup_dir", "backup_dir_secondary",
+                "backup_keep", "backup_dir_allow_unc"):
+        assert key in shipped, f"{key} defaults.json'da yok"
+        assert shipped[key] == getattr(fallback, key), (
+            f"{key}: defaults.json={shipped[key]!r} != SystemConfig={getattr(fallback, key)!r}")
+
+
+def test_shipped_backup_dir_does_not_assume_a_second_drive():
+    """The default destination must exist on any Windows box, not just this one."""
+    from micofx.paths import load_defaults
+    assert load_defaults()["system"]["backup_dir"].upper().startswith("C:")

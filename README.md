@@ -75,9 +75,14 @@ Sistem sekmesinden ayarlanir:
 
 | Ayar | Ne |
 |---|---|
-| `backup_dir` | Birincil hedef |
+| `backup_enabled` | Ana anahtar. Kapatilirsa gece gorevi calisir ama hicbir sey yazmaz |
+| `backup_dir` | Birincil hedef. Varsayilan `C:\MicoFX_Yedek` - her makinede var olan bir yol |
 | `backup_dir_secondary` | Ikincil hedef; bos birakilirsa kapali. Ayni zip buraya da kopyalanir |
 | `backup_keep` | Her iki hedefte tutulacak en yeni yedek sayisi |
+
+Yedek konumu bu makinede olmayan bir surucuyu gosteriyorsa (D: yok, USB
+takili degil, ag surucusu kopuk) yedek alinmaz ve gorev **okunabilir bir hata**
+verir - once yolu duzeltin, ya da otomatik yedegi kapatin.
 
 **Ikinci hedefi mutlaka farkli bir FIZIKSEL diske ya da bir bulut klasorune
 verin.** `C:` ve `D:` cogu makinede tek bir SSD'nin iki bolumudur - surucu
@@ -85,6 +90,12 @@ harfleri yedeklilik gibi gorunur ama degildir, disk olurse ikisi de gider.
 Bu proje icin onemi ekstra buyuk: `data/micofx.db` Git'e girmez, yani her
 sembol ayari, her optimizasyon sonucu ve AI denetleyicinin ogrendigi her sey
 sadece o dosyada durur. GitHub kodu tutar, bunlarin hicbirini tutmaz.
+
+Gece gorevi **Interactive** olarak calisir: bilgisayar kilit ekranindayken
+sorun yok, ama oturumu tamamen kapattiysaniz o gece yedek alinmaz. Isterseniz
+Gorev Zamanlayici > "MicoFX Aksam Yedegi" > Ozellikler > **"Kullanici oturum
+acmis olsun ya da olmasin calistir"** secebilirsiniz; bu Windows'a sifrenizi
+kaydettirir, o yuzden karar sizin.
 
 ## Daha fazla
 

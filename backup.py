@@ -75,7 +75,10 @@ def _prune(folder: Path, keep: int) -> None:
     existing = sorted(folder.glob("MicoFX_*.zip"),
                       key=lambda p: p.stat().st_mtime, reverse=True)
     for old in existing[keep:]:
-        print(f"Eski yedek siliniyor: {folder.name}/{old.name}")
+        # Full path, not folder.name: both destinations are usually called
+        # "MicoFX_Yedek", so the short form made the one line that says
+        # something was DELETED unable to say from where.
+        print(f"Eski yedek siliniyor: {old}")
         try:
             old.unlink()
         except OSError as exc:
@@ -90,11 +93,19 @@ def main() -> int:
         # readable line in the task history, not a traceback.
         print(f"HATA: {exc}")
         return 1
+    enabled = bool(getattr(store.system, "backup_enabled", True))
     raw_dir = str(store.system.backup_dir)
     raw_second = str(getattr(store.system, "backup_dir_secondary", "") or "").strip()
     allow_unc = bool(store.system.backup_dir_allow_unc)
     keep = max(1, int(store.system.backup_keep))
     store.close()
+
+    if not enabled:
+        # Deliberately off, so exit 0: the Windows task still fires nightly and
+        # a non-zero result here would show up as a failing scheduled task
+        # forever, which is exactly how a real failure later gets ignored.
+        print("Otomatik yedekleme kapali (Sistem > backup_enabled). Yedek alinmadi.")
+        return 0
 
     # PATCH /api/system already refuses to WRITE a UNC backup_dir without
     # this flag (see web/app.py) - this is the read side of that same gate.
@@ -119,8 +130,22 @@ def main() -> int:
               f"backup_dir_allow_unc kapali - ikincil kopya atlandi.")
         raw_second = ""
 
+    # A drive letter that is not mounted (D: on a machine that has none, a USB
+    # stick left unplugged, a disconnected network drive) used to raise
+    # FileNotFoundError straight out of mkdir. Under the scheduled task that is
+    # a bare traceback in a window nobody sees, so the operator learns their
+    # backups stopped whenever they next need one.
     dest_dir = Path(raw_dir)
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"HATA: yedek konumu kullanilamiyor ({raw_dir}): {exc}\n"
+              f"Surucu takili degil veya yol yanlis olabilir. Web panelinden "
+              f"Sistem > 'Yedek konumu' alanini bu makinede gercekten var olan "
+              f"bir klasore ayarlayin (orn. C:\\MicoFX_Yedek), ya da otomatik "
+              f"yedeklemeyi kapatin.")
+        return 1
+
     stamp = time.strftime("%Y-%m-%d_%H%M")
     zip_path = dest_dir / f"MicoFX_{stamp}.zip"
 

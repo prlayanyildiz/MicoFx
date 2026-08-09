@@ -23,7 +23,12 @@
     "auto_reopt_weekday": 5,
     "mt5_terminal_path": "C:\\Program Files\\Pepperstone MetaTrader 5\\terminal64.exe",
     "autostart_mt5": false,
-    "autostart_mt5_wait_sec": 90
+    "autostart_mt5_wait_sec": 90,
+    "backup_enabled": true,
+    "backup_dir": "C:\\MicoFX_Yedek",
+    "backup_dir_secondary": "",
+    "backup_keep": 5,
+    "backup_dir_allow_unc": false
   },
   "group_presets": {
     "forex": {

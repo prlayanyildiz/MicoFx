@@ -527,6 +527,17 @@ class SystemConfig:
     # Where the scheduled evening backup (backup.py, run via Windows Task
     # Scheduler) drops its timestamped zip. Read at run time, not baked into
     # the script, so changing it here is the only place that needs editing.
+    # Master switch for the nightly backup. The Windows task still fires; it
+    # is ``backup.py`` that reads this and exits without writing, which keeps
+    # turning backups off a one-click change in the panel instead of a Task
+    # Scheduler edit that needs a UAC prompt and cannot be reversed from the
+    # UI. Off is a deliberate state, not a failure: the task exits 0.
+    backup_enabled: bool = True
+    # Deliberately a path that exists on every Windows machine. A drive letter
+    # that only exists here (D:, or a USB stick that is not plugged in) turns
+    # the nightly backup into a nightly crash on any other install, so the
+    # shipped default must never assume one - the operator picks the real
+    # destination in the panel.
     backup_dir: str = "C:\\MicoFX_Yedek"
     # A second, independent destination, written in the same run. Empty
     # disables it.
@@ -545,7 +556,7 @@ class SystemConfig:
     # happened, and a backup task that exits non-zero because the cloud folder
     # was briefly locked would just train the operator to ignore it.
     backup_dir_secondary: str = ""
-    backup_keep: int = 3              # how many most-recent backups to retain
+    backup_keep: int = 5              # how many most-recent backups to retain, per destination
     # A UNC destination sends the whole project (code + the settings DB) over
     # the network to whatever share is named - fine for an intentional NAS
     # backup, but a live exfiltration path if something with API access ever
