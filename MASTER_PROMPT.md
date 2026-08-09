@@ -36,9 +36,17 @@ trade's logic, not of the system:
 | Weekend | `sessions.weekend_closed` | on (crypto exempt) |
 
 With near-24h session windows the first two mean **no position survives the
-local day**, so an H1 trend follower cannot hold a multi-day move. That is an
-account-risk / overnight-gap decision, not a bug — but it is a real limit on
-"let trends run" and must not be described away.
+local day**, so an H1 trend follower cannot hold a multi-day move.
+
+**This is a settled decision, confirmed by the owner on 2026-08-09: keep it.**
+The reasoning is overnight gap risk on a small account — an index or commodity
+gap jumps straight over the hard stop, which is the one protection the model
+leans on entirely. Every current optimizer result was also measured under this
+constraint, so removing it would invalidate the whole portfolio at once.
+
+Do not file this as a bug and do not "fix" it. If it is ever revisited it is a
+deliberate change that requires a full re-optimization, and the daily-loss
+flatten stays regardless (that one is account risk, not a view on the trade).
 
 ### Breakeven — state it exactly
 
