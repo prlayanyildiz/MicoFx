@@ -63,6 +63,21 @@ function toast(message, kind = "") {
   setTimeout(() => box.remove(), 4200);
 }
 
+// /api/symbols-bulk only reports "changed" in its happy path - a per-symbol
+// guard (open position blocking a strategy/TF/magic/exit-field change) skips
+// that symbol silently unless the caller also surfaces res.rejected. Shared
+// so every bulk action reports the same way instead of a success-only toast
+// hiding a partial failure.
+function toastBulkResult(res, verb) {
+  const rejected = res.rejected || [];
+  if (!rejected.length) {
+    toast(`${res.changed} sembol ${verb}`, "ok");
+    return;
+  }
+  toast(`${res.changed} sembol ${verb}, ${rejected.length} sembol atlandi `
+      + `(acik pozisyon var): ${rejected.join(", ")}`, "err");
+}
+
 function num(value, digits = 2) {
   const v = Number(value);
   if (!isFinite(v)) return "-";
@@ -1900,7 +1915,7 @@ function wire() {
         const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { enabled } } });
         SYMBOLS = res.symbols;
         cardsBuilt = false;
-        toast(`${res.changed} sembol ${enabled ? "acildi" : "kapatildi"}`, "ok");
+        toastBulkResult(res, enabled ? "acildi" : "kapatildi");
         refresh();
       } catch (e) { toast(e.message, "err"); }
     };
@@ -1927,7 +1942,7 @@ function wire() {
       });
       SYMBOLS = res2.symbols;
       cardsBuilt = false;
-      toast(`${res2.changed} sembol sabit lota cevrildi`, "ok");
+      toastBulkResult(res2, "sabit lota cevrildi");
       refresh();
     } catch (e) { toast(e.message, "err"); }
   };
@@ -1940,7 +1955,7 @@ function wire() {
         const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { lot_mode } } });
         SYMBOLS = res.symbols;
         cardsBuilt = false;
-        toast(`${res.changed} sembol lot modu: ${lot_mode === "fixed" ? "sabit" : "risk %"}`, "ok");
+        toastBulkResult(res, `lot modu ${lot_mode === "fixed" ? "sabit" : "risk %"} yapildi`);
         refresh();
       },
     );
@@ -1954,7 +1969,7 @@ function wire() {
       const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { max_positions: val } } });
       SYMBOLS = res.symbols;
       cardsBuilt = false;
-      toast(`${res.changed} sembolun maks pozisyonu ${val} yapildi`, "ok");
+      toastBulkResult(res, `maks pozisyon ${val} yapildi`);
       refresh();
     },
   );

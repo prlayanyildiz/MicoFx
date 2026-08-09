@@ -170,7 +170,30 @@ def _reject_non_finite_values(d: dict[str, Any], label: str = "") -> None:
             raise HTTPException(400, f"{name} gecersiz ({value!r})")
 
 
-def _validate_enum_fields(patch: dict[str, Any]) -> None:
+def _reject_non_finite_deep(value: Any, path: str = "") -> None:
+    """Recursive counterpart to ``_reject_non_finite_values``.
+
+    opt_params' numeric leaves (``strategy_grids``/``grid`` search axes) sit
+    two levels down - {strategy: {param: [values...]}} - so the flat,
+    top-level-only check used for symbol/system patches would walk right past
+    a NaN buried in one of those lists. Walks dicts and lists to every leaf
+    instead.
+    """
+    if isinstance(value, dict):
+        for key, sub in value.items():
+            _reject_non_finite_deep(sub, f"{path}.{key}" if path else str(key))
+        return
+    if isinstance(value, (list, tuple)):
+        for i, sub in enumerate(value):
+            _reject_non_finite_deep(sub, f"{path}[{i}]")
+        return
+    bad = ((isinstance(value, (int, float)) and not math.isfinite(value))
+          or (isinstance(value, str) and value.strip().lower() in _NON_FINITE_TOKENS))
+    if bad:
+        raise HTTPException(400, f"{path or 'deger'} gecersiz ({value!r})")
+
+
+def _validate_enum_fields(patch: dict[str, Any], label: str = "") -> None:
     for key, (allowed, empty_ok) in _ENUM_FIELDS.items():
         if key not in patch or patch[key] is None:
             continue
@@ -178,7 +201,8 @@ def _validate_enum_fields(patch: dict[str, Any]) -> None:
         if empty_ok and value == "":
             continue
         if value not in allowed:
-            raise HTTPException(400, f"{key} gecersiz ({value!r}) - izin verilenler: {', '.join(allowed)}")
+            name = f"{label}.{key}" if label else key
+            raise HTTPException(400, f"{name} gecersiz ({value!r}) - izin verilenler: {', '.join(allowed)}")
 
 
 def _reject_internal_fields(patch: dict[str, Any]) -> None:
@@ -365,6 +389,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _reject_non_finite_values(patch)
         if isinstance(patch.get("secondary_params"), dict):
             _reject_non_finite_values(patch["secondary_params"], "secondary_params")
+            # trail_mode is the one OPT_FIELD enum value the search can also
+            # write here - top-level _validate_enum_fields below never looks
+            # inside this nested dict, so a garbage trail_mode landed straight
+            # in cfg.secondary_params unchecked.
+            _validate_enum_fields(patch["secondary_params"], "secondary_params")
         _validate_enum_fields(patch)
         _validate_risk_bounds(patch)
         current = store.symbols.get(symbol)
@@ -581,6 +610,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _reject_non_finite_values(body.patch)
         if isinstance(body.patch.get("secondary_params"), dict):
             _reject_non_finite_values(body.patch["secondary_params"], "secondary_params")
+            _validate_enum_fields(body.patch["secondary_params"], "secondary_params")
         _validate_enum_fields(body.patch)
         _validate_risk_bounds(body.patch)
         targets = body.symbols or list(store.symbols)
@@ -823,9 +853,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/opt/params")
     def set_opt_params(body: dict[str, Any]) -> dict[str, Any]:
         # These parameters drive the walk-forward search that ultimately
-        # writes live trading params via apply() - same NaN/Infinity class
-        # of risk as the symbol-level fields, just never checked here at all.
-        _reject_non_finite_values(body)
+        # writes live trading params via apply() - same NaN/Infinity class of
+        # risk as the symbol-level fields. strategy_grids/grid nest their
+        # numeric axes inside {strategy: {param: [values...]}}, so this needs
+        # the recursive check, not the flat top-level-only one.
+        _reject_non_finite_deep(body)
         return {"ok": True, "params": store.save_opt_params(body)}
 
     @app.post("/api/opt/params/reset")
@@ -881,6 +913,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # optimizer.apply() writes straight into the same SymbolConfig via
         # store.update_symbol(), unvalidated field-by-field.
         _reject_non_finite_values(params)
+        _reject_non_finite_values({"score": score})
         enum_check = dict(params)
         if timeframe is not None:
             enum_check["timeframe"] = timeframe

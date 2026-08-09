@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from types import SimpleNamespace
 
 from micofx.engine import Engine, SymbolState
@@ -148,6 +149,80 @@ def test_secondary_unresolved_ticket_zero_candidates_does_not_report_success():
     assert "EURUSD" in eng._orphan_scan
     assert eng._orphan_scan["EURUSD"]["magic"] == 1
     assert store.settings["secondary_orphan_scan"] == eng._orphan_scan
+
+    # H1: self._positions is stale (still shows nothing new for this magic -
+    # that is exactly why the scan exists), so can_open()'s position-count
+    # check cannot be trusted to block a duplicate order on the next poll.
+    # The entry-time gate must refuse outright instead of calling
+    # open_market() again.
+    calls_before = client.open_market_calls
+    eng._try_entry(cfg, state, account={"balance": 1000.0})
+    assert client.open_market_calls == calls_before
+    assert "taramasi devam ediyor" in state.note
+    assert state.signal == "buy"  # still held, not consumed
+
+
+def test_orphan_scan_block_lifts_once_scan_resolves():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    state = _state()
+    eng._try_entry(cfg, state, account={"balance": 1000.0})
+    assert "EURUSD" in eng._orphan_scan
+
+    # The delayed ticket finally shows up and gets closed by the scan.
+    client.close_ok = {701}
+    eng._positions = [{"ticket": 701, "magic": 1}]
+    eng._scan_orphan_candidates()
+    assert "EURUSD" not in eng._orphan_scan
+
+    # Entry is unblocked again - open_market() gets called this time.
+    calls_before = client.open_market_calls
+    eng._try_entry(cfg, state, account={"balance": 1000.0})
+    assert client.open_market_calls == calls_before + 1
+
+
+def test_orphan_scan_abandons_after_stale_timeout_and_unblocks_entry():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0}}  # ancient -> stale
+
+    eng._scan_orphan_candidates()
+
+    assert "EURUSD" in eng._orphan_scan  # kept around for the grace window
+    assert eng._orphan_scan["EURUSD"]["abandoned"] is True
+
+    # Entry is unblocked once abandoned, even though the scan entry is still there.
+    state = _state()
+    calls_before = client.open_market_calls
+    eng._try_entry(cfg, state, account={"balance": 1000.0})
+    assert client.open_market_calls == calls_before + 1
+
+
+def test_orphan_scan_abandoned_entry_still_closes_a_late_ticket():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[
+        {"ticket": 801, "magic": 1},
+    ])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0,
+                                   "abandoned": True, "abandoned_at": time.time()}}
+    eng._positions = client.positions()
+    client.close_ok = {801}
+
+    eng._scan_orphan_candidates()
+
+    assert client.closed == [801]
+    assert "EURUSD" not in eng._orphan_scan
+
+
+def test_orphan_scan_fully_dropped_after_abandon_grace_expires():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0,
+                                   "abandoned": True, "abandoned_at": 0.0}}  # ancient
+
+    eng._scan_orphan_candidates()
+
+    assert "EURUSD" not in eng._orphan_scan
 
 
 def test_secondary_single_candidate_found_via_retry_is_tagged_not_closed():
@@ -306,6 +381,8 @@ def test_symbol_daily_halt_includes_commission_in_floating_side():
     eng.risk = SimpleNamespace(daily=SimpleNamespace(start_balance=1000.0, day_key="2026-01-01"))
     eng._day_cache = {"per_symbol": []}
     eng._day_cache_at = 1e18  # force day_stats() to serve this cache as-is
+    eng._symbol_halted = {}
+    eng.store = SimpleNamespace(set_setting=lambda k, v: None)
     # Floating profit alone (before commission) sits just above the 1% cap;
     # 2 lots * 50/lot round-turn commission is what should push it over.
     eng._positions = [{"ticket": 1, "magic": 1, "volume": 2.0, "profit": -9.0, "swap": 0.0}]
@@ -323,7 +400,71 @@ def test_symbol_daily_halt_stays_clear_without_commission_push():
     eng.risk = SimpleNamespace(daily=SimpleNamespace(start_balance=1000.0, day_key="2026-01-01"))
     eng._day_cache = {"per_symbol": []}
     eng._day_cache_at = 1e18
+    eng._symbol_halted = {}
+    eng.store = SimpleNamespace(set_setting=lambda k, v: None)
     # Tiny position: even with commission included, nowhere near the 1% cap.
     eng._positions = [{"ticket": 1, "magic": 1, "volume": 0.01, "profit": -1.0, "swap": 0.0}]
 
     assert eng._symbol_daily_halt(cfg) == ""
+
+
+def test_symbol_daily_halt_is_sticky_across_floating_bounce():
+    # M1: once tripped, must not flip back off just because floating P/L on
+    # this symbol recovers mid-cycle - only the day rollover clears it. This
+    # is what manage_positions()'s flatten trigger now relies on (it just
+    # calls _symbol_daily_halt(cfg) again - the stickiness lives here).
+    cfg = SymbolConfig(symbol="EURUSD", magic=1, symbol_daily_loss_pct=1.0,
+                       commission_per_lot=0.0)
+    eng = object.__new__(Engine)
+    eng.risk = SimpleNamespace(daily=SimpleNamespace(start_balance=1000.0, day_key="2026-01-01"))
+    eng._day_cache = {"per_symbol": []}
+    eng._day_cache_at = 1e18
+    eng._symbol_halted = {}
+    settings = {}
+    eng.store = SimpleNamespace(set_setting=lambda k, v: settings.__setitem__(k, v))
+    eng._positions = [{"ticket": 1, "magic": 1, "volume": 1.0, "profit": -20.0, "swap": 0.0}]
+
+    first = eng._symbol_daily_halt(cfg)
+    assert first != ""
+    assert eng._symbol_halted["EURUSD"] == first
+    assert settings["symbol_daily_halted"] == eng._symbol_halted
+
+    # Floating recovers well above the -1% line.
+    eng._positions = [{"ticket": 1, "magic": 1, "volume": 1.0, "profit": 5.0, "swap": 0.0}]
+    second = eng._symbol_daily_halt(cfg)
+    assert second == first  # sticky, not recomputed
+
+
+def test_symbol_daily_halt_disabled_bypasses_existing_sticky_entry():
+    cfg = SymbolConfig(symbol="EURUSD", magic=1, symbol_daily_loss_pct=0.0)
+    eng = object.__new__(Engine)
+    eng._symbol_halted = {"EURUSD": "gunluk sembol zarar limiti (5.00%)"}
+    eng.store = SimpleNamespace(set_setting=lambda k, v: None)
+
+    assert eng._symbol_daily_halt(cfg) == ""
+
+
+def test_daily_rollover_clears_sticky_symbol_halts():
+    eng = object.__new__(Engine)
+    eng._symbol_halted = {"EURUSD": "gunluk sembol zarar limiti (5.00%)"}
+    settings = {}
+    eng.store = SimpleNamespace(set_setting=lambda k, v: settings.__setitem__(k, v))
+    eng.risk = SimpleNamespace(daily=SimpleNamespace(rollover=lambda now, bal: True))
+
+    eng._handle_daily_rollover(server_now=0.0, balance=1000.0)
+
+    assert eng._symbol_halted == {}
+    assert settings["symbol_daily_halted"] == {}
+
+
+def test_daily_rollover_leaves_sticky_symbol_halts_when_same_day():
+    eng = object.__new__(Engine)
+    eng._symbol_halted = {"EURUSD": "gunluk sembol zarar limiti (5.00%)"}
+    calls = []
+    eng.store = SimpleNamespace(set_setting=lambda k, v: calls.append((k, v)))
+    eng.risk = SimpleNamespace(daily=SimpleNamespace(rollover=lambda now, bal: False))
+
+    eng._handle_daily_rollover(server_now=0.0, balance=1000.0)
+
+    assert eng._symbol_halted == {"EURUSD": "gunluk sembol zarar limiti (5.00%)"}
+    assert calls == []

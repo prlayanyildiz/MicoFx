@@ -196,6 +196,14 @@ class Engine:
             str(k): v for k, v in (store.get_setting("secondary_orphan_scan") or {}).items()
             if isinstance(v, dict)
         }
+        # Sticky per-symbol daily-loss halt (see _symbol_daily_halt) - once a
+        # symbol trips its own cap, stays tripped (blocking both new entries
+        # and, via manage_positions(), keeps retrying the flatten) until the
+        # next day rollover, same persistence guarantee DailyGuard.loss_halted
+        # already has at the account level. Cleared in _cycle() alongside it.
+        self._symbol_halted: dict[str, str] = {
+            str(k): str(v) for k, v in (store.get_setting("symbol_daily_halted") or {}).items()
+        }
         self._reopt_at = float(store.get_setting("auto_reopt_at", 0.0) or 0.0)
 
     # ------------------------------------------------------------- lifecycle
@@ -317,7 +325,7 @@ class Engine:
             return
 
         server_now = self.client.server_now()
-        self.risk.daily.rollover(server_now, account.get("balance", 0.0))
+        self._handle_daily_rollover(server_now, account.get("balance", 0.0))
 
         self._positions = self.client.positions()
         if not self.client.connected:
@@ -841,6 +849,18 @@ class Engine:
 
     def _try_entry(self, base: SymbolConfig, state: SymbolState,
                    account: dict[str, Any]) -> None:
+        scan = self._orphan_scan.get(base.symbol)
+        if scan is not None and not scan.get("abandoned"):
+            # A prior secondary fill on this symbol/magic is still waiting on
+            # a delayed broker ticket - self._positions cannot be trusted to
+            # reflect it (that is exactly why the scan is still open), so
+            # can_open()'s position-count check below cannot be relied on to
+            # block a duplicate order here. Refuse ANY entry (not just
+            # secondary-sourced ones - a fresh primary trade could just as
+            # easily collide with a slot the still-invisible position already
+            # holds) until _scan_orphan_candidates() resolves or abandons it.
+            state.note = "ikincil ticket taramasi devam ediyor - giris beklemede"
+            return
         side = state.signal
         secondary = state.signal_source == "secondary"
         cfg = self._secondary_config(base) if secondary else base
@@ -1053,11 +1073,15 @@ class Engine:
         if unresolved_ticket:
             # Position is still open (couldn't be identified, or identified but
             # not closed) - unlike orphan_closed above this is NOT a clean
-            # failed-entry retry state. Leave signal/cooldown untouched:
-            # can_open()'s position-count check already blocks a duplicate
-            # entry on the next poll, and clearing the signal here would
-            # misreport this as a normal successful fill. _scan_orphan_candidates
-            # / manage_positions retry the close every cycle from here on.
+            # failed-entry retry state, so signal/cooldown are left untouched
+            # rather than misreported as a normal successful fill. The
+            # zero-candidate case also just wrote self._orphan_scan[cfg.symbol]
+            # above - the entry-time gate at the top of this function (not
+            # can_open()'s position-count check, which self._positions being
+            # stale here makes unreliable) is what actually stops the next
+            # poll from firing another order_send at this same symbol.
+            # _scan_orphan_candidates()/manage_positions() retry the close
+            # every cycle from here on.
             state.note = ("ikincil ticket cozulemedi - pozisyon acik kaldi, "
                           "otomatik tekrar denenecek")
             return
@@ -1134,10 +1158,19 @@ class Engine:
         entry time. Broker replication lag can mean ``positions()`` genuinely
         had not caught up yet - this keeps checking every cycle instead of
         writing the position off as untraceable after one failed diff.
+
+        New entries on the symbol are refused (see ``_try_entry``) for as
+        long as its scan entry exists and is not yet ``abandoned`` - a
+        genuinely lost fill would otherwise block that symbol from trading
+        forever, so past ``stale_after`` the block itself is lifted, but the
+        entry is kept around, abandoned, for one more short grace window: a
+        same-magic ticket that turns up that late is still closed on sight
+        instead of being left to run under the wrong strategy's exits.
         """
         if not self._orphan_scan:
             return
-        stale_after = 900.0  # generous - broker lag, not a retry budget
+        stale_after = 900.0    # generous - broker lag, not a retry budget
+        abandon_grace = 300.0  # extra watch time after the entry block lifts
         changed = False
         for symbol in list(self._orphan_scan):
             entry = self._orphan_scan[symbol]
@@ -1164,11 +1197,23 @@ class Engine:
                              "ERROR", symbol)
                 del self._orphan_scan[symbol]
                 changed = True
-            elif time.time() - float(entry.get("since", 0.0)) > stale_after:
-                LOG.emit("Gecikmis ikincil ticket taramasi zaman asimina ugradi - "
-                         "pozisyon hicbir zaman gorunmedi, birakiliyor.", "ERROR", symbol)
-                del self._orphan_scan[symbol]
+                continue
+            if entry.get("abandoned"):
+                if time.time() - float(entry.get("abandoned_at", 0.0)) > abandon_grace:
+                    LOG.emit("Gecikmis ikincil ticket taramasi (ek bekleme suresi de doldu) - "
+                             "pozisyon hicbir zaman gorunmedi, tarama tamamen birakiliyor, "
+                             "elle kontrol edin.", "ERROR", symbol)
+                    del self._orphan_scan[symbol]
+                    changed = True
+                continue
+            if time.time() - float(entry.get("since", 0.0)) > stale_after:
+                entry["abandoned"] = True
+                entry["abandoned_at"] = time.time()
                 changed = True
+                LOG.emit(f"Gecikmis ikincil ticket taramasi {stale_after:g}sn zaman asimina "
+                         f"ugradi - pozisyon hicbir zaman gorunmedi, {symbol} icin yeni giris "
+                         f"tekrar acildi, ancak gec beliren bir ticket'i kapatmak icin "
+                         f"{abandon_grace:g}sn daha izlenecek.", "ERROR", symbol)
         if changed:
             self._save_orphan_scan()
 
@@ -1669,13 +1714,17 @@ class Engine:
         most of the day's allowed loss while every other symbol keeps trading
         normally, right up until the whole account crosses the global line.
         Sourced from real MT5 deal history (``day_stats``) plus this symbol's
-        current floating P/L, not a persisted flag, so it is correct again
-        immediately after any restart without needing its own recovery
-        bookkeeping - the day resets when the broker day (and therefore the
-        cached stats) does.
+        current floating P/L - EXCEPT once tripped, which is sticky
+        (persisted, cleared only on day rollover - see ``_cycle()``) just like
+        DailyGuard.loss_halted. Without that, floating P/L recovering mid-cycle
+        (another position on the same symbol swinging back, a stray tick) made
+        the halt - and the flatten manage_positions() drives off it - flap
+        back off for that cycle even though the day's cap was already blown.
         """
         if cfg.symbol_daily_loss_pct <= 0:
             return ""
+        if cfg.symbol in self._symbol_halted:
+            return self._symbol_halted[cfg.symbol]
         guard = self.risk.daily
         if guard.start_balance <= 0:
             return ""
@@ -1703,8 +1752,22 @@ class Engine:
             return ""
         loss_pct = -(realised + floating) / guard.start_balance * 100.0
         if loss_pct >= cfg.symbol_daily_loss_pct:
-            return f"gunluk sembol zarar limiti ({loss_pct:.2f}%)"
+            reason = f"gunluk sembol zarar limiti ({loss_pct:.2f}%)"
+            self._symbol_halted[cfg.symbol] = reason
+            self._save_symbol_halted()
+            return reason
         return ""
+
+    def _save_symbol_halted(self) -> None:
+        self.store.set_setting("symbol_daily_halted", self._symbol_halted)
+
+    def _handle_daily_rollover(self, server_now: float, balance: float) -> None:
+        if self.risk.daily.rollover(server_now, balance):
+            # New broker day - every symbol-level sticky halt from yesterday
+            # is stale, same as DailyGuard.loss_halted resetting itself.
+            if self._symbol_halted:
+                self._symbol_halted = {}
+                self._save_symbol_halted()
 
     def day_stats(self, max_age: float = 5.0) -> dict[str, Any]:
         """Closed-trade totals for the current local (Windows) day, per symbol."""

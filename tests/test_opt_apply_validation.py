@@ -138,6 +138,47 @@ def test_opt_apply_rejects_invalid_strategy():
     assert optimizer.calls == []
 
 
+def test_opt_apply_rejects_nan_string_score():
+    tc, optimizer = _client()
+    res = tc.post("/api/opt/apply", json={
+        "symbol": "XAUUSD",
+        "params": {"sl_atr_mult": 1.5},
+        "score": "NaN",
+    })
+    assert res.status_code == 400
+    assert optimizer.calls == []
+
+
+def test_opt_apply_rejects_infinity_score():
+    tc, optimizer = _client()
+    res = tc.post("/api/opt/apply", json={
+        "symbol": "XAUUSD",
+        "params": {"sl_atr_mult": 1.5},
+        "score": "Infinity",
+    })
+    assert res.status_code == 400
+    assert optimizer.calls == []
+
+
+def test_opt_apply_run_id_path_score_also_validated():
+    tc, optimizer = _client()
+
+    class _StoreWithHistory(_FakeStore):
+        def opt_history(self, symbol, limit):
+            return [{"id": 9, "symbol": symbol, "params": {"sl_atr_mult": 1.5},
+                     "score": float("nan"), "timeframe": "M15", "strategy": "t3_stoch",
+                     "validated": True}]
+
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    store = _StoreWithHistory(symbols)
+    app = create_app(store, _FakeClient(), _FakeEngine(), optimizer)
+    tc2 = TestClient(app)
+
+    res = tc2.post("/api/opt/apply", json={"symbol": "XAUUSD", "run_id": 9})
+    assert res.status_code == 400
+    assert optimizer.calls == []
+
+
 def test_opt_apply_accepts_valid_params():
     tc, optimizer = _client()
     res = tc.post("/api/opt/apply", json={
