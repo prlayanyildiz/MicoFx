@@ -22,7 +22,7 @@ cd MicoFx
 3. MT5’te “Algoritmik alim satima izin ver” → `start.bat`
 
 Klasor zaten varsa: `cd $env:USERPROFILE\MicoFx` sonra `.\KUR.bat`.  
-Claude: `claude` (olmazsa `claude.cmd`). Detay: [BULUT_KURULUM.md](BULUT_KURULUM.md).
+Detay: [BULUT_KURULUM.md](BULUT_KURULUM.md).
 
 ## Bu surum: birlestirilmis / genisletilmis surum
 

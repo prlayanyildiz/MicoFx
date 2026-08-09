@@ -27,10 +27,11 @@ cd $env:USERPROFILE\MicoFx
 .\KUR.bat
 ```
 
-`KUR.bat` Python / Node / Claude Code yoksa kurar, kodu gunceller, paketleri kurar.
+`KUR.bat` Git/Python yoksa kurar, kodu gunceller, paketleri kurar.
+(Claude Code / Node **gerekmez** — bot icin yeterli.)
 Bitisinde masaustune kisayollar atar:
 **MicoFX Baslat**, **MicoFX Durdur**, **MicoFX Terminal**, **MicoFX Klasor**.
-Gelmezse klasorde `kisayol.bat`’e cift tikla (sadece kisayol yeniler).
+Gelmezse klasorde `kisayol.bat`’e cift tikla.
 
 ### 3) MT5 + baslat
 1. MT5’e gir  
@@ -48,17 +49,6 @@ git pull
 
 Gerekirse `stop.bat` → `start.bat`.  
 (Istersen yine `.\KUR.bat` — pull + paket kontrolu yapar.)
-
----
-
-## Claude Code (opsiyonel)
-
-```powershell
-cd $env:USERPROFILE\MicoFx
-claude
-```
-
-`claude` engellenirse: `claude.cmd`
 
 ---
 
