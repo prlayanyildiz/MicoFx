@@ -918,6 +918,7 @@ class Engine:
         # re-check below closes that direction too.
         before_tickets = {p["ticket"] for p in self._positions if p["magic"] == base.magic}
         orphan_closed = False
+        unresolved_ticket = False
         with self.entry_lock:
             live_cfg = self.store.symbols.get(base.symbol)
             if live_cfg is None or live_cfg.magic != base.magic:
@@ -955,26 +956,48 @@ class Engine:
                         after_tickets = {p["ticket"] for p in self._positions
                                         if p["magic"] == base.magic}
                         new_tickets = after_tickets - before_tickets
-                        if len(new_tickets) == 1:
-                            orphan = next(iter(new_tickets))
-                            if self.client.close_position(orphan, self.store.system.slippage_points,
-                                                          "MicoFX cozulemeyen ikincil ticket"):
-                                self._positions = self.client.positions()
-                                orphan_closed = True
-                                LOG.emit(f"Ikincil sinyal islemi acildi ama ticket'i "
-                                         f"cozulemedi - pozisyon #{orphan} guvenlik icin "
-                                         f"hemen kapatildi, sinyal tekrar denenecek.",
-                                         "ERROR", cfg.symbol)
-                            else:
-                                LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i cozulemedi "
-                                         f"VE #{orphan} kapatilamadi - YANLISLIKLA birincil "
-                                         f"cikis parametreleriyle yonetilecek, elle kontrol "
-                                         f"edin.", "ERROR", cfg.symbol)
-                        else:
+                        if not new_tickets:
+                            unresolved_ticket = True
                             LOG.emit("Ikincil sinyal islemi acildi ama pozisyon ticket'i "
-                                     "cozulemedi (belirsiz aday sayisi) - bu pozisyon "
+                                     "cozulemedi (yeni ticket bulunamadi) - bu pozisyon "
                                      "YANLISLIKLA birincil cikis parametreleriyle "
                                      "yonetilecek, elle kontrol edin.", "ERROR", cfg.symbol)
+                        else:
+                            # Every same-magic ticket that appeared since the fill is a
+                            # candidate - with more than one (a second signal firing on
+                            # this same lock, or a stale snapshot) we cannot tell which
+                            # one is ours, so the safe move is closing all of them rather
+                            # than guessing and leaving an untracked position running
+                            # under the wrong strategy's exits.
+                            closed: set[int] = set()
+                            for orphan in new_tickets:
+                                if self.client.close_position(
+                                        orphan, self.store.system.slippage_points,
+                                        "MicoFX cozulemeyen ikincil ticket"):
+                                    closed.add(orphan)
+                            if closed:
+                                self._positions = self.client.positions()
+                            if closed == new_tickets:
+                                orphan_closed = True
+                                LOG.emit(f"Ikincil sinyal islemi acildi ama ticket'i "
+                                         f"cozulemedi - pozisyon(lar) {sorted(closed)} "
+                                         f"guvenlik icin hemen kapatildi, sinyal tekrar "
+                                         f"denenecek.", "ERROR", cfg.symbol)
+                            else:
+                                unresolved_ticket = True
+                                remaining = sorted(new_tickets - closed)
+                                if closed:
+                                    LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
+                                             f"cozulemedi - {sorted(closed)} kapatildi ama "
+                                             f"{remaining} KAPATILAMADI - YANLISLIKLA "
+                                             f"birincil cikis parametreleriyle yonetilecek, "
+                                             f"elle kontrol edin.", "ERROR", cfg.symbol)
+                                else:
+                                    LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
+                                             f"cozulemedi VE {remaining} kapatilamadi - "
+                                             f"YANLISLIKLA birincil cikis parametreleriyle "
+                                             f"yonetilecek, elle kontrol edin.",
+                                             "ERROR", cfg.symbol)
         if orphan_closed:
             # Treat exactly like a failed entry (the position is flat again,
             # closed a moment after opening) - not the normal successful-fill
@@ -986,6 +1009,15 @@ class Engine:
             state.primary_signal = ""
             state.sec_signal = ""
             state.pending_bar_key = (0, 0)
+            return
+        if unresolved_ticket:
+            # Position is still open (couldn't be identified or closed) - unlike
+            # orphan_closed above this is NOT a clean failed-entry retry state.
+            # Leave signal/cooldown untouched: can_open()'s position-count check
+            # already blocks a duplicate entry on the next poll, and clearing the
+            # signal here would misreport this as a normal successful fill.
+            state.note = ("ikincil ticket cozulemedi - pozisyon acik kaldi, "
+                          "tanimlanamadi/kapatilamadi, elle kontrol")
             return
         if not result.get("ok"):
             state.note = result.get("error", "emir hatasi")

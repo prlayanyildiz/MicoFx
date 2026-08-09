@@ -439,7 +439,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         sl = be
                     elif not is_buy and be < sl:
                         sl = be
-                    moved_be = True
+                    # Mirrors live's _take_partial reached_breakeven: a clamp that
+                    # left ``be`` short of entry improved the stop but did not
+                    # actually reach risk-free, so it must not be reported as BE.
+                    moved_be = (be >= entry) if is_buy else (be <= entry)
                 rung += 1
 
             c = close[j]

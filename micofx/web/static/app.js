@@ -232,7 +232,7 @@ function renderCapacity() {
       <td><span class="pill ${r.enabled ? "on" : "off"}">${r.enabled ? "aktif" : "kapali"}</span></td>
       <td class="num">${num(r.lot, 2)}</td>
       <td class="num ${r.edge_scale > 1 ? "pos" : (r.edge_scale < 1 ? "neg" : "dim")}">${r.edge_scale != null ? "x" + num(r.edge_scale, 2) : "-"}</td>
-      <td class="num dim">${r.lot_note || r.lot_mode}</td>
+      <td class="num dim">${esc(r.lot_note || r.lot_mode)}</td>
       <td class="num ${r.open_positions ? "pos" : "dim"}">${r.open_positions}</td>
       <td class="num dim">${r.max_positions}</td>
       <td class="num ${r.free_slots > 0 ? "pos" : "neg"}"><b>${r.free_slots}</b></td>
@@ -1084,11 +1084,11 @@ function renderOptJob() {
     const inc = r.incumbent;
     const kept = !r.applied && inc && inc.net_r != null;
     const incText = kept
-      ? `Uygulanmadi${r.keep_reason ? ": " + r.keep_reason : ""}. Canli ayar degismedi `
-        + `(${inc.strategy || "-"}/${inc.timeframe || "-"}, test ${signed(inc.net_r, 1)}R`
+      ? `Uygulanmadi${r.keep_reason ? ": " + esc(r.keep_reason) : ""}. Canli ayar degismedi `
+        + `(${esc(inc.strategy || "-")}/${esc(inc.timeframe || "-")}, test ${signed(inc.net_r, 1)}R`
         + `${inc.profit_factor != null ? ", PF " + num(inc.profit_factor, 2) : ""}). `
         + `Soldaki rakamlar reddedilen adayin backtest sonucudur, hesap bakiyesi degil.`
-      : (r.keep_reason || "");
+      : esc(r.keep_reason || "");
     // Retention gate itself was removed on request (per-symbol judgment
     // instead of one uniform bar) - shown here so that judgment has a number
     // to work from instead of having to infer overfitting risk from PF alone.
@@ -1167,12 +1167,12 @@ async function loadOptHistory() {
         <td class="num ${cls(hold.net_r)}">${hold.net_r != null ? signed(hold.net_r, 1) + "R" : "-"}</td>
         <td class="num ${h.holdout_retention == null ? "" : h.holdout_retention < 0.25 ? "neg" : h.holdout_retention < 0.5 ? "" : "pos"}">${
           h.holdout_retention != null ? num(h.holdout_retention * 100, 0) + "%" : "-"}</td>
-        <td title="${h.applied ? "" : (h.keep_reason || "")}">${h.applied
+        <td title="${esc(h.applied ? "" : (h.keep_reason || ""))}">${h.applied
           ? '<span class="pill on">evet</span>'
           : h.validated ? '<span class="pill warn">dogrulandi</span>'
           : '<span class="pill off">hayir</span>'}${
           h.applied || !h.keep_reason ? ""
-            : `<div class="small warn-text">${h.keep_reason}</div>`}</td>`;
+            : `<div class="small warn-text">${esc(h.keep_reason)}</div>`}</td>`;
       tr.appendChild(el("td", {}, el("button", {
         class: "btn btn-sm", text: "Uygula",
         onclick: async (e) => {
