@@ -439,16 +439,7 @@ class Engine:
         for cfg in list(self.store.symbols.values()):
             state = self.states.setdefault(cfg.symbol, SymbolState(cfg.symbol))
             if not cfg.enabled:
-                state.note = "kapali"
-                # Same stale-signal hazard as the session/market_open gates:
-                # clearing only state.signal leaves primary_signal/pending_bar_key
-                # standing, so re-enabling before a new bar closes could revive
-                # and fire a signal from before the symbol was disabled.
-                state.signal = ""
-                state.signal_source = ""
-                state.primary_signal = ""
-                state.sec_signal = ""
-                state.pending_bar_key = (0, 0)
+                self._evaluate_disabled(cfg, state, server_now, account)
                 continue
             try:
                 wants = self._evaluate(cfg, state, server_now, account, allow_entry=allow_entry)
@@ -576,6 +567,44 @@ class Engine:
 
     # ------------------------------------------------------------ evaluation
 
+    def _has_open_secondary_ticket(self, cfg: SymbolConfig) -> bool:
+        return any(p["magic"] == cfg.magic and p["ticket"] in self._sec_tickets
+                  for p in self._positions)
+
+    def _evaluate_disabled(self, cfg: SymbolConfig, state: SymbolState,
+                           server_now: float, account: dict[str, Any]) -> None:
+        """Handle one ``cfg.enabled == False`` symbol for this cycle.
+
+        A position can still be open under this magic (the user paused a
+        symbol, not stopped-and-flattened it) - full skip (old behaviour)
+        stops state.last_bar/atr from ever advancing again, and
+        manage_positions()'s per-bar throttle (self._stop_bar vs last_bar)
+        then never fires _update_stop for that ticket again: trail/BE/
+        partial-TP freezes silently for good, with only the broker's own
+        static SL/TP left protecting it. allow_entry=False guarantees
+        _evaluate() can never arm a NEW entry here (same gate every other
+        allow_entry=False path already relies on - bot stopped, daily guard
+        tripped, netting - none of which clear the signal chain either,
+        since a merely-not-actionable signal is not a stale one).
+        """
+        if any(p["magic"] == cfg.magic for p in self._positions):
+            try:
+                self._evaluate(cfg, state, server_now, account, allow_entry=False)
+            except Exception as exc:
+                LOG.emit(f"Degerlendirme hatasi (kapali sembol): {exc}", "ERROR", cfg.symbol)
+            state.note = "kapali"
+        else:
+            # Same stale-signal hazard as the session/market_open gates:
+            # clearing only state.signal leaves primary_signal/pending_bar_key
+            # standing, so re-enabling before a new bar closes could revive
+            # and fire a signal from before the symbol was disabled.
+            state.note = "kapali"
+            state.signal = ""
+            state.signal_source = ""
+            state.primary_signal = ""
+            state.sec_signal = ""
+            state.pending_bar_key = (0, 0)
+
     def _evaluate(self, cfg: SymbolConfig, state: SymbolState, server_now: float,
                   account: dict[str, Any], allow_entry: bool) -> bool:
         """Refresh state; return True when this symbol wants an entry this bar."""
@@ -611,12 +640,27 @@ class Engine:
         primary_fresh = self._refresh_signals(cfg, state, params)
         if cfg.has_secondary():
             sec_fresh = self._refresh_secondary(cfg, state)
+        elif self._has_open_secondary_ticket(cfg):
+            # ensemble_enabled/secondary_strategy can be toggled off (a plain
+            # PATCH {"ensemble_enabled": false} - patch_symbol()'s guard only
+            # tracks secondary_strategy/secondary_timeframe, not this flag)
+            # while a secondary-opened ticket is still live. Fully stopping
+            # the refresh below (old behaviour) freezes state.sec_last_bar/
+            # sec_atr at whatever they were the instant this flipped -
+            # manage_positions()'s per-bar throttle (self._stop_bar vs
+            # sec_last_bar) then never advances again, silently freezing that
+            # ticket's trail/BE/partial-TP for good. Keep refreshing instead;
+            # _merge_signals() below already ignores state.sec_signal
+            # whenever has_secondary() is False, so this can never arm a NEW
+            # secondary entry - it only keeps the already-open one managed.
+            sec_fresh = self._refresh_secondary(cfg, state)
         else:
             sec_fresh = False
-            if state.sec_signal or state.sec_last_bar:
+            if state.sec_signal or state.sec_last_bar or state.sec_atr:
                 state.sec_signal = ""
                 state.sec_last_bar = 0
                 state.sec_bars = None
+                state.sec_atr = 0.0
         self._merge_signals(cfg, state, primary_fresh, sec_fresh)
         fresh = primary_fresh or sec_fresh
         # Keyed on the leg actually driving state.signal, not the combined

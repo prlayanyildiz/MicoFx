@@ -384,6 +384,59 @@ def test_reject_reason_flags_high_cost():
     assert opt.reject_reason(None, best) == "islem maliyeti riske gore cok yuksek"
 
 
+class _MinPositiveStore:
+    """Just enough of Store for reject_reason()'s min_positive_ratio read."""
+    def __init__(self, min_positive_ratio):
+        self._params = {"min_positive_ratio": min_positive_ratio}
+
+    def opt_params(self):
+        return self._params
+
+
+def test_reject_reason_uses_hardcoded_default_when_no_store():
+    # store=None (e.g. a unit test double, or before Optimizer is wired up)
+    # must not crash - falls back to the same 0.6 the setting itself defaults
+    # to.
+    opt = Optimizer(store=None, client=None)
+    best = {
+        "holdout": _result(), "validation": _result(),
+        "positive_ratio": 0.5, "score": 5.0,
+    }
+    assert opt.reject_reason(None, best) == "secim segmentleri arasinda tutarsiz"
+
+
+def test_reject_reason_honours_configured_min_positive_ratio_below_default():
+    # Regression pin: reject_reason() used to hardcode 0.6 regardless of the
+    # user-configured min_positive_ratio (UI allows down to 0.3, and
+    # backtest.py's own walk_forward search already honours the configured
+    # value) - a candidate the search validated at e.g. 0.5 consistency was
+    # silently re-rejected here anyway under a threshold nobody set.
+    opt = Optimizer(store=_MinPositiveStore(0.4), client=None)
+    best = {
+        "holdout": _result(), "validation": _result(),
+        "positive_ratio": 0.5, "score": 5.0,
+    }
+    assert opt.reject_reason(None, best) == ""
+
+
+def test_reject_reason_still_rejects_below_configured_lower_threshold():
+    opt = Optimizer(store=_MinPositiveStore(0.4), client=None)
+    best = {
+        "holdout": _result(), "validation": _result(),
+        "positive_ratio": 0.35, "score": 5.0,
+    }
+    assert opt.reject_reason(None, best) == "secim segmentleri arasinda tutarsiz"
+
+
+def test_reject_reason_honours_configured_min_positive_ratio_above_default():
+    opt = Optimizer(store=_MinPositiveStore(0.8), client=None)
+    best = {
+        "holdout": _result(), "validation": _result(),
+        "positive_ratio": 0.7, "score": 5.0,  # would have passed the old hardcoded 0.6
+    }
+    assert opt.reject_reason(None, best) == "secim segmentleri arasinda tutarsiz"
+
+
 # --------------------------------------------------------------------------- apply_secondary guard
 
 class _SecCfg:
@@ -630,3 +683,73 @@ def test_daily_guard_resume_clears_loss_halted():
 
     assert guard.halted is False
     assert guard.loss_halted is False
+
+
+# --------------------------------------------------------------------------- t3_ribbon slope filter
+
+def _ribbon_cache(n=300):
+    rng = np.linspace(100.0, 130.0, n)  # mild uptrend, keeps every gate happy
+    close = rng.copy()
+    high = close + 0.2
+    low = close - 0.2
+    open_ = close.copy()
+    from micofx.strategy import IndicatorCache
+    return IndicatorCache(high, low, close, times=np.arange(n, dtype=np.int64) * 300,
+                          tf_seconds=300, open_=open_, volume=np.ones(n))
+
+
+def test_t3_ribbon_slope_filter_disabled_by_default_lets_flat_slope_cross_through():
+    # Regression pin: t3_slope_atr=0 is documented "0 disables", but the
+    # filter used to apply unconditionally (unlike every other "0 disables"
+    # knob in this family) - thr=0.0 still demanded slope>=0.0/-slope>=0.0,
+    # permanently vetoing a cross where the slow line is momentarily flat or
+    # pointed the other way, exactly the case "disabled" promised to allow.
+    from micofx.strategy import Params, _t3_ribbon
+
+    cache = _ribbon_cache()
+    n = cache.close.size
+    fast = np.full(n, 100.0)
+    slow = np.full(n, 100.0)
+    cross_at = 150
+    # Fast crosses above slow at cross_at; slow is FLAT that bar (slope==0)
+    # and DECLINING going into it - the exact case the filter must let
+    # through when t3_slope_atr==0 (disabled).
+    slow[:cross_at] = np.linspace(101.0, 100.0, cross_at)
+    slow[cross_at:] = 100.0
+    fast[:cross_at] = 99.0
+    fast[cross_at:] = 100.5
+
+    def _fake_t3(length, vf):
+        # _t3_ribbon requests the fast length first, then the slow length.
+        return fast if length == max(2, int(5)) else slow
+
+    cache.t3 = _fake_t3
+
+    p = Params(strategy="t3_ribbon", htf_mode="", t3_fast=5, t3_slow_mult=3.0,
+              t3_slope_atr=0.0, atr_period=14)
+    sig = _t3_ribbon(cache, p)
+    assert bool(sig.buy[cross_at]) is True
+
+
+def test_t3_ribbon_slope_filter_enabled_still_blocks_the_same_flat_cross():
+    from micofx.strategy import Params, _t3_ribbon
+
+    cache = _ribbon_cache()
+    n = cache.close.size
+    fast = np.full(n, 100.0)
+    slow = np.full(n, 100.0)
+    cross_at = 150
+    slow[:cross_at] = np.linspace(101.0, 100.0, cross_at)
+    slow[cross_at:] = 100.0
+    fast[:cross_at] = 99.0
+    fast[cross_at:] = 100.5
+
+    def _fake_t3(length, vf):
+        return fast if length == max(2, int(5)) else slow
+
+    cache.t3 = _fake_t3
+
+    p = Params(strategy="t3_ribbon", htf_mode="", t3_fast=5, t3_slow_mult=3.0,
+              t3_slope_atr=0.5, atr_period=14)  # explicitly enabled
+    sig = _t3_ribbon(cache, p)
+    assert bool(sig.buy[cross_at]) is False

@@ -237,7 +237,19 @@ class Supervisor:
         # Reviews keep running - quarantine is a hard circuit breaker enforced
         # regardless of ``enabled`` (see ``gate()``), so its state must stay
         # live rather than freezing at whatever it was when AI was turned off.
-        return (time.time() - self.last_review) >= self.settings["review_interval_sec"]
+        # Called directly from engine._cycle(), OUTSIDE the try/except that
+        # wraps review() - web/app.py's /api/ai/settings now type-checks
+        # against DEFAULTS before this can be reached, but a value that
+        # somehow ends up non-numeric anyway (stale DB row from before that
+        # check existed) must not raise here: that would silently cancel the
+        # rest of THIS cycle too (new-entry evaluation included), every
+        # single cycle, since the outer per-cycle handler only logs and
+        # moves on rather than restoring the loop's later steps.
+        try:
+            interval = float(self.settings["review_interval_sec"])
+        except (TypeError, ValueError):
+            interval = float(DEFAULTS["review_interval_sec"])
+        return (time.time() - self.last_review) >= interval
 
     def review(self, day_pnl_pct: float) -> dict[str, Any]:
         """Recompute every verdict from realised MT5 history."""
@@ -330,7 +342,14 @@ class Supervisor:
         self._attach_expectation(cfg, v)
 
         now = time.time()
-        quarantine_secs = float(cfgs["quarantine_hours"]) * 3600.0
+        # Same "don't let a corrupted stored value crash the safety feature
+        # that's supposed to protect the account" reasoning as due() above -
+        # web/app.py's type check now blocks this at the door, this is only
+        # for a row already bad before that existed.
+        try:
+            quarantine_secs = float(cfgs["quarantine_hours"]) * 3600.0
+        except (TypeError, ValueError):
+            quarantine_secs = float(DEFAULTS["quarantine_hours"]) * 3600.0
 
         if streak >= int(cfgs["quarantine_losses"]):
             self._quarantine(v, f"{streak} ust uste zarar", quarantine_secs, now)

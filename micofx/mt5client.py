@@ -529,7 +529,14 @@ class MT5Client:
             return None
         with self._lock:
             t = mt5.symbol_info_tick(real)
-        if t is None or (t.bid <= 0 and t.ask <= 0):
+        if t is None or t.bid <= 0 or t.ask <= 0:
+            # Either side <=0 (not just both) is a bad/partial quote - a
+            # one-sided zero (illiquid instrument, rollover gap, feed
+            # glitch) used to pass this check, letting open_market() build
+            # an order at price=0.0 and min_stop_distance() compute a
+            # nonsense spread from it. The broker would reject the zero
+            # price anyway, but there's no reason to spend a live order
+            # attempt finding that out.
             return None
         data = {"bid": float(t.bid), "ask": float(t.ask), "time": float(t.time),
                 "spread": float(t.ask - t.bid)}
@@ -972,8 +979,16 @@ class MT5Client:
         min_dist = self.min_stop_distance(symbol)
         reanchor_ok = True
         if abs(fill_price - price) > min_dist * 0.1:
-            sl_dist = abs(price - sl) if sl > 0 else 0.0
-            tp_dist = abs(tp - price) if tp > 0 else 0.0
+            # Distances from request["sl"]/["tp"] - the levels actually SENT
+            # and accepted by the broker - not the original sl/tp params.
+            # When INVALID_STOPS widened the request above, recomputing from
+            # the original (already-rejected) tight distance re-sent exactly
+            # what the broker just refused; modify_position() has no retry/
+            # widening ladder of its own, so it silently failed a second time
+            # and this function still reported the rejected values as the
+            # position's real SL/TP.
+            sl_dist = abs(price - request["sl"]) if request["sl"] > 0 else 0.0
+            tp_dist = abs(request["tp"] - price) if request["tp"] > 0 else 0.0
             if side == "buy":
                 final_sl = self.normalize_price(symbol, fill_price - sl_dist) if sl > 0 else 0.0
                 final_tp = self.normalize_price(symbol, fill_price + tp_dist) if tp > 0 else 0.0

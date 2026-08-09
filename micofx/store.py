@@ -102,12 +102,20 @@ class Store:
         stored blob fresh here makes concurrent single-field writes commute
         instead of clobbering each other.
         """
-        current = self._load_system().to_dict()
-        for key, value in patch.items():
-            if key in current and value is not None:
-                current[key] = value
-        self.system = SystemConfig.from_dict(current)
-        self.save_system()
+        # The whole read-modify-write has to be one critical section - two
+        # threads (engine poll loop calling start()/stop(), a web request
+        # handling a System PATCH) each doing their own separate _load_system()
+        # + save_system() around this loop could interleave and have the
+        # second writer's stale pre-read snapshot silently revert whatever
+        # the first one just wrote. RLock is reentrant, so the get_setting()/
+        # set_setting() calls inside _load_system()/save_system() nest fine.
+        with self._lock:
+            current = self._load_system().to_dict()
+            for key, value in patch.items():
+                if key in current and value is not None:
+                    current[key] = value
+            self.system = SystemConfig.from_dict(current)
+            self.save_system()
         return self.system
 
     # --------------------------------------------------------------- symbols
@@ -139,7 +147,17 @@ class Store:
                 (cfg.symbol, position, blob),
             )
             self._db.commit()
-        self.symbols[cfg.symbol] = cfg
+        # Replace the dict object rather than mutate it in place. Every
+        # engine/risk/supervisor read site takes a reference via
+        # list(store.symbols.values()) without holding self._lock (locking
+        # every one of those hot-path reads would be its own cost) - mutating
+        # the same dict object a concurrent iterator is walking can raise
+        # "dictionary changed size during iteration" mid-cycle. Rebinding
+        # self.symbols to a brand-new dict never touches the old object, so
+        # any iterator already holding a reference to it keeps working
+        # against a now-stale-but-internally-consistent snapshot instead of
+        # crashing - a single attribute reassignment is atomic under the GIL.
+        self.symbols = {**self.symbols, cfg.symbol: cfg}
 
     def update_symbol(self, symbol: str, patch: dict[str, Any]) -> SymbolConfig | None:
         cfg = self.symbols.get(symbol)
@@ -159,7 +177,9 @@ class Store:
             cur = self._db.execute("DELETE FROM symbols WHERE symbol=?", (symbol,))
             self._db.execute("DELETE FROM opt_runs WHERE symbol=?", (symbol,))
             self._db.commit()
-        self.symbols.pop(symbol, None)
+        # Same copy-on-write reasoning as save_symbol() above.
+        if symbol in self.symbols:
+            self.symbols = {k: v for k, v in self.symbols.items() if k != symbol}
         return cur.rowcount > 0
 
     def purge_orphan_history(self) -> int:
@@ -176,7 +196,13 @@ class Store:
             return int(cur.rowcount or 0)
 
     def next_magic(self, avoid: set[int] | None = None) -> int:
-        used = {c.magic for c in self.symbols.values()}
+        # list() snapshot: a concurrent save_symbol()/delete_symbol() now
+        # rebinds self.symbols to a new dict object rather than mutating it
+        # (see save_symbol()'s comment), so this is defense-in-depth, not
+        # load-bearing on its own - but every other iteration site in the
+        # codebase already takes this same snapshot, and this one shouldn't
+        # be the odd one out.
+        used = {c.magic for c in list(self.symbols.values())}
         # A magic still tied to a pending secondary_orphan_scan window
         # (engine.py's H1 tracking) has a fill that may not be visible in
         # client.positions() yet - handing it straight back out here would
@@ -273,7 +299,7 @@ class Store:
         return seeded
 
     def _magic_taken(self, magic: int, avoid_magics: set[int] | None) -> bool:
-        if magic in {c.magic for c in self.symbols.values()}:
+        if magic in {c.magic for c in list(self.symbols.values())}:
             return True
         scan = self.get_setting("secondary_orphan_scan", {}) or {}
         if isinstance(scan, dict) and magic in {
@@ -395,7 +421,14 @@ class Store:
 
     def save_opt_params(self, params: dict[str, Any]) -> dict[str, Any]:
         base = self.opt_params()
-        base.update(params)
+        # Same "None means leave this field alone" convention as
+        # update_symbol()/update_system() - a raw dict.update() let a client
+        # bug that serialises a blank numeric input as JSON null overwrite a
+        # previously-valid default with None, which then crashes the
+        # optimizer's background thread the next time it runs (int(None)).
+        for key, value in params.items():
+            if value is not None:
+                base[key] = value
         self.set_setting("opt_params", base)
         return base
 

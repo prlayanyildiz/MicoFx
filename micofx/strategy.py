@@ -1057,8 +1057,19 @@ def _t3_ribbon(cache: IndicatorCache, p: Params) -> Signals:
     if p.min_body_ratio > 0:
         ok &= cache.body_ratio() >= p.min_body_ratio
 
-    buy = ok & cross_up & (slope >= thr) & (close > fast) & allow_long
-    sell = ok & cross_dn & (-slope >= thr) & (close < fast) & allow_short
+    buy = ok & cross_up & (close > fast) & allow_long
+    sell = ok & cross_dn & (close < fast) & allow_short
+    # 0 (the default) means disabled, same convention as every other
+    # optional filter in this family (t3_accel_min, st_mult, cost_rank_max,
+    # don_squeeze, adx_max - all gated behind `if p.x > 0`). This one was
+    # applied unconditionally instead: thr=0.0 still demanded slope>=0.0/
+    # -slope>=0.0, permanently vetoing a cross that fires while the slow
+    # line is momentarily flat or still pointed the other way - often the
+    # earliest, most valuable part of the move, and exactly the case the
+    # "0 disables" doc comment above promised would be let through.
+    if thr > 0:
+        buy &= slope >= thr
+        sell &= -slope >= thr
 
     if p.t3_accel_min > 0:
         accel = _t3_accel(fast, atr_series)

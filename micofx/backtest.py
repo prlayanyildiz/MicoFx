@@ -704,7 +704,11 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                            bars.open, bars.volume, cost_price)
     keys, combos = combos_from_grid(grid, max_combos)
 
-    per_segment_trades = max(6, int(min_trades / max(1, segments - 1)))
+    # ``selection`` is windows[:-2], i.e. segments-2 windows (validation and
+    # holdout are held out) - the discount below divided by segments-1,
+    # understating the trades expected per selection window and making the
+    # sample-size discount stricter than the actual window count implies.
+    per_segment_trades = max(6, int(min_trades / max(1, segments - 2)))
 
     # Signals depend only on the entry-side parameters (``Params.key``); the
     # exit grid - stops, targets, trailing, partials, the spread gate - does not

@@ -24,6 +24,7 @@ from ..optimizer import Optimizer
 from ..paths import ROOT, WEB_DIR
 from ..sessions import describe
 from ..store import Store
+from ..supervisor import DEFAULTS as AI_SETTINGS_DEFAULTS
 
 TEMPLATES = WEB_DIR / "templates"
 STATIC = WEB_DIR / "static"
@@ -192,6 +193,30 @@ def _reject_non_finite_deep(value: Any, path: str = "") -> None:
           or (isinstance(value, str) and value.strip().lower() in _NON_FINITE_TOKENS))
     if bad:
         raise HTTPException(400, f"{path or 'deger'} gecersiz ({value!r})")
+
+
+def _reject_wrong_type_against(patch: dict[str, Any], reference: dict[str, Any]) -> None:
+    # Supervisor.update_settings() is a raw dict.update() with no type check
+    # of its own - a string/list/bool sent for what should be a number (e.g.
+    # {"quarantine_hours": "abc"}) got stored verbatim, then crashed
+    # supervisor.review()/due() the next time they ran (float("abc"),
+    # comparing a float against a str) - and due() is called every engine
+    # cycle un-try/excepted, silently killing new-entry evaluation for the
+    # rest of that cycle, every cycle, until fixed. bool is checked before
+    # (int, float) since bool is a subclass of int in Python.
+    for key, value in patch.items():
+        if key not in reference or value is None:
+            continue
+        expected = reference[key]
+        if isinstance(expected, bool):
+            ok = isinstance(value, bool)
+        elif isinstance(expected, (int, float)):
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+        else:
+            ok = isinstance(value, type(expected))
+        if not ok:
+            raise HTTPException(
+                400, f"{key} gecersiz tip ({value!r}) - {type(expected).__name__} bekleniyor")
 
 
 def _validate_enum_fields(patch: dict[str, Any], label: str = "") -> None:
@@ -1172,6 +1197,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/ai/settings")
     def ai_settings(body: dict[str, Any]) -> dict[str, Any]:
         _reject_non_finite_values(body)
+        _reject_wrong_type_against(body, AI_SETTINGS_DEFAULTS)
         settings = engine.supervisor.update_settings(body)
         LOG.emit("AI denetleyici ayarlari guncellendi.", "AI")
         return {"ok": True, "settings": settings}
@@ -1180,7 +1206,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def ai_review() -> dict[str, Any]:
         account = engine.refresh_account(force=True)
         pnl = engine.risk.daily.pnl_pct(float(account.get("equity", 0.0)))
-        return {"ok": True, "ai": engine.supervisor.review(pnl)}
+        try:
+            result = engine.supervisor.review(pnl)
+        except Exception as exc:
+            raise HTTPException(500, f"AI denetleyici hatasi: {exc}") from exc
+        return {"ok": True, "ai": result}
 
     @app.post("/api/ai/clear")
     def ai_clear(symbol: str | None = None) -> dict[str, Any]:

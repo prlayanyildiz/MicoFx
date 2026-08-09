@@ -1035,7 +1035,16 @@ function syncOptPicker() {
 
 async function saveOptParams() {
   const body = { grid: {} };
-  $$("[data-opt-key]").forEach((i) => { body[i.dataset.optKey] = parseFloat(i.value); });
+  const skipped = [];
+  // A blank/non-numeric field must NOT be sent at all - parseFloat("") is
+  // NaN, and JSON.stringify(NaN) silently serialises to null, which the
+  // server stored verbatim over a previously-valid default and crashed the
+  // optimizer's background thread (int(None)) on the next run.
+  $$("[data-opt-key]").forEach((i) => {
+    const value = parseFloat(i.value);
+    if (isFinite(value)) body[i.dataset.optKey] = value;
+    else skipped.push(i.dataset.optKey);
+  });
   $$("[data-grid-key]").forEach((i) => {
     const values = i.value.split(",").map((x) => parseFloat(x.trim())).filter((x) => isFinite(x));
     if (values.length) body.grid[i.dataset.gridKey] = values;
@@ -1044,7 +1053,9 @@ async function saveOptParams() {
     const res = await api("/api/opt/params", { method: "POST", body });
     OPT_PARAMS = res.params;
     renderOptForm();
-    toast("Optimizasyon ayarlari kaydedildi", "ok");
+    toast(skipped.length
+      ? `Kaydedildi (gecersiz alanlar atlandi: ${skipped.join(", ")})`
+      : "Optimizasyon ayarlari kaydedildi", skipped.length ? "err" : "ok");
   } catch (e) { toast(e.message, "err"); }
 }
 

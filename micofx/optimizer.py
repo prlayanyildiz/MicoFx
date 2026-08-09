@@ -239,6 +239,21 @@ class Optimizer:
 
     def _run(self, targets: list[str], apply_best: bool, bars_override: int | None,
              tf_override: list[str] | None = None) -> None:
+        # Thread target - nothing downstream of start() is allowed to leave
+        # self.job stuck in "running" forever. A bad opt_params value (e.g. a
+        # None a client bug slipped through, or hand-edited settings) used to
+        # raise straight out of this thread with no handler, silently killing
+        # it: the Start button (job.state == "running") stayed disabled
+        # indefinitely with no error ever surfaced anywhere.
+        try:
+            self._run_unsafe(targets, apply_best, bars_override, tf_override)
+        except Exception as exc:
+            err = f"{type(exc).__name__}: {exc}"
+            self._set(state="done", finished_at=time.time(), current="", error=err)
+            LOG.emit(f"Optimizasyon beklenmedik hatayla durdu: {err}", "OPT")
+
+    def _run_unsafe(self, targets: list[str], apply_best: bool, bars_override: int | None,
+                    tf_override: list[str] | None = None) -> None:
         self.client.set_terminal_path(self.store.system.mt5_terminal_path)
         self.client.set_overrides(
             {c.symbol: c.broker_symbol for c in list(self.store.symbols.values())})
@@ -814,7 +829,16 @@ class Optimizer:
             return "dogrulama segmenti kar etmedi"
         if not backtest._slice_ok(hold):
             return "dokunulmamis test segmenti kar etmedi"
-        if best.get("positive_ratio", 0) < 0.6:
+        # Must track the same setting the search itself gates candidates on
+        # (backtest.py's walk_forward min_positive_ratio param, default 0.6,
+        # UI-configurable down to 0.3) - a hardcoded 0.6 here silently
+        # overrode any lower value the user configured: the search would
+        # admit/validate a 0.4-0.59 candidate exactly as asked, then this
+        # gate re-rejected it anyway with a threshold the user never set,
+        # under a generic message indistinguishable from a real failure.
+        min_positive = float(self.store.opt_params().get("min_positive_ratio", 0.6)) \
+            if self.store is not None else 0.6
+        if best.get("positive_ratio", 0) < min_positive:
             return "secim segmentleri arasinda tutarsiz"
         if hold.get("cost_per_trade_r", 0) > self.MAX_COST_PER_TRADE_R:
             return "islem maliyeti riske gore cok yuksek"
