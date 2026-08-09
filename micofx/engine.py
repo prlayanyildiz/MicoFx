@@ -1203,6 +1203,22 @@ class Engine:
         if not result.get("ok"):
             state.note = result.get("error", "emir hatasi")
             LOG.emit(result.get("error", "emir hatasi"), "ERROR", cfg.symbol)
+            if result.get("ambiguous"):
+                # open_market() could not establish whether the order filled
+                # (timeout plus an unreadable position book, or several new
+                # same-magic tickets). Retrying on the next poll is the one
+                # thing that must not happen here: if it did fill, the retry
+                # doubles the position. Drop the whole signal chain so nothing
+                # re-offers this entry before a new bar closes, by which point
+                # _reload_positions() has seen whatever is really open and
+                # can_open()'s max_positions gate applies normally again.
+                state.signal = ""
+                state.signal_source = ""
+                state.primary_signal = ""
+                state.sec_signal = ""
+                state.pending_bar_key = (0, 0)
+                state.note = "emir sonucu belirsiz - tekrar denenmeyecek, MT5'i kontrol edin"
+                return
             if result.get("retcode") in NON_RETRYABLE_RETCODES:
                 # This reject will not clear up before the bar rolls over -
                 # keeping pending_bar_key set just re-offers the same doomed

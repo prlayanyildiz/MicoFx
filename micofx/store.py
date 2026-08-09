@@ -38,11 +38,31 @@ class Store:
     def __init__(self) -> None:
         ensure_dirs()
         self._lock = threading.RLock()
-        self._db = sqlite3.connect(DB_PATH, check_same_thread=False)
-        self._db.row_factory = sqlite3.Row
-        with self._lock:
-            self._db.executescript(_SCHEMA)
-            self._db.commit()
+        try:
+            self._db = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15.0)
+            self._db.row_factory = sqlite3.Row
+            with self._lock:
+                # A second process holding the DB for a moment (backup.py's
+                # own Store, a OneDrive/antivirus scan touching the file) used
+                # to surface as an immediate "database is locked" that took
+                # down whatever thread was writing. Waiting is the correct
+                # answer to contention this short; only a genuinely stuck
+                # writer should ever reach the caller as an error.
+                self._db.execute("PRAGMA busy_timeout=15000")
+                self._db.executescript(_SCHEMA)
+                self._db.commit()
+        except sqlite3.Error as exc:
+            # Corrupt file, unreadable path, disk full at boot. Raised as a
+            # plain RuntimeError so run.py can report it in Turkish and exit
+            # cleanly - under pythonw.exe an uncaught sqlite3 traceback goes
+            # to a stream nobody ever sees and the app just vanishes.
+            LOG.emit(f"Ayar veritabani acilamadi ({DB_PATH}): {exc}", "ERROR")
+            raise RuntimeError(
+                f"Ayar veritabani acilamadi: {DB_PATH}\n{exc}\n"
+                f"Disk dolu olabilir veya dosya bozulmus olabilir. Dosyayi "
+                f"yeniden adlandirip programi tekrar baslatirsaniz varsayilan "
+                f"ayarlarla temiz bir veritabani olusturulur."
+            ) from exc
 
         self.defaults = load_defaults()
         self.system = self._load_system()
@@ -386,9 +406,6 @@ class Store:
         updated = SymbolConfig.from_dict(payload)
         self.save_symbol(updated)
         return updated
-
-    def enabled_symbols(self) -> list[SymbolConfig]:
-        return [c for c in self.symbols.values() if c.enabled]
 
     # ------------------------------------------------------------- optimizer
 

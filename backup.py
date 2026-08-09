@@ -29,7 +29,13 @@ def _iter_files(root: Path):
 
 
 def main() -> int:
-    store = Store()
+    try:
+        store = Store()
+    except RuntimeError as exc:
+        # Unattended scheduled task: a broken settings DB must produce a
+        # readable line in the task history, not a traceback.
+        print(f"HATA: {exc}")
+        return 1
     raw_dir = str(store.system.backup_dir)
     allow_unc = bool(store.system.backup_dir_allow_unc)
     keep = max(1, int(store.system.backup_keep))

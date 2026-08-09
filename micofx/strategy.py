@@ -11,30 +11,6 @@ from .models import SymbolConfig
 STOCH_MID = 50.0
 
 
-STRATEGY_LABELS = {
-    "t3_stoch": "T3 + Stochastic RSI (momentum)",
-    "orb": "Acilis Araligi Kirilimi (ORB)",
-    "vwap_rev": "VWAP Ortalamaya Donus",
-    "donchian": "Donchian Kirilimi (sikisma filtreli)",
-    "squeeze_brk": "Bollinger/Keltner Sikisma Kirilimi",
-    "flow_rev": "Emir Akisi Tukenme Donusu",
-    "mtf_pullback": "Ust Zaman Dilimi Trend Geri Cekilmesi",
-    "micro_rev": "Mikro Ortalamaya Donus (maliyet olcekli)",
-    "burst": "Momentum Patlamasi Devami (maliyet kapili)",
-    "t3_ribbon": "Tillson T3 Seridi (hizli/yavas kesisim)",
-    "dual_t3": "Ikili T3 + ATR (sade cekirdek)",
-    "st_trend": "SuperTrend Donusu (hedefsiz, sadece trail)",
-    "t3_flip": "Tek Tillson T3 Yon Donusu (tek cizgi)",
-    "liq_sweep": "Likidite Avi / Stop Hunt Donusu",
-    "macd_flip": "MACD Histogram Sifir Kesisimi (momentum ayriskma)",
-    "wavetrend_flip": "WaveTrend Kesisimi (volatiliteye gore normalize osilator)",
-    "stoch_flip": "Yavas Stokastik %K/%D Kesisimi (RSI'siz, saf fiyat araligi)",
-    "parabolic_flip": "Parabolic SAR Yon Donusu (ivmelenen takip noktasi)",
-    "trix_flip": "TRIX Sifir Kesisimi (uc kat yumusatilmis, yavas/temiz)",
-    "aroon_flip": "Aroon Osilator Sifir Kesisimi (son tepe/dipten bu yana bar sayisi)",
-}
-
-
 @dataclass
 class Params:
     """Flat parameter view so the optimizer can vary values without a full config."""

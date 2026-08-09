@@ -88,7 +88,14 @@ def main() -> int:
               f"veya MICO_PORT ile baska bir port secin.")
         return 1
 
-    store = Store()
+    try:
+        store = Store()
+    except RuntimeError as exc:
+        # Store() already logged the sqlite detail to logs/micofx.log; this
+        # path exists so a broken settings DB ends as a readable message and
+        # exit code 1 instead of a traceback into pythonw.exe's void.
+        print(f"[{APP_NAME}] {exc}")
+        return 1
     client = MT5Client(store.system.mt5_terminal_path)
 
     if store.system.autostart_mt5:

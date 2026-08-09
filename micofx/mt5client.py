@@ -39,6 +39,21 @@ _FILL_RETCODES: frozenset[int] = frozenset(
      if mt5 is not None and hasattr(mt5, name)}
 )
 
+# Outcomes that say nothing about whether the order reached the server. The
+# request was already on the wire when the terminal gave up waiting, so the
+# broker may well have filled it - reporting these as a plain rejection (the
+# old behaviour) let the caller keep the signal alive and fire a SECOND
+# order_send on the next poll, stacking a duplicate position on top of a fill
+# nobody knew about. Every one of these has to be resolved by looking at the
+# position book, never by trusting the return value. ``order_send`` returning
+# None (IPC-level failure inside the terminal bridge) is the same class of
+# unknown and is routed through the same verification.
+_AMBIGUOUS_RETCODES: frozenset[int] = frozenset(
+    {getattr(mt5, name) for name in
+     ("TRADE_RETCODE_TIMEOUT", "TRADE_RETCODE_CONNECTION")
+     if mt5 is not None and hasattr(mt5, name)}
+)
+
 _INFO_TTL = 120.0
 _TICK_TTL = 0.5
 _RECONNECT_COOLDOWN = 5.0
@@ -852,7 +867,10 @@ class MT5Client:
 
         if result is None:
             code, text = mt5.last_error()
-            return {"ok": False, "error": f"{symbol}: order_send bos dondu ({code}: {text})"}
+            return self._verify_ambiguous_send(
+                symbol, real, magic, before_tickets, float(price),
+                f"{symbol}: order_send bos dondu ({code}: {text})",
+                side=side, req_sl=request["sl"], req_tp=request["tp"])
 
         if result.retcode == mt5.TRADE_RETCODE_INVALID_STOPS:
             # The broker rejected the level, not the trade's risk. Widen only
@@ -896,6 +914,19 @@ class MT5Client:
         if result is None or result.retcode not in _FILL_RETCODES:
             code = getattr(result, "retcode", -1)
             text = getattr(result, "comment", "?")
+            # A retry inside the INVALID_STOPS/INVALID_FILL ladders above can
+            # itself come back None or time out - same unknown outcome as the
+            # first send, and the earlier attempts in the ladder may have
+            # filled too, so this must go through verification rather than be
+            # reported as a clean reject.
+            if result is None or code in _AMBIGUOUS_RETCODES:
+                return self._verify_ambiguous_send(
+                    symbol, real, magic, before_tickets, float(price),
+                    f"{symbol}: emir sonucu belirsiz ({code} {text})",
+                    # request["sl"]/["tp"] not the sl/tp params: the
+                    # INVALID_STOPS ladder above may have widened them, and
+                    # the widened pair is what the broker actually holds.
+                    side=side, req_sl=request["sl"], req_tp=request["tp"])
             return {"ok": False, "retcode": code, "error": f"{symbol}: emir reddedildi ({code} {text})"}
         # DONE_PARTIAL (IOC took less than the requested volume) is a real
         # fill, not a rejection - treating it as ok:False here left a live
@@ -1029,6 +1060,104 @@ class MT5Client:
             # requested price, so this is the only place it is knowable.
             "requested": float(price),
             "price": fill_price, "volume": float(result.volume),
+            "sl": final_sl, "tp": final_tp,
+        }
+
+    def _verify_ambiguous_send(self, symbol: str, real: str, magic: int,
+                               before_tickets: set[int], requested: float,
+                               reason: str, side: str = "", req_sl: float = 0.0,
+                               req_tp: float = 0.0) -> dict[str, Any]:
+        """Decide what actually happened after an unconfirmed ``order_send``.
+
+        Timeouts and IPC failures are not rejections: the request may already
+        be executing at the broker. The only trustworthy answer is the
+        position book, diffed against the snapshot ``open_market`` took just
+        before the send.
+
+        Three outcomes, and the caller must be able to tell them apart:
+
+        * **one new same-magic ticket** - the order DID fill. Returned as a
+          normal success so the entry is booked once and the signal is
+          consumed, instead of being retried into a duplicate position.
+        * **no new ticket after the whole retry window** - genuinely never
+          reached the market. Plain failure, safe to retry on the next poll.
+        * **anything we cannot see** (positions_get failing, or more than one
+          new ticket) - flagged ``ambiguous`` so the caller refuses to send
+          another order for this symbol rather than guessing. Fail closed: a
+          missed entry costs a signal, a duplicate costs double risk.
+
+        Broker replication can lag the fill by a beat, so the book is
+        re-checked a few times over ~2s before "no new ticket" is believed.
+        """
+        adopted = None
+        for attempt in range(4):
+            # Sleep first: a fill that has not propagated into positions_get
+            # yet is exactly the case this is here to catch, and the very
+            # first read is the least likely to see it.
+            time.sleep(0.3 if attempt == 0 else 0.6)
+            with self._lock:
+                after = mt5.positions_get(symbol=real)
+            if after is None:
+                self.connected = False
+                LOG.emit(f"{reason} - pozisyon listesi de okunamadi ({mt5.last_error()}), "
+                         f"emrin acilip acilmadigi BILINMIYOR. Yeni emir gonderilmeyecek, "
+                         f"MT5'i elle kontrol edin.", "ERROR", symbol)
+                return {"ok": False, "ambiguous": True,
+                        "error": f"{reason} - pozisyon durumu dogrulanamadi"}
+            new = [p for p in after
+                   if p.magic == magic and int(p.ticket) not in before_tickets]
+            if len(new) > 1:
+                LOG.emit(f"{reason} - ayni magic altinda {len(new)} yeni pozisyon var, "
+                         f"hangisinin bu emir oldugu belirlenemedi. Yeni emir "
+                         f"gonderilmeyecek, MT5'i elle kontrol edin.", "ERROR", symbol)
+                return {"ok": False, "ambiguous": True,
+                        "error": f"{reason} - birden fazla yeni pozisyon, cozulemedi"}
+            if len(new) == 1:
+                adopted = new[0]
+                break
+
+        if adopted is None:
+            return {"ok": False,
+                    "error": f"{reason} - dogrulandi: yeni pozisyon olusmamis, emir gecmemis"}
+
+        LOG.emit(f"{reason} - ancak pozisyon #{int(adopted.ticket)} gercekten acilmis; "
+                 f"tekrar emir gonderilmedi, pozisyon sahiplenildi.", "WARN", symbol)
+
+        ticket = int(adopted.ticket)
+        fill_price = float(adopted.price_open)
+        final_sl, final_tp = float(adopted.sl), float(adopted.tp)
+        # The levels the broker is holding were built from the pre-fill tick,
+        # because there was no confirmed fill price to anchor them to at send
+        # time. On a fast symbol that gap is real - a live BTCUSD probe of
+        # this exact path filled 27 price units away from the tick, which
+        # would have left the position risking 527 instead of the 500 it was
+        # sized for. Same re-anchor the normal fill path does, off the same
+        # requested-vs-filled distances.
+        reanchor_ok = True
+        min_dist = self.min_stop_distance(symbol)
+        if side and (req_sl > 0 or req_tp > 0) and abs(fill_price - requested) > min_dist * 0.1:
+            sl_dist = abs(requested - req_sl) if req_sl > 0 else 0.0
+            tp_dist = abs(req_tp - requested) if req_tp > 0 else 0.0
+            if side == "buy":
+                final_sl = self.normalize_price(symbol, fill_price - sl_dist) if req_sl > 0 else 0.0
+                final_tp = self.normalize_price(symbol, fill_price + tp_dist) if req_tp > 0 else 0.0
+            else:
+                final_sl = self.normalize_price(symbol, fill_price + sl_dist) if req_sl > 0 else 0.0
+                final_tp = self.normalize_price(symbol, fill_price - tp_dist) if req_tp > 0 else 0.0
+            reanchor_ok = self.modify_position(ticket, final_sl, final_tp, symbol)
+            if not reanchor_ok:
+                # Broker refused the correction - the position keeps the
+                # tick-anchored levels it already has, so report those rather
+                # than the ones we wanted.
+                final_sl, final_tp = float(adopted.sl), float(adopted.tp)
+
+        return {
+            "ok": True, "recovered": True,
+            "order": 0, "deal": 0, "position": ticket,
+            "partial_fill": False,
+            "sl_tp_reanchored": reanchor_ok,
+            "requested": float(requested), "price": fill_price,
+            "volume": float(adopted.volume),
             "sl": final_sl, "tp": final_tp,
         }
 
