@@ -91,6 +91,13 @@ Bu proje icin onemi ekstra buyuk: `data/micofx.db` Git'e girmez, yani her
 sembol ayari, her optimizasyon sonucu ve AI denetleyicinin ogrendigi her sey
 sadece o dosyada durur. GitHub kodu tutar, bunlarin hicbirini tutmaz.
 
+Geri yuklerken ayar veritabanini **yalnizca** arsiv icindeki kanonik yoldan,
+`data/micofx.db`'den alin. "Adi micofx.db ile biten ilk dosya" diye aramayin:
+gecmiste test artigi kopyalar (`.pytest_tmp/...`) alfabetik siralamada once
+geliyordu. Yedekleyici bu klasorleri artik disarida birakir ve arsivde ikinci
+bir micofx.db gorurse uyarir, ama operatorun kurali sudur - tek dogru yol
+`data/micofx.db`.
+
 Gece gorevi **Interactive** olarak calisir: bilgisayar kilit ekranindayken
 sorun yok, ama oturumu tamamen kapattiysaniz o gece yedek alinmaz. Isterseniz
 Gorev Zamanlayici > "MicoFX Aksam Yedegi" > Ozellikler > **"Kullanici oturum

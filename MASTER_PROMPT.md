@@ -177,6 +177,13 @@ Settings keys include: `system`, `opt_params`, `supervisor`, `supervisor_state`,
 
 `opt_params` = defaults.optimizer merged with stored overrides.
 
+### Backup invariants (`backup.py`)
+
+- `data/micofx.db` is gitignored. The nightly archive is its **only** copy — GitHub holds none of it.
+- `EXCLUDE_DIRS` ⊇ `.pytest_tmp` (alongside `.venv`, `__pycache__`, `.pytest_cache`, `.git`). Test debris must never enter an archive.
+- The archive has exactly one canonical DB path: `data/micofx.db`, written via sqlite's online-backup API (consistent snapshot, not a raw copy). A second `*micofx.db` entry is a decoy → **warn, do not fail the run**.
+- `C:` and `D:` are usually one physical disk. `backup_dir_secondary` must be a different physical drive or a cloud folder, and is a **copy** of the primary zip — never a second build.
+
 ---
 
 ## 5. Web terminal
