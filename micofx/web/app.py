@@ -376,6 +376,25 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             return []
         return [p for p in client.positions(magic=magic) if p["ticket"] in tagged]
 
+    def _secondary_risk(magic: int, symbol: str) -> tuple[list[dict[str, Any]], bool]:
+        """Everything that counts as "cannot safely touch secondary identity/
+        exit right now" - live-tagged secondary tickets, PLUS the same
+        untracked-fill risk optimizer.apply_secondary() already guards for
+        (see engine.py's H1 orphan tracking): a closed-but-still-unresolved
+        orphan ticket, or a still-open orphan-scan window where the fill's
+        ticket was never even identified. A pending scan blocks regardless of
+        whether engine.py has marked it "abandoned" - abandoned only means
+        engine.py stopped actively re-diffing every cycle, not that the
+        position is confirmed gone (see engine._try_entry).
+        """
+        tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
+        orphan_tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
+        watch = tagged | orphan_tickets
+        live = [p for p in client.positions(magic=magic) if p["ticket"] in watch] if watch else []
+        scan = store.get_setting("secondary_orphan_scan", {}) or {}
+        pending_scan = symbol in scan and int(scan[symbol].get("magic", -1)) == magic
+        return live, pending_scan
+
     @app.post("/api/symbols/{symbol}")
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
         patch = body.model_dump()
@@ -474,11 +493,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                             409, f"{symbol}: {what} degistirilemedi, {len(open_here)} acik pozisyon var "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
                 if secondary_changing:
-                    live_tagged = _open_tagged_secondary(current.magic)
-                    if live_tagged:
+                    live_tagged, pending_scan = _secondary_risk(current.magic, symbol)
+                    if live_tagged or pending_scan:
+                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
                         raise HTTPException(
                             409, f"{symbol}: ikincil strateji degistirilemedi, "
-                                 f"{len(live_tagged)} acik ikincil-sinyal pozisyonu var "
+                                 f"{len(live_tagged)} acik ikincil-sinyal pozisyonu var{note} "
                                  f"(once kapanmasini bekleyin)")
                 if exit_fields_changing and not (magic_changing or primary_changing):
                     open_here = _open_under_magic(current.magic)
@@ -490,15 +510,16 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                                  f"degistirilemedi, {len(open_here)} acik pozisyon var "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
                 if secondary_exit_changing and not secondary_changing:
-                    live_tagged = _open_tagged_secondary(current.magic)
-                    if live_tagged:
+                    live_tagged, pending_scan = _secondary_risk(current.magic, symbol)
+                    if live_tagged or pending_scan:
                         changed_fields = sorted(
                             k for k in (set(next_sec_params) | set(current.secondary_params)) & EXIT_RISK_FIELDS
                             if next_sec_params.get(k) != current.secondary_params.get(k))
+                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
                         raise HTTPException(
                             409, f"{symbol}: ikincil cikis/risk parametreleri "
                                  f"({', '.join(changed_fields)}) degistirilemedi, "
-                                 f"{len(live_tagged)} acik ikincil-sinyal pozisyonu var "
+                                 f"{len(live_tagged)} acik ikincil-sinyal pozisyonu var{note} "
                                  f"(once kapanmasini bekleyin)")
             if primary_changing:
                 tf_allow = store.opt_params().get("strategy_timeframes")
@@ -658,10 +679,21 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             engine.entry_lock.acquire()
         try:
             open_magics = ({p["magic"] for p in client.positions()} if guarded else set())
+            secondary_guarded = secondary_fields or secondary_params_present
+            # Same untracked-fill risk class optimizer.apply_secondary() and
+            # patch_symbol()'s _secondary_risk() guard for (see engine.py's
+            # H1 orphan tracking) - a live-tagged ticket alone missed a
+            # closed-but-still-unresolved orphan ticket, and missed a
+            # still-open orphan-scan window entirely (that one has no ticket
+            # number at all yet, so it cannot be found via client.positions()
+            # - it is keyed by symbol, checked separately below).
             tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
-            tagged_magics = ({p["magic"] for p in client.positions()
-                              if p["ticket"] in tagged}
-                             if (secondary_fields or secondary_params_present) and tagged else set())
+            orphan_tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
+            watch_tickets = tagged | orphan_tickets
+            watch_magics = ({p["magic"] for p in client.positions() if p["ticket"] in watch_tickets}
+                            if secondary_guarded and watch_tickets else set())
+            orphan_scan = (store.get_setting("secondary_orphan_scan", {}) or {}
+                          if secondary_guarded else {})
             for symbol in targets:
                 current = store.symbols.get(symbol) if guarded else None
                 if guarded and current is None:
@@ -681,12 +713,16 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 if symbol_changing and current.magic in open_magics:
                     rejected.append(symbol)
                     continue
+                pending_scan = (
+                    symbol in orphan_scan
+                    and int(orphan_scan[symbol].get("magic", -1)) == current.magic
+                ) if current is not None else False
                 if secondary_fields and current is not None:
                     next_sec = body.patch.get("secondary_strategy", current.secondary_strategy)
                     next_stf = body.patch.get("secondary_timeframe", current.secondary_timeframe)
                     sec_changing = (next_sec != current.secondary_strategy
                                     or next_stf != current.secondary_timeframe)
-                    if sec_changing and current.magic in tagged_magics:
+                    if sec_changing and (current.magic in watch_magics or pending_scan):
                         rejected.append(symbol)
                         continue
                 if exit_fields and current is not None:
@@ -698,7 +734,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     sec_keys = (set(next_sec_params) | set(current.secondary_params)) & EXIT_RISK_FIELDS
                     sec_exit_changing = any(next_sec_params.get(k) != current.secondary_params.get(k)
                                             for k in sec_keys)
-                    if sec_exit_changing and current.magic in tagged_magics:
+                    if sec_exit_changing and (current.magic in watch_magics or pending_scan):
                         rejected.append(symbol)
                         continue
                 if store.update_symbol(symbol, body.patch) is not None:

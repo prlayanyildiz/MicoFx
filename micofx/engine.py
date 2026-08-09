@@ -849,8 +849,7 @@ class Engine:
 
     def _try_entry(self, base: SymbolConfig, state: SymbolState,
                    account: dict[str, Any]) -> None:
-        scan = self._orphan_scan.get(base.symbol)
-        if scan is not None and not scan.get("abandoned"):
+        if base.symbol in self._orphan_scan:
             # A prior secondary fill on this symbol/magic is still waiting on
             # a delayed broker ticket - self._positions cannot be trusted to
             # reflect it (that is exactly why the scan is still open), so
@@ -858,7 +857,13 @@ class Engine:
             # block a duplicate order here. Refuse ANY entry (not just
             # secondary-sourced ones - a fresh primary trade could just as
             # easily collide with a slot the still-invisible position already
-            # holds) until _scan_orphan_candidates() resolves or abandons it.
+            # holds) until _scan_orphan_candidates() has fully DROPPED this
+            # scan entry - "abandoned" only stops actively re-diffing every
+            # cycle (see _scan_orphan_candidates), it does not mean the
+            # position is no longer possibly out there. Keeping the entry
+            # blocked through the abandon grace window too removes the
+            # contradiction of calling a symbol "abandoned" while still
+            # letting fresh trades stack on top of an unresolved one.
             state.note = "ikincil ticket taramasi devam ediyor - giris beklemede"
             return
         side = state.signal
@@ -1159,13 +1164,15 @@ class Engine:
         had not caught up yet - this keeps checking every cycle instead of
         writing the position off as untraceable after one failed diff.
 
-        New entries on the symbol are refused (see ``_try_entry``) for as
-        long as its scan entry exists and is not yet ``abandoned`` - a
-        genuinely lost fill would otherwise block that symbol from trading
-        forever, so past ``stale_after`` the block itself is lifted, but the
-        entry is kept around, abandoned, for one more short grace window: a
-        same-magic ticket that turns up that late is still closed on sight
-        instead of being left to run under the wrong strategy's exits.
+        New entries on the symbol stay refused (see ``_try_entry``) for as
+        long as its scan entry exists at all, ``abandoned`` or not - past
+        ``stale_after`` this stops actively expecting the ticket to show up
+        (it is unlikely to now) and starts counting down a short grace
+        window instead, but the entry itself is only ever cleared by finding
+        the ticket (closed on sight) or by the grace window finally expiring,
+        never by giving up on the wait alone. A same-magic ticket that turns
+        up during that grace window is still closed rather than left to run
+        under the wrong strategy's exits.
         """
         if not self._orphan_scan:
             return
@@ -1200,9 +1207,37 @@ class Engine:
                 continue
             if entry.get("abandoned"):
                 if time.time() - float(entry.get("abandoned_at", 0.0)) > abandon_grace:
-                    LOG.emit("Gecikmis ikincil ticket taramasi (ek bekleme suresi de doldu) - "
-                             "pozisyon hicbir zaman gorunmedi, tarama tamamen birakiliyor, "
-                             "elle kontrol edin.", "ERROR", symbol)
+                    # Final look with a fresh positions() call (not the
+                    # possibly-stale self._positions snapshot this cycle
+                    # started with) before giving up for good - closes the
+                    # gap between "last checked" and "actually dropping",
+                    # since after this the symbol is untracked and a ticket
+                    # that shows up even one broker tick later would run
+                    # under the primary's exit params instead.
+                    last_look = {p["ticket"] for p in self.client.positions() if p["magic"] == magic}
+                    last_new = last_look - known
+                    if last_new:
+                        closed = set()
+                        for ticket in last_new:
+                            if self.client.close_position(
+                                    ticket, self.store.system.slippage_points,
+                                    "MicoFX gecikmis ikincil ticket (son sans)"):
+                                closed.add(ticket)
+                        if closed:
+                            self._positions = self.client.positions()
+                            LOG.emit(f"Son sans taramasinda ikincil ticket bulundu ve "
+                                     f"kapatildi: {sorted(closed)}.", "WARN", symbol)
+                        failed = last_new - closed
+                        if failed:
+                            self._orphan_tickets |= failed
+                            self._save_orphan_tickets()
+                            LOG.emit(f"Son sans taramasinda ticket bulundu ama kapatilamadi: "
+                                     f"{sorted(failed)} - her dongude tekrar denenecek.",
+                                     "ERROR", symbol)
+                    else:
+                        LOG.emit("Gecikmis ikincil ticket taramasi (ek bekleme suresi de doldu) - "
+                                 "pozisyon hicbir zaman gorunmedi, tarama tamamen birakiliyor, "
+                                 "elle kontrol edin.", "ERROR", symbol)
                     del self._orphan_scan[symbol]
                     changed = True
                 continue
@@ -1211,9 +1246,9 @@ class Engine:
                 entry["abandoned_at"] = time.time()
                 changed = True
                 LOG.emit(f"Gecikmis ikincil ticket taramasi {stale_after:g}sn zaman asimina "
-                         f"ugradi - pozisyon hicbir zaman gorunmedi, {symbol} icin yeni giris "
-                         f"tekrar acildi, ancak gec beliren bir ticket'i kapatmak icin "
-                         f"{abandon_grace:g}sn daha izlenecek.", "ERROR", symbol)
+                         f"ugradi - pozisyon hicbir zaman gorunmedi, {symbol} icin giris hala "
+                         f"engelli, gec beliren bir ticket'i kapatmak icin {abandon_grace:g}sn "
+                         f"daha izlenecek, sonra tarama tamamen birakilacak.", "ERROR", symbol)
         if changed:
             self._save_orphan_scan()
 
@@ -1384,7 +1419,20 @@ class Engine:
             sec_open_magics: set[int] = set()
         else:
             open_magics = {p["magic"] for p in self._positions}
-            sec_open_magics = {p["magic"] for p in self._positions if p["ticket"] in self._sec_tickets}
+            sec_open_magics = {p["magic"] for p in self._positions
+                               if p["ticket"] in self._sec_tickets or p["ticket"] in self._orphan_tickets}
+        # A zero-candidate orphan-scan window (H1) is genuinely invisible to
+        # self._positions - that is the entire reason it exists - so without
+        # this, this magic reads as flat here even though a fill may still
+        # turn up, and both the primary and secondary held-back exit/risk
+        # patches would land on a position that was never actually confirmed
+        # closed. Same risk class Optimizer.apply()/apply_secondary() already
+        # guard for on the write side; this is the corresponding read-side
+        # gap on the "did it ever actually go flat" check.
+        for entry in self._orphan_scan.values():
+            magic = int(entry.get("magic", -1))
+            open_magics.add(magic)
+            sec_open_magics.add(magic)
         # Same lock optimizer.apply()/web PATCH hold across their own
         # open-position check + write - without it, a concurrent apply() on
         # the web thread could land a fresh patch (correctly clearing

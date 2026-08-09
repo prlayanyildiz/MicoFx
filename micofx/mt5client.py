@@ -725,14 +725,23 @@ class MT5Client:
             )
         out = []
         for d in raw or []:
-            if d.entry not in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT, mt5.DEAL_ENTRY_OUT_BY):
+            # DEAL_ENTRY_IN is included too now, so merge_round_trips() can
+            # fold its commission into the round-trip total - some brokers
+            # split round-turn commission across both legs (or charge it all
+            # on entry) rather than only at close, and dropping the IN side
+            # entirely undercounted realised cost. Its profit is always 0.0
+            # (an entry never itself realises P/L) and it carries no "reason"
+            # (SL/TP only ever apply to a closing deal), so nothing else that
+            # reads this list needs to change to tolerate it showing up.
+            if d.entry not in (mt5.DEAL_ENTRY_IN, mt5.DEAL_ENTRY_OUT,
+                               mt5.DEAL_ENTRY_INOUT, mt5.DEAL_ENTRY_OUT_BY):
                 continue
             out.append({
                 "ticket": int(d.ticket), "position": int(d.position_id), "symbol": d.symbol,
                 "magic": int(d.magic), "volume": float(d.volume), "price": float(d.price),
                 "profit": float(d.profit), "commission": float(d.commission),
                 "swap": float(d.swap), "time": int(d.time), "comment": d.comment,
-                "reason": int(d.reason),
+                "reason": int(d.reason), "entry": int(d.entry),
             })
         return out
 
@@ -747,10 +756,21 @@ class MT5Client:
         judgment downstream (``Supervisor.review``), and the day's win-rate
         (``Engine.day_stats``). Grouped by MT5's ``position_id`` and summed, one
         entry per closed position, timestamped at its last (closing) fill.
+
+        ``deals`` now carries DEAL_ENTRY_IN deals too (see ``deals_since()``),
+        so its entry-side commission is folded into the total - but only for
+        a position that actually HAS a closing deal in this same list. A
+        still-open position's IN deal sitting alone here would otherwise be
+        misread as a completed zero-profit "trade" the instant it filled,
+        polluting win/loss counts and win-rate before it ever closed.
         """
+        CLOSING = (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_INOUT, mt5.DEAL_ENTRY_OUT_BY)
+        closed_positions = {d["position"] for d in deals if d.get("entry") in CLOSING}
         by_position: dict[int, dict[str, Any]] = {}
         for d in deals:
             pos = d["position"]
+            if pos not in closed_positions:
+                continue
             row = by_position.get(pos)
             if row is None:
                 row = {"position": pos, "symbol": d["symbol"], "magic": d["magic"],

@@ -181,7 +181,12 @@ def test_orphan_scan_block_lifts_once_scan_resolves():
     assert client.open_market_calls == calls_before + 1
 
 
-def test_orphan_scan_abandons_after_stale_timeout_and_unblocks_entry():
+def test_orphan_scan_abandon_after_stale_timeout_keeps_entry_blocked():
+    # H2: "abandoned" only stops actively re-diffing every cycle - it does
+    # NOT reopen entry. The contradiction of "abandoned but entry still
+    # open" is exactly what this is closing: the scan entry (and therefore
+    # the _try_entry block) stays until it is fully dropped, never merely
+    # because the stale timeout fired.
     cfg = _cfg()
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0}}  # ancient -> stale
@@ -191,11 +196,63 @@ def test_orphan_scan_abandons_after_stale_timeout_and_unblocks_entry():
     assert "EURUSD" in eng._orphan_scan  # kept around for the grace window
     assert eng._orphan_scan["EURUSD"]["abandoned"] is True
 
-    # Entry is unblocked once abandoned, even though the scan entry is still there.
+    # Entry stays blocked - abandoned or not, the scan entry is still there.
+    state = _state()
+    calls_before = client.open_market_calls
+    eng._try_entry(cfg, state, account={"balance": 1000.0})
+    assert client.open_market_calls == calls_before
+    assert "taramasi devam ediyor" in state.note
+
+
+def test_orphan_scan_entry_unblocked_only_after_final_drop():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0,
+                                   "abandoned": True, "abandoned_at": 0.0}}  # grace also expired
+
+    eng._scan_orphan_candidates()
+
+    assert "EURUSD" not in eng._orphan_scan  # fully dropped now
     state = _state()
     calls_before = client.open_market_calls
     eng._try_entry(cfg, state, account={"balance": 1000.0})
     assert client.open_market_calls == calls_before + 1
+
+
+def test_orphan_scan_final_drop_does_a_last_look_and_closes_late_ticket():
+    # M3: the exact cycle a scan would finally drop still gets one more
+    # fresh positions() check before giving up, so a ticket that only
+    # replicates that late is still caught instead of silently running
+    # under the primary's exit params from then on.
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[
+        {"ticket": 901, "magic": 1},
+    ])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0,
+                                   "abandoned": True, "abandoned_at": 0.0}}
+    eng._positions = []  # this cycle's snapshot missed it...
+    client.close_ok = {901}  # ...but the fresh client.positions() call sees it
+
+    eng._scan_orphan_candidates()
+
+    assert client.closed == [901]
+    assert "EURUSD" not in eng._orphan_scan
+
+
+def test_orphan_scan_final_drop_last_look_close_fails_goes_to_orphan_tickets():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[
+        {"ticket": 902, "magic": 1},
+    ])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0,
+                                   "abandoned": True, "abandoned_at": 0.0}}
+    eng._positions = []
+    client.close_ok = set()  # close fails
+
+    eng._scan_orphan_candidates()
+
+    assert "EURUSD" not in eng._orphan_scan
+    assert eng._orphan_tickets == {902}
 
 
 def test_orphan_scan_abandoned_entry_still_closes_a_late_ticket():
@@ -468,3 +525,67 @@ def test_daily_rollover_leaves_sticky_symbol_halts_when_same_day():
 
     assert eng._symbol_halted == {"EURUSD": "gunluk sembol zarar limiti (5.00%)"}
     assert calls == []
+
+
+def _pending_exits_engine(cfg, positions):
+    eng = object.__new__(Engine)
+    eng.entry_lock = threading.Lock()
+    eng._positions = positions
+    eng._sec_tickets = set()
+    eng._orphan_tickets = set()
+    eng._orphan_scan = {}
+    updates = []
+    eng.store = SimpleNamespace(
+        symbols=SimpleNamespace(values=lambda: [cfg]),
+        update_symbol=lambda symbol, patch: updates.append((symbol, patch)) or cfg,
+    )
+    return eng, updates
+
+
+def test_apply_pending_exits_holds_back_primary_while_orphan_scan_pending():
+    # M2: self._positions genuinely doesn't show this magic's fill yet (the
+    # whole reason the scan exists), so without consulting _orphan_scan too
+    # the magic reads as flat and the held-back patch lands prematurely.
+    cfg = SymbolConfig(symbol="EURUSD", magic=1, pending_exit_patch={"sl_atr_mult": 2.0})
+    eng, updates = _pending_exits_engine(cfg, positions=[])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0}}
+
+    eng._apply_pending_exits()
+
+    assert updates == []
+
+
+def test_apply_pending_exits_lands_once_orphan_scan_clears():
+    cfg = SymbolConfig(symbol="EURUSD", magic=1, pending_exit_patch={"sl_atr_mult": 2.0})
+    eng, updates = _pending_exits_engine(cfg, positions=[])
+    eng._orphan_scan = {}  # resolved/dropped
+
+    eng._apply_pending_exits()
+
+    assert len(updates) == 1
+    assert updates[0][1]["sl_atr_mult"] == 2.0
+
+
+def test_apply_pending_exits_holds_back_secondary_while_orphan_ticket_open():
+    # An orphan ticket is a real MT5 position (untagged, being retried for
+    # close) - not in _sec_tickets, so the old sec_open_magics computation
+    # missed it entirely.
+    cfg = SymbolConfig(symbol="EURUSD", magic=1,
+                       pending_secondary_exit_patch={"trail_start_atr": 1.5})
+    eng, updates = _pending_exits_engine(cfg, positions=[{"ticket": 401, "magic": 1}])
+    eng._orphan_tickets = {401}
+
+    eng._apply_pending_exits()
+
+    assert updates == []
+
+
+def test_apply_pending_exits_secondary_lands_when_no_orphan_risk():
+    cfg = SymbolConfig(symbol="EURUSD", magic=1,
+                       pending_secondary_exit_patch={"trail_start_atr": 1.5})
+    eng, updates = _pending_exits_engine(cfg, positions=[])
+
+    eng._apply_pending_exits()
+
+    assert len(updates) == 1
+    assert updates[0][1]["secondary_params"]["trail_start_atr"] == 1.5

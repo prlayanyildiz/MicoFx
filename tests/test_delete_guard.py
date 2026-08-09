@@ -681,3 +681,28 @@ def test_index_page_rejects_wrong_token():
     res = tc.get("/?token=wrong")
     assert res.status_code == 401
     assert "secret123" not in res.text
+
+
+def test_logs_download_requires_token_when_configured():
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/api/logs/download")
+    assert res.status_code == 401
+
+
+def test_logs_download_accepts_query_param_token():
+    # M6: a plain <a href> download link cannot set a custom header - the
+    # gate already accepts ?token= as a fallback for every /api/* route
+    # (not just "/"), which is what app.js's download link now relies on.
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/api/logs/download?token=secret123")
+    assert res.status_code != 401  # 404 (no log file yet) is fine - just not auth-rejected

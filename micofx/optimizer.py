@@ -1082,6 +1082,17 @@ class Optimizer:
                 return {"ok": False,
                         "error": f"{symbol}: MT5 baglantisi koptu, acik pozisyon dogrulanamadi - "
                                  f"islem guvenlik icin reddedildi"}
+            # A same-magic orphan ticket (engine.py's H1 tracking) is already
+            # a real MT5 position, so it is already IN open_here above - only
+            # the zero-candidate orphan-scan window needs adding here: that
+            # fill is genuinely invisible to client.positions() yet (that is
+            # the entire reason the scan exists), so open_here alone would
+            # read this magic as flat and skip both the family-swap block and
+            # the exit/risk holdback below for a position that may still turn
+            # up. Same risk class apply_secondary() already guards for.
+            orphan_scan = self.store.get_setting("secondary_orphan_scan", {}) or {}
+            pending_scan = (symbol in orphan_scan
+                            and int(orphan_scan[symbol].get("magic", -1)) == cfg.magic)
             # Default: this apply() is the new authoritative candidate, so any
             # earlier held-back patch is superseded and must be dropped - the
             # held-back branch below overwrites this with the fresh one when
@@ -1092,14 +1103,15 @@ class Optimizer:
             # on top of it by Engine._apply_pending_exits the next time this
             # magic is seen flat - silently reverting the newer values.
             patch["pending_exit_patch"] = {}
-            if open_here:
+            if open_here or pending_scan:
+                scan_note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
                 if primary_changed:
                     # Swapping the family out from under it mid-trade hands that
                     # same position's ongoing trail/breakeven math to a
                     # different, unrelated strategy's params entirely - wait for
                     # flat rather than let that happen.
                     return {"ok": False,
-                            "error": f"{symbol}: {len(open_here)} acik pozisyon var, "
+                            "error": f"{symbol}: {len(open_here)} acik pozisyon var{scan_note}, "
                                      f"strateji/TF degisikligi pozisyon kapanana kadar bekliyor "
                                      f"(parametre iyilestirmesi degil, aile degisikligi)"}
                 # Same family/timeframe: entry-signal params (t3_length, adx_min,
@@ -1128,7 +1140,7 @@ class Optimizer:
                                           if k not in EXIT_RISK_FIELDS}
                         patch["opt_summary"] = {**patch["opt_summary"], "params": summary_params,
                                                 "pending_exit_fields": sorted(held_back)}
-                    LOG.emit(f"{symbol}: {len(open_here)} acik pozisyon var, "
+                    LOG.emit(f"{symbol}: {len(open_here)} acik pozisyon var{scan_note}, "
                              f"cikis/risk parametreleri ({', '.join(sorted(held_back))}) "
                              f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)
             updated = self.store.update_symbol(symbol, patch)

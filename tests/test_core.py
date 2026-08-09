@@ -85,6 +85,41 @@ def test_simulate_stops_out_a_long_on_the_stop_leg():
     assert res.trade_rs[0] < 0
 
 
+def test_simulate_skips_entry_with_nan_atr():
+    # M5: mirrors engine._try_entry's live ATR gate - a bare ``atr <= 0``
+    # check is not fail-closed for NaN (NaN compares False to everything), so
+    # a NaN'd entry-bar ATR must not size sl_dist/tp_dist and produce a
+    # corrupt R value.
+    n = 60
+    high = np.full(n, 100.0)
+    low = np.full(n, 100.0)
+    close = np.full(n, 100.0)
+    open_ = np.full(n, 100.0)
+    low[12] = 90.0
+    close[12] = 95.0
+
+    from micofx.strategy import IndicatorCache, Params, Signals
+    atr = np.full(n, 1.0)
+    buy = np.zeros(n, dtype=bool)
+    buy[10] = True
+    sell = np.zeros(n, dtype=bool)
+    sig = Signals(t3=close, k=close, d=close, atr=atr, adx=np.zeros(n),
+                  buy=buy, sell=sell, htf_up=np.zeros(n, dtype=bool),
+                  htf_down=np.zeros(n, dtype=bool))
+    cache = IndicatorCache(high, low, close, times=np.arange(n) * 300, tf_seconds=300,
+                           open_=open_, volume=np.ones(n))
+    p = Params(sl_atr_mult=1.0, tp_atr_mult=0.0, trail_start_atr=0.0)
+    # Corrupt just the entry bar's cached ATR value directly - simulate()
+    # reads cache.atr_list(p.atr_period), not sig.atr.
+    corrupted = cache.atr_list(p.atr_period)
+    corrupted[10] = float("nan")
+    cache._atr_lists[p.atr_period] = corrupted
+
+    res = backtest.simulate(cache, sig, open_, np.zeros(n), point=0.01, p=p,
+                            entries=np.array([10]))
+    assert res.trades == 0
+
+
 def test_simulate_targets_a_long_on_the_target_leg():
     n = 60
     high = np.full(n, 100.0)
@@ -263,14 +298,17 @@ def test_can_open_allows_when_bucket_not_full():
 
 # --------------------------------------------------------------------------- merge_round_trips
 
+import MetaTrader5 as mt5  # noqa: E402  (installed on this machine - see mt5client.py)
+
+
 def test_merge_round_trips_sums_partial_fills_into_one_trade():
     deals = [
         {"position": 1, "symbol": "EURUSD", "magic": 1, "time": 100,
-         "profit": 5.0, "commission": -0.5, "swap": 0.0},
+         "profit": 5.0, "commission": -0.5, "swap": 0.0, "entry": mt5.DEAL_ENTRY_OUT},
         {"position": 1, "symbol": "EURUSD", "magic": 1, "time": 110,
-         "profit": -1.0, "commission": -0.5, "swap": 0.0},
+         "profit": -1.0, "commission": -0.5, "swap": 0.0, "entry": mt5.DEAL_ENTRY_OUT},
         {"position": 2, "symbol": "EURUSD", "magic": 1, "time": 105,
-         "profit": -3.0, "commission": -0.5, "swap": 0.0},
+         "profit": -3.0, "commission": -0.5, "swap": 0.0, "entry": mt5.DEAL_ENTRY_OUT},
     ]
     merged = MT5Client.merge_round_trips(deals)
     assert len(merged) == 2
@@ -280,6 +318,33 @@ def test_merge_round_trips_sums_partial_fills_into_one_trade():
     assert by_pos[1]["time"] == 110  # timestamped at the LAST (closing) fill
     # sorted by time ascending: position 2 (t=105) before position 1 (t=110)
     assert [r["position"] for r in merged] == [2, 1]
+
+
+def test_merge_round_trips_folds_in_entry_side_commission():
+    # M4: DEAL_ENTRY_IN now carries commission too (some brokers split the
+    # round-turn commission across both legs) - a closed position's IN deal
+    # must be folded into the total, not silently dropped.
+    deals = [
+        {"position": 1, "symbol": "EURUSD", "magic": 1, "time": 100,
+         "profit": 0.0, "commission": -0.4, "swap": 0.0, "entry": mt5.DEAL_ENTRY_IN},
+        {"position": 1, "symbol": "EURUSD", "magic": 1, "time": 110,
+         "profit": 5.0, "commission": -0.4, "swap": 0.0, "entry": mt5.DEAL_ENTRY_OUT},
+    ]
+    merged = MT5Client.merge_round_trips(deals)
+    assert len(merged) == 1
+    assert merged[0]["commission"] == pytest.approx(-0.8)  # both legs, not just the OUT one
+    assert merged[0]["profit"] == pytest.approx(5.0)
+
+
+def test_merge_round_trips_excludes_still_open_position():
+    # A position with only an IN deal (no OUT/INOUT/OUT_BY yet) hasn't
+    # actually closed - it must not be reported as a zero-profit "trade".
+    deals = [
+        {"position": 1, "symbol": "EURUSD", "magic": 1, "time": 100,
+         "profit": 0.0, "commission": -0.4, "swap": 0.0, "entry": mt5.DEAL_ENTRY_IN},
+    ]
+    merged = MT5Client.merge_round_trips(deals)
+    assert merged == []
 
 
 # --------------------------------------------------------------------------- optimizer.reject_reason

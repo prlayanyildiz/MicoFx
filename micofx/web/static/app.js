@@ -194,7 +194,7 @@ function renderCards() {
   const lossRatio = lossLimit > 0 ? Math.min(100, Math.max(0, (-dayPct / lossLimit) * 100)) : 0;
 
   const cards = [
-    { lbl: "Bakiye", val: num(acc.balance), foot: `${acc.currency || ""} | kaldirac 1:${acc.leverage || "-"}`, accent: "blue" },
+    { lbl: "Bakiye", val: num(acc.balance), foot: `${esc(acc.currency || "")} | kaldirac 1:${acc.leverage || "-"}`, accent: "blue" },
     { lbl: "Varlik", val: num(acc.equity), foot: `acik k/z ${signed(acc.profit)}`, accent: Number(acc.profit) >= 0 ? "green" : "red" },
     { lbl: "Serbest Marj", val: num(acc.margin_free), foot: `kullanilan ${num(acc.margin)}`, accent: "blue" },
     {
@@ -2015,6 +2015,15 @@ function wire() {
     $("#logview").innerHTML = "";
     logAfter = 0;
   };
+  // A plain <a href> navigation cannot set the X-Mico-Token header the way
+  // api() does for fetch calls - when a token is configured (non-localhost
+  // bind) this download would otherwise 401. The gate already accepts
+  // ?token= as a fallback (see create_app()'s middleware), so appending it
+  // here is enough - no need to turn this into a fetch+blob download.
+  if (API_TOKEN) {
+    const dl = $("#btn-log-download");
+    if (dl) dl.href = `/api/logs/download?token=${encodeURIComponent(API_TOKEN)}`;
+  }
 
   renderLogLevels();
 }

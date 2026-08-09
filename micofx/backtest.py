@@ -334,7 +334,11 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             continue
 
         atr_entry = atr[i]
-        if atr_entry <= 0:
+        # Mirrors live's engine._try_entry ATR gate: NaN compares False to
+        # everything, so a bare ``<= 0`` check is not fail-closed for it - a
+        # NaN'd bar (corrupt input, indicator edge case) would otherwise
+        # size sl_dist/tp_dist off it below and produce a garbage R value.
+        if not math.isfinite(atr_entry) or atr_entry <= 0:
             ptr += 1
             continue
         s = float(spread_price[j0])

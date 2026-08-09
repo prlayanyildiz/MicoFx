@@ -30,10 +30,26 @@ def _iter_files(root: Path):
 
 def main() -> int:
     store = Store()
-    dest_dir = Path(store.system.backup_dir)
+    raw_dir = str(store.system.backup_dir)
+    allow_unc = bool(store.system.backup_dir_allow_unc)
     keep = max(1, int(store.system.backup_keep))
     store.close()
 
+    # PATCH /api/system already refuses to WRITE a UNC backup_dir without
+    # this flag (see web/app.py) - this is the read side of that same gate.
+    # A UNC value could still be sitting in the DB from before that check
+    # existed (or a config seeded outside the API), and this scheduled task
+    # runs unattended - it must not silently keep sending the whole project
+    # + settings DB over the network run after run just because nothing
+    # re-validates the stored value at execution time.
+    is_unc = raw_dir.startswith("\\\\") or raw_dir.startswith("//")
+    if is_unc and not allow_unc:
+        print(f"HATA: yedek konumu UNC ({raw_dir!r}) ama backup_dir_allow_unc kapali - "
+              f"yedek yazilmadi. Web panelinden System > backup_dir_allow_unc:true "
+              f"yapin veya yerel bir yol secin.")
+        return 1
+
+    dest_dir = Path(raw_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y-%m-%d_%H%M")
     zip_path = dest_dir / f"MicoFX_{stamp}.zip"
