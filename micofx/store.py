@@ -175,8 +175,24 @@ class Store:
             self._db.commit()
             return int(cur.rowcount or 0)
 
-    def next_magic(self) -> int:
+    def next_magic(self, avoid: set[int] | None = None) -> int:
         used = {c.magic for c in self.symbols.values()}
+        # A magic still tied to a pending secondary_orphan_scan window
+        # (engine.py's H1 tracking) has a fill that may not be visible in
+        # client.positions() yet - handing it straight back out here would
+        # let a brand new symbol's own fill land under the same magic the
+        # scan is still watching, and _scan_orphan_candidates() would then
+        # force-close it as the "delayed orphan ticket" it is not. Readable
+        # from settings alone, no client needed, so every caller gets this
+        # protection for free. ``avoid`` additionally covers still-open
+        # orphan_tickets' live magics - that needs client.positions() to
+        # resolve, which this storage-layer method has no access to, so
+        # callers that can see the broker connection pass it in.
+        scan = self.get_setting("secondary_orphan_scan", {}) or {}
+        if isinstance(scan, dict):
+            used |= {int(v.get("magic", -1)) for v in scan.values() if isinstance(v, dict)}
+        if avoid:
+            used |= {int(m) for m in avoid}
         magic = 990101
         while magic in used:
             magic += 1
@@ -189,6 +205,7 @@ class Store:
         broker_symbol: str = "",
         magic: int | None = None,
         enabled: bool = True,
+        avoid_magics: set[int] | None = None,
     ) -> SymbolConfig:
         """Add a product from a group preset; raises ValueError on bad/duplicate names."""
         name = str(symbol or "").strip().upper().replace(" ", "_")
@@ -203,14 +220,15 @@ class Store:
             "symbol": name,
             "group": group,
             "enabled": bool(enabled),
-            "magic": int(magic) if magic is not None else self.next_magic(),
+            "magic": int(magic) if magic is not None else self.next_magic(avoid_magics),
             "broker_symbol": str(broker_symbol or "").strip(),
         }
         payload.update(presets.get(group, {}))
         payload["symbol"] = name
         payload["group"] = group
         payload["enabled"] = bool(enabled)
-        payload["magic"] = int(magic) if magic is not None else payload.get("magic", self.next_magic())
+        payload["magic"] = (int(magic) if magic is not None
+                            else payload.get("magic", self.next_magic(avoid_magics)))
         payload["broker_symbol"] = str(broker_symbol or "").strip()
         cfg = SymbolConfig.from_dict(payload)
         self.save_symbol(cfg, position=len(self.symbols))
@@ -261,7 +279,7 @@ class Store:
             LOG.emit(f"{seeded} sembol varsayilan ayarlarla yuklendi.", "INFO")
         return seeded
 
-    def reset_symbol_to_preset(self, symbol: str) -> SymbolConfig | None:
+    def reset_symbol_to_preset(self, symbol: str, avoid_magics: set[int] | None = None) -> SymbolConfig | None:
         entry = next((e for e in self.defaults.get("symbols", []) if e.get("symbol") == symbol), None)
         cfg = self.symbols.get(symbol)
         if cfg is None and entry is None:
@@ -271,7 +289,7 @@ class Store:
             "symbol": symbol,
             "group": group,
             "enabled": True,
-            "magic": cfg.magic if cfg else self.next_magic(),
+            "magic": cfg.magic if cfg else self.next_magic(avoid_magics),
             "broker_symbol": cfg.broker_symbol if cfg else "",
         }
         payload.update(self.defaults.get("group_presets", {}).get(group, {}))
@@ -279,7 +297,7 @@ class Store:
             payload.update({k: v for k, v in entry.items() if k != "group"})
         payload["symbol"] = symbol
         payload["group"] = group
-        payload["magic"] = cfg.magic if cfg else payload.get("magic", self.next_magic())
+        payload["magic"] = cfg.magic if cfg else payload.get("magic", self.next_magic(avoid_magics))
         payload["broker_symbol"] = cfg.broker_symbol if cfg else ""
         updated = SymbolConfig.from_dict(payload)
         self.save_symbol(updated)

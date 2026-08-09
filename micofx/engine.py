@@ -1177,7 +1177,12 @@ class Engine:
         if not self._orphan_scan:
             return
         stale_after = 900.0    # generous - broker lag, not a retry budget
-        abandon_grace = 300.0  # extra watch time after the entry block lifts
+        # Entry stays blocked (see _try_entry) for this whole window too -
+        # abandoning only stops the active re-diff every cycle (below), it is
+        # NOT a green light for new trades on this magic. Only a full drop
+        # (ticket found+closed, or this grace window also expiring) actually
+        # clears self._orphan_scan and re-opens entry.
+        abandon_grace = 300.0
         changed = False
         for symbol in list(self._orphan_scan):
             entry = self._orphan_scan[symbol]

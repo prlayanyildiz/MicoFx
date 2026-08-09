@@ -226,6 +226,16 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
     if api_token:
+        # ``?token=`` is only ever needed where a plain browser navigation
+        # can't set a custom header: the bootstrap "/" load, and the
+        # <a href> log download link. Every other /api/* route goes through
+        # app.js's fetch-based api() helper, which already sets the
+        # X-Mico-Token header - letting those also accept a query param
+        # would just widen where the token can end up (proxy/access logs,
+        # browser history, a Referer header on an outbound request) for no
+        # actual usability gain.
+        _QUERY_TOKEN_PATHS = {"/", "/api/logs/download"}
+
         @app.middleware("http")
         async def _require_api_token(request, call_next):
             path = request.url.path
@@ -235,11 +245,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # the token is meant to let in" - but on a non-localhost bind
             # ANYONE can fetch "/" with no credentials at all, so that meta
             # tag handed the token to precisely the population it exists to
-            # keep out. Gating "/" too (accepting the token via a ?token=
-            # query param too, since a plain browser navigation cannot set a
-            # custom header) is what actually makes that comment true.
+            # keep out. Gating "/" too is what actually makes that comment true.
             if path.startswith("/api/") or path == "/":
-                token = request.headers.get("x-mico-token") or request.query_params.get("token")
+                token = request.headers.get("x-mico-token")
+                if not token and path in _QUERY_TOKEN_PATHS:
+                    token = request.query_params.get("token")
                 if token != api_token:
                     if path == "/":
                         return PlainTextResponse(
@@ -376,24 +386,47 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             return []
         return [p for p in client.positions(magic=magic) if p["ticket"] in tagged]
 
+    def _pending_orphan_scan(magic: int, symbol: str) -> bool:
+        """True while engine.py (H1) is still watching this symbol/magic for
+        a secondary fill whose ticket was never identified - genuinely
+        invisible to client.positions() (that is the entire reason the scan
+        exists), so nothing that only checks live positions can see this risk
+        on its own. Blocks regardless of whether engine.py has marked it
+        "abandoned" - abandoned only means it stopped actively re-diffing
+        every cycle (H2), not that the position is confirmed gone. A magic
+        this stale/reused ID would otherwise collide with (DELETE, seed
+        overwrite, next_magic reassigning it to a brand new symbol) is the
+        exact same risk class as touching identity/exit under it directly.
+        """
+        scan = store.get_setting("secondary_orphan_scan", {}) or {}
+        return symbol in scan and int(scan[symbol].get("magic", -1)) == magic
+
     def _secondary_risk(magic: int, symbol: str) -> tuple[list[dict[str, Any]], bool]:
         """Everything that counts as "cannot safely touch secondary identity/
         exit right now" - live-tagged secondary tickets, PLUS the same
         untracked-fill risk optimizer.apply_secondary() already guards for
         (see engine.py's H1 orphan tracking): a closed-but-still-unresolved
         orphan ticket, or a still-open orphan-scan window where the fill's
-        ticket was never even identified. A pending scan blocks regardless of
-        whether engine.py has marked it "abandoned" - abandoned only means
-        engine.py stopped actively re-diffing every cycle, not that the
-        position is confirmed gone (see engine._try_entry).
+        ticket was never even identified.
         """
         tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
         orphan_tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
         watch = tagged | orphan_tickets
         live = [p for p in client.positions(magic=magic) if p["ticket"] in watch] if watch else []
-        scan = store.get_setting("secondary_orphan_scan", {}) or {}
-        pending_scan = symbol in scan and int(scan[symbol].get("magic", -1)) == magic
-        return live, pending_scan
+        return live, _pending_orphan_scan(magic, symbol)
+
+    def _orphan_ticket_magics() -> set[int]:
+        """Live magics of still-open orphan_tickets (H1) - Store.next_magic()
+        already avoids orphan_scan's magics on its own (no client needed
+        there), but this half needs client.positions() to resolve, which the
+        storage layer has no access to. Callers that hand out a fresh magic
+        (add/reset) pass this in so a new symbol cannot land on a magic an
+        unresolved secondary fill is still sitting on.
+        """
+        tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
+        if not tickets:
+            return set()
+        return {p["magic"] for p in client.positions() if p["ticket"] in tickets}
 
     @app.post("/api/symbols/{symbol}")
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
@@ -487,10 +520,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             if guarded and current is not None:
                 if magic_changing or primary_changing:
                     open_here = _open_under_magic(current.magic)
-                    if open_here:
+                    # optimizer.apply() already refuses a family swap while a
+                    # pending orphan-scan sits on this magic (M1, prior round)
+                    # - this endpoint is the other door to primary_changed,
+                    # and had no equivalent: a fill genuinely invisible to
+                    # client.positions() would otherwise let the swap through.
+                    pending_scan = _pending_orphan_scan(current.magic, symbol)
+                    if open_here or pending_scan:
                         what = "magic" if magic_changing else "strateji/zaman dilimi"
+                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
                         raise HTTPException(
-                            409, f"{symbol}: {what} degistirilemedi, {len(open_here)} acik pozisyon var "
+                            409, f"{symbol}: {what} degistirilemedi, {len(open_here)} acik pozisyon var{note} "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
                 if secondary_changing:
                     live_tagged, pending_scan = _secondary_risk(current.magic, symbol)
@@ -502,12 +542,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                                  f"(once kapanmasini bekleyin)")
                 if exit_fields_changing and not (magic_changing or primary_changing):
                     open_here = _open_under_magic(current.magic)
-                    if open_here:
+                    pending_scan = _pending_orphan_scan(current.magic, symbol)
+                    if open_here or pending_scan:
                         changed_fields = sorted(k for k in EXIT_RISK_FIELDS
                                                 if k in patch and patch[k] != getattr(current, k))
+                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
                         raise HTTPException(
                             409, f"{symbol}: cikis/risk parametreleri ({', '.join(changed_fields)}) "
-                                 f"degistirilemedi, {len(open_here)} acik pozisyon var "
+                                 f"degistirilemedi, {len(open_here)} acik pozisyon var{note} "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
                 if secondary_exit_changing and not secondary_changing:
                     live_tagged, pending_scan = _secondary_risk(current.magic, symbol)
@@ -550,6 +592,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 group=body.group or "forex",
                 broker_symbol=body.broker_symbol or "",
                 enabled=body.enabled,
+                avoid_magics=_orphan_ticket_magics() if client.connected else None,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -579,6 +622,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 raise HTTPException(
                     409, f"{symbol} silinemedi: {len(open_here)} acik pozisyon var "
                          f"(once kapatin veya 'enabled:false' yapip pozisyon kapanmasini bekleyin)")
+            if _pending_orphan_scan(cfg.magic, symbol):
+                # No visible position, but engine.py is still watching this
+                # exact symbol/magic for a secondary fill it could not
+                # identify yet - deleting now frees the magic for reuse
+                # (see Store.next_magic) while that fill may still turn up,
+                # letting a brand new symbol collide with it.
+                raise HTTPException(
+                    409, f"{symbol} silinemedi: tanimlanamayan bir ikincil ticket taramasi "
+                         f"devam ediyor (magic {cfg.magic}) - taramanin bitmesini bekleyin")
             store.delete_symbol(symbol)
         engine.states.pop(symbol, None)
         engine.supervisor.clear(symbol)
@@ -605,9 +657,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     raise HTTPException(
                         409, f"{symbol}: varsayilana donulemedi, {len(open_here)} acik pozisyon var "
                              f"(once kapatin veya pozisyon kapanmasini bekleyin)")
+                if _pending_orphan_scan(cfg.magic, symbol):
+                    raise HTTPException(
+                        409, f"{symbol}: varsayilana donulemedi, tanimlanamayan bir ikincil "
+                             f"ticket taramasi devam ediyor - taramanin bitmesini bekleyin")
                 updated = store.reset_symbol_to_preset(symbol)
         else:
-            updated = store.reset_symbol_to_preset(symbol)
+            # cfg is None: this symbol was deleted and is being recreated from
+            # its preset - a fresh magic is assigned (see Store.next_magic),
+            # so the same reuse risk as create_symbol() applies.
+            updated = store.reset_symbol_to_preset(
+                symbol, avoid_magics=_orphan_ticket_magics() if client.connected else None)
         if updated is None:
             raise HTTPException(404, f"{symbol} icin varsayilan yok")
         LOG.emit("Ayarlar varsayilana dondu.", "INFO", symbol)
@@ -760,12 +820,20 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # bot-owned position is still open.
             _require_connected()
             with engine.entry_lock:
-                magics = {c.magic for c in list(store.symbols.values())}
+                symbols_snapshot = list(store.symbols.values())
+                magics = {c.magic for c in symbols_snapshot}
                 open_bot = [p for p in client.positions() if p["magic"] in magics]
                 if open_bot:
                     raise HTTPException(
                         409, f"portfoy sifirlanamadi: {len(open_bot)} acik bot pozisyonu var "
                              f"(once kapatin veya panic ile duzleyin)")
+                scanning = sorted(c.symbol for c in symbols_snapshot
+                                  if _pending_orphan_scan(c.magic, c.symbol))
+                if scanning:
+                    raise HTTPException(
+                        409, f"portfoy sifirlanamadi: tanimlanamayan ikincil ticket taramasi "
+                             f"devam eden semboller var: {', '.join(scanning)} - taramalarin "
+                             f"bitmesini bekleyin")
                 count = store.replace_with_defaults()
         else:
             count = store.seed_symbols(overwrite=False)

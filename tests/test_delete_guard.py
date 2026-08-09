@@ -696,8 +696,8 @@ def test_logs_download_requires_token_when_configured():
 
 def test_logs_download_accepts_query_param_token():
     # M6: a plain <a href> download link cannot set a custom header - the
-    # gate already accepts ?token= as a fallback for every /api/* route
-    # (not just "/"), which is what app.js's download link now relies on.
+    # gate special-cases this one GET route to also accept ?token=, which is
+    # what app.js's download link relies on.
     store = _FakeStore({})
     client = _FakeClient([])
     engine = _FakeEngine()
@@ -706,3 +706,33 @@ def test_logs_download_accepts_query_param_token():
 
     res = tc.get("/api/logs/download?token=secret123")
     assert res.status_code != 401  # 404 (no log file yet) is fine - just not auth-rejected
+
+
+def test_other_api_routes_reject_query_param_token():
+    # L3: ?token= is intentionally narrow - only "/" and the log download
+    # link need it (a plain browser navigation can't set a header). Every
+    # other /api/* route goes through app.js's fetch-based api() helper,
+    # which already sets X-Mico-Token - accepting a query param there too
+    # would just widen where the token can leak (proxy logs, browser
+    # history, an outbound Referer) for no usability gain.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    store = _FakeStore(symbols)
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/api/system?token=secret123")
+    assert res.status_code == 401
+
+
+def test_other_api_routes_still_accept_header_token():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    store = _FakeStore(symbols)
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/api/system", headers={"X-Mico-Token": "secret123"})
+    assert res.status_code == 200

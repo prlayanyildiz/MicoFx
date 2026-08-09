@@ -55,6 +55,15 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
   { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
 ));
 
+// Position side / signal direction land straight in a CSS class attribute
+// in several tables (`class="pill ${v}"`) with no allowlist - esc() alone
+// still leaves them free to break out of the attribute (an unescaped quote
+// inside the escaped text is still just text, but esc() doesn't stop a
+// value from containing one either way). Only "buy"/"sell" are ever real
+// values here; anything else - a bug upstream, a corrupted payload - is
+// dropped to a neutral class instead of trusted into the markup.
+const sideClass = (v) => (v === "buy" || v === "sell" ? v : "dim");
+
 function toast(message, kind = "") {
   const box = document.createElement("div");
   box.className = kind;
@@ -318,7 +327,7 @@ function renderPositions() {
     const tr = el("tr");
     tr.innerHTML = `
       <td class="sym">${esc(p.symbol)}${p.managed ? "" : ' <span class="pill off">harici</span>'}</td>
-      <td><span class="pill ${p.side}">${p.side === "buy" ? "AL" : "SAT"}</span></td>
+      <td><span class="pill ${sideClass(p.side)}">${p.side === "buy" ? "AL" : "SAT"}</span></td>
       <td class="num">${num(p.volume, 2)}</td>
       <td class="num">${price(p.price_open, digits)}</td>
       <td class="num">${price(p.price_current, digits)}</td>
@@ -366,7 +375,7 @@ function renderLive() {
     } else if (sess.minutes_to_open != null) {
       sessionCell = `<span class="pill off">kapali</span> <span class="dim mono">${Math.floor(sess.minutes_to_open / 60)}s${sess.minutes_to_open % 60}dk</span>`;
     }
-    const sig = st.signal ? `<span class="pill ${st.signal}">${st.signal === "buy" ? "AL" : "SAT"}</span>` : '<span class="dim">-</span>';
+    const sig = st.signal ? `<span class="pill ${sideClass(st.signal)}">${st.signal === "buy" ? "AL" : "SAT"}</span>` : '<span class="dim">-</span>';
     const htf = !cfg.htf_factor ? '<span class="dim">kapali</span>'
       : st.htf > 0 ? '<span class="pos">yukari</span>'
       : st.htf < 0 ? '<span class="neg">asagi</span>' : '<span class="dim">-</span>';
@@ -874,7 +883,7 @@ function updateSymbolCards() {
       ? new Date(cfg.opt_updated_at * 1000).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" })
       : "-";
     const sig = st.signal
-      ? `<span class="pill ${st.signal}">${st.signal === "buy" ? "AL" : "SAT"}${st.signal_source === "secondary" ? " (2)" : ""}</span>`
+      ? `<span class="pill ${sideClass(st.signal)}">${st.signal === "buy" ? "AL" : "SAT"}${st.signal_source === "secondary" ? " (2)" : ""}</span>`
       : (st.signal_source === "conflict" ? '<span class="pill">CAPRAZ</span>' : "");
     $(".scard-live", card).innerHTML = `
       <span><b>strateji</b> ${esc(STRATEGY_LABEL[cfg.strategy] || cfg.strategy)} <span class="dim">${esc(cfg.timeframe)}</span></span>
