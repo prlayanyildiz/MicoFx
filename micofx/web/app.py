@@ -81,6 +81,17 @@ _SYMBOL_RISK_BOUNDS = {
     "max_lot": (0.0, 20.0, False),
     "fixed_lot": (0.0, 20.0, False),
     "max_positions": (1, 50, True),
+    # The whole exit model is these three numbers, so all three are
+    # strictly-positive. ``trail_start_atr`` is the one that actually needed
+    # a gate: engine._update_stop and backtest both arm the trail behind
+    # ``if trail_start_atr > 0``, so a 0 written here does not mean "arm
+    # immediately" the way it reads - it means the trail NEVER arms and the
+    # position runs on its hard stop alone for its whole life. The optimizer
+    # can never produce that (no shipped grid contains 0), so the only way in
+    # was a hand-typed value, and a UI ``min`` protects nothing but the UI.
+    "sl_atr_mult": (0.0, 20.0, False),
+    "trail_start_atr": (0.0, 20.0, False),
+    "trail_step_atr": (0.0, 20.0, False),
 }
 
 _SYSTEM_RISK_BOUNDS = {

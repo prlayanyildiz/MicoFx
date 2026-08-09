@@ -121,3 +121,18 @@ def test_optimizer_grids_do_not_filter_on_start_vs_step():
     starts, steps = grid["trail_start_atr"], grid["trail_step_atr"]
     pairs = [(a, b) for a in starts for b in steps if a <= b]
     assert pairs, "shipped grid can no longer express start <= step"
+
+
+def test_trail_start_zero_disables_the_trail_entirely():
+    """Pins the surprising semantics the API bound now guards against.
+
+    Documented rather than changed: `if trail_start_atr > 0` is shared by the
+    engine and the simulator, so altering it here would be an exit-model change.
+    What matters is that the behaviour is known and deliberately unreachable
+    from outside - see test_symbol_risk_bounds.py, which rejects 0 at the API.
+    """
+    # A run that reaches +3 ATR and collapses. With a working trail this banks
+    # profit (see the parametrised test above); with trail_start 0 it does not
+    # arm at all and the whole 1R of hard-stop risk is given back.
+    assert _run(1.0, 0.0, 1.6, peak_atr=3.0) == pytest.approx(-1.0, abs=0.02)
+    assert _run(1.0, 0.5, 1.6, peak_atr=3.0) > 1.0

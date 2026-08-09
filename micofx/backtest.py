@@ -281,7 +281,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     # Falls back to the old flat approximation when the caller doesn't know the
     # symbol's real broker floor (``mt5client.min_stop_distance`` - stops_level,
     # freeze_level, current spread) - live can legally require a wider stop than
-    # this default, which understates the true SL/TP/trail floor for symbols
+    # this default, which understates the true stop/trail floor for symbols
     # where the broker's own minimum exceeds ten points.
     if min_stop is None:
         min_stop = point * 10.0
@@ -367,7 +367,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             if flatten is not None and flatten[j]:
                 # Live force-closes at the current market price the instant the
                 # session/day-end band starts, ahead of trail/BE/stale checks -
-                # same ordering here (checked before those, right after SL/TP).
+                # same ordering here (checked immediately after the stop).
                 exit_price = close[j] + (0.0 if is_buy else s)
                 reason = "flatten"
                 exit_bar = j

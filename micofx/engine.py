@@ -374,7 +374,7 @@ class Engine:
         # default - a stopped bot does not close what is already open) any
         # position still open while stopped sat completely unmanaged: no
         # trailing, no breakeven, no forced flatten near session/day close.
-        # Only the broker-native SL/TP kept protecting it. New entries are
+        # Only the broker-native stop kept protecting it. New entries are
         # still gated separately below via allow_entry.
         self.manage_positions(server_now)
 
@@ -581,7 +581,7 @@ class Engine:
         manage_positions()'s per-bar throttle (self._stop_bar vs last_bar)
         then never fires _update_stop for that ticket again: trail/BE/
         partial-TP freezes silently for good, with only the broker's own
-        static SL/TP left protecting it. allow_entry=False guarantees
+        static stop left protecting it. allow_entry=False guarantees
         _evaluate() can never arm a NEW entry here (same gate every other
         allow_entry=False path already relies on - bot stopped, daily guard
         tripped, netting - none of which clear the signal chain either,

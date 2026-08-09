@@ -494,7 +494,7 @@ const SECTIONS = [
     fields: [
       { k: "atr_period", t: "int", label: "ATR periyot", min: 2, max: 100 },
       { k: "sl_atr_mult", t: "num", label: "SL x ATR", step: 0.1, min: 0.1 },
-      { k: "trail_start_atr", t: "num", label: "Trail baslangic x ATR", step: 0.1, min: 0 },
+      { k: "trail_start_atr", t: "num", label: "Trail baslangic x ATR", step: 0.1, min: 0.1 },
       { k: "trail_step_atr", t: "num", label: "Trail mesafe x ATR", step: 0.1, min: 0.1 },
       {
         k: "trail_mode", t: "select", label: "Trail modu",
@@ -593,8 +593,8 @@ const SECTIONS = [
     fields: [
       // Same two fields as the dual_t3 block above - there they are an optional
       // confirmation, here they are the entire signal. The regime gate is the
-      // shared adx_min in "Giris Filtreleri"; the exit is TP x ATR = 0 plus the
-      // trail settings in "Risk ve Cikis (ATR)".
+      // shared adx_min in "Giris Filtreleri"; the exit is the hard ATR stop
+      // plus the trail, both in "Risk ve Cikis".
       { k: "st_period", t: "int", label: "SuperTrend ATR periyodu", min: 2, max: 100 },
       { k: "st_mult", t: "num", label: "SuperTrend x ATR bant genisligi (sinyal)", step: 0.1, min: 0, max: 10 },
     ],
@@ -605,7 +605,7 @@ const SECTIONS = [
       // The whole signal is these two fields: one T3 line, and the bar its own
       // direction changes. The third is the only optional filter - the same
       // line's curvature at the flip bar - and 0 turns it off completely. The
-      // exit is TP x ATR = 0 (no target) plus the trail in "Risk ve Cikis (ATR)".
+      // exit is the hard ATR stop plus the trail, both in "Risk ve Cikis".
       { k: "t3_length", t: "int", label: "T3 uzunluk", min: 2, max: 60 },
       { k: "t3_volume_factor", t: "num", label: "T3 hacim faktoru", step: 0.05, min: 0.1, max: 1 },
       { k: "t3_accel_min", t: "num", label: "Min T3 ivmesi x ATR (0=kapali, yatay piyasa filtresi)", step: 0.01, min: 0, max: 1 },
@@ -772,8 +772,8 @@ function buildSymbolCard(cfg) {
     el("div", { class: "form-grid" }, POSITION_SECTION.fields.map((f) => buildField(cfg, f))),
   ]));
 
-  // Strateji secimi, sinyal ic parametreleri, ATR cikis mekanigi, filtreler,
-  // kismi kar - hepsi optimizer'in ayarladigi seyler. Elle mudahale edilmeyecekse
+  // Strateji secimi, sinyal ic parametreleri, ATR cikis mekanigi, filtreler -
+  // hepsi optimizer'in ayarladigi seyler. Elle mudahale edilmeyecekse
   // gorunumde gurultu; katlanir blokta duruyor, silinmedi.
   const advDetails = el("details", { class: "subgrid" });
   advDetails.appendChild(el("summary", { class: "title", text: "Ileri duzey / Strateji Parametreleri" }));

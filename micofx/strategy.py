@@ -1061,8 +1061,8 @@ def _dual_t3(cache: IndicatorCache, p: Params) -> Signals:
 
     This is the deliberately minimal core of the system: a fast T3 crossing a
     slow T3 decides direction and timing, and ATR decides everything about risk
-    (stop, target, breakeven, trail, partials - all shared with every other
-    family, none of it reinvented here). There is no Stochastic RSI, no RSI, no
+    (the hard stop and the trail - shared with every other family, none of it
+    reinvented here). There is no Stochastic RSI, no RSI, no
     ADX regime gate, no higher-timeframe agreement gate, no Bollinger/Keltner
     squeeze, no order-flow volume proxy, no Fibonacci ratio, no body-ratio or
     ATR-percentile entry filter. Those series are not merely disabled here, they

@@ -875,11 +875,13 @@ class MT5Client:
         if result.retcode == mt5.TRADE_RETCODE_INVALID_STOPS:
             # The broker rejected the level, not the trade's risk. Widen only
             # up to the broker's own minimum distance and keep the strategy's
-            # ATR-sized SL/TP otherwise - replacing it with a fixed buffer (the
-            # old behaviour) silently substituted a tiny, unvalidated stop for
-            # whatever sl_atr_mult/tp_atr_mult actually computed, so a trade
-            # that was supposed to risk N x ATR could get stopped out on noise
-            # a few points from entry instead.
+            # ATR-sized levels otherwise - replacing them with a fixed buffer
+            # (the old behaviour) silently substituted a tiny, unvalidated stop
+            # for whatever sl_atr_mult actually computed, so a trade that was
+            # supposed to risk N x ATR could get stopped out on noise a few
+            # points from entry instead. This function keeps a generic ``tp``
+            # parameter because it is the broker API wrapper, not the strategy;
+            # the engine always passes 0.
             min_dist = self.min_stop_distance(symbol)
             sl_dist = max(abs(price - sl), min_dist) if sl > 0 else 0.0
             tp_dist = max(abs(tp - price), min_dist) if tp > 0 else 0.0

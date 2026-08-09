@@ -109,3 +109,46 @@ def test_patch_symbol_accepts_fixed_lot_at_ceiling():
     res = tc.post("/api/symbols/XAUUSD", json={"fixed_lot": 20})
     assert res.status_code == 200
     assert store.symbols["XAUUSD"].fixed_lot == 20
+
+
+# --------------------------------------------------------- exit-model bounds
+
+def test_patch_symbol_rejects_zero_trail_start():
+    """0 reads as "arm the trail immediately"; it actually disables the trail.
+
+    engine._update_stop and backtest both arm behind ``if trail_start_atr > 0``,
+    so a hand-typed 0 leaves the position running on its hard stop alone for its
+    entire life - no ratchet, no breakeven, nothing gives back a winner's gains.
+    No shipped grid contains 0, so the optimizer can never produce it; the API
+    was the only door and it was open.
+    """
+    tc, store = _client()
+    before = store.symbols["XAUUSD"].trail_start_atr
+    res = tc.post("/api/symbols/XAUUSD", json={"trail_start_atr": 0})
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].trail_start_atr == before
+
+
+def test_patch_symbol_rejects_zero_trail_step_and_zero_stop():
+    """The other two legs of the exit model are strictly positive too.
+
+    trail_step 0 puts the trailing stop exactly on the close (instant stop-out);
+    sl_atr_mult 0 collapses the hard stop to the broker's bare minimum distance
+    rather than the ATR-sized risk the position was sized against.
+    """
+    tc, store = _client()
+    for field in ("trail_step_atr", "sl_atr_mult"):
+        before = getattr(store.symbols["XAUUSD"], field)
+        res = tc.post("/api/symbols/XAUUSD", json={field: 0})
+        assert res.status_code == 400, field
+        assert getattr(store.symbols["XAUUSD"], field) == before, field
+
+
+def test_patch_symbol_still_accepts_a_small_positive_trail_start():
+    """The gate is "> 0", not a tuning opinion - 0.1 and start<=step stay legal."""
+    tc, store = _client()
+    res = tc.post("/api/symbols/XAUUSD", json={"trail_start_atr": 0.1,
+                                               "trail_step_atr": 1.6})
+    assert res.status_code == 200
+    assert store.symbols["XAUUSD"].trail_start_atr == 0.1
+    assert store.symbols["XAUUSD"].trail_step_atr == 1.6
