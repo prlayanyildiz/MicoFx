@@ -260,8 +260,31 @@ class Store:
         self.purge_orphan_history()
         return seeded
 
-    def seed_symbols(self, overwrite: bool = False) -> int:
-        """Create symbol rows from config/defaults.json group presets."""
+    def _magic_taken(self, magic: int, avoid_magics: set[int] | None) -> bool:
+        if magic in {c.magic for c in self.symbols.values()}:
+            return True
+        scan = self.get_setting("secondary_orphan_scan", {}) or {}
+        if isinstance(scan, dict) and magic in {
+            int(v.get("magic", -1)) for v in scan.values() if isinstance(v, dict)
+        }:
+            return True
+        if avoid_magics and magic in {int(m) for m in avoid_magics}:
+            return True
+        return False
+
+    def seed_symbols(self, overwrite: bool = False, avoid_magics: set[int] | None = None) -> int:
+        """Create symbol rows from config/defaults.json group presets.
+
+        Soft-seed (``overwrite=False``) only ever adds symbols missing from
+        the portfolio, but defaults.json ships each entry with a *fixed*
+        magic - if that magic was since freed (its symbol deleted) and handed
+        out again by next_magic() to something else, or is still owned by a
+        pending secondary_orphan_scan window or a live orphan ticket, writing
+        it back verbatim collides. engine.py's by_magic lookup is last-write-
+        wins, so two symbols sharing a magic silently means one manages the
+        other's position (H1). ``overwrite=True`` wipes the whole portfolio
+        first (see replace_with_defaults) so no such clash is possible there.
+        """
         presets = self.defaults.get("group_presets", {})
         seeded = 0
         for idx, entry in enumerate(self.defaults.get("symbols", [])):
@@ -272,6 +295,15 @@ class Store:
             payload: dict[str, Any] = {"symbol": symbol, "group": group, "enabled": True}
             payload.update(presets.get(group, {}))
             payload.update({k: v for k, v in entry.items() if k != "group"})
+            if not overwrite:
+                wanted = payload.get("magic")
+                if wanted is None or self._magic_taken(int(wanted), avoid_magics):
+                    new_magic = self.next_magic(avoid=avoid_magics)
+                    if wanted is not None and int(wanted) != new_magic:
+                        LOG.emit(
+                            f"{symbol}: soft-seed magic {int(wanted)} -> {new_magic} "
+                            f"(cakisma onlendi)", "INFO", symbol)
+                    payload["magic"] = new_magic
             self.save_symbol(SymbolConfig.from_dict(payload), position=idx)
             seeded += 1
         if seeded:

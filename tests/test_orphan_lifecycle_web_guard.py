@@ -40,6 +40,7 @@ class _FakeStore:
         self._settings = settings or {}
         self.deleted = []
         self.replaced = False
+        self.seed_avoid_magics = "unset"
 
     def get_setting(self, key, default=None):
         return self._settings.get(key, default)
@@ -70,7 +71,8 @@ class _FakeStore:
         self.symbols.clear()
         return n
 
-    def seed_symbols(self, overwrite=False):
+    def seed_symbols(self, overwrite=False, avoid_magics=None):
+        self.seed_avoid_magics = avoid_magics
         return 0
 
     def next_magic(self, avoid=None):
@@ -254,3 +256,142 @@ def test_patch_primary_exit_field_allowed_without_scan():
 
     assert res.status_code == 200
     assert store.symbols["XAUUSD"].sl_atr_mult == 2.0
+
+
+# ---------------------------------------------------------------------- M1
+
+def test_bulk_primary_exit_field_blocked_by_pending_scan():
+    # bulk_patch only loaded secondary_orphan_scan when a secondary field/
+    # param was in the patch - a primary-only EXIT_RISK bulk edit never saw
+    # a scan watching the very magic it was about to mutate under.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
+    settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
+    tc, store = _client(symbols, settings=settings)
+
+    res = tc.post("/api/symbols-bulk", json={"symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.0}})
+
+    assert res.status_code == 200
+    assert res.json()["rejected"] == ["XAUUSD"]
+    assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
+
+
+def test_bulk_primary_family_change_blocked_by_pending_scan():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15")}
+    settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
+    tc, store = _client(symbols, settings=settings)
+
+    res = tc.post("/api/symbols-bulk",
+                  json={"symbols": ["XAUUSD"], "patch": {"strategy": "burst", "timeframe": "M5"}})
+
+    assert res.status_code == 200
+    assert res.json()["rejected"] == ["XAUUSD"]
+    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+
+
+def test_bulk_primary_exit_field_allowed_without_scan_or_position():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
+    tc, store = _client(symbols)
+
+    res = tc.post("/api/symbols-bulk", json={"symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.0}})
+
+    assert res.status_code == 200
+    assert res.json().get("rejected", []) == []
+    assert store.symbols["XAUUSD"].sl_atr_mult == 2.0
+
+
+def test_bulk_secondary_regression_still_blocked_by_live_tagged():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, secondary_strategy="t3_stoch",
+                              secondary_timeframe="M15")}
+    positions = [{"ticket": 500, "magic": 1}]
+    settings = {"secondary_tickets": [500]}
+    tc, store = _client(symbols, positions=positions, settings=settings)
+
+    res = tc.post("/api/symbols-bulk",
+                  json={"symbols": ["XAUUSD"], "patch": {"secondary_strategy": "burst"}})
+
+    assert res.status_code == 200
+    assert res.json()["rejected"] == ["XAUUSD"]
+    assert store.symbols["XAUUSD"].secondary_strategy == "t3_stoch"
+
+
+# ---------------------------------------------------------------------- L1
+
+def test_create_symbol_refused_when_disconnected_with_orphan_tickets():
+    settings = {"secondary_orphan_tickets": [777]}
+    fake_client = _FakeClient([], connected=False)
+    fake_engine = _FakeEngine()
+    fake_store = _FakeStore({}, settings=settings)
+    app = create_app(fake_store, fake_client, fake_engine, optimizer=None)
+    tc = TestClient(app)
+
+    res = tc.post("/api/symbols", json={"symbol": "EURUSD"})
+
+    assert res.status_code == 409
+    assert "EURUSD" not in fake_store.symbols
+
+
+def test_create_symbol_allowed_when_disconnected_without_orphan_tickets():
+    fake_client = _FakeClient([], connected=False)
+    fake_engine = _FakeEngine()
+    fake_store = _FakeStore({})
+    app = create_app(fake_store, fake_client, fake_engine, optimizer=None)
+    tc = TestClient(app)
+
+    res = tc.post("/api/symbols", json={"symbol": "EURUSD"})
+
+    assert res.status_code == 200
+    assert "EURUSD" in fake_store.symbols
+
+
+def test_reset_recreate_refused_when_disconnected_with_orphan_tickets():
+    settings = {"secondary_orphan_tickets": [777]}
+    defaults = {"symbols": [{"symbol": "EURUSD", "group": "forex"}],
+                "group_presets": {"forex": {}}}
+    fake_client = _FakeClient([], connected=False)
+    fake_engine = _FakeEngine()
+    fake_store = _FakeStore({}, settings=settings, defaults=defaults)
+    app = create_app(fake_store, fake_client, fake_engine, optimizer=None)
+    tc = TestClient(app)
+
+    res = tc.post("/api/symbols/EURUSD/reset")
+
+    assert res.status_code == 409
+
+
+def test_reset_existing_symbol_unaffected_by_orphan_tickets():
+    # cfg already exists -> reuses cfg.magic, no fresh assignment - L1's
+    # disconnected-orphan-ticket guard only applies to the recreate path.
+    symbols = {"EURUSD": _cfg("EURUSD", magic=5)}
+    settings = {"secondary_orphan_tickets": [777]}
+    defaults = {"symbols": [{"symbol": "EURUSD", "group": "forex"}],
+                "group_presets": {"forex": {}}}
+    tc, store = _client(symbols, settings=settings, defaults=defaults)
+
+    res = tc.post("/api/symbols/EURUSD/reset")
+
+    assert res.status_code == 200
+
+
+def test_soft_seed_refused_when_disconnected_with_orphan_tickets():
+    settings = {"secondary_orphan_tickets": [777]}
+    fake_client = _FakeClient([], connected=False)
+    fake_engine = _FakeEngine()
+    fake_store = _FakeStore({}, settings=settings)
+    app = create_app(fake_store, fake_client, fake_engine, optimizer=None)
+    tc = TestClient(app)
+
+    res = tc.post("/api/symbols-seed", params={"overwrite": "false"})
+
+    assert res.status_code == 409
+
+
+def test_soft_seed_allowed_when_disconnected_without_orphan_tickets():
+    fake_client = _FakeClient([], connected=False)
+    fake_engine = _FakeEngine()
+    fake_store = _FakeStore({})
+    app = create_app(fake_store, fake_client, fake_engine, optimizer=None)
+    tc = TestClient(app)
+
+    res = tc.post("/api/symbols-seed", params={"overwrite": "false"})
+
+    assert res.status_code == 200

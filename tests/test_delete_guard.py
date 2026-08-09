@@ -629,6 +629,35 @@ def test_api_accepts_correct_token():
     assert res.status_code == 200
 
 
+def test_api_rejects_empty_token_header():
+    # L3: secrets.compare_digest requires a real string on both sides - an
+    # empty header must still 401 cleanly, not raise/500.
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/api/system", headers={"X-Mico-Token": ""})
+    assert res.status_code == 401
+
+
+def test_api_rejects_wrong_length_token():
+    # L3: compare_digest must not blow up (or misbehave) on a candidate
+    # shorter/longer than the real token.
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/api/system", headers={"X-Mico-Token": "short"})
+    assert res.status_code == 401
+
+    res = tc.get("/api/system", headers={"X-Mico-Token": "secret123-and-then-some-more"})
+    assert res.status_code == 401
+
+
 def test_index_page_requires_token_when_configured():
     # B4: "/" used to be left out of the gate entirely, so the token embedded
     # in its own (then-unauthenticated) HTML was readable by anyone who could

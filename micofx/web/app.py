@@ -3,6 +3,7 @@ from __future__ import annotations
 import html as html_escape
 import math
 import os
+import secrets
 import signal
 import subprocess
 import threading
@@ -250,7 +251,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 token = request.headers.get("x-mico-token")
                 if not token and path in _QUERY_TOKEN_PATHS:
                     token = request.query_params.get("token")
-                if token != api_token:
+                # L3: plain `!=` on the token leaks a timing side-channel
+                # (early-exit on the first mismatched byte) - irrelevant on
+                # the default 127.0.0.1 bind but this whole gate only exists
+                # for MICO_HOST=0.0.0.0, where a remote attacker can time it.
+                # compare_digest needs two strings; the `not token` guard
+                # keeps the missing-header/query-param (None) case from ever
+                # reaching it.
+                if not token or not secrets.compare_digest(token, api_token):
                     if path == "/":
                         return PlainTextResponse(
                             "MicoFX: token gerekli - ?token=<MICO_API_TOKEN> ile acin.",
@@ -428,6 +436,28 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             return set()
         return {p["magic"] for p in client.positions() if p["ticket"] in tickets}
 
+    def _reject_magic_assignment_if_disconnected_orphans() -> None:
+        """L1: create_symbol/reset(recreate)/soft-seed hand out a fresh magic
+        via Store.next_magic(), which avoids orphan-ticket magics via
+        _orphan_ticket_magics() above - but that needs client.positions() to
+        resolve a ticket to its magic, so while disconnected it silently
+        passes ``avoid_magics=None`` and next_magic falls back to only the
+        portfolio + scan avoid-set it already knows on its own. A still-open
+        orphan ticket's magic is invisible in that fallback, so a brand new
+        symbol (or one being recreated) could land squarely on it. Rather
+        than assign blind, refuse outright until reconnected or the orphan
+        ticket list is cleared - the same "fail closed on disconnect" stance
+        _require_connected() already takes for DELETE/patch.
+        """
+        if client.connected:
+            return
+        tickets = store.get_setting("secondary_orphan_tickets", []) or []
+        if tickets:
+            raise HTTPException(
+                409, "MT5 baglantisi yokken yeni magic atanamiyor: tanimlanamayan "
+                     "ikincil ticket listesi dolu (magic cakisma riski) - MT5'e "
+                     "baglanin veya orphan ticket listesinin temizlenmesini bekleyin")
+
     @app.post("/api/symbols/{symbol}")
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
         patch = body.model_dump()
@@ -586,6 +616,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/symbols")
     def create_symbol(body: SymbolCreate) -> dict[str, Any]:
+        _reject_magic_assignment_if_disconnected_orphans()
         try:
             cfg = store.add_symbol(
                 body.symbol,
@@ -666,6 +697,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # cfg is None: this symbol was deleted and is being recreated from
             # its preset - a fresh magic is assigned (see Store.next_magic),
             # so the same reuse risk as create_symbol() applies.
+            _reject_magic_assignment_if_disconnected_orphans()
             updated = store.reset_symbol_to_preset(
                 symbol, avoid_magics=_orphan_ticket_magics() if client.connected else None)
         if updated is None:
@@ -752,8 +784,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             watch_tickets = tagged | orphan_tickets
             watch_magics = ({p["magic"] for p in client.positions() if p["ticket"] in watch_tickets}
                             if secondary_guarded and watch_tickets else set())
-            orphan_scan = (store.get_setting("secondary_orphan_scan", {}) or {}
-                          if secondary_guarded else {})
+            # M1: patch_symbol()'s primary guard already treats a pending
+            # secondary_orphan_scan window the same as a visible open position
+            # (_pending_orphan_scan) - bulk only ever loaded this dict when a
+            # secondary field/param was in the patch, so a primary-only bulk
+            # (family/magic/EXIT_RISK) never saw a scan that was watching the
+            # very magic it was about to reassign or mutate exits under.
+            orphan_scan = store.get_setting("secondary_orphan_scan", {}) or {} if guarded else {}
             for symbol in targets:
                 current = store.symbols.get(symbol) if guarded else None
                 if guarded and current is None:
@@ -764,19 +801,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     if not strategy_allows_timeframe(next_strat, next_tf, allow):
                         rejected.append(symbol)
                         continue
+                pending_scan = (
+                    symbol in orphan_scan
+                    and int(orphan_scan[symbol].get("magic", -1)) == current.magic
+                ) if current is not None else False
                 symbol_changing = (
                     (needs_tf_check and (
                         body.patch.get("strategy", current.strategy) != current.strategy
                         or body.patch.get("timeframe", current.timeframe) != current.timeframe))
                     or (magic_changing and int(body.patch["magic"]) != current.magic)
                 ) if guarded else False
-                if symbol_changing and current.magic in open_magics:
+                if symbol_changing and (current.magic in open_magics or pending_scan):
                     rejected.append(symbol)
                     continue
-                pending_scan = (
-                    symbol in orphan_scan
-                    and int(orphan_scan[symbol].get("magic", -1)) == current.magic
-                ) if current is not None else False
                 if secondary_fields and current is not None:
                     next_sec = body.patch.get("secondary_strategy", current.secondary_strategy)
                     next_stf = body.patch.get("secondary_timeframe", current.secondary_timeframe)
@@ -787,7 +824,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                         continue
                 if exit_fields and current is not None:
                     exit_changing = any(body.patch[k] != getattr(current, k) for k in exit_fields)
-                    if exit_changing and current.magic in open_magics:
+                    if exit_changing and (current.magic in open_magics or pending_scan):
                         rejected.append(symbol)
                         continue
                 if secondary_params_present and current is not None:
@@ -836,7 +873,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                              f"bitmesini bekleyin")
                 count = store.replace_with_defaults()
         else:
-            count = store.seed_symbols(overwrite=False)
+            # H1: soft-seed can silently reassign a stale defaults.json magic
+            # onto whatever it collides with (portfolio/scan handled inside
+            # Store.seed_symbols already) - the live-orphan-ticket half still
+            # needs client.positions() to resolve, same as create/reset (L1).
+            _reject_magic_assignment_if_disconnected_orphans()
+            count = store.seed_symbols(
+                overwrite=False,
+                avoid_magics=_orphan_ticket_magics() if client.connected else None,
+            )
         return {"ok": True, "seeded": count, "symbols": symbol_payload(force=True),
                 "system": store.system.to_dict()}
 

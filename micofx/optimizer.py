@@ -987,12 +987,17 @@ class Optimizer:
                 return {"ok": False,
                         "error": f"{symbol}: {blocked} acik ikincil-sinyal pozisyonu var{note}, "
                                  f"ikincil strateji degistirilemedi (once kapanmasini bekleyin)"}
-        elif attempt is not None and live_tagged:
+        elif attempt is not None and (live_tagged or live_orphan or pending_scan):
             # Same family/timeframe, just refined params ("refine"). Engine's
             # manage_positions() re-reads cfg.secondary_params live every
             # cycle via _secondary_config(), the same live-reread hazard
             # apply() holds back exit/risk fields for on the primary side -
-            # this path had no equivalent holdback at all until now.
+            # this path had no equivalent holdback at all until now. L2: the
+            # identity-swap block above already treats live_orphan/pending_scan
+            # as equal risk to live_tagged (an unresolved/untracked fill is
+            # exactly the same "position under this magic may exist" hazard) -
+            # this elif only checked live_tagged, so a refine could sail
+            # through while an orphan ticket or scan window was still open.
             sec_params = patch.get("secondary_params", {})
             held_back = [k for k in sec_params if k in EXIT_RISK_FIELDS]
             if held_back:
@@ -1005,7 +1010,9 @@ class Optimizer:
                     patch["secondary_summary"] = {**patch["secondary_summary"], "params": summary_params,
                                                   "pending_exit_fields": sorted(held_back)}
                 patch["pending_secondary_exit_patch"] = pending
-                LOG.emit(f"{symbol}: {len(live_tagged)} acik ikincil-sinyal pozisyonu var, "
+                blocked = len(live_tagged) + len(live_orphan)
+                note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
+                LOG.emit(f"{symbol}: {blocked} acik ikincil-sinyal pozisyonu var{note}, "
                          f"ikincil cikis/risk parametreleri ({', '.join(sorted(held_back))}) "
                          f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)
         # update_symbol drops None values, so an empty candidate has to be
