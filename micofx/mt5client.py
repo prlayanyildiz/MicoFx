@@ -936,7 +936,18 @@ class MT5Client:
             candidate = int(result.order)
             with self._lock:
                 exists = mt5.positions_get(ticket=candidate)
-            if exists:
+            if exists is None:
+                # None = API failure, not "no such ticket" - folding it into
+                # the else branch below silently treated a disconnect as
+                # "candidate ticket not found" and fell through to the
+                # symbol-wide lookup, which (if that call happened to
+                # succeed) masked the drop entirely instead of flipping
+                # connected like every other positions_get() failure here.
+                self.connected = False
+                LOG.emit(f"positions_get(ticket={candidate}) basarisiz oldu (open_market "
+                         f"candidate, {mt5.last_error()}) - baglanti koptu olarak isaretlendi.",
+                         "WARN")
+            elif exists:
                 pos_ticket = candidate
             else:
                 with self._lock:
