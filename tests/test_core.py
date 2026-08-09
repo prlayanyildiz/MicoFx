@@ -77,7 +77,7 @@ def test_simulate_stops_out_a_long_on_the_stop_leg():
                   htf_down=np.zeros(n, dtype=bool))
     cache = IndicatorCache(high, low, close, times=np.arange(n) * 300, tf_seconds=300,
                            open_=open_, volume=np.ones(n))
-    p = Params(sl_atr_mult=1.0, tp_atr_mult=0.0, trail_start_atr=0.0)
+    p = Params(sl_atr_mult=1.0, trail_start_atr=0.0)
     res = backtest.simulate(cache, sig, open_, np.zeros(n), point=0.01, p=p,
                             entries=np.array([10]))
     assert res.trades == 1
@@ -108,7 +108,7 @@ def test_simulate_skips_entry_with_nan_atr():
                   htf_down=np.zeros(n, dtype=bool))
     cache = IndicatorCache(high, low, close, times=np.arange(n) * 300, tf_seconds=300,
                            open_=open_, volume=np.ones(n))
-    p = Params(sl_atr_mult=1.0, tp_atr_mult=0.0, trail_start_atr=0.0)
+    p = Params(sl_atr_mult=1.0, trail_start_atr=0.0)
     # Corrupt just the entry bar's cached ATR value directly - simulate()
     # reads cache.atr_list(p.atr_period), not sig.atr.
     corrupted = cache.atr_list(p.atr_period)
@@ -120,7 +120,7 @@ def test_simulate_skips_entry_with_nan_atr():
     assert res.trades == 0
 
 
-def test_simulate_targets_a_long_on_the_target_leg():
+def test_simulate_exits_a_long_on_the_trail_not_a_target():
     n = 60
     high = np.full(n, 100.0)
     low = np.full(n, 100.0)
@@ -139,12 +139,83 @@ def test_simulate_targets_a_long_on_the_target_leg():
                   htf_down=np.zeros(n, dtype=bool))
     cache = IndicatorCache(high, low, close, times=np.arange(n) * 300, tf_seconds=300,
                            open_=open_, volume=np.ones(n))
-    p = Params(sl_atr_mult=1.0, tp_atr_mult=1.0, trail_start_atr=0.0)
+    # Bar 12 runs 5 ATR into profit and closes at 105, so the trail arms and
+    # ratchets the stop to 104.5. Bar 13 falls back to 100 and takes it out
+    # there. The win is banked by the TRAIL - there is no take-profit level in
+    # this system, and a spike to 110 must not close anything by itself.
+    p = Params(sl_atr_mult=1.0, trail_start_atr=1.0, trail_step_atr=0.5)
     res = backtest.simulate(cache, sig, open_, np.zeros(n), point=0.01, p=p,
                             entries=np.array([10]))
     assert res.trades == 1
     assert res.wins == 1
     assert res.trade_rs[0] > 0
+    assert res.exits.get("trail") == 1
+    assert "target" not in res.exits
+
+
+def test_simulate_never_produces_a_target_exit():
+    """No configuration can put a take-profit back into the simulator.
+
+    A long that spikes far beyond any old tp_atr_mult and then comes all the
+    way back must ride the trail down, not book a fixed target on the spike.
+    """
+    n = 80
+    high = np.full(n, 100.0)
+    low = np.full(n, 100.0)
+    close = np.full(n, 100.0)
+    open_ = np.full(n, 100.0)
+    high[12] = 140.0            # far past any target the old grid could set
+    close[12] = 101.0           # ...but closes back at +1
+    low[20] = 90.0              # later gives it all back
+
+    from micofx.strategy import IndicatorCache, Params, Signals
+    atr = np.full(n, 1.0)
+    buy = np.zeros(n, dtype=bool)
+    buy[10] = True
+    sig = Signals(t3=close, k=close, d=close, atr=atr, adx=np.zeros(n),
+                  buy=buy, sell=np.zeros(n, dtype=bool),
+                  htf_up=np.zeros(n, dtype=bool), htf_down=np.zeros(n, dtype=bool))
+    cache = IndicatorCache(high, low, close, times=np.arange(n) * 300, tf_seconds=300,
+                           open_=open_, volume=np.ones(n))
+    res = backtest.simulate(cache, sig, open_, np.zeros(n), point=0.01,
+                            p=Params(sl_atr_mult=1.0, trail_start_atr=0.5,
+                                     trail_step_atr=0.5),
+                            entries=np.array([10]))
+    assert res.trades == 1
+    assert "target" not in res.exits
+    assert set(res.exits) <= {"stop", "trail", "flatten", "time"}
+
+
+def test_simulate_has_no_time_stop():
+    """A quiet trade stays open to the end of the sample, not to a bar count.
+
+    Nothing here ever reaches the stop or the trail, so the only way this can
+    end is the sample running out. If a time stop existed the exit reason would
+    still be "time", but it would land far earlier - so the hold length is what
+    actually distinguishes the two.
+    """
+    n = 400
+    high = np.full(n, 100.2)
+    low = np.full(n, 99.8)
+    close = np.full(n, 100.0)
+    open_ = np.full(n, 100.0)
+
+    from micofx.strategy import IndicatorCache, Params, Signals
+    atr = np.full(n, 1.0)
+    buy = np.zeros(n, dtype=bool)
+    buy[10] = True
+    sig = Signals(t3=close, k=close, d=close, atr=atr, adx=np.zeros(n),
+                  buy=buy, sell=np.zeros(n, dtype=bool),
+                  htf_up=np.zeros(n, dtype=bool), htf_down=np.zeros(n, dtype=bool))
+    cache = IndicatorCache(high, low, close, times=np.arange(n) * 300, tf_seconds=300,
+                           open_=open_, volume=np.ones(n))
+    res = backtest.simulate(cache, sig, open_, np.zeros(n), point=0.01,
+                            p=Params(sl_atr_mult=2.0, trail_start_atr=5.0),
+                            entries=np.array([10]))
+    assert res.trades == 1
+    # Held to the last bar of the sample (~389 bars), nowhere near the 12-96
+    # bar caps the old max_bars_in_trade grid used to impose.
+    assert res.avg_bars > 300
 
 
 # --------------------------------------------------------------------------- lot_for / ai_scale

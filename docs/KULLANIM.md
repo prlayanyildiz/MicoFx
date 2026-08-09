@@ -9,11 +9,23 @@ Güncel portföy (10 sembol): SpotBrent, XAUUSD, GER40, JPN225, NAS100, US500, A
 
 ## Son güncellemeler (bu belgeyi okuduğun tarihte geçerli olanlar)
 
-- **Sabit kâr hedefi (TP) kaldırıldı, hepsi iz-süren-stop (trail)**: Artık hiçbir
-  sembolde sabit bir "şuraya gelince kapat" seviyesi yok. Pozisyon kârdayken
-  stop, fiyatı ATR mesafesiyle takip ediyor — trend devam ettikçe kâr da
-  büyüyor, "erken havlu atma" riski azaldı. Optimizasyon da artık sadece bu
-  tarzı arıyor (sabit hedef seçeneği aramadan kaldırıldı).
+- **Tek çıkış modeli: sert ATR stop + takip eden stop.** Sistemden şunlar
+  tamamen kaldırıldı — sabit kâr hedefi (TP), kademeli kâr alma (partial),
+  zaman stopu (max bar), bayat-işlem kapanışı ve ayrı başabaş sıçraması.
+  Artık bir pozisyonu yalnızca stop kapatır:
+  - **Giriş anında** `sl_atr_mult × ATR` mesafesinde sert bir stop broker'a
+    gönderilir ve hiçbir koşulda kaldırılmaz. Bilgisayar kapansa, internet
+    gitse bile orada durur.
+  - **Kâr `trail_start_atr × ATR`'yi geçince** stop, kapanmış bar fiyatının
+    `trail_step_atr × ATR` gerisinden takip etmeye başlar. Mandallıdır: asla
+    geri gitmez, asla ilk sert stoptan kötüye gitmez.
+  - Ayrı bir "başabaşa çek" adımı yok; `trail_start` > `trail_step` olduğunda
+    takip eden stop girişi kendiliğinden geçiyor. Tam girişe yapışan eski
+    adım, sıradan dalgalanmada kazanan işlemi boşuna sıfırlıyordu.
+  - Bu üç sayı (`sl_atr_mult`, `trail_start_atr`, `trail_step_atr`) **her
+    sembol için ayrı** ve optimizasyonun aradığı şey de bunlar.
+  - Kalan tek zorunlu kapatma sebepleri takvim/risk kaynaklı: seans sonu
+    flatten, gün sonu flatten ve günlük zarar limiti.
 - **Min-lot risk koruması**: Broker'ın minimum lotu, hesaplanan riskin 2
   katından fazlasını gerektiriyorsa (ör. hesap küçükken JPN225/NAS100 gibi
   pahalı enstrümanlarda), o işlem sessizce büyütülmek yerine **atlanıyor**.
@@ -172,7 +184,7 @@ Bakiye, equity, serbest marj, günlük K/Z, bot durumu (çalışıyor / izliyor)
 Botun pozisyonları. **Tümünü Kapat** hepsini kapatır.
 
 ### Günlük Özet
-Bugün kapanmış işlemler sembol bazında (partial/kısmi kapanışlar tek
+Bugün kapanmış işlemler sembol bazında (aynı pozisyonun parçalı kapanışları tek
 işlem olarak birleştirilerek gösterilir, parçalanmış sayım yok).
 
 ### Canlı Sembol Durumu
@@ -215,7 +227,7 @@ Her sembol bir kart. Tıkla → ayarlar açılır. Değişiklikler anında kaydo
 ### "İleri düzey / Strateji Parametreleri" (katlı, optimizer ayarlıyor)
 
 Strateji ailesi + zaman dilimi seçimi, sinyalin iç parametreleri (T3
-uzunluğu, RSI, ADX eşikleri…), SL/TP/trail ATR çarpanları, giriş
+uzunluğu, RSI, ADX eşikleri…), sert stop ve takip ATR çarpanları, giriş
 filtreleri, kısmi kâr merdiveni. Bunları elle değiştirmek **mümkün** ama
 normalde gerekmez — optimizasyon çalıştırıp sonucu uygulamak yeterli. Aç
 bakmak istersen ▸'a tıkla.
@@ -286,7 +298,7 @@ Geçmişe bakıp **canlı koruma** yapar; yeni strateji üretmez.
 |---|---|
 | Karar | ok / izleme / karantina / idle |
 | Gerekçe | Neden bu karar |
-| İşlem / Kazanç / PF / Net | Son dönemde gerçekleşenler (partial kapanışlar tek işlem olarak birleştirilir) |
+| İşlem / Kazanç / PF / Net | Son dönemde gerçekleşenler (aynı pozisyonun parçalı kapanışları tek işlem sayılır) |
 | Üst üste zarar | Seri kayıp |
 | Lot çarpanı | AI'nin küçülttüğü ölçek (örn. 0.6) |
 | Kapalı saatler | O saatte giriş yok |

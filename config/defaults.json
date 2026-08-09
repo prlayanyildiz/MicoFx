@@ -44,21 +44,16 @@
       "htf_mode": "t3",
       "atr_period": 14,
       "sl_atr_mult": 1.0,
-      "tp_atr_mult": 1.5,
       "trail_start_atr": 0.7,
       "trail_step_atr": 0.5,
-      "breakeven_atr": 0.5,
       "adx_period": 14,
       "adx_min": 18.0,
       "max_spread_atr": 0.1,
       "min_atr_ratio": 0.0,
       "cooldown_sec": 120,
-      "max_bars_in_trade": 0,
       "commission_per_lot": 8.0,
       "min_body_ratio": 0.0,
       "atr_pct_min": 0.0,
-      "partial_tp_r": 0.0,
-      "partial_tp_fraction": 0.5,
       "use_sessions": true,
       "sessions": [
         {
@@ -93,21 +88,16 @@
       "htf_mode": "t3",
       "atr_period": 14,
       "sl_atr_mult": 1.2,
-      "tp_atr_mult": 1.8,
       "trail_start_atr": 0.8,
       "trail_step_atr": 0.6,
-      "breakeven_atr": 0.6,
       "adx_period": 14,
       "adx_min": 18.0,
       "max_spread_atr": 0.12,
       "min_atr_ratio": 0.0,
       "cooldown_sec": 120,
-      "max_bars_in_trade": 0,
       "commission_per_lot": 0.0,
       "min_body_ratio": 0.0,
       "atr_pct_min": 0.0,
-      "partial_tp_r": 0.0,
-      "partial_tp_fraction": 0.5,
       "use_sessions": true,
       "sessions": [
         {
@@ -142,21 +132,16 @@
       "htf_mode": "t3",
       "atr_period": 14,
       "sl_atr_mult": 1.5,
-      "tp_atr_mult": 2.2,
       "trail_start_atr": 1.0,
       "trail_step_atr": 0.8,
-      "breakeven_atr": 0.8,
       "adx_period": 14,
       "adx_min": 18.0,
       "max_spread_atr": 0.12,
       "min_atr_ratio": 0.0,
       "cooldown_sec": 120,
-      "max_bars_in_trade": 0,
       "commission_per_lot": 0.0,
       "min_body_ratio": 0.0,
       "atr_pct_min": 0.0,
-      "partial_tp_r": 0.0,
-      "partial_tp_fraction": 0.5,
       "use_sessions": true,
       "sessions": [
         {
@@ -191,21 +176,16 @@
       "htf_mode": "t3",
       "atr_period": 14,
       "sl_atr_mult": 2.5,
-      "tp_atr_mult": 3.5,
       "trail_start_atr": 1.5,
       "trail_step_atr": 1.2,
-      "breakeven_atr": 1.0,
       "adx_period": 14,
       "adx_min": 22.0,
       "max_spread_atr": 0.25,
       "min_atr_ratio": 0.0,
       "cooldown_sec": 900,
-      "max_bars_in_trade": 0,
       "commission_per_lot": 0.0,
       "min_body_ratio": 0.0,
       "atr_pct_min": 0.0,
-      "partial_tp_r": 0.0,
-      "partial_tp_fraction": 0.5,
       "use_sessions": true,
       "sessions": [
         {
@@ -1055,18 +1035,6 @@
           20.0,
           25.0
         ],
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -1087,11 +1055,6 @@
           0.8,
           1.2,
           1.6
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.5,
-          0.8
         ]
       },
       "t3_flip": {
@@ -1119,18 +1082,6 @@
           0.04,
           0.08
         ],
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -1151,11 +1102,6 @@
           0.8,
           1.2,
           1.6
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.5,
-          0.8
         ]
       },
       "macd_flip": {
@@ -1177,18 +1123,6 @@
           9,
           12
         ],
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -1209,11 +1143,6 @@
           0.8,
           1.2,
           1.6
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.5,
-          0.8
         ]
       },
       "wavetrend_flip": {
@@ -1228,18 +1157,6 @@
           21,
           28
         ],
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -1260,11 +1177,6 @@
           0.8,
           1.2,
           1.6
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.5,
-          0.8
         ]
       },
       "stoch_flip": {
@@ -1285,18 +1197,6 @@
           3,
           5
         ],
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -1317,11 +1217,6 @@
           0.8,
           1.2,
           1.6
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.5,
-          0.8
         ]
       },
       "parabolic_flip": {
@@ -1336,18 +1231,6 @@
           0.2,
           0.3
         ],
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -1368,11 +1251,6 @@
           0.8,
           1.2,
           1.6
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.5,
-          0.8
         ]
       },
       "trix_flip": {
@@ -1383,18 +1261,6 @@
           21,
           27
         ],
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -1415,11 +1281,6 @@
           0.8,
           1.2,
           1.6
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.5,
-          0.8
         ]
       },
       "aroon_flip": {
@@ -1429,18 +1290,6 @@
           21,
           25
         ],
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -1461,56 +1310,6 @@
           0.8,
           1.2,
           1.6
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.5,
-          0.8
-        ]
-      }
-    },
-    "exit_styles": {
-      "trail": {
-        "tp_atr_mult": [
-          0.0
-        ],
-        "partial_tp_r": [
-          0.0
-        ],
-        "partial2_tp_r": [
-          0.0
-        ],
-        "stale_exit_ratio": [
-          0.0
-        ],
-        "max_bars_in_trade": [
-          0
-        ],
-        "sl_atr_mult": [
-          0.5,
-          0.7,
-          0.9,
-          1.2,
-          1.5
-        ],
-        "trail_start_atr": [
-          0.3,
-          0.4,
-          0.5,
-          0.7,
-          1.0
-        ],
-        "trail_step_atr": [
-          0.25,
-          0.4,
-          0.6,
-          0.8
-        ],
-        "breakeven_atr": [
-          0.0,
-          0.25,
-          0.4,
-          0.6
         ]
       }
     },
@@ -1520,12 +1319,6 @@
         0.7,
         0.9,
         1.2,
-        1.5
-      ],
-      "tp_atr_mult": [
-        0.8,
-        1.0,
-        1.2,
         1.5,
         2.0
       ],
@@ -1534,37 +1327,16 @@
         0.4,
         0.5,
         0.7,
-        1.0
+        1.0,
+        1.4
       ],
       "trail_step_atr": [
         0.25,
         0.4,
         0.6,
-        0.8
-      ],
-      "breakeven_atr": [
-        0.0,
-        0.25,
-        0.4,
-        0.6
-      ],
-      "partial_tp_r": [
-        0.0,
-        0.7,
-        1.0
-      ],
-      "partial2_tp_r": [
-        0.0,
+        0.8,
         1.2,
-        1.8
-      ],
-      "stale_exit_ratio": [
-        0.0,
-        0.4,
-        0.6
-      ],
-      "max_bars_in_trade": [
-        0
+        1.6
       ],
       "max_spread_atr": [
         0.05,

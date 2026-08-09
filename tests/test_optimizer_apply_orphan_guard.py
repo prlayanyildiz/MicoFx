@@ -51,7 +51,7 @@ class _Client:
 
 def _cfg():
     return SymbolConfig(symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15",
-                        sl_atr_mult=1.0, tp_atr_mult=2.0)
+                        sl_atr_mult=1.0, trail_step_atr=0.6)
 
 
 def test_apply_holds_back_exit_fields_when_orphan_scan_pending_and_no_visible_position():
@@ -141,7 +141,7 @@ def test_apply_family_swap_aborts_when_secondary_clear_fails():
     cfg = SymbolConfig(
         symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15",
         ensemble_enabled=True, secondary_strategy="micro_rev",
-        secondary_timeframe="M5", sl_atr_mult=1.0, tp_atr_mult=2.0,
+        secondary_timeframe="M5", sl_atr_mult=1.0, trail_step_atr=0.6,
     )
     store = _Store(cfg)
     opt = Optimizer(store=store, client=_Client(positions=[]))

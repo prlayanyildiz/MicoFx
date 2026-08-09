@@ -490,11 +490,10 @@ const SECTIONS = [
     ],
   },
   {
-    title: "Risk ve Cikis (ATR)",
+    title: "Risk ve Cikis (sert ATR stop + ATR takip)",
     fields: [
       { k: "atr_period", t: "int", label: "ATR periyot", min: 2, max: 100 },
       { k: "sl_atr_mult", t: "num", label: "SL x ATR", step: 0.1, min: 0.1 },
-      { k: "tp_atr_mult", t: "num", label: "TP x ATR (0=hedef yok, sadece trail)", step: 0.1, min: 0 },
       { k: "trail_start_atr", t: "num", label: "Trail baslangic x ATR", step: 0.1, min: 0 },
       { k: "trail_step_atr", t: "num", label: "Trail mesafe x ATR", step: 0.1, min: 0.1 },
       {
@@ -502,9 +501,6 @@ const SECTIONS = [
         opts: [["atr", "ATR (klasik)"], ["structure", "Yapisal (swing H/L)"], ["hybrid", "Hibrit (en siki)"]],
       },
       { k: "trail_lookback", t: "int", label: "Yapisal trail geriye bakis (bar)", min: 3, max: 100 },
-      { k: "breakeven_atr", t: "num", label: "Maliyete cekme x ATR", step: 0.1, min: 0 },
-      { k: "max_bars_in_trade", t: "int", label: "Maks bar (0=kapali)", min: 0, max: 2000 },
-      { k: "stale_exit_ratio", t: "num", label: "Erken zarar kapanisi (max bar orani, 0=kapali)", step: 0.05, min: 0, max: 1 },
     ],
   },
   {
@@ -629,13 +625,9 @@ const SECTIONS = [
     ],
   },
   {
-    title: "Maliyet ve Kismi Kar",
+    title: "Maliyet",
     fields: [
       { k: "commission_per_lot", t: "num", label: "Komisyon (1 lot gidis-donus)", step: 0.5, min: 0 },
-      { k: "partial_tp_r", t: "num", label: "Kismi kar seviyesi (xR, 0=kapali)", step: 0.25, min: 0, max: 5 },
-      { k: "partial_tp_fraction", t: "num", label: "Kismi kar orani", step: 0.05, min: 0.1, max: 0.9 },
-      { k: "partial2_tp_r", t: "num", label: "2. kademe kar seviyesi (xR, 0=kapali)", step: 0.25, min: 0, max: 8 },
-      { k: "partial2_fraction", t: "num", label: "2. kademe orani (ilk lot uzerinden)", step: 0.05, min: 0, max: 0.9 },
     ],
   },
 ];
@@ -1146,7 +1138,7 @@ function renderOptJob() {
     tr.innerHTML = `
       <td class="sym">${esc(r.symbol)}</td>
       <td class="dim">${esc(r.strategy || "-")}</td>
-      <td class="dim">${esc(r.timeframe)}${r.exit_style ? ` <span class="dim" title="cikis modu">${r.exit_style === "trail" ? "iz" : "hdf"}</span>` : ""}</td>
+      <td class="dim">${esc(r.timeframe)}</td>
       <td class="num ${r.best.score > 0 ? "pos" : "neg"}"><b>${num(r.best.score, 2)}</b></td>
       <td class="num dim">${num(r.best.positive_ratio * 100, 0)}%</td>
       <td class="num">${s.trades}</td>

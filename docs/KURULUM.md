@@ -26,7 +26,7 @@ Toplam sure (indirmeler dahil): ~15-20 dakika.
 MicoFX bir Python programidir, once Python'un bilgisayarda kurulu olmasi
 gerekir.
 
-**Kolay yol:** `KURULUM.bat` dosyasina cift tiklayin.
+**Kolay yol:** `KUR.bat` dosyasina cift tiklayin.
 
 - Python bilgisayarda yoksa, otomatik olarak `winget` ile kurmayi dener.
 - `winget` de yoksa (cok eski Windows surumlerinde olabilir), tarayicida
@@ -35,7 +35,7 @@ gerekir.
   - **ONEMLI:** Kurulum ekraninin en altinda **"Add python.exe to PATH"**
     kutucugu vardir, bunu MUTLAKA isaretleyin. Isaretlenmezse Python
     calisir ama MicoFX onu bulamaz.
-- Python yeni kurulduysa, mevcut pencereyi kapatip `KURULUM.bat`'i **tekrar**
+- Python yeni kurulduysa, mevcut pencereyi kapatip `KUR.bat`'i **tekrar**
   calistirin (yeni kurulan Python'un tanmasi icin yeni bir pencere/oturum
   gerekir).
 
@@ -43,7 +43,7 @@ gerekir.
 
 ## 2) MicoFX'in kendi bagimliliklarini kur
 
-`KURULUM.bat` Python'u bulduktan sonra otomatik olarak devam eder:
+`KUR.bat` Python'u bulduktan sonra otomatik olarak devam eder:
 
 1. `C:\MicoFX-venv` altinda MicoFX'e ozel bir sanal ortam olusturur
    (sisteminizdeki diger Python programlarini etkilemez). Bilerek proje
@@ -132,7 +132,7 @@ Adim adim kullanim (sembol ekleme, optimizasyon, AI denetleyici vb.) icin
 
 **"python bulunamadi" / "'python' is not recognized"**
 Python PATH'e eklenmemis. Python'u kaldirip "Add python.exe to PATH"
-kutucugunu isaretleyerek yeniden kurun, ya da KURULUM.bat'i tekrar calistirin.
+kutucugunu isaretleyerek yeniden kurun, ya da KUR.bat'i tekrar calistirin.
 
 **`pip install` sirasinda MetaTrader5 kurulamadi**
 `MetaTrader5` pip paketi yalnizca Windows icin ve yalnizca 64-bit Python ile

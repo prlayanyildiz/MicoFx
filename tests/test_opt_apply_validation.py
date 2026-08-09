@@ -101,7 +101,7 @@ def test_opt_apply_rejects_nan_string_param():
     tc, optimizer = _client()
     res = tc.post("/api/opt/apply", json={
         "symbol": "XAUUSD",
-        "params": {"sl_atr_mult": "NaN", "tp_atr_mult": 2.0},
+        "params": {"sl_atr_mult": "NaN", "trail_step_atr": 2.0},
     })
     assert res.status_code == 400
     assert optimizer.calls == []
@@ -183,7 +183,7 @@ def test_opt_apply_accepts_valid_params():
     tc, optimizer = _client()
     res = tc.post("/api/opt/apply", json={
         "symbol": "XAUUSD",
-        "params": {"sl_atr_mult": 1.5, "tp_atr_mult": 2.0, "trail_mode": "atr"},
+        "params": {"sl_atr_mult": 1.5, "trail_step_atr": 0.8, "trail_mode": "atr"},
         "strategy": "t3_stoch", "timeframe": "M15",
     })
     assert res.status_code == 200

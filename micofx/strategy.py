@@ -116,20 +116,13 @@ class Params:
     atr_period: int = 14
     adx_period: int = 14
     adx_min: float = 0.0
+    # Exit model: hard ATR stop + ATR trail, nothing else. See SymbolConfig.
     sl_atr_mult: float = 1.2
-    tp_atr_mult: float = 1.8
     trail_start_atr: float = 0.8
     trail_step_atr: float = 0.6
     trail_mode: str = "atr"          # "atr" | "structure" | "hybrid"
     trail_lookback: int = 5          # bars to look back for swing high/low (structure/hybrid)
-    breakeven_atr: float = 0.0
-    max_bars_in_trade: int = 0
     cooldown_sec: int = 0            # live engine caps to 2 bars of TF; BT mirrors that
-    stale_exit_ratio: float = 0.0    # close a losing trade past this fraction of max_bars; 0 disables
-    partial_tp_r: float = 0.0
-    partial_tp_fraction: float = 0.5
-    partial2_tp_r: float = 0.0       # second scale-out rung; 0 disables
-    partial2_fraction: float = 0.3   # fraction of the ORIGINAL size it banks
     max_spread_atr: float = 0.0
     min_atr_ratio: float = 0.0
     min_body_ratio: float = 0.0

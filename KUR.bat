@@ -1,14 +1,13 @@
 @echo off
-REM MicoFX - tek tikla kurulum / guncelleme (Python, Node, Claude, paketler).
+REM MicoFX - tek kurulum. Cift tikla, bitmesini bekle.
+REM Butun is KUR.ps1'de; bu dosya sadece onu ExecutionPolicy engeline
+REM takilmadan calistirir.
 cd /d "%~dp0"
-echo MicoFX kuruluyor... Birak, bitene kadar bekle.
-echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bootstrap.ps1"
-echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0KUR.ps1"
 if errorlevel 1 (
-  echo BIR SEY TERS GITTİ - yukaridaki kirmizi satirlara bak.
+  echo.
+  echo Kurulum tamamlanamadi - yukaridaki mesaja bakin.
   pause
   exit /b 1
 )
-echo Tamam. Kapatabilirsin. Sonra start.bat ile baslat.
 pause

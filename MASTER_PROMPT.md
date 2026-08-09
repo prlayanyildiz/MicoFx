@@ -11,6 +11,45 @@ At the start of a task, detect which tree is the workspace root and enable only 
 
 ---
 
+## 0. The exit model — one regime, do not add to it
+
+Read this before touching anything that closes a position.
+
+A trade leaves **only through its stop**:
+
+1. **Hard stop.** `max(sl_atr_mult * ATR, broker min_stop)`, attached to the
+   entry order and never lifted. It is the only protection that survives the
+   process, the machine or the connection dying. Never make it conditional.
+2. **ATR trail.** Once open profit reaches `trail_start_atr * ATR`, the stop
+   follows `trail_step_atr * ATR` behind the **closed bar's** price. Ratchet
+   only: never widens, never lands worse than the original hard stop.
+
+Plus three flattens that are calendar/risk limits, not opinions about the
+trade: session end, day end, daily-loss halt.
+
+**Deliberately removed. Do not reintroduce, and do not accept a config,
+grid axis or UI field that reimplements one:**
+
+| Gone | Why |
+|---|---|
+| `tp_atr_mult` (take-profit) | Caps the winners that pay for the losers. The trail decides when a move is over by watching it, not by naming a price up front. |
+| `partial_tp_r` / `partial2_tp_r` + fractions | Scale-outs truncate the same tail for the same reason, and split one trade's R across rungs. |
+| `max_bars_in_trade` (time stop) | Closes a position because the clock ran out — exactly the trends worth holding. |
+| `stale_exit_ratio` | Same, for losers; the hard stop already bounds them. |
+| `breakeven_atr` | A separate "snap to exact entry" step scratches winners on ordinary noise. With `trail_start_atr > trail_step_atr` the trail crosses entry by itself. |
+
+Three numbers per symbol carry the whole model — `sl_atr_mult`,
+`trail_start_atr`, `trail_step_atr` — and they are what the optimizer
+searches. `Store.opt_params()` filters saved grids down to `OPT_FIELDS`, so a
+stale saved blob cannot resurrect a removed axis; if you add an axis, add it
+to `OPT_FIELDS` or it will be silently dropped.
+
+Backtest and live must stay identical here: `backtest.simulate`'s bar loop and
+`engine._update_stop` are the same rule written twice. Change one, change both,
+and cover it in `tests/test_core.py`.
+
+---
+
 ## 1. Product in one sentence
 
 Local **MetaTrader 5** multi-symbol autotrader with a **FastAPI + browser terminal**: always watches prices/indicators; places orders only after **Bot Başlat**; tunes each symbol via **walk-forward optimization** over four strategy families; sizes and gates risk with ATR math, daily loss halt, and a live **AI supervisor** that quarantines losers and can trigger re-opt.
@@ -35,9 +74,7 @@ Local **MetaTrader 5** multi-symbol autotrader with a **FastAPI + browser termin
 | `start_silent.vbs` | Prefer `pythonw.exe` / minimized python `run.py` |
 | `start_console.bat` | Foreground; closing window kills app |
 | `stop.bat` / `restart.bat` | Kill port listener / silent restart |
-| `KUR.bat` / `bootstrap.ps1` | Cloud install (Git+Python+venv+shortcuts); no Claude/Node |
-| `KURULUM.bat` | Venv at `C:\MicoFX-venv` + pip |
-| `kisayol.bat` / `Create-Shortcuts.ps1` | Desktop shortcuts |
+| `KUR.bat` → `KUR.ps1` | **The** installer, single entry point: Python + venv at `C:\MicoFX-venv` + pip + desktop shortcuts. Idempotent, re-runnable after `git pull`. |
 | `run.py` | Real entry |
 
 Env: `MICO_HOST`, `MICO_PORT`, `MICO_OPEN_BROWSER`.
@@ -57,7 +94,7 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
   README.md / MASTER_PROMPT.md
   docs/KULLANIM.md / docs/KURULUM.md
   run.py / backup.py / requirements.txt
-  KUR.bat / bootstrap.ps1 / KURULUM.bat / kisayol.bat / Create-Shortcuts.ps1
+  KUR.bat / KUR.ps1                         # the only installer
   start.bat / start_silent.vbs / start_console.bat / stop.bat / restart.bat
   config/defaults.json
   data/micofx.db                            # runtime (gitignored)
@@ -138,15 +175,15 @@ MT5 copy_rates_from_pos
        → session / market / cooldown / DailyGuard / AI gate / spread / ATR floors
        → RiskManager.lot_for (+ edge_scale + AI risk_scale)
        → RiskManager.can_open
-       → MT5Client.open_market(SL/TP/magic)
-       → manage: time stop / partial TP / breakeven / trail / session flatten
+       → MT5Client.open_market(hard SL, tp=0 always, magic)
+       → manage: ATR trail only (+ session / day-end / daily-loss flatten)
 ```
 
 ### Backtest honesty (must match live intent)
 - Signal on **closed** bar → fill at **next bar open** (buy pays spread).
 - Full spread + round-turn commission every trade.
-- Same bar hits SL and TP → **stop wins**.
-- Trail / BE advance on **bar closes only**, not intrabar wick trails.
+- There is no TP level, so the only same-bar contest is stop vs trail; the stop is checked first.
+- The trail advances on **bar closes only**, never on intrabar wicks.
 
 ### Signal conflicts
 Bars where both `buy` and `sell` are True must be **dropped** (neither side). Do not prefer buy. Apply in every strategy family and guard again in backtest/engine/`Signals.last()`.
@@ -219,7 +256,7 @@ a guessed cost. Both `backtest.walk_forward` and `Engine._refresh_signals` /
 Source `(H+L+2C)/4`; six cascaded EMAs; volume factor `vf`; classic T3 weighted blend of e3..e6.
 
 ### Explicitly removed / do not reintroduce without evidence
-- Exit-on-opposite-signal: measured fire rate ~0–1.6%; exits are trail / BE / partial / time.
+- Exit-on-opposite-signal: measured fire rate ~0–1.6%; every exit is the stop (hard or trailed).
 - Ai-only `supertrend()` helper is **dead code** — not a product feature.
 
 ---
@@ -304,7 +341,7 @@ Per cycle:
 
 Entry checks (order matters conceptually): ATR present, tick present, spread vs ATR, min ATR/price, AI gate, session/market, cooldown, DailyGuard not halted, optional live cost gate, lot sizing, `can_open`, then market order with magic.
 
-Position management: max bars time stop, partial TP + move BE, breakeven ATR, trail ATR, flat before session end.
+Position management: **ATR trail and nothing else**, plus the calendar/risk flattens (session end, day end, daily-loss limit).
 
 ---
 
@@ -369,11 +406,11 @@ Groups: `forex`, `index`, `commodity`, `crypto`.
 
 Starter symbols (20): EURUSD, GBPUSD, AUDUSD, USDCAD, USDCHF, GER40, FRA40, UK100, NAS100, US30, US500, HK50, HSTECH, JPN225, AUS200, XAUUSD, SpotBrent, NatGas, BTCUSD, ETHUSD — each with unique magic `99000x`.
 
-Group presets set lot floors (FX/commodity/crypto 0.01, index 0.10), sessions, ADX floors, ATR exits, commissions, cooldowns, max bars in trade.
+Group presets set lot floors (FX/commodity/crypto 0.01, index 0.10), sessions, ADX floors, the ATR stop/trail triple, commissions and cooldowns.
 
 Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**, index / commodity / crypto **0.0** (spread only).
 
-`crypto` is deliberately its own preset, not forex or commodity: 24/7 session (`00:00-23:59`, trade_days 1-7), M15 base timeframe, much wider ATR stops (SL 2.5 / TP 3.5 ATR), ADX floor 22 and a longer cooldown to survive crypto's volatility.
+`crypto` is deliberately its own preset, not forex or commodity: 24/7 session (`00:00-23:59`, trade_days 1-7), M15 base timeframe, a much wider ATR stop, ADX floor 22 and a longer cooldown to survive crypto's volatility.
 
 ---
 
@@ -381,7 +418,7 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 
 | Name | Value | Role |
 |---|---|---|
-| OPT_FIELDS | t3/stoch/htf/adx/sl/tp/trail/BE/body/atr%/partial/orb/vwap/don… | Opt may overwrite only these |
+| OPT_FIELDS | t3/stoch/htf/adx/sl_atr_mult/trail_start/trail_step/trail_mode/body/atr%/orb/vwap/don… | Opt may overwrite only these. `Store.opt_params()` filters saved grids to this set, so a removed axis can never be resurrected by a stale saved blob. |
 | MIN_TEST_TRADES | 12 | OOS slice |
 | MIN_OOS_PF | 1.10 | OOS slice |
 | MAX_COST_PER_TRADE_R | 0.25 | Apply gate |
@@ -474,7 +511,7 @@ Experimental trading richness — **do not copy into FX unless asked**:
 - Backtest score with trade-R consistency / DD penalties (diverges from FX formula)
 - Supervisor `hour_risk_scales`, live PF edge-decay halving risk
 - `autostart_mt5` / wait / terminal process helpers / watchdog scripts
-- defaults: `max_combos=2000`, richer SL/TP/trail/retest grids
+- defaults: `max_combos=2000`, wide stop/trail/retest grids
 - Fixed portfolio like Orj (no FX CRUD)
 - `supertrend` in indicators = unused
 

@@ -226,28 +226,6 @@ def flatten_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False,
     return mask
 
 
-def _ladder(p: Params, entry: float, sl_dist: float,
-            is_buy: bool) -> list[tuple[float, float, float]]:
-    """Scale-out rungs as ``(price, r_multiple, fraction of original size)``.
-
-    A rung only counts when it is further out than the one before it and when
-    the ladder still leaves a runner, so a configuration can never close the
-    whole position through partials and leave the trailing stop with nothing to
-    manage. Shared by the backtest and the live engine so the two book the same
-    banked R for the same configuration.
-    """
-    if p.partial_tp_r <= 0 or not (0.0 < p.partial_tp_fraction < 1.0):
-        return []
-    sign = 1.0 if is_buy else -1.0
-    out = [(entry + sign * sl_dist * p.partial_tp_r,
-            float(p.partial_tp_r), float(p.partial_tp_fraction))]
-    if (p.partial2_tp_r > p.partial_tp_r and p.partial2_fraction > 0
-            and p.partial_tp_fraction + p.partial2_fraction < 1.0):
-        out.append((entry + sign * sl_dist * p.partial2_tp_r,
-                    float(p.partial2_tp_r), float(p.partial2_fraction)))
-    return out
-
-
 def run(cache: IndicatorCache, open_: np.ndarray, spread_pts: np.ndarray, point: float,
         p: Params, tradable: np.ndarray | None = None, commission_price: float = 0.0) -> Result:
     """Bar-replay of the live rules, scored in R multiples.
@@ -307,7 +285,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     # where the broker's own minimum exceeds ten points.
     if min_stop is None:
         min_stop = point * 10.0
-    max_bars = p.max_bars_in_trade if p.max_bars_in_trade > 0 else n
 
     # Structure trail: precompute once so the loop below stays O(1) per bar.
     # swing_lows/highs are causal (rolling window excludes the current bar).
@@ -357,44 +334,32 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         sl_dist = max(atr_entry * p.sl_atr_mult, min_stop)
         entry = float(open_[j0] + s) if is_buy else float(open_[j0])
         sl = entry - sl_dist if is_buy else entry + sl_dist
-        # ``tp_atr_mult <= 0`` means "no fixed target at all": the hard stop and
-        # the trail are the only ways out. Without this branch the max() below
-        # collapsed to ``min_stop * 1.5`` - a target roughly fifteen points from
-        # entry - so a zero multiplier silently became the tightest possible
-        # scalp instead of a trend runner. Pushing the level to infinity keeps
-        # the bar loop branch-free while making the comparison never fire.
-        if p.tp_atr_mult > 0:
-            tp_dist = max(atr_entry * p.tp_atr_mult, min_stop * 1.5)
-            tp = entry + tp_dist if is_buy else entry - tp_dist
-        else:
-            tp = float("inf") if is_buy else float("-inf")
-        moved_be = False
-
-        # Optional scale-out ladder: bank a slice at N1 x risk, another at N2,
-        # run the remainder. Rungs are held as (price, r_multiple, fraction of
-        # the ORIGINAL size) so the banked R is exactly what the live engine
-        # books when it closes that same fraction of the opening volume.
-        runner = 1.0
-        banked_r = 0.0
-        rungs = _ladder(p, entry, sl_dist, is_buy)
-        rung = 0
+        # No take-profit level exists in this model, so the only way out is the
+        # stop - hard at first, trailing once the move has paid for it. See
+        # SymbolConfig's exit-model note for why there is nothing else.
+        # ``trailing`` separates the two in the exit histogram: a "stop" is the
+        # original risk being hit, a "trail" is giving back part of a move that
+        # had already gone our way.
+        trailing = False
 
         exit_price = None
         exit_bar = j0
         reason = "time"
 
-        for j in range(j0, min(n, j0 + max_bars)):
+        # Runs to the end of the sample: nothing closes a position because it
+        # has been open too long. A trade that neither stops out nor trails out
+        # simply stays open, exactly as it would live. This does not blow up the
+        # cost of a sweep - ``ptr`` below skips every entry signal up to the
+        # exit bar, so no two simulated trades overlap and the loop still visits
+        # each bar at most once per pass.
+        for j in range(j0, n):
             bar_high, bar_low = high[j], low[j]
             if is_buy:
                 if bar_low <= sl:
-                    exit_price, reason = sl, ("stop" if not moved_be else "trail")
-                elif bar_high >= tp:
-                    exit_price, reason = tp, "target"
+                    exit_price, reason = sl, ("trail" if trailing else "stop")
             else:
                 if bar_high + s >= sl:
-                    exit_price, reason = sl, ("stop" if not moved_be else "trail")
-                elif bar_low + s <= tp:
-                    exit_price, reason = tp, "target"
+                    exit_price, reason = sl, ("trail" if trailing else "stop")
             if exit_price is not None:
                 exit_bar = j
                 break
@@ -408,64 +373,17 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 exit_bar = j
                 break
 
-            if p.stale_exit_ratio > 0 and max_bars < n:
-                held = j - j0 + 1
-                if held > max_bars * p.stale_exit_ratio:
-                    c_now = close[j]
-                    gain_now = (c_now - entry) if is_buy else (entry - c_now)
-                    if gain_now < 0:
-                        exit_price = c_now + (0.0 if is_buy else s)
-                        reason = "stale"
-                        exit_bar = j
-                        break
-
-            # Walk up the ladder; several rungs can fall inside one bar's range.
-            while rung < len(rungs):
-                level, r_mult, frac = rungs[rung]
-                hit = (bar_high >= level) if is_buy else (bar_low + s <= level)
-                if not hit:
-                    break
-                banked_r += r_mult * frac
-                runner -= frac
-                if rung == 0:
-                    # First slice off: the remainder rides risk-free from
-                    # here - clamped against the broker's min-stop distance
-                    # from the CURRENT bar close, same as live's
-                    # _take_partial(). Live can never place a stop closer to
-                    # the market than min_stop allows; placing it at exactly
-                    # entry unconditionally here credited a "risk-free" rung
-                    # backtest could not have actually achieved live on a
-                    # symbol whose min_stop is wide relative to this rung's
-                    # trigger distance.
-                    be_limit = close[j] - min_stop if is_buy else close[j] + min_stop
-                    be = min(entry, be_limit) if is_buy else max(entry, be_limit)
-                    if is_buy and be > sl:
-                        sl = be
-                    elif not is_buy and be < sl:
-                        sl = be
-                    # Mirrors live's _take_partial reached_breakeven: a clamp that
-                    # left ``be`` short of entry improved the stop but did not
-                    # actually reach risk-free, so it must not be reported as BE.
-                    moved_be = (be >= entry) if is_buy else (be <= entry)
-                rung += 1
-
             c = close[j]
             a = atr[j]
             gain = (c - entry) if is_buy else (entry - c)
             if a > 0 and gain > 0:
                 target = None
-                # Mirrors engine._update_stop's breakeven_locked guard: once
-                # breakeven is reached (now, or already from an earlier bar -
-                # sl at/past entry), the min_stop clamp below must never be
-                # allowed to land the final stop worse than entry. Backtest
-                # previously clamped to the bar close unconditionally, which
-                # could bank a "breakeven" bar that live (post-fix) actually
-                # skips, since a stop worse than breakeven is not one.
+                # Mirrors engine._update_stop's breakeven_locked guard: once the
+                # trail has ratcheted the stop to or past entry, the min_stop
+                # clamp below must never put it back on the losing side. There
+                # is no separate breakeven step - the trail reaches entry by
+                # itself once trail_start_atr exceeds trail_step_atr.
                 breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
-                if p.breakeven_atr > 0 and not moved_be and gain >= a * p.breakeven_atr:
-                    target = entry
-                    moved_be = True
-                    breakeven_locked = True
                 if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
                     trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
                     trail = trail_atr
@@ -490,10 +408,12 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         new_sl = min(target, c - min_stop)
                         if not (breakeven_locked and new_sl < entry):
                             sl = new_sl
+                            trailing = True
                     elif not is_buy and target < sl:
                         new_sl = max(target, c + min_stop)
                         if not (breakeven_locked and new_sl > entry):
                             sl = new_sl
+                            trailing = True
             exit_bar = j
 
         if exit_price is None:
@@ -501,10 +421,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             reason = "time"
 
         move = (exit_price - entry) if is_buy else (entry - exit_price)
-        r = float((banked_r * sl_dist + move * runner - commission_price) / sl_dist)
+        r = float((move - commission_price) / sl_dist)
         res.cost_r += float((commission_price + s) / sl_dist)
-        if banked_r > 0 and reason in ("stop", "trail"):
-            reason = "partial+" + reason
         res.trades += 1
         res.net_r += r
         res.trade_rs.append(r)
@@ -711,7 +629,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     per_segment_trades = max(6, int(min_trades / max(1, segments - 2)))
 
     # Signals depend only on the entry-side parameters (``Params.key``); the
-    # exit grid - stops, targets, trailing, partials, the spread gate - does not
+    # exit grid - the hard stop, the trail, the spread gate - does not
     # move a single bar of the signal series. Roughly nine tenths of the grid is
     # exit parameters, so recomputing the indicator stack per combination was
     # repeating identical work. The sweep below walks the grid grouped by signal

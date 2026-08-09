@@ -1,56 +1,71 @@
 # MicoFX
 
-MetaTrader 5 uzerinde otomatik islem sistemi + web paneli.  
-Dort strateji ailesi, ATR risk, gunluk zarar kesici, sembol saatleri, AI risk denetleyici.
+MetaTrader 5 uzerinde calisan otomatik islem sistemi ve web paneli.
 
-> Once demo. Finansal tavsiye degildir.
+Cikis mantigi tek ve degismez: **her pozisyon sert bir ATR stop ile acilir,
+kar ATR'ye gore belirlenen esigi gectikten sonra takip eden stop devreye girer
+ve stop asla geri gitmez.** Hedef (take-profit) yoktur, kademeli kar alma
+yoktur, zaman stopu yoktur - trendin ne zaman bittigine takip eden stop karar
+verir.
 
-## Klasor
+> Once demo hesapta calistirin. Finansal tavsiye degildir.
 
-| Yol | Ne |
-|---|---|
-| `micofx/` | Kod |
-| `config/defaults.json` | Ilk sablon |
-| `data/` / `logs/` | Runtime DB + log (Git disi) |
-| `docs/` | [Kullanim](docs/KULLANIM.md) · [Yerel kurulum](docs/KURULUM.md) |
-| `MASTER_PROMPT.md` | Gelistirici / agent kaynagi |
-| `KUR.bat` | Bulut kurulum (Git + Python + paket + kisayol) |
-| `KURULUM.bat` | Sadece venv + pip |
-| `start.bat` / `stop.bat` / `start_console.bat` | Baslat / durdur / konsol |
-| `kisayol.bat` | Masaustu kisayollari |
-| `backup.py` | Aksam yedegi (Task Scheduler) |
-| `requirements.txt` / `run.py` | Bagimlilik + giris |
+## Kurulum
 
-## Bulut kurulum
+Tek dosya. [Git](https://git-scm.com/download/win) kurulu degilse once onu
+kurun ve PowerShell'i kapatip yeniden acin.
 
-Private depo — tek satir indirme calismaz.
-
-1. [Git kur](https://git-scm.com/download/win) → Next → PowerShell kapat/ac  
-2.
 ```powershell
 cd $env:USERPROFILE
 git clone https://github.com/prlayanyildiz/MicoFx.git
 cd MicoFx
 .\KUR.bat
 ```
-3. MT5: **Algoritmik alim satima izin ver** → masaustu **MicoFX Baslat**
 
-Gunluk: `git pull` → gerekirse `.\KUR.bat` / `.\kisayol.bat`.  
-USB / klasor kopyasi: [docs/KURULUM.md](docs/KURULUM.md).
+`KUR.bat` Python'u, sanal ortami, paketleri ve masaustu kisayollarini
+halleder. Bastan calistirmak guvenli - yapilmis adimlari atlar, bu yuzden
+`git pull` sonrasi tazeleme icin de ayni dosyayi kullanin.
 
-## Calistirma
+Sonra MetaTrader 5'te **Araclar > Secenekler > Uzman Danismanlar > Algoritmik
+alim satima izin ver** kutusunu isaretleyin ve masaustundeki **MicoFX Baslat**
+kisayoluna cift tiklayin.
 
-```powershell
-.\start.bat
-```
+Panel: <http://127.0.0.1:8900> (`MICO_PORT` ile degistirilebilir).
 
-Panel: `http://127.0.0.1:8900` (`MICO_PORT` ile degisir).  
-Acilista **izleme** modu — emir icin panelden **Bot Baslat**.
+**Acilista sistem izleme modundadir.** Emir gonderilmesi icin panelden **Bot
+Baslat** demeniz gerekir. Ayni MT5 hesabinda ayni anda iki bot calistirmayin.
 
-**Ayni MT5 hesabinda yerelde + bulutta ayni anda bot acma.**
+## Nasil calisir
+
+| Asama | Ne olur |
+|---|---|
+| Sinyal | 20 strateji ailesinden sembole atanmis olani, kapanmis bar uzerinde calisir |
+| Filtre | Seans saatleri, spread/ATR orani, ADX rejimi, gunluk zarar kesici |
+| Boyut | Risk yuzdesi ve ATR stop mesafesinden lot; AI denetleyici gerekirse kucultur |
+| Giris | Piyasa emri + sert ATR stop (broker'da durur, hicbir kosulda kaldirilmaz) |
+| Takip | Kar `trail_start x ATR`'yi gecince stop `trail_step x ATR` mesafeden mandalli izler |
+| Cikis | Yalnizca stop. Ek olarak seans sonu / gun sonu / gunluk zarar flatten'i |
+
+Optimizer, her sembol icin strateji + zaman dilimi + stop/takip parametrelerini
+yuruyen-ileri (walk-forward) test ile arar. Bir aday ancak hem secmeli
+dogrulama hem de hic dokunulmamis test diliminde mevcut ayardan iyiyse
+uygulanir; degilse mevcut ayar korunur.
+
+## Klasor
+
+| Yol | Ne |
+|---|---|
+| `micofx/` | Kod (motor, strateji, optimizer, risk, web) |
+| `config/defaults.json` | Ilk sablon ve optimizer arama gridi |
+| `data/` · `logs/` | Runtime DB ve log (Git disi) |
+| `KUR.bat` · `KUR.ps1` | Tek kurulum |
+| `start.bat` · `stop.bat` · `start_console.bat` | Baslat / durdur / konsol |
+| `backup.py` | Aksam yedegi (Windows Gorev Zamanlayici) |
+| `docs/` | [Kullanim](docs/KULLANIM.md) · [Kurulum ayrintilari](docs/KURULUM.md) |
+| `MASTER_PROMPT.md` | Gelistirici / agent kaynagi |
 
 ## Daha fazla
 
-- Kullanim: [docs/KULLANIM.md](docs/KULLANIM.md)  
-- Strateji / optimizer / risk kurallari: [MASTER_PROMPT.md](MASTER_PROMPT.md)  
-- Yerel kurulum: [docs/KURULUM.md](docs/KURULUM.md)
+- Gunluk kullanim: [docs/KULLANIM.md](docs/KULLANIM.md)
+- Kurulum ayrintilari, USB/klasor kopyasi: [docs/KURULUM.md](docs/KURULUM.md)
+- Strateji, optimizer ve risk kurallari: [MASTER_PROMPT.md](MASTER_PROMPT.md)

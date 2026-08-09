@@ -227,27 +227,30 @@ class SymbolConfig:
     htf_factor: int = 6              # base timeframe multiple; 0/1 disables
     htf_mode: str = "t3"             # "t3" | "off"
 
-    # ---- ATR risk model ----
+    # ---- ATR risk model: hard stop, then trail. Nothing else closes a trade. ----
+    #
+    # There is exactly one exit regime and it has two parts:
+    #
+    #   1. a hard stop at ``sl_atr_mult`` x ATR, sent to the broker with the
+    #      entry and never removed - it is what is standing there if this
+    #      process, the machine, or the internet goes away mid-trade;
+    #   2. once open profit reaches ``trail_start_atr`` x ATR, a trailing stop
+    #      ``trail_step_atr`` x ATR behind the best closed price seen since
+    #      entry, ratcheting forward only.
+    #
+    # Deliberately absent: take-profit, scale-out ladders, breakeven jumps,
+    # time stops and stale-trade exits. Every one of them caps or truncates a
+    # winner, which is the opposite of what a trailing system is for - the
+    # trail decides when a move is over, nothing else gets a vote. Breakeven
+    # in particular is not a separate mechanism here: once trail_start exceeds
+    # trail_step the trail crosses entry on its own, without the "snap exactly
+    # to entry" step that turns ordinary noise into a scratched winner.
     atr_period: int = 14
     sl_atr_mult: float = 1.2
-    tp_atr_mult: float = 1.8
     trail_start_atr: float = 0.8
     trail_step_atr: float = 0.6
     trail_mode: str = "atr"          # "atr" | "structure" | "hybrid"
     trail_lookback: int = 5          # bars to look back for swing high/low (structure/hybrid)
-    breakeven_atr: float = 0.0       # 0 disables the breakeven jump
-    max_bars_in_trade: int = 0       # 0 disables the time stop
-    stale_exit_ratio: float = 0.0    # close a losing trade past this fraction of max_bars; 0 disables
-    partial_tp_r: float = 0.0        # bank part of the position at N x risk; 0 disables
-    partial_tp_fraction: float = 0.5 # how much of the position that first target takes
-    # Second rung of the scale-out ladder. A scalper's realised R:R is decided by
-    # *where* size comes off, not by the final target: one exit at 1R throws away
-    # the tail, one exit at 3R gives most trades back. Two rungs plus a trailed
-    # runner is the standard shape - bank at N1, bank again at N2, let the rest
-    # ride risk-free. Ignored unless it sits beyond ``partial_tp_r`` and leaves a
-    # runner (``partial_tp_fraction + partial2_fraction < 1``).
-    partial2_tp_r: float = 0.0       # 0 disables the second rung
-    partial2_fraction: float = 0.3   # fraction of the ORIGINAL size the second rung takes
     # ---- costs ----
     commission_per_lot: float = 0.0  # round-turn commission in account currency
 
@@ -333,29 +336,23 @@ class SymbolConfig:
         return out
 
 
-# Subset of OPT_FIELDS that engine.manage_positions / _update_stop / _take_partial
-# read live off cfg for a position that is ALREADY open (trail, breakeven, partial
-# ladder, time stop) - as opposed to entry-signal fields, which only shape NEW
-# entries and can't disturb a trade in flight. A "refine" apply (same strategy/
-# timeframe, new numbers) must hold these back while a position is open, or the
-# stop/trail/partial math for that trade silently changes mid-flight to numbers
-# it was never opened or sized against.
+# Subset of OPT_FIELDS that engine._update_stop reads live off cfg for a
+# position that is ALREADY open - as opposed to entry-signal fields, which only
+# shape NEW entries and can't disturb a trade in flight. A "refine" apply (same
+# strategy/timeframe, new numbers) must hold these back while a position is
+# open, or the stop/trail math for that trade silently changes mid-flight to
+# numbers it was never opened or sized against.
 EXIT_RISK_FIELDS = frozenset({
     "sl_atr_mult", "trail_start_atr", "trail_step_atr", "trail_mode", "trail_lookback",
-    "breakeven_atr", "partial_tp_r", "partial_tp_fraction",
-    "partial2_tp_r", "partial2_fraction", "stale_exit_ratio", "max_bars_in_trade",
 })
 
 # Parameters the optimizer is allowed to overwrite on a SymbolConfig.
 OPT_FIELDS = [
     "t3_length", "t3_volume_factor", "rsi_length", "stoch_length",
     "smooth_k", "smooth_d", "stoch_band", "htf_factor", "adx_min", "adx_max",
-    "sl_atr_mult", "tp_atr_mult", "trail_start_atr", "trail_step_atr",
+    "sl_atr_mult", "trail_start_atr", "trail_step_atr",
     "trail_mode", "trail_lookback",
-    "breakeven_atr", "min_body_ratio", "atr_pct_min",
-    "partial_tp_r", "partial_tp_fraction",
-    "partial2_tp_r", "partial2_fraction", "stale_exit_ratio",
-    "max_bars_in_trade",
+    "min_body_ratio", "atr_pct_min",
     "orb_minutes", "orb_buffer_atr", "orb_retest", "vwap_sd",
     "don_length", "don_buffer_atr", "don_squeeze",
     "sqz_length", "sqz_bb_sd", "sqz_kc_atr", "sqz_momentum_len",
@@ -413,19 +410,19 @@ STRATEGY_TIMEFRAMES: dict[str, list[str]] = {
     "squeeze_brk": ["M15", "M30", "H1"],
 }
 
-# Exit/risk axes used when searching M15+ (or any non-scalp pairing). The shared
-# scalp grid is too tight for multi-hour holds; without this overlay H1 winners
-# never appear because every sample dies inside a 12-24 bar scalp time-stop.
+# Exit/risk axes used when searching M15+ (or any non-scalp pairing). A
+# multi-hour hold wants a wider hard stop and a looser trail than a five-minute
+# scalp does; the shared grid is sized for the latter, so without this overlay
+# the search only ever offers H1 candidates a stop tight enough to be noise.
+#
+# ``trail_step_atr`` reaches 2.0 here on purpose. The whole point of dropping
+# take-profit is to stay in a trend until it actually turns, and a trail closer
+# than roughly 1 ATR on an hourly bar gets clipped by ordinary retracement long
+# before that - a tight trail is just a take-profit that pretends otherwise.
 SWING_GRID_OVERLAY: dict[str, list] = {
     "sl_atr_mult": [1.0, 1.2, 1.5, 2.0, 2.5, 3.0],
-    "tp_atr_mult": [1.5, 2.0, 2.5, 3.0, 4.0],
-    "trail_start_atr": [0.6, 0.8, 1.0, 1.4, 2.0],
-    "trail_step_atr": [0.4, 0.6, 0.8, 1.2],
-    "breakeven_atr": [0.0, 0.5, 0.8, 1.2],
-    "partial_tp_r": [0.0, 1.0, 1.5, 2.0],
-    "partial2_tp_r": [0.0, 2.0, 3.0],
-    "stale_exit_ratio": [0.0, 0.5, 0.75],
-    "max_bars_in_trade": [24, 48, 96, 192],
+    "trail_start_atr": [0.6, 0.8, 1.0, 1.4, 2.0, 2.5],
+    "trail_step_atr": [0.4, 0.6, 0.8, 1.2, 1.6, 2.0],
     "max_spread_atr": [0.0, 0.08, 0.12, 0.2],
 }
 

@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from .logbus import LOG
-from .models import SymbolConfig, SystemConfig
+from .models import OPT_FIELDS, SymbolConfig, SystemConfig
 from .paths import DB_PATH, ensure_dirs, load_defaults
 
 _SCHEMA = """
@@ -430,10 +430,32 @@ class Store:
             known = set(base["strategies"])
             base["strategies"] = list(base["strategies"]) + [f for f in families if f not in known]
 
-        for key in ("strategy_grids", "exit_styles", "grid", "strategy_timeframes"):
+        for key in ("strategy_grids", "grid", "strategy_timeframes"):
             ship_map, have = shipped.get(key), base.get(key)
             if isinstance(ship_map, dict) and isinstance(have, dict):
                 base[key] = {**ship_map, **have}
+
+        # A saved blob outlives the code that wrote it. Because the merge above
+        # lets the stored copy win, a grid axis that has since been REMOVED from
+        # the system would be handed straight back to the optimizer and searched
+        # again - which is exactly how a deleted exit parameter (take-profit,
+        # scale-out rungs, the time stop) could quietly come back to life on a
+        # machine that had pressed Save once, long after the code stopped
+        # supporting it. Anything the search cannot legally write to a
+        # SymbolConfig has no business being an axis, so filter to OPT_FIELDS.
+        allowed = set(OPT_FIELDS)
+        if isinstance(base.get("grid"), dict):
+            base["grid"] = {k: v for k, v in base["grid"].items() if k in allowed}
+        if isinstance(base.get("strategy_grids"), dict):
+            base["strategy_grids"] = {
+                fam: {k: v for k, v in axes.items() if k in allowed}
+                for fam, axes in base["strategy_grids"].items()
+                if isinstance(axes, dict)
+            }
+        # Same reasoning for the whole exit-style block: the optimizer no longer
+        # splits a family into targeted/trail sweeps because there is only one
+        # exit regime left, so a stored block is dead weight, not configuration.
+        base.pop("exit_styles", None)
         return base
 
     def save_opt_params(self, params: dict[str, Any]) -> dict[str, Any]:

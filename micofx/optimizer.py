@@ -51,48 +51,8 @@ def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
         outcome = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     outcome["timeframe"] = payload["timeframe"]
     outcome["strategy"] = payload["strategy"]
-    outcome["exit_style"] = payload.get("exit_style", "")
     outcome["order"] = payload.get("order", 0)
     return outcome
-
-
-# Exit axes an ``exit_styles`` block is allowed to pin. A family that already
-# names one of these in its own grid has declared its exit regime itself and is
-# swept once, unsplit.
-EXIT_AXES = ("tp_atr_mult", "partial_tp_r", "partial2_tp_r", "stale_exit_ratio")
-
-
-def build_variants(families: list[str], shared: dict[str, list],
-                   family_grids: dict[str, Any],
-                   exit_styles: dict[str, Any]) -> list[dict[str, Any]]:
-    """Expand each family into one sweep per exit style.
-
-    How a trade is *closed* is as much a searchable choice as how it is opened,
-    and the two regimes are not points on one axis: a targeted exit wants a
-    fixed take-profit and an optional scale-out ladder, a pure-trail exit wants
-    none of that and a wider trailing grid instead. Interleaving them in a
-    single Cartesian grid would let the random sample hand a family a nonsense
-    hybrid far more often than either coherent regime, so each style is its own
-    sweep with its own budget, and they meet on the validation slice like any
-    other pair of candidates.
-
-    Without an ``exit_styles`` block this returns exactly one variant per family
-    with the previous grid, so behaviour is unchanged.
-    """
-    styles = {k: v for k, v in (exit_styles or {}).items() if isinstance(v, dict)}
-    out: list[dict[str, Any]] = []
-    for name in families:
-        fam = {k: v for k, v in (family_grids.get(name) or {}).items()
-               if isinstance(v, list) and v}
-        if not styles or any(k in fam for k in EXIT_AXES):
-            out.append({"key": name, "strategy": name, "exit_style": "",
-                        "grid": {**shared, **fam}})
-            continue
-        for style, over in styles.items():
-            pinned = {k: v for k, v in over.items() if isinstance(v, list) and v}
-            out.append({"key": f"{name}|{style}", "strategy": name, "exit_style": style,
-                        "grid": {**shared, **fam, **pinned}})
-    return out
 
 
 _BLAS_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
@@ -278,24 +238,26 @@ class Optimizer:
         families = [s for s in (params.get("strategies") or ["t3_stoch"]) if s in STRATEGIES] \
             or ["t3_stoch"]
         family_grids = params.get("strategy_grids") or {}
-        # Each family searches its own parameters plus the shared risk/exit grid.
-        # The family grid is applied *last* so a family may pin an exit axis the
-        # shared grid also lists - that is how a trail-only family declares
-        # ``tp_atr_mult: [0.0]`` (no fixed target) and an empty partial ladder
-        # instead of being handed the portfolio-wide target grid it was never
-        # meant to trade. Families that name no exit axis are unaffected.
-        exit_styles = params.get("exit_styles") or {}
-        variants = build_variants(families, shared, family_grids, exit_styles)
+        # One sweep per family: its own parameters on top of the shared risk
+        # grid. There used to be a second axis here - an ``exit_styles`` block
+        # that split every family into a "targeted" and a "trail" sweep,
+        # because how a trade is closed was a searchable choice. It is not any
+        # more: the system has exactly one exit regime (hard ATR stop, then ATR
+        # trail), so there is nothing left to split on and every candidate is
+        # comparable to every other without it.
+        variants = [{"key": name, "strategy": name,
+                     "grid": {**shared, **{k: v for k, v in (family_grids.get(name) or {}).items()
+                                           if isinstance(v, list) and v}}}
+                    for name in families]
         # Optional override of the shipped family→TF map (empty list = inherit).
         tf_allow = params.get("strategy_timeframes")
         if not isinstance(tf_allow, dict):
             tf_allow = STRATEGY_TIMEFRAMES
 
-        styles_txt = "/".join(exit_styles.keys()) or "tek"
         LOG.emit(f"Optimizasyon basladi | {len(targets)} sembol | son {lookback_days} gun | "
                  f"{segments} segment (son segment dogrulama) | "
                  f"zaman dilimleri {'/'.join(timeframes)} | stratejiler {'/'.join(families)} | "
-                 f"cikis modlari {styles_txt} ({len(variants)} tarama/zaman dilimi) | "
+                 f"cikis: sert ATR stop + ATR takip ({len(variants)} tarama/zaman dilimi) | "
                  f"scalp TF kilidi acik | "
                  f"max {max_combos} kombinasyon | "
                  f"{_worker_count(self.store.system.opt_max_workers)} paralel surec", "OPT")
@@ -380,22 +342,17 @@ class Optimizer:
                 if bars is None or len(bars) < 600:
                     plan["attempts"].append(
                         {"timeframe": tf, "strategy": family,
-                         "exit_style": variant["exit_style"], "ok": False,
+                         "ok": False,
                          "order": len(plan["jobs"]) + len(plan["attempts"]),
                          "error": f"veri yetersiz ({len(bars) if bars else 0} bar)"})
                     continue
-                # Swing overlay first, then the variant's own grid on top - an
-                # exit style's pins (build_variants' EXIT_AXES, e.g. "trail"
-                # forcing tp_atr_mult=[0.0]) are the whole reason that style
-                # exists. Applying the overlay last clobbered them with real
-                # tp/partial values on every M15+ pairing, so "trail" search
-                # results there were never actually TP-less - they were
-                # ordinary targeted exits mislabeled as trail.
+                # Swing overlay first, then the family's own grid on top: a
+                # family that states its own stop/trail range means it, and the
+                # generic M15+ widening must not clobber it.
                 grid = dict(SWING_GRID_OVERLAY) if uses_swing_exits(family, tf) else {}
                 grid.update(variant["grid"])
                 plan["jobs"].append({
                     "symbol": cfg.symbol, "timeframe": tf, "strategy": family,
-                    "exit_style": variant["exit_style"],
                     "order": len(plan["jobs"]) + len(plan["attempts"]),
                     "cfg": {**cfg.to_dict(), "timeframe": tf, "strategy": family},
                     "bars": {name: np.asarray(getattr(bars, name))
@@ -498,10 +455,10 @@ class Optimizer:
                 plan = plans.get(symbol)
             elif plan["outstanding"] > 0:
                 self._set(current=symbol)
-                measured = {(a.get("timeframe"), a.get("strategy"), a.get("exit_style", ""))
+                measured = {(a.get("timeframe"), a.get("strategy"))
                             for a in plan["attempts"]}
                 jobs = [j for j in plan["jobs"]
-                        if (j["timeframe"], j["strategy"], j["exit_style"]) not in measured]
+                        if (j["timeframe"], j["strategy"]) not in measured]
             else:
                 continue
             for job in jobs:
@@ -582,7 +539,6 @@ class Optimizer:
         report["symbol"] = cfg.symbol
         report["tried"] = [
             {"timeframe": a["timeframe"], "strategy": a.get("strategy", "?"),
-             "exit_style": a.get("exit_style", ""),
              "ok": bool(a.get("ok")), "validated": bool(a.get("validated")),
              "score": a["best"]["score"] if a.get("ok") else None,
              "validation_net_r": a["best"]["validation"]["net_r"] if a.get("ok") else None,
@@ -688,8 +644,7 @@ class Optimizer:
                          f"(test net {float(report['incumbent'].get('net_r') or 0.0):+.1f}R)")
         LOG.emit(
             f"{cfg.symbol}: {report['strategy']}/{report['timeframe']}"
-            f"{('/' + report['exit_style']) if report.get('exit_style') else ''} "
-            f"skor {score:.2f} | "
+            f" skor {score:.2f} | "
             f"secim {sel['trades']} islem "
             f"PF {sel['profit_factor']:.2f} ({best['positive_ratio']:.0%} segment pozitif) | "
             f"secmeli dogrulama {val['trades']} islem PF {val['profit_factor']:.2f} "

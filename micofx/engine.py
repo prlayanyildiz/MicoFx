@@ -175,12 +175,12 @@ class Engine:
             if str(t).isdigit()
         }
         self._netting_warned = False
-        self._partials: dict[int, dict[str, float]] = {
-            int(k): {"rungs": float(v.get("rungs", 0.0)), "orig": float(v.get("orig", 0.0)),
-                     "done": float(v.get("done", 0.0))}
-            for k, v in (store.get_setting("partial_state") or {}).items()
-            if str(k).isdigit() and isinstance(v, dict) and float(v.get("orig", 0.0)) > 0
-        }
+        # A position opened before the scale-out ladder was removed can still
+        # be open right now, and its old partial_state row is meaningless to
+        # the current exit model - drop the setting once rather than carry a
+        # reader for a feature that no longer exists.
+        if store.get_setting("partial_state"):
+            store.set_setting("partial_state", {})
         # Ensemble bookkeeping: the overlaid config per symbol, and which open
         # tickets came from the secondary signal (persisted, because positions
         # outlive the process and must keep being managed by the exit rules they
@@ -999,14 +999,15 @@ class Engine:
             return
 
         min_stop = self.client.min_stop_distance(cfg.symbol)
+        # The hard stop. Always sent with the entry and never lifted: it is the
+        # only protection that survives this process dying, and the broker's own
+        # minimum distance is a floor on it, never a reason to skip it.
         sl_dist = max(atr * cfg.sl_atr_mult, min_stop)
-        # A zero TP multiple is the "hard stop + trail only" exit mode: the order
-        # goes out with no take-profit level, so nothing but the trailing stop
-        # can close a winner. Without the branch the max() floor turned it into a
-        # target one and a half stop-distances wide, which is the opposite of
-        # letting a trend run. mt5client.open_market already reads tp <= 0 as
-        # "no take-profit", so 0.0 is passed through untouched.
-        tp_dist = max(atr * cfg.tp_atr_mult, min_stop * 1.5) if cfg.tp_atr_mult > 0 else 0.0
+        # No take-profit, ever. A trailing system decides when a move is over by
+        # watching the move, not by naming a price in advance; a fixed target is
+        # just a cap on the winners that pay for the losers. mt5client.open_market
+        # reads tp <= 0 as "no take-profit level".
+        tp_dist = 0.0
 
         # Optional live cost gate — off by default; optimizer already models cost.
         sys = self.store.system
@@ -1267,11 +1268,6 @@ class Engine:
             "TRADE", cfg.symbol,
         )
 
-    def _save_partials(self) -> None:
-        self.store.set_setting(
-            "partial_state",
-            {str(t): v for t, v in self._partials.items()})
-
     def _tag_secondary(self, tickets: set[int]) -> None:
         if not tickets:
             return
@@ -1429,11 +1425,6 @@ class Engine:
             self._force_flat_pending &= live
             self.store.set_setting("force_flat_pending_tickets",
                                    sorted(self._force_flat_pending))
-        # forget scale-out bookkeeping whose position is gone
-        pruned = {t: v for t, v in self._partials.items() if t in live}
-        if pruned != self._partials:
-            self._partials = pruned
-            self._save_partials()
         if self._sec_tickets - live:
             self._sec_tickets &= live
             self.store.set_setting("secondary_tickets", sorted(self._sec_tickets))
@@ -1543,38 +1534,13 @@ class Engine:
                                  f"denenecek.", "WARN", cfg.symbol)
                 continue
 
-            if cfg.max_bars_in_trade > 0:
-                held = server_now - pos["time"]
-                if held > cfg.max_bars_in_trade * timeframe_seconds(cfg.timeframe):
-                    fill = {}
-                    if self._close_tracked(pos, "MicoFX zaman stop", "exit", fill=fill):
-                        filled = float(fill.get("volume", pos["volume"]))
-                        if filled + 1e-9 >= float(pos["volume"]):
-                            LOG.emit(f"Zaman stopu ({cfg.max_bars_in_trade} bar) ile kapatildi.",
-                                     "TRADE", cfg.symbol)
-                        else:
-                            LOG.emit(f"Zaman stopu: kismen kapatildi "
-                                     f"({filled:g}/{pos['volume']:g} lot), kalan tekrar "
-                                     f"denenecek.", "WARN", cfg.symbol)
-                    continue
-
-            if cfg.stale_exit_ratio > 0 and cfg.max_bars_in_trade > 0:
-                held = server_now - pos["time"]
-                bar_sec = timeframe_seconds(cfg.timeframe)
-                stale_limit = cfg.max_bars_in_trade * bar_sec * cfg.stale_exit_ratio
-                if held > stale_limit and pos.get("profit", 0) + pos.get("swap", 0) < 0:
-                    fill = {}
-                    if self._close_tracked(pos, "MicoFX erken zarar kapanisi",
-                                           "exit", fill=fill):
-                        filled = float(fill.get("volume", pos["volume"]))
-                        if filled + 1e-9 >= float(pos["volume"]):
-                            LOG.emit(f"Erken zarar kapanisi: {held / bar_sec:.0f} bar "
-                                     f"zararda, kapatildi.", "TRADE", cfg.symbol)
-                        else:
-                            LOG.emit(f"Erken zarar kapanisi: kismen kapatildi "
-                                     f"({filled:g}/{pos['volume']:g} lot), kalan tekrar "
-                                     f"denenecek.", "WARN", cfg.symbol)
-                    continue
+            # No time stop and no stale-loss exit. Both used to close a trade
+            # purely because the clock ran out, which is how a system that is
+            # supposed to ride trends ends up cutting exactly the ones worth
+            # holding. A position leaves only through its stop - hard at first,
+            # trailing once the move pays for it - or through the session /
+            # day-end / daily-loss flatten above, which are calendar and risk
+            # limits rather than opinions about the trade.
 
             if atr > 0:
                 is_secondary = pos["ticket"] in self._sec_tickets
@@ -1711,33 +1677,22 @@ class Engine:
             ref = live
         entry = pos["price_open"]
         profit_dist = (ref - entry) if is_buy else (entry - ref)
-        # _take_partial computes its own wick-based distance (bars.high/low)
-        # independently of profit_dist's sign, mirroring how the backtest
-        # ladder books a rung the instant a bar's wick touches it - gating
-        # this call on close-based profit_dist > 0 meant a bar that wicked
-        # deep into profit and closed back at/under breakeven silently never
-        # took the partial live, while the backtest that trained partial_tp_r
-        # banked it every time.
-        if self._take_partial(cfg, pos, atr, profit_dist, bars):
-            return
         if profit_dist <= 0:
             return
 
         min_stop = self.client.min_stop_distance(cfg.symbol)
         current_sl = pos["sl"]
         target: float | None = None
-        # Once breakeven has been reached (this cycle or a previous one), the
-        # live-quote min_stop clamp below must never be allowed to land the
-        # final stop worse than entry - that clamp exists to respect the
-        # broker's distance rule, not to override the breakeven guarantee.
+        # Once the stop has been ratcheted past entry - by the trail, on this
+        # or any earlier bar - the live-quote min_stop clamp below must never
+        # be allowed to put it back on the losing side. That clamp exists to
+        # respect the broker's distance rule, not to hand back protection the
+        # trade has already earned. There is no separate breakeven step that
+        # sets this: once trail_start_atr exceeds trail_step_atr the trail
+        # crosses entry by itself, which is the same guarantee without the
+        # "snap exactly to entry" move that turns ordinary noise into a
+        # scratched winner.
         breakeven_locked = current_sl != 0 and (current_sl >= entry if is_buy else current_sl <= entry)
-
-        if cfg.breakeven_atr > 0 and profit_dist >= atr * cfg.breakeven_atr:
-            # Exact entry, then the shared min_stop clamp below - matches BT.
-            lock = entry
-            if current_sl == 0 or (lock > current_sl if is_buy else lock < current_sl):
-                target = lock
-                breakeven_locked = True
 
         if cfg.trail_start_atr > 0 and profit_dist >= atr * cfg.trail_start_atr:
             # ATR-based trailing (always computed as the baseline / fallback)
@@ -1799,141 +1754,6 @@ class Engine:
         if self.client.modify_position(pos["ticket"], target, pos["tp"], cfg.symbol):
             LOG.emit(f"SL guncellendi -> {target:.5f} (kar {profit_dist / atr:.2f}xATR)",
                      "TRADE", cfg.symbol)
-
-    def _take_partial(self, cfg: SymbolConfig, pos: dict[str, Any], atr: float,
-                      profit_dist: float, bars: Any = None) -> bool:
-        """Walk the scale-out ladder, mirroring ``backtest._ladder`` exactly.
-
-        Every rung's fraction is measured against the volume the position
-        *opened* with, not against what is left, so the live blended R matches
-        the number the walk-forward measured. ``done`` is set to the rung count
-        once no further rung can be filled (broker minimum volume), which stops
-        the engine re-probing the same position on every cycle.
-
-        ``backtest._ladder``'s caller books a rung the instant the closed bar's
-        *high/low* reaches it - a wick fill, the same way the SL/TP touch check
-        works. Using only ``profit_dist`` (built from the bar's close) here was
-        stricter than that: a bar that wicked through a rung and closed back
-        below it would bank in the walk-forward but never fire live, quietly
-        inflating the R the optimizer credits ``partial_tp_r`` with. Falling
-        back to ``profit_dist`` when bars are unavailable keeps this identical
-        to the previous behaviour rather than silently disabling the check.
-        """
-        ticket = pos["ticket"]
-        if ticket not in self._partials:
-            self._partials[ticket] = {"rungs": 0.0, "orig": float(pos["volume"]), "done": 0.0}
-            self._save_partials()
-        book = self._partials[ticket]
-        if book.get("done"):
-            return False
-
-        entry = pos["price_open"]
-        is_buy = pos["side"] == "buy"
-        wick_dist = profit_dist
-        if bars is not None and hasattr(bars, "high") and len(bars.high) > 0:
-            wick_ref = float(bars.high[-1]) if is_buy else float(bars.low[-1])
-            wick_dist = max(profit_dist, (wick_ref - entry) if is_buy else (entry - wick_ref))
-        sl_dist = max(atr * cfg.sl_atr_mult, self.client.min_stop_distance(cfg.symbol))
-        rungs = backtest._ladder(Params.from_config(cfg), entry, sl_dist, is_buy)
-
-        info = self.client.info(cfg.symbol)
-        if not info:
-            return False
-        step, minimum = info["volume_step"], info["volume_min"]
-
-        ticket = pos["ticket"]
-        tp = pos["tp"]
-        remaining = float(pos["volume"])
-        filled_any = False
-        # Loop rather than stopping after one rung: manage_positions only
-        # calls this once per newly-closed bar (self._stop_bar), but a single
-        # bar's wick can cross several rung thresholds at once - the backtest
-        # ladder books every rung the bar's high/low reaches, not just the
-        # first. Capping live at one rung per bar under-realised partials on
-        # any bar that moved fast, quietly diverging from the walk-forward's
-        # blended-R number.
-        while True:
-            taken = int(book["rungs"])
-            if taken >= len(rungs):
-                book["done"] = 1.0
-                self._save_partials()
-                break
-            _, r_mult, frac = rungs[taken]
-            if wick_dist < sl_dist * r_mult:
-                break
-
-            slice_lot = self.client.normalize_volume(cfg.symbol, book["orig"] * frac)
-            # Only scale out when both sides of the split stay above the
-            # broker's minimum volume - otherwise the ladder would either
-            # fail or close out.
-            if slice_lot < minimum or (remaining - slice_lot) < minimum - step / 2:
-                book["done"] = 1.0
-                self._save_partials()
-                break
-
-            fill: dict[str, Any] = {}
-            pos_view = dict(pos, volume=remaining)
-            if not self._close_tracked(pos_view, f"MicoFX kismi kar {taken + 1}", "exit",
-                                       volume=slice_lot, fill=fill):
-                break
-            filled_any = True
-            # close_position() returns True on TRADE_RETCODE_DONE_PARTIAL too
-            # (IOC filled less than requested) - advancing the rung on that
-            # would book the full fraction while real volume is still open,
-            # desyncing ``book`` from the actual position. Only advance on a
-            # fill that covers the requested slice; a genuine shortfall stops
-            # the loop here and retries the same rung next cycle, clamped to
-            # whatever volume is left by then (close_position already does
-            # that clamping).
-            filled = float(fill.get("volume", slice_lot))
-            if filled < slice_lot - step / 2:
-                LOG.emit(f"Kismi kar {taken + 1}. kademe eksik doldu: {filled:g}/{slice_lot:g} lot, "
-                         "kademe tekrar denenecek", "WARN", cfg.symbol)
-                break
-            remaining -= filled
-            book["rungs"] = taken + 1
-            self._save_partials()
-            reached_breakeven = False
-            if taken == 0:
-                # First slice off: the remainder rides risk-free from here.
-                # Exact entry can sit inside the broker's min-stop distance
-                # from the live price (small first rung, e.g. 0.5R) - an
-                # unclamped modify then gets rejected and the remainder
-                # silently keeps its original, wider SL while the backtest
-                # already credited this rung as risk-free. Clamp the same
-                # way _update_stop does and only move the stop, never widen it.
-                tick = self.client.tick(cfg.symbol)
-                be = entry
-                if tick is not None:
-                    live = tick["bid"] if is_buy else tick["ask"]
-                    min_stop = self.client.min_stop_distance(cfg.symbol)
-                    limit = live - min_stop if is_buy else live + min_stop
-                    be = min(entry, limit) if is_buy else max(entry, limit)
-                current_sl = pos["sl"]
-                # A trail/BE from _update_stop can already sit ahead of plain
-                # entry by the time this first rung fills (both run off the
-                # same cycle's manage_positions pass) - only move the stop
-                # when it actually tightens the current one, same guard
-                # _update_stop itself uses, or this would give back protection
-                # that was already earned.
-                improves = current_sl == 0 or (be > current_sl if is_buy else be < current_sl)
-                # min_stop against a live price that has already retraced can
-                # clamp ``be`` to something short of true entry - still moved
-                # (an improvement over the old, much wider stop is better than
-                # none), but it is not actually risk-free, so it must not be
-                # reported as such below.
-                reached_breakeven = (be >= entry) if is_buy else (be <= entry)
-                if improves and not self.client.modify_position(ticket, be, tp, cfg.symbol):
-                    LOG.emit(f"BE'ye cekilemedi (min-stop) #{ticket}, eski SL korunuyor",
-                             "WARN", cfg.symbol)
-                    reached_breakeven = False
-                elif improves and not reached_breakeven:
-                    LOG.emit(f"Kismi kar sonrasi stop sikildi ama tam BE'ye ulasamadi "
-                             f"(canli fiyat geri cekilmis) #{ticket}", "WARN", cfg.symbol)
-            LOG.emit(f"Kismi kar {taken + 1}. kademe: {slice_lot:g} lot ({r_mult:.1f}R), "
-                     f"kalan {'risksiz ' if taken == 0 and reached_breakeven else ''}devam ediyor",
-                     "TRADE", cfg.symbol)
-        return filled_any
 
     # ---------------------------------------------------------------- reports
 
