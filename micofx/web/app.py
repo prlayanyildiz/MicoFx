@@ -1050,8 +1050,22 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if pos["magic"] not in owned_magics:
             raise HTTPException(
                 403, f"bu pozisyon MicoFX'e ait degil (magic {pos['magic']}) - buradan kapatilamaz")
-        ok = client.close_position(int(ticket), store.system.slippage_points, "MicoFX manuel")
-        return {"ok": ok}
+        fill: dict[str, Any] = {}
+        ok = client.close_position(int(ticket), store.system.slippage_points,
+                                   "MicoFX manuel", fill=fill)
+        if not ok:
+            return {"ok": False}
+        # close_position True includes DONE_PARTIAL - re-diff so the UI does
+        # not treat a still-open remainder as fully closed.
+        still = next((p for p in _positions() if p["ticket"] == int(ticket)), None)
+        if still is not None:
+            return {
+                "ok": False,
+                "partial": True,
+                "closed_volume": float(fill.get("volume", 0.0)),
+                "remaining_volume": float(still.get("volume", 0.0)),
+            }
+        return {"ok": True, "closed_volume": float(fill.get("volume", pos["volume"]))}
 
     @app.post("/api/positions-close-all")
     def close_everything() -> dict[str, Any]:

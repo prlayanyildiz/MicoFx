@@ -376,6 +376,7 @@ def test_manage_positions_retries_orphan_ticket_close_and_skips_normal_managemen
     cfg = _cfg()
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
+    eng._force_flat_pending = set()
     eng._partials = {}
     eng._stop_bar = {}
     # Position 401 is a previously-unresolved secondary ticket, still open.
@@ -408,6 +409,7 @@ def test_manage_positions_orphan_retry_done_partial_keeps_tracking():
     cfg = _cfg()
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
+    eng._force_flat_pending = set()
     eng._partials = {}
     eng._stop_bar = {}
     pos = {"ticket": 402, "magic": 1, "side": "buy", "volume": 0.2,
@@ -435,6 +437,56 @@ def test_manage_positions_orphan_retry_done_partial_keeps_tracking():
 
     assert client.closed == [402]
     assert eng._orphan_tickets == {402}  # must NOT drop on DONE_PARTIAL True
+
+
+def test_force_flat_pending_sticky_after_session_window(monkeypatch):
+    # should_flatten True once → ticket enters sticky set; later when the
+    # window is False, remainder must still retry (not fall into trail).
+    from micofx import sessions as sessions_mod
+
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._weekend_pending = set()
+    eng._force_flat_pending = set()
+    eng._partials = {}
+    eng._stop_bar = {}
+    eng._orphan_tickets = set()
+    pos = {"ticket": 701, "magic": 1, "side": "buy", "volume": 0.2,
+           "time": 0, "profit": 0, "swap": 0}
+    eng._positions = [pos]
+
+    class _Values:
+        def values(self):
+            return [cfg]
+    eng.store.symbols = _Values()
+
+    calls = {"n": 0}
+
+    def _flatten(cfg, server_now, trade_all_hours):
+        calls["n"] += 1
+        return calls["n"] == 1  # only first cycle is "in window"
+
+    monkeypatch.setattr(sessions_mod, "should_flatten", _flatten)
+    monkeypatch.setattr(sessions_mod, "day_end_close", lambda *a, **k: False)
+    monkeypatch.setattr(sessions_mod, "weekend_closed", lambda *a, **k: False)
+
+    def _partial(ticket, slippage_points, comment, volume=None, fill=None):
+        client.closed.append(ticket)
+        if fill is not None:
+            fill.update({"symbol": "EURUSD", "side": "buy", "requested": 1.1,
+                         "price": 1.1, "volume": 0.05, "risk_dist": 0.0})
+        return True
+
+    client.close_position = _partial  # type: ignore[method-assign]
+
+    eng.manage_positions(server_now=0.0)
+    assert 701 in eng._force_flat_pending
+    assert client.closed == [701]
+
+    # Window expired - sticky set must still force close retry
+    eng.manage_positions(server_now=0.0)
+    assert client.closed == [701, 701]
+    assert 701 in eng._force_flat_pending
 
 
 def test_scan_orphan_candidates_finds_delayed_ticket_and_closes_it():
@@ -472,6 +524,7 @@ def test_manage_positions_skips_secondary_trail_with_nan_sec_atr():
     cfg = _cfg()
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
+    eng._force_flat_pending = set()
     eng._partials = {}
     eng._stop_bar = {}
     eng._orphan_tickets = set()

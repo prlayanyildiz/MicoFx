@@ -340,8 +340,15 @@ function renderPositions() {
       text: "Kapat",
       onclick: async (e) => {
         e.target.disabled = true;
-        try { await api(`/api/positions/${p.ticket}/close`, { method: "POST" }); refresh(); }
-        catch (err) { toast(err.message, "err"); e.target.disabled = false; }
+        try {
+          const res = await api(`/api/positions/${p.ticket}/close`, { method: "POST" });
+          if (res && res.ok === false) {
+            toast(res.partial
+              ? `Kısmi kapanış: kalan ${res.remaining_volume} lot, tekrar deneyin`
+              : "Pozisyon kapatılamadı", "err");
+          }
+          refresh();
+        } catch (err) { toast(err.message, "err"); e.target.disabled = false; }
       },
     })));
     return tr;

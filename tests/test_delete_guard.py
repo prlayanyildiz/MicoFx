@@ -98,6 +98,14 @@ class _FakeClient:
 
     def close_position(self, ticket, slippage, comment, volume=None, fill=None):
         self.closed_tickets.append(int(ticket))
+        # Full close by default: remove from the live book so re-diff honesty
+        # (DONE_PARTIAL path keeps the ticket) matches production.
+        gone = [p for p in self._positions if p["ticket"] == int(ticket)]
+        self._positions = [p for p in self._positions if p["ticket"] != int(ticket)]
+        if fill is not None and gone:
+            fill.update({"volume": float(gone[0].get("volume", 0.1)),
+                         "symbol": gone[0].get("symbol", ""), "side": "buy",
+                         "requested": 0.0, "price": 0.0, "risk_dist": 0.0})
         return True
 
 
@@ -587,12 +595,43 @@ def test_close_ticket_refuses_position_with_unowned_magic():
 
 def test_close_ticket_allows_owned_position():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
-    positions = [{"ticket": 555, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
+    positions = [{"ticket": 555, "symbol": "XAUUSD", "magic": 990021, "side": "buy",
+                  "volume": 0.1}]
     tc, store = _client(symbols, positions)
 
     res = tc.post("/api/positions/555/close")
     assert res.status_code == 200
     assert res.json()["ok"] is True
+
+
+def test_close_ticket_done_partial_returns_ok_false():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    positions = [{"ticket": 556, "symbol": "XAUUSD", "magic": 990021, "side": "buy",
+                  "volume": 0.2}]
+    store = _FakeStore(symbols)
+    client = _FakeClient(positions)
+    engine = _FakeEngine()
+
+    def _partial(ticket, slippage, comment, volume=None, fill=None):
+        client.closed_tickets.append(int(ticket))
+        if fill is not None:
+            fill.update({"volume": 0.05, "symbol": "XAUUSD", "side": "buy",
+                         "requested": 0.0, "price": 0.0, "risk_dist": 0.0})
+        # Leave ticket in book (DONE_PARTIAL)
+        for p in client._positions:
+            if p["ticket"] == int(ticket):
+                p["volume"] = 0.15
+        return True
+
+    client.close_position = _partial  # type: ignore[method-assign]
+    tc = TestClient(create_app(store, client, engine, optimizer=None))
+
+    res = tc.post("/api/positions/556/close")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is False
+    assert body["partial"] is True
+    assert body["remaining_volume"] == 0.15
 
 
 def test_close_ticket_404s_for_unknown_ticket():

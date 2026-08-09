@@ -166,6 +166,14 @@ class Engine:
         self._weekend_pending: set[int] = {
             int(t) for t in (store.get_setting("weekend_pending_tickets") or []) if str(t).isdigit()
         }
+        # Session / day-end flatten sticky: should_flatten / day_end_close are
+        # time windows - a DONE_PARTIAL True during the window used to look
+        # "handled", then once the window flipped off the remainder fell into
+        # normal trail. Same sticky contract as weekend_pending.
+        self._force_flat_pending: set[int] = {
+            int(t) for t in (store.get_setting("force_flat_pending_tickets") or [])
+            if str(t).isdigit()
+        }
         self._netting_warned = False
         self._partials: dict[int, dict[str, float]] = {
             int(k): {"rungs": float(v.get("rungs", 0.0)), "orig": float(v.get("orig", 0.0)),
@@ -1357,6 +1365,10 @@ class Engine:
         if self._weekend_pending - live:
             self._weekend_pending &= live
             self.store.set_setting("weekend_pending_tickets", sorted(self._weekend_pending))
+        if self._force_flat_pending - live:
+            self._force_flat_pending &= live
+            self.store.set_setting("force_flat_pending_tickets",
+                                   sorted(self._force_flat_pending))
         # forget scale-out bookkeeping whose position is gone
         pruned = {t: v for t, v in self._partials.items() if t in live}
         if pruned != self._partials:
@@ -1438,24 +1450,52 @@ class Engine:
             # symbol, so one instrument could keep bleeding floating loss
             # past its own configured cap while every other symbol traded on.
             if self.store.system.daily_loss_flatten and self._symbol_daily_halt(cfg):
-                if self._close_tracked(pos, "MicoFX sembol gunluk zarar limiti", "exit"):
-                    LOG.emit("Sembol gunluk zarar limiti: pozisyon kapatildi.", "TRADE", cfg.symbol)
+                fill = {}
+                if self._close_tracked(pos, "MicoFX sembol gunluk zarar limiti",
+                                       "exit", fill=fill):
+                    filled = float(fill.get("volume", pos["volume"]))
+                    if filled + 1e-9 >= float(pos["volume"]):
+                        LOG.emit("Sembol gunluk zarar limiti: pozisyon kapatildi.",
+                                 "TRADE", cfg.symbol)
+                    else:
+                        LOG.emit(f"Sembol gunluk zarar limiti: kismen kapatildi "
+                                 f"({filled:g}/{pos['volume']:g} lot), kalan tekrar "
+                                 f"denenecek.", "WARN", cfg.symbol)
                 continue
-            if sessions.should_flatten(cfg, server_now, self.store.system.trade_all_hours):
-                if self._close_tracked(pos, "MicoFX seans kapanis", "exit"):
-                    LOG.emit("Seans kapanisi: pozisyon kapatildi.", "TRADE", cfg.symbol)
-                continue
-            if sessions.day_end_close(server_now, self.store.system.day_end_flatten_min):
-                if self._close_tracked(pos, "MicoFX gun sonu", "exit"):
-                    LOG.emit("Gun sonu: pozisyon kapatildi.", "TRADE", cfg.symbol)
+            # Flag session / day-end flatten into a sticky set BEFORE the
+            # window can expire - DONE_PARTIAL True must not fall through to
+            # trail once should_flatten/day_end_close flips False.
+            if (sessions.should_flatten(cfg, server_now, self.store.system.trade_all_hours)
+                    or sessions.day_end_close(server_now, self.store.system.day_end_flatten_min)):
+                if pos["ticket"] not in self._force_flat_pending:
+                    self._force_flat_pending.add(pos["ticket"])
+                    self.store.set_setting("force_flat_pending_tickets",
+                                           sorted(self._force_flat_pending))
+            if pos["ticket"] in self._force_flat_pending:
+                fill = {}
+                if self._close_tracked(pos, "MicoFX zorunlu flatten", "exit", fill=fill):
+                    filled = float(fill.get("volume", pos["volume"]))
+                    if filled + 1e-9 >= float(pos["volume"]):
+                        LOG.emit("Zorunlu flatten: pozisyon kapatildi.", "TRADE", cfg.symbol)
+                    else:
+                        LOG.emit(f"Zorunlu flatten: kismen kapatildi "
+                                 f"({filled:g}/{pos['volume']:g} lot), kalan tekrar "
+                                 f"denenecek.", "WARN", cfg.symbol)
                 continue
 
             if cfg.max_bars_in_trade > 0:
                 held = server_now - pos["time"]
                 if held > cfg.max_bars_in_trade * timeframe_seconds(cfg.timeframe):
-                    if self._close_tracked(pos, "MicoFX zaman stop", "exit"):
-                        LOG.emit(f"Zaman stopu ({cfg.max_bars_in_trade} bar) ile kapatildi.",
-                                 "TRADE", cfg.symbol)
+                    fill = {}
+                    if self._close_tracked(pos, "MicoFX zaman stop", "exit", fill=fill):
+                        filled = float(fill.get("volume", pos["volume"]))
+                        if filled + 1e-9 >= float(pos["volume"]):
+                            LOG.emit(f"Zaman stopu ({cfg.max_bars_in_trade} bar) ile kapatildi.",
+                                     "TRADE", cfg.symbol)
+                        else:
+                            LOG.emit(f"Zaman stopu: kismen kapatildi "
+                                     f"({filled:g}/{pos['volume']:g} lot), kalan tekrar "
+                                     f"denenecek.", "WARN", cfg.symbol)
                     continue
 
             if cfg.stale_exit_ratio > 0 and cfg.max_bars_in_trade > 0:
@@ -1463,9 +1503,17 @@ class Engine:
                 bar_sec = timeframe_seconds(cfg.timeframe)
                 stale_limit = cfg.max_bars_in_trade * bar_sec * cfg.stale_exit_ratio
                 if held > stale_limit and pos.get("profit", 0) + pos.get("swap", 0) < 0:
-                    if self._close_tracked(pos, "MicoFX erken zarar kapanisi", "exit"):
-                        LOG.emit(f"Erken zarar kapanisi: {held / bar_sec:.0f} bar zararda, kapatildi.",
-                                 "TRADE", cfg.symbol)
+                    fill = {}
+                    if self._close_tracked(pos, "MicoFX erken zarar kapanisi",
+                                           "exit", fill=fill):
+                        filled = float(fill.get("volume", pos["volume"]))
+                        if filled + 1e-9 >= float(pos["volume"]):
+                            LOG.emit(f"Erken zarar kapanisi: {held / bar_sec:.0f} bar "
+                                     f"zararda, kapatildi.", "TRADE", cfg.symbol)
+                        else:
+                            LOG.emit(f"Erken zarar kapanisi: kismen kapatildi "
+                                     f"({filled:g}/{pos['volume']:g} lot), kalan tekrar "
+                                     f"denenecek.", "WARN", cfg.symbol)
                     continue
 
             if atr > 0:

@@ -723,8 +723,14 @@ class MT5Client:
                 datetime.fromtimestamp(float(ts), tz=timezone.utc),
                 datetime.fromtimestamp(end_ts, tz=timezone.utc),
             )
+            if raw is None:
+                # Same class as positions_get None - failed call, not empty history.
+                self.connected = False
+                LOG.emit(f"history_deals_get basarisiz oldu ({mt5.last_error()}) - "
+                         "baglanti koptu olarak isaretlendi.", "WARN")
+                return []
         out = []
-        for d in raw or []:
+        for d in raw:
             # DEAL_ENTRY_IN is included too now, so merge_round_trips() can
             # fold its commission into the round-trip total - some brokers
             # split round-turn commission across both legs (or charge it all
@@ -1034,6 +1040,13 @@ class MT5Client:
         """
         with self._lock:
             found = mt5.positions_get(ticket=int(ticket))
+        if found is None:
+            # None = API failure (same as positions()); empty tuple = gone.
+            self.connected = False
+            LOG.emit(f"positions_get(ticket={ticket}) basarisiz oldu "
+                     f"({mt5.last_error()}) - baglanti koptu olarak isaretlendi.",
+                     "WARN")
+            return False
         if not found:
             return False
         p = found[0]
@@ -1079,7 +1092,8 @@ class MT5Client:
             code = getattr(result, "retcode", -1)
             LOG.emit(f"Pozisyon kapatilamadi #{ticket} ({code})", "ERROR", p.symbol)
             return False
-        if result.retcode == mt5.TRADE_RETCODE_DONE_PARTIAL:
+        partial = result.retcode == mt5.TRADE_RETCODE_DONE_PARTIAL
+        if partial:
             # IOC closed less than requested - the position still has volume
             # left open on the broker, not fully flat. True still, so callers
             # (close_all's counter, panic) count this as "handled" rather than
@@ -1096,7 +1110,9 @@ class MT5Client:
                 # this leg's slippage in R without re-reading the position.
                 "risk_dist": abs(float(p.price_open) - float(p.sl)) if p.sl else 0.0,
             })
-        if volume is None:
+        # Full-close log only when not DONE_PARTIAL - otherwise the "kismen"
+        # line above already told the truth and a second "kapatildi" lied.
+        if volume is None and not partial:
             LOG.emit(f"Pozisyon kapatildi #{ticket} kar={p.profit:.2f}", "TRADE", p.symbol)
         return True
 
@@ -1159,9 +1175,9 @@ class MT5Client:
                 # Same mid-call failure, now partway through closing. Do NOT
                 # report ``len(before) - len(remaining)`` here - remaining
                 # just came back [] from the same failed call, which would
-                # inflate "closed" to the full original count regardless of
-                # how many close_position() calls this pass actually
-                # confirmed. confirmed_closed only counts calls that
-                # genuinely returned success, so it cannot overstate.
+                # inflate "closed" to the full original count. confirmed_closed
+                # counts True returns (including DONE_PARTIAL) - remaining=-1
+                # still makes kill-switch ok:false; callers must not treat
+                # confirmed_closed as "fully flat volume".
                 return confirmed_closed, -1
         return len(before) - len(remaining), len(remaining)
