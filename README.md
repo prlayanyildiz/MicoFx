@@ -7,57 +7,22 @@ Dort bagimsiz strateji ailesi, ATR tabanli stop/hedef/trailing, gunluk zarar
 kesici, sembol bazli islem saatleri ve gerceklesmis sonuclara gore karar veren
 bir risk denetleyicisi.
 
-## Hizli kurulum (yeni/bos bir Windows makinede)
+## Hizli kurulum (bulut / bos Windows)
 
-Depo **ozel (private)** oldugu icin tek-satirlik anonim indirme linki
-calismaz (`raw.githubusercontent.com` sadece herkese acik depolarda
-calisir) - Git'i once elle kurmak gerekiyor, sonrasi tam otomatik.
+Private depo — tek satir `irm|iex` calismaz. **3 adim:**
 
-**1) Git'i kur** (tek manuel adim):
-[git-scm.com/download/win](https://git-scm.com/download/win) adresinden
-indir, kurulum ekranlarinda hep "Next" de, bitince PowerShell'i kapat/ac.
-
-**2) Kodu cek** (ozel depo oldugu icin giris istenebilir, tarayicidan
-hesabinla onaylarsin):
+1. [Git kur](https://git-scm.com/download/win) → Next → PowerShell kapat/ac  
+2. PowerShell:
 ```powershell
 cd $env:USERPROFILE
 git clone https://github.com/prlayanyildiz/MicoFx.git
 cd MicoFx
+.\KUR.bat
 ```
+3. MT5’te “Algoritmik alim satima izin ver” → `start.bat`
 
-**3) Gerisi otomatik:**
-```powershell
-powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
-```
-(`.\bootstrap.ps1` tek basina "calisan script'ler devre disi" hatasi
-verebilir - Windows'un varsayilan PowerShell kisitlamasi, yukaridaki komut
-bunu asar.)
-
-Bu, Python/Node.js/Claude Code yoksa kurar (once `winget` dener, olmazsa
-resmi siteden dogrudan indirip sessizce kurar) ve `KURULUM.bat`'i
-calistirir - hicbir soruya cevap vermen gerekmez.
-
-Bitince MetaTrader 5 terminaline giris yapip "Algoritmik alim satima izin
-ver" kutusunu isaretle, sonra `start.bat` ile baslat. Ayrintili adimlar ve
-sorun giderme icin [BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
-
-**4) Claude Code ile devam etmek istersen** (kod uzerinde birlikte
-calismak icin, opsiyonel):
-
-PowerShell `claude.ps1` icin ExecutionPolicy engeli verirse once:
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-Sonra:
-```powershell
-cd $env:USERPROFILE\MicoFx
-claude
-```
-Policy degistirmek istemezsen: `claude.cmd`
-
-Yeni bir oturum acilir (bu makinede daha once konusulmus bir sohbetin
-hafizasi otomatik gelmez), ama proje dosyalari zaten orada oldugu icin
-hizli baglam kazanir.
+Klasor zaten varsa: `cd $env:USERPROFILE\MicoFx` sonra `.\KUR.bat`.  
+Claude: `claude` (olmazsa `claude.cmd`). Detay: [BULUT_KURULUM.md](BULUT_KURULUM.md).
 
 ## Bu surum: birlestirilmis / genisletilmis surum
 

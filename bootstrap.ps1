@@ -1,17 +1,16 @@
-# MicoFX - bulut sunucu kurulumu (klonlanmis repo icinden).
-# Calistirma (depo PRIVATE - raw.githubusercontent.com / irm|iex CALISMAZ):
-#   cd $env:USERPROFILE\MicoFx
-#   powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
-#
-# Yapar: Git, Python, Node.js, Claude Code yoksa kurar (once winget dener,
-# yoksa resmi siteden dogrudan indirip sessizce kurar), depoyu klonlar/
-# gunceller, KURULUM.bat'i calistirir. Hicbir adimda kullanici etkilesimi
-# beklemez - tum kurulumlar sessiz (silent) modda calisir.
+# MicoFX bulut kurulumu. En kolay: KUR.bat'e cift tikla.
+# (Private depo - irm|iex / raw.githubusercontent.com CALISMAZ.)
 
 $ErrorActionPreference = "Stop"
 
 $RepoUrl = "https://github.com/prlayanyildiz/MicoFx.git"
-$Dest = "$env:USERPROFILE\MicoFx"
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+# KUR.bat / bootstrap.ps1 zaten bir clone icinden calisiyorsa o klasoru kullan.
+if (Test-Path (Join-Path $ScriptRoot ".git")) {
+    $Dest = $ScriptRoot
+} else {
+    $Dest = "$env:USERPROFILE\MicoFx"
+}
 $TempDir = "$env:TEMP\micofx_bootstrap"
 
 function Refresh-Path {
@@ -145,11 +144,7 @@ cmd /c "KURULUM.bat < NUL"
 Pop-Location
 
 Write-Host ""
-Write-Host "Bitti. Simdi MT5'e giris yap, `"Algoritmik alim satima izin ver`" kutusunu" -ForegroundColor Green
-Write-Host "isaretle, sonra '$Dest\start.bat' ile baslat." -ForegroundColor Green
-Write-Host ""
-Write-Host "Claude Code ile devam etmek icin:" -ForegroundColor Green
-Write-Host "  cd `"$Dest`"; claude" -ForegroundColor Green
-Write-Host "PowerShell 'script calistirma kapali' derse:" -ForegroundColor Yellow
-Write-Host "  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned" -ForegroundColor Yellow
-Write-Host "  veya: claude.cmd" -ForegroundColor Yellow
+Write-Host "Bitti." -ForegroundColor Green
+Write-Host "1) MT5: Algoritmik alim satima izin ver" -ForegroundColor Green
+Write-Host "2) start.bat ile baslat" -ForegroundColor Green
+Write-Host "Claude: cd `"$Dest`"; claude   (olmazsa claude.cmd)" -ForegroundColor Green
