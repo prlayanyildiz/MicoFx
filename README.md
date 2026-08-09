@@ -64,6 +64,28 @@ uygulanir; degilse mevcut ayar korunur.
 | `docs/` | [Kullanim](docs/KULLANIM.md) · [Kurulum ayrintilari](docs/KURULUM.md) |
 | `MASTER_PROMPT.md` | Gelistirici / agent kaynagi |
 
+## Yedek
+
+`backup.py` her aksam Windows Gorev Zamanlayici ile calisir ve projeyi
+zaman damgali bir zip'e alir. Ayar veritabani (`data/micofx.db`) zip'e ham
+kopya olarak degil, sqlite'in kendi online-backup API'siyle **tutarli bir
+anlik goruntu** olarak girer - bot yazarken alinsa bile restore edilebilir.
+
+Sistem sekmesinden ayarlanir:
+
+| Ayar | Ne |
+|---|---|
+| `backup_dir` | Birincil hedef |
+| `backup_dir_secondary` | Ikincil hedef; bos birakilirsa kapali. Ayni zip buraya da kopyalanir |
+| `backup_keep` | Her iki hedefte tutulacak en yeni yedek sayisi |
+
+**Ikinci hedefi mutlaka farkli bir FIZIKSEL diske ya da bir bulut klasorune
+verin.** `C:` ve `D:` cogu makinede tek bir SSD'nin iki bolumudur - surucu
+harfleri yedeklilik gibi gorunur ama degildir, disk olurse ikisi de gider.
+Bu proje icin onemi ekstra buyuk: `data/micofx.db` Git'e girmez, yani her
+sembol ayari, her optimizasyon sonucu ve AI denetleyicinin ogrendigi her sey
+sadece o dosyada durur. GitHub kodu tutar, bunlarin hicbirini tutmaz.
+
 ## Daha fazla
 
 - Gunluk kullanim: [docs/KULLANIM.md](docs/KULLANIM.md)

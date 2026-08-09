@@ -70,6 +70,18 @@ def _snapshot_db(source: Path, workdir: Path) -> Path | None:
     return out
 
 
+def _prune(folder: Path, keep: int) -> None:
+    """Keep only the ``keep`` newest archives in ``folder``."""
+    existing = sorted(folder.glob("MicoFX_*.zip"),
+                      key=lambda p: p.stat().st_mtime, reverse=True)
+    for old in existing[keep:]:
+        print(f"Eski yedek siliniyor: {folder.name}/{old.name}")
+        try:
+            old.unlink()
+        except OSError as exc:
+            print(f"UYARI: eski yedek silinemedi ({old}): {exc}")
+
+
 def main() -> int:
     try:
         store = Store()
@@ -79,6 +91,7 @@ def main() -> int:
         print(f"HATA: {exc}")
         return 1
     raw_dir = str(store.system.backup_dir)
+    raw_second = str(getattr(store.system, "backup_dir_secondary", "") or "").strip()
     allow_unc = bool(store.system.backup_dir_allow_unc)
     keep = max(1, int(store.system.backup_keep))
     store.close()
@@ -90,12 +103,21 @@ def main() -> int:
     # runs unattended - it must not silently keep sending the whole project
     # + settings DB over the network run after run just because nothing
     # re-validates the stored value at execution time.
-    is_unc = raw_dir.startswith("\\\\") or raw_dir.startswith("//")
-    if is_unc and not allow_unc:
+    def _is_unc(path: str) -> bool:
+        return path.startswith("\\\\") or path.startswith("//")
+
+    if _is_unc(raw_dir) and not allow_unc:
         print(f"HATA: yedek konumu UNC ({raw_dir!r}) ama backup_dir_allow_unc kapali - "
               f"yedek yazilmadi. Web panelinden System > backup_dir_allow_unc:true "
               f"yapin veya yerel bir yol secin.")
         return 1
+    # The secondary destination goes through the same gate rather than being
+    # trusted for being "just a copy" - it receives the identical archive,
+    # settings DB included.
+    if raw_second and _is_unc(raw_second) and not allow_unc:
+        print(f"UYARI: ikincil yedek konumu UNC ({raw_second!r}) ama "
+              f"backup_dir_allow_unc kapali - ikincil kopya atlandi.")
+        raw_second = ""
 
     dest_dir = Path(raw_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -117,11 +139,22 @@ def main() -> int:
 
     print(f"Yedek olusturuldu: {zip_path}")
 
-    existing = sorted(dest_dir.glob("MicoFX_*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
-    for old in existing[keep:]:
-        print(f"Eski yedek siliniyor: {old.name}")
-        old.unlink()
+    # Copy the finished archive rather than building it twice: a second walk
+    # would snapshot the DB again a few seconds later, so the two "copies"
+    # could disagree about the state they claim to preserve.
+    if raw_second:
+        try:
+            second_dir = Path(raw_second)
+            second_dir.mkdir(parents=True, exist_ok=True)
+            second_path = second_dir / zip_path.name
+            shutil.copy2(zip_path, second_path)
+            print(f"Ikincil kopya: {second_path}")
+            _prune(second_dir, keep)
+        except OSError as exc:
+            # Never fatal - see backup_dir_secondary's note in models.py.
+            print(f"UYARI: ikincil kopya yazilamadi ({raw_second}): {exc}")
 
+    _prune(dest_dir, keep)
     print(f"Tamamlandi. Guncel yedek sayisi: {len(list(dest_dir.glob('MicoFX_*.zip')))}")
     return 0
 

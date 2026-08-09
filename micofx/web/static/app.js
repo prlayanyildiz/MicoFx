@@ -1412,6 +1412,7 @@ const SYS_FIELDS_ADVANCED = [
   { k: "autostart_mt5", label: "Acilista MT5 terminalini baslat (yol ayarliysa ve kapaliysa)", t: "bool" },
   { k: "autostart_mt5_wait_sec", label: "MT5 baglanti bekleme (sn)", t: "int", min: 15, max: 300 },
   { k: "backup_dir", label: "Yedek konumu (aksam otomatik yedek buraya gider)", t: "text", wide: true },
+  { k: "backup_dir_secondary", label: "Ikinci yedek konumu (bos = kapali; ayni yedek buraya da kopyalanir - farkli bir FIZIKSEL disk veya bulut klasoru secin)", t: "text", wide: true },
   { k: "backup_keep", label: "Tutulacak yedek sayisi", t: "int", min: 1, max: 30 },
 ];
 

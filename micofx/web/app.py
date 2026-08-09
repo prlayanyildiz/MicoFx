@@ -998,8 +998,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         patch.pop("running", None)  # bot state is owned by start/stop
         _reject_non_finite_values(patch)
         _validate_risk_bounds(patch, _SYSTEM_RISK_BOUNDS)
-        if "backup_dir" in patch and patch["backup_dir"]:
-            path = str(patch["backup_dir"]).strip()
+        # Both destinations go through the identical gate: the secondary one
+        # receives the same archive, settings DB and all, so "it is only a
+        # copy" buys it no leniency.
+        for field in ("backup_dir", "backup_dir_secondary"):
+            if field not in patch or not patch[field]:
+                continue
+            path = str(patch[field]).strip()
             is_unc = path.startswith("\\\\") or path.startswith("//")
             # Not a full path-safety audit - just enough to catch a typo/blank
             # value silently pointing the nightly backup at nothing. Must be a
@@ -1011,7 +1016,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             )
             if not valid:
                 raise HTTPException(
-                    400, f"yedek konumu gecersiz: {path!r} - tam bir yol olmali "
+                    400, f"{field} gecersiz: {path!r} - tam bir yol olmali "
                          f"(orn. C:\\MicoFX_Yedek), surucu koku olamaz")
             if is_unc:
                 # A UNC destination sends the whole project - code AND the
@@ -1025,7 +1030,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 allow_unc = patch.get("backup_dir_allow_unc", store.system.backup_dir_allow_unc)
                 if not allow_unc:
                     raise HTTPException(
-                        400, f"yedek konumu UNC ({path!r}) - once backup_dir_allow_unc:true "
+                        400, f"{field} UNC ({path!r}) - once backup_dir_allow_unc:true "
                              f"gonderin (agdaki bir paylasima proje + veritabani kopyalanacak)")
         updated = store.update_system(patch)
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}

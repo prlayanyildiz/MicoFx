@@ -528,6 +528,23 @@ class SystemConfig:
     # Scheduler) drops its timestamped zip. Read at run time, not baked into
     # the script, so changing it here is the only place that needs editing.
     backup_dir: str = "C:\\MicoFX_Yedek"
+    # A second, independent destination, written in the same run. Empty
+    # disables it.
+    #
+    # This exists because "C: live, D: archive" is not actually two copies
+    # when C: and D: are partitions of one SSD, which is the common case and
+    # is the case on the machine this was written for - the drive letters look
+    # like redundancy and provide none. It matters more here than for most
+    # projects: data/micofx.db is gitignored, so every symbol config, every
+    # optimizer result and the supervisor's whole learned state live only in
+    # that file. GitHub carries the code and none of that.
+    #
+    # A path under OneDrive (or any synced/removable location) gets the
+    # archive off the physical disk without another moving part. Failure to
+    # write here is reported but never fails the run - the primary copy still
+    # happened, and a backup task that exits non-zero because the cloud folder
+    # was briefly locked would just train the operator to ignore it.
+    backup_dir_secondary: str = ""
     backup_keep: int = 3              # how many most-recent backups to retain
     # A UNC destination sends the whole project (code + the settings DB) over
     # the network to whatever share is named - fine for an intentional NAS
