@@ -227,8 +227,8 @@ function renderCapacity() {
   const rows = (cap.rows || []).map((r) => {
     const tr = el("tr");
     tr.innerHTML = `
-      <td class="sym">${r.symbol}</td>
-      <td><span class="pill ${r.group}">${GROUP_LABEL[r.group] || r.group}</span></td>
+      <td class="sym">${esc(r.symbol)}</td>
+      <td><span class="pill ${esc(r.group)}">${esc(GROUP_LABEL[r.group] || r.group)}</span></td>
       <td><span class="pill ${r.enabled ? "on" : "off"}">${r.enabled ? "aktif" : "kapali"}</span></td>
       <td class="num">${num(r.lot, 2)}</td>
       <td class="num ${r.edge_scale > 1 ? "pos" : (r.edge_scale < 1 ? "neg" : "dim")}">${r.edge_scale != null ? "x" + num(r.edge_scale, 2) : "-"}</td>
@@ -268,7 +268,7 @@ function renderExecution() {
     const bad = flagged.has(sym);
     const tr = el("tr");
     tr.innerHTML = `
-      <td class="sym">${sym}</td>
+      <td class="sym">${esc(sym)}</td>
       <td class="num">${s.samples}</td>
       <td class="num">${s.adverse}</td>
       <td class="num">${s.favourable}</td>
@@ -293,7 +293,7 @@ function renderExecution() {
     `${t.samples} emir olculdu | aleyhte ${t.adverse} / lehte ${t.favourable} ` +
     `(<b>${num(t.adverse_ratio, 2)}x</b>) | ortalama kayma <b>${signed(t.mean_points, 2)}</b> puan ` +
     `= riskin <b>${signed(t.mean_r * 100, 2)}%</b>'i | toplam etki ${signed(t.money)}` +
-    ((t.flagged || []).length ? ` | <span class="pill bad">incele: ${t.flagged.join(", ")}</span>` : "");
+    ((t.flagged || []).length ? ` | <span class="pill bad">incele: ${t.flagged.map(esc).join(", ")}</span>` : "");
 }
 
 function renderPositions() {
@@ -302,7 +302,7 @@ function renderPositions() {
     const digits = (SYMBOLS.find((s) => s.resolved_symbol === p.symbol) || {}).digits ?? 5;
     const tr = el("tr");
     tr.innerHTML = `
-      <td class="sym">${p.symbol}${p.managed ? "" : ' <span class="pill off">harici</span>'}</td>
+      <td class="sym">${esc(p.symbol)}${p.managed ? "" : ' <span class="pill off">harici</span>'}</td>
       <td><span class="pill ${p.side}">${p.side === "buy" ? "AL" : "SAT"}</span></td>
       <td class="num">${num(p.volume, 2)}</td>
       <td class="num">${price(p.price_open, digits)}</td>
@@ -329,7 +329,7 @@ function renderDayTable() {
   const rows = ((STATE.day || {}).per_symbol || []).map((r) => {
     const tr = el("tr");
     tr.innerHTML = `
-      <td class="sym">${r.symbol}</td>
+      <td class="sym">${esc(r.symbol)}</td>
       <td class="num">${r.trades}</td>
       <td class="num pos">${r.wins}</td>
       <td class="num neg">${r.losses}</td>
@@ -357,9 +357,9 @@ function renderLive() {
       : st.htf < 0 ? '<span class="neg">asagi</span>' : '<span class="dim">-</span>';
     const tr = el("tr");
     tr.innerHTML = `
-      <td class="sym">${cfg.symbol}</td>
-      <td class="dim" title="${STRATEGY_LABEL[cfg.strategy] || cfg.strategy}">${cfg.strategy}</td>
-      <td class="dim">${cfg.timeframe}</td>
+      <td class="sym">${esc(cfg.symbol)}</td>
+      <td class="dim" title="${esc(STRATEGY_LABEL[cfg.strategy] || cfg.strategy)}">${esc(cfg.strategy)}</td>
+      <td class="dim">${esc(cfg.timeframe)}</td>
       <td>${sessionCell}</td>
       <td class="${st.t3_rising ? "pos" : "neg"}">${st.bars_ready ? (st.t3_rising ? "yukari" : "asagi") : '<span class="dim">-</span>'}</td>
       <td>${htf}</td>
@@ -401,9 +401,9 @@ const POSITION_SECTION = {
   title: "Pozisyon Boyutu",
   fields: [
     { k: "lot_mode", t: "select", label: "Lot modu", opts: [["fixed", "Sabit lot"], ["risk", "Risk yuzdesi"]] },
-    { k: "fixed_lot", t: "num", label: "Sabit lot", step: 0.01, min: 0.01 },
+    { k: "fixed_lot", t: "num", label: "Sabit lot", step: 0.01, min: 0.01, max: 20 },
     { k: "risk_percent", t: "num", label: "Risk %", step: 0.05, min: 0.05 },
-    { k: "max_lot", t: "num", label: "Maks lot", step: 0.01, min: 0.01 },
+    { k: "max_lot", t: "num", label: "Maks lot", step: 0.01, min: 0.01, max: 20 },
     { k: "max_positions", t: "int", label: "Maks pozisyon", min: 1, max: 50 },
     { k: "symbol_daily_loss_pct", t: "num", label: "Sembol gunluk zarar limiti % (0=kapali)", step: 0.1, min: 0,
       hint: "Bu sembol bugun bakiyenin bu kadarini kaybedince, hesabin genel gunluk limiti dolmasa bile "
@@ -862,8 +862,8 @@ function updateSymbolCards() {
       ? `<span class="pill ${st.signal}">${st.signal === "buy" ? "AL" : "SAT"}${st.signal_source === "secondary" ? " (2)" : ""}</span>`
       : (st.signal_source === "conflict" ? '<span class="pill">CAPRAZ</span>' : "");
     $(".scard-live", card).innerHTML = `
-      <span><b>strateji</b> ${STRATEGY_LABEL[cfg.strategy] || cfg.strategy} <span class="dim">${cfg.timeframe}</span></span>
-      <span><b>seans</b> ${sess.open ? '<span class="pos">acik</span>' : '<span class="dim">kapali</span>'} ${cfg.session_text}</span>
+      <span><b>strateji</b> ${esc(STRATEGY_LABEL[cfg.strategy] || cfg.strategy)} <span class="dim">${esc(cfg.timeframe)}</span></span>
+      <span><b>seans</b> ${sess.open ? '<span class="pos">acik</span>' : '<span class="dim">kapali</span>'} ${esc(cfg.session_text)}</span>
       <span><b>lot</b> ${num(cfg.lot_mode === "risk" ? cfg.max_lot : cfg.fixed_lot, 2)}${cfg.lot_mode === "risk" ? " (risk)" : ""}</span>
       <span><b>T3</b> ${st.bars_ready ? (st.t3_rising ? '<span class="pos">yukari</span>' : '<span class="neg">asagi</span>') : "-"}</span>
       <span><b>K/D</b> ${st.k != null ? num(st.k, 0) + "/" + num(st.d, 0) : "-"}</span>
@@ -1102,9 +1102,9 @@ function renderOptJob() {
       : r.validated ? `<span class="pill warn" title="${incText}">dogrulandi, uygulanmadi</span>`
       : `<span class="pill bad" title="${incText}">dogrulanmadi</span>`;
     tr.innerHTML = `
-      <td class="sym">${r.symbol}</td>
-      <td class="dim">${r.strategy || "-"}</td>
-      <td class="dim">${r.timeframe}${r.exit_style ? ` <span class="dim" title="cikis modu">${r.exit_style === "trail" ? "iz" : "hdf"}</span>` : ""}</td>
+      <td class="sym">${esc(r.symbol)}</td>
+      <td class="dim">${esc(r.strategy || "-")}</td>
+      <td class="dim">${esc(r.timeframe)}${r.exit_style ? ` <span class="dim" title="cikis modu">${r.exit_style === "trail" ? "iz" : "hdf"}</span>` : ""}</td>
       <td class="num ${r.best.score > 0 ? "pos" : "neg"}"><b>${num(r.best.score, 2)}</b></td>
       <td class="num dim">${num(r.best.positive_ratio * 100, 0)}%</td>
       <td class="num">${s.trades}</td>
@@ -1118,7 +1118,7 @@ function renderOptJob() {
       <td>${status}</td>
       <td class="dim mono" style="white-space:normal;max-width:380px">${
         incText ? `<div class="small warn-text">${incText}</div>` : ""
-      }${Object.entries(r.best.params).map(([k, v]) => `${k}=${v}`).join("  ")}</td>`;
+      }${Object.entries(r.best.params).map(([k, v]) => `${esc(k)}=${esc(v)}`).join("  ")}</td>`;
     tr.appendChild(el("td", {}, r.applied ? el("span", { class: "dim", text: "-" })
       : el("button", {
         class: "btn btn-sm", text: "Uygula",
@@ -1157,9 +1157,9 @@ async function loadOptHistory() {
       const tr = el("tr");
       tr.innerHTML = `
         <td class="dim mono">${new Date(h.created_at * 1000).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-        <td class="sym">${h.symbol}</td>
-        <td class="dim">${h.strategy || "-"}</td>
-        <td class="dim">${h.timeframe || "-"}</td>
+        <td class="sym">${esc(h.symbol)}</td>
+        <td class="dim">${esc(h.strategy || "-")}</td>
+        <td class="dim">${esc(h.timeframe || "-")}</td>
         <td class="num ${h.score > 0 ? "pos" : "neg"}">${num(h.score, 2)}</td>
         <td class="num dim">${val.net_r != null ? signed(val.net_r, 1) + "R" : "-"}</td>
         <td class="num">${hold.trades ?? "-"}</td>
@@ -1258,8 +1258,8 @@ function renderAI() {
       const [pill, label] = AI_STATE[r.state] || ["off", r.state];
       const tr = el("tr");
       tr.innerHTML = `
-      <td class="sym">${r.symbol}${r.enabled ? "" : ' <span class="pill off">kapali</span>'}</td>
-      <td><span class="pill ${pill}">${label}</span>${r.quarantine_left_min ? ` <span class="dim mono">${r.quarantine_left_min}dk</span>` : ""}</td>
+      <td class="sym">${esc(r.symbol)}${r.enabled ? "" : ' <span class="pill off">kapali</span>'}</td>
+      <td><span class="pill ${pill}">${esc(label)}</span>${r.quarantine_left_min ? ` <span class="dim mono">${r.quarantine_left_min}dk</span>` : ""}</td>
       <td class="dim">${esc(r.reason || "")}</td>
       <td class="num">${r.trades}</td>
       <td class="num">${r.trades ? num(r.wins / r.trades * 100, 0) + "%" : "-"}</td>
@@ -1561,7 +1561,7 @@ function renderPortfolio() {
 
     const tr = el("tr");
     tr.innerHTML = `<td class="sym">${esc(cfg.symbol)}</td>
-      <td><span class="pill ${cfg.group}">${GROUP_LABEL[cfg.group] || cfg.group}</span></td>
+      <td><span class="pill ${esc(cfg.group)}">${esc(GROUP_LABEL[cfg.group] || cfg.group)}</span></td>
       <td></td><td></td><td></td>
       <td class="mono ${ok ? "" : "dim"}">${esc(cfg.resolved_symbol || "-")}</td>
       <td>${status}</td><td></td>`;

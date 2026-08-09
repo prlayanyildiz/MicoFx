@@ -8,6 +8,7 @@ candidate" path that closes it and retries cleanly.
 """
 from __future__ import annotations
 
+import math
 import threading
 from types import SimpleNamespace
 
@@ -21,6 +22,7 @@ class _FakeClient:
         self._positions_after = positions_after
         self.closed: list[int] = []
         self.close_ok: set[int] = set()
+        self.open_market_calls = 0
 
     def min_stop_distance(self, symbol):
         return 0.0001
@@ -33,6 +35,7 @@ class _FakeClient:
         return time.time()
 
     def open_market(self, symbol, side, lot, sl, tp, magic, slippage=0, comment=""):
+        self.open_market_calls += 1
         return {"ok": True, "position": None, "requested": 1.1000, "price": 1.1000,
                 "volume": lot, "sl": sl, "tp": tp, "partial_fill": False,
                 "sl_tp_reanchored": True}
@@ -40,7 +43,7 @@ class _FakeClient:
     def positions(self):
         return self._positions_after
 
-    def close_position(self, ticket, slippage_points, comment):
+    def close_position(self, ticket, slippage_points, comment, volume=None, fill=None):
         self.closed.append(ticket)
         return ticket in self.close_ok
 
@@ -80,14 +83,16 @@ class _FakeSymbols:
 class _FakeStore:
     def __init__(self, cfg):
         self.system = SimpleNamespace(slippage_points=5, block_high_cost=False,
-                                       max_cost_pct_of_risk=0.0, trade_all_hours=True)
+                                       max_cost_pct_of_risk=0.0, trade_all_hours=True,
+                                       daily_loss_flatten=False, day_end_flatten_min=0)
         self.symbols = _FakeSymbols(cfg)
+        self.settings: dict = {}
 
     def opt_params(self):
         return {}
 
     def set_setting(self, key, value):
-        pass
+        self.settings[key] = value
 
 
 def _make_engine(cfg, positions_after):
@@ -103,8 +108,10 @@ def _make_engine(cfg, positions_after):
     eng._positions = []
     eng._sec_tickets = set()
     eng._sec_cfgs = {}
+    eng._orphan_tickets = set()
+    eng._orphan_scan = {}
     eng.states = {}
-    return eng, client
+    return eng, client, store
 
 
 def _cfg():
@@ -126,8 +133,8 @@ def _state():
 def test_secondary_unresolved_ticket_zero_candidates_does_not_report_success():
     cfg = _cfg()
     # open_market reports ok, but positions() afterward shows nothing new for
-    # this magic - zero candidates.
-    eng, client = _make_engine(cfg, positions_after=[])
+    # this magic - zero candidates, even after the in-lock retries.
+    eng, client, store = _make_engine(cfg, positions_after=[])
     state = _state()
 
     eng._try_entry(cfg, state, account={"balance": 1000.0})
@@ -137,13 +144,37 @@ def test_secondary_unresolved_ticket_zero_candidates_does_not_report_success():
     # Not treated as a successful fill: no cooldown, no signal-clear.
     assert state.cooldown_until == 0.0
     assert state.signal == "buy"
+    # Sticky: persisted so a restart doesn't forget to keep scanning.
+    assert "EURUSD" in eng._orphan_scan
+    assert eng._orphan_scan["EURUSD"]["magic"] == 1
+    assert store.settings["secondary_orphan_scan"] == eng._orphan_scan
+
+
+def test_secondary_single_candidate_found_via_retry_is_tagged_not_closed():
+    cfg = _cfg()
+    # Exactly one same-magic ticket appears - even though open_market()
+    # couldn't resolve it directly, a clean single-candidate diff is now
+    # trusted enough to tag rather than close.
+    eng, client, store = _make_engine(cfg, positions_after=[
+        {"ticket": 301, "magic": 1},
+    ])
+    state = _state()
+
+    eng._try_entry(cfg, state, account={"balance": 1000.0})
+
+    assert client.closed == []
+    assert 301 in eng._sec_tickets
+    # Normal successful-fill bookkeeping applies.
+    assert state.cooldown_until > 0.0
+    assert state.signal == ""
+    assert state.note == "islem acildi"
 
 
 def test_secondary_unresolved_ticket_multiple_candidates_closes_all():
     cfg = _cfg()
     # Two same-magic tickets appear after the fill - ambiguous, both are
     # closed for safety.
-    eng, client = _make_engine(cfg, positions_after=[
+    eng, client, store = _make_engine(cfg, positions_after=[
         {"ticket": 101, "magic": 1}, {"ticket": 102, "magic": 1},
     ])
     client.close_ok = {101, 102}
@@ -157,11 +188,12 @@ def test_secondary_unresolved_ticket_multiple_candidates_closes_all():
     assert state.cooldown_until == 0.0
     assert state.signal == ""
     assert state.pending_bar_key == (0, 0)
+    assert eng._orphan_tickets == set()
 
 
 def test_secondary_unresolved_ticket_multiple_candidates_partial_close_failure():
     cfg = _cfg()
-    eng, client = _make_engine(cfg, positions_after=[
+    eng, client, store = _make_engine(cfg, positions_after=[
         {"ticket": 201, "magic": 1}, {"ticket": 202, "magic": 1},
     ])
     client.close_ok = {201}  # 202 fails to close
@@ -174,3 +206,124 @@ def test_secondary_unresolved_ticket_multiple_candidates_partial_close_failure()
     # Not all resolved: must not look like a normal successful fill.
     assert state.cooldown_until == 0.0
     assert state.signal == "buy"
+    # Sticky ticket-level retry, persisted.
+    assert eng._orphan_tickets == {202}
+    assert store.settings["secondary_orphan_tickets"] == [202]
+
+
+def test_manage_positions_retries_orphan_ticket_close_and_skips_normal_management():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._weekend_pending = set()
+    eng._partials = {}
+    eng._stop_bar = {}
+    # Position 401 is a previously-unresolved secondary ticket, still open.
+    eng._positions = [{"ticket": 401, "magic": 1, "side": "buy", "volume": 0.1,
+                       "time": 0, "profit": 0, "swap": 0}]
+    eng._orphan_tickets = {401}
+    client.close_ok = {401}
+
+    # manage_positions() looks configs up via store.symbols.values()
+    class _Values:
+        def values(self):
+            return [cfg]
+    eng.store.symbols = _Values()
+
+    eng.manage_positions(server_now=0.0)
+
+    assert client.closed == [401]
+    assert eng._orphan_tickets == set()
+    assert store.settings["secondary_orphan_tickets"] == []
+
+
+def test_scan_orphan_candidates_finds_delayed_ticket_and_closes_it():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[
+        {"ticket": 501, "magic": 1},
+    ])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0}}
+    eng._positions = client.positions()
+    client.close_ok = {501}
+
+    eng._scan_orphan_candidates()
+
+    assert client.closed == [501]
+    assert eng._orphan_scan == {}
+    assert eng._orphan_tickets == set()
+
+
+def test_try_entry_refuses_nan_atr():
+    # NaN compares False to everything - a bare ``atr <= 0`` guard would let
+    # it through silently and size sl_dist/tp_dist off garbage.
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    state = _state()
+    state.sec_atr = math.nan
+
+    eng._try_entry(cfg, state, account={"balance": 1000.0})
+
+    assert state.note == "ATR yok"
+    assert client.open_market_calls == 0
+    assert state.signal == "buy"  # untouched, not consumed as a failed attempt
+
+
+def test_manage_positions_skips_secondary_trail_with_nan_sec_atr():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._weekend_pending = set()
+    eng._partials = {}
+    eng._stop_bar = {}
+    eng._orphan_tickets = set()
+    eng._sec_tickets = {601}
+    eng._positions = [{"ticket": 601, "magic": 1, "side": "buy", "volume": 0.1,
+                       "time": 0, "profit": 0, "swap": 0}]
+
+    class _Values:
+        def values(self):
+            return [cfg]
+    eng.store.symbols = _Values()
+
+    state = _state()
+    state.sec_atr = math.nan
+    state.atr = 0.002  # a healthy primary ATR that must NOT be substituted in
+    eng.states = {"EURUSD": state}
+
+    calls = []
+    eng._update_stop = lambda *a, **kw: calls.append(a)
+
+    eng.manage_positions(server_now=0.0)
+
+    assert calls == []
+
+
+def test_symbol_daily_halt_includes_commission_in_floating_side():
+    # positions_get() has no live commission field (MT5 API limitation) -
+    # the still-open round-turn cost is estimated from commission_per_lot so
+    # the floating side lines up with how day_stats() nets realised trades.
+    cfg = SymbolConfig(symbol="EURUSD", magic=1, symbol_daily_loss_pct=1.0,
+                       commission_per_lot=50.0)
+    eng = object.__new__(Engine)
+    eng.risk = SimpleNamespace(daily=SimpleNamespace(start_balance=1000.0, day_key="2026-01-01"))
+    eng._day_cache = {"per_symbol": []}
+    eng._day_cache_at = 1e18  # force day_stats() to serve this cache as-is
+    # Floating profit alone (before commission) sits just above the 1% cap;
+    # 2 lots * 50/lot round-turn commission is what should push it over.
+    eng._positions = [{"ticket": 1, "magic": 1, "volume": 2.0, "profit": -9.0, "swap": 0.0}]
+
+    reason = eng._symbol_daily_halt(cfg)
+
+    assert reason != ""
+    assert "gunluk sembol zarar limiti" in reason
+
+
+def test_symbol_daily_halt_stays_clear_without_commission_push():
+    cfg = SymbolConfig(symbol="EURUSD", magic=1, symbol_daily_loss_pct=1.0,
+                       commission_per_lot=50.0)
+    eng = object.__new__(Engine)
+    eng.risk = SimpleNamespace(daily=SimpleNamespace(start_balance=1000.0, day_key="2026-01-01"))
+    eng._day_cache = {"per_symbol": []}
+    eng._day_cache_at = 1e18
+    # Tiny position: even with commission included, nowhere near the 1% cap.
+    eng._positions = [{"ticket": 1, "magic": 1, "volume": 0.01, "profit": -1.0, "swap": 0.0}]
+
+    assert eng._symbol_daily_halt(cfg) == ""

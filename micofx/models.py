@@ -515,6 +515,12 @@ class SystemConfig:
     # the script, so changing it here is the only place that needs editing.
     backup_dir: str = "C:\\MicoFX_Yedek"
     backup_keep: int = 3              # how many most-recent backups to retain
+    # A UNC destination sends the whole project (code + the settings DB) over
+    # the network to whatever share is named - fine for an intentional NAS
+    # backup, but a live exfiltration path if something with API access ever
+    # gets to set backup_dir without the operator meaning it to. Off by
+    # default; local drive-letter paths need no such flag.
+    backup_dir_allow_unc: bool = False
 
     # ---- execution ----
     slippage_points: int = 20

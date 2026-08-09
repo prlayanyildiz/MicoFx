@@ -76,8 +76,8 @@ class StopBody(BaseModel):
 # UI's own number-input min/max never protected anything but the UI.
 _SYMBOL_RISK_BOUNDS = {
     "risk_percent": (0.0, 20.0, False),   # (min, max, min_inclusive) - % of balance per trade
-    "max_lot": (0.0, None, False),
-    "fixed_lot": (0.0, None, False),
+    "max_lot": (0.0, 20.0, False),
+    "fixed_lot": (0.0, 20.0, False),
     "max_positions": (1, 50, True),
 }
 
@@ -204,8 +204,23 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     if api_token:
         @app.middleware("http")
         async def _require_api_token(request, call_next):
-            if request.url.path.startswith("/api/"):
-                if request.headers.get("x-mico-token") != api_token:
+            path = request.url.path
+            # ``/`` used to be deliberately left out of this gate on the theory
+            # that embedding the token in its (unauthenticated) HTML was safe
+            # because "whoever can already fetch this HTML... is exactly who
+            # the token is meant to let in" - but on a non-localhost bind
+            # ANYONE can fetch "/" with no credentials at all, so that meta
+            # tag handed the token to precisely the population it exists to
+            # keep out. Gating "/" too (accepting the token via a ?token=
+            # query param too, since a plain browser navigation cannot set a
+            # custom header) is what actually makes that comment true.
+            if path.startswith("/api/") or path == "/":
+                token = request.headers.get("x-mico-token") or request.query_params.get("token")
+                if token != api_token:
+                    if path == "/":
+                        return PlainTextResponse(
+                            "MicoFX: token gerekli - ?token=<MICO_API_TOKEN> ile acin.",
+                            status_code=401)
                     return JSONResponse({"detail": "gecersiz veya eksik API token"}, status_code=401)
             return await call_next(request)
 
@@ -241,12 +256,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def index() -> HTMLResponse:
         html = (TEMPLATES / "index.html").read_text(encoding="utf-8")
         if api_token:
-            # Page and static assets stay unauthenticated (the browser has to
-            # load them before it can know any token) - only /api/* is
-            # gated. This is trusted-origin embedding, not a secret sent
-            # over the wire to a third party: whoever can already fetch this
-            # HTML from this server is exactly who the token is meant to let
-            # in.
+            # Reaching this handler at all means the token middleware above
+            # already accepted a matching x-mico-token header or ?token=
+            # query param for this exact request - static assets stay
+            # unauthenticated (just JS/CSS, no data), but the page itself
+            # does not anymore. Embedding the token back into the HTML here
+            # is genuinely trusted-origin at this point: whoever is loading
+            # this page already had the token to get this far.
             html = html.replace(
                 "<head>",
                 f'<head>\n<meta name="mico-api-token" content="{html_escape.escape(api_token)}">',
@@ -704,18 +720,33 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _validate_risk_bounds(patch, _SYSTEM_RISK_BOUNDS)
         if "backup_dir" in patch and patch["backup_dir"]:
             path = str(patch["backup_dir"]).strip()
+            is_unc = path.startswith("\\\\") or path.startswith("//")
             # Not a full path-safety audit - just enough to catch a typo/blank
             # value silently pointing the nightly backup at nothing. Must be a
             # local absolute path (drive letter) or a UNC share, and not the
             # bare drive root (never want backups written directly to C:\).
             valid = (
                 (len(path) >= 3 and path[1] == ":" and path[2] in "\\/" and len(path) > 3)
-                or path.startswith("\\\\")
+                or is_unc
             )
             if not valid:
                 raise HTTPException(
                     400, f"yedek konumu gecersiz: {path!r} - tam bir yol olmali "
                          f"(orn. C:\\MicoFX_Yedek), surucu koku olamaz")
+            if is_unc:
+                # A UNC destination sends the whole project - code AND the
+                # settings DB - over the network to whatever share is named.
+                # Fine for an intentional NAS backup; not something a plain
+                # backup_dir PATCH should be able to flip on by itself, since
+                # that is the one field here that turns "misconfigured" into
+                # "exfiltration". allow_unc has to already be true (set in a
+                # separate, explicit step) or be flipped on in this same
+                # request alongside the UNC path.
+                allow_unc = patch.get("backup_dir_allow_unc", store.system.backup_dir_allow_unc)
+                if not allow_unc:
+                    raise HTTPException(
+                        400, f"yedek konumu UNC ({path!r}) - once backup_dir_allow_unc:true "
+                             f"gonderin (agdaki bir paylasima proje + veritabani kopyalanacak)")
         updated = store.update_system(patch)
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}
         if "mt5_terminal_path" in patch:
@@ -843,6 +874,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             strategy = strategy or match.get("strategy")
         if not params:
             raise HTTPException(400, "parametre yok")
+        # Covers both the hand-typed path (params come straight off the
+        # request body) and the run_id path (params come from stored opt
+        # history) - the same NaN-string / bad-enum bypass _validate_symbol
+        # closes for PATCH /api/symbols/{symbol} exists here too, since
+        # optimizer.apply() writes straight into the same SymbolConfig via
+        # store.update_symbol(), unvalidated field-by-field.
+        _reject_non_finite_values(params)
+        enum_check = dict(params)
+        if timeframe is not None:
+            enum_check["timeframe"] = timeframe
+        if strategy is not None:
+            enum_check["strategy"] = strategy
+        _validate_enum_fields(enum_check)
         # A run_id pull carries the search's own verdict - refuse to apply a
         # candidate the walk-forward itself rejected unless the caller
         # explicitly overrides. Hand-typed params (no run_id, no detail) are

@@ -151,9 +151,15 @@ def main() -> int:
         threading.Timer(3.0, engine.start).start()
 
     url = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
+    # The token gate now covers "/" itself (see create_app()'s docstring), so
+    # a bare GET here 401s - the auto-opened tab needs the token in the query
+    # string to actually land on the page. Printed line stays token-free
+    # (same log-audience reasoning as the ERROR line above); this is a local
+    # process action, not something that gets written anywhere.
+    open_url = f"{url}/?token={api_token}" if api_token else url
     print(f"[{APP_NAME} {__version__}] terminal: {url}")
     if os.getenv("MICO_OPEN_BROWSER", "1") == "1" and defaults.get("open_browser", True):
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(1.2, lambda: webbrowser.open(open_url)).start()
 
     try:
         uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)

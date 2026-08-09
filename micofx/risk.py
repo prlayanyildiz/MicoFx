@@ -30,6 +30,15 @@ class DailyGuard:
         self.start_balance: float = float(store.get_setting("day_start_balance", 0.0) or 0.0)
         self.halted: bool = bool(store.get_setting("day_halted", False))
         self.halt_reason: str = str(store.get_setting("day_halt_reason", ""))
+        # Distinguishes *why* halted is True - a profit-target halt should
+        # never trigger the loss-side flatten below, and unlike re-deriving
+        # that from a live pnl_pct check every cycle (which flaps False the
+        # instant floating P/L on some other position bounces equity back
+        # above the threshold, even though the day is still halted), this is
+        # set once at the moment the loss halt actually fires and stays put
+        # until rollover/resume - the same persistence guarantee ``halted``
+        # itself already has.
+        self.loss_halted: bool = bool(store.get_setting("day_loss_halted", False))
 
     def rollover(self, server_epoch: float, balance: float) -> bool:
         key = time.strftime("%Y-%m-%d", time.localtime(server_epoch))
@@ -39,26 +48,33 @@ class DailyGuard:
         self.start_balance = float(balance)
         self.halted = False
         self.halt_reason = ""
+        self.loss_halted = False
         self.store.set_setting("day_key", key)
         self.store.set_setting("day_start_balance", self.start_balance)
         self.store.set_setting("day_halted", False)
         self.store.set_setting("day_halt_reason", "")
+        self.store.set_setting("day_loss_halted", False)
         LOG.emit(f"Yeni islem gunu {key} | baslangic bakiye {balance:.2f}", "INFO")
         return True
 
-    def _halt(self, reason: str) -> None:
+    def _halt(self, reason: str, loss: bool = False) -> None:
         if not self.halted:
             LOG.emit(reason, "WARN")
         self.halted = True
         self.halt_reason = reason
         self.store.set_setting("day_halted", True)
         self.store.set_setting("day_halt_reason", reason)
+        if loss:
+            self.loss_halted = True
+            self.store.set_setting("day_loss_halted", True)
 
     def resume(self) -> None:
         self.halted = False
         self.halt_reason = ""
+        self.loss_halted = False
         self.store.set_setting("day_halted", False)
         self.store.set_setting("day_halt_reason", "")
+        self.store.set_setting("day_loss_halted", False)
 
     def pnl_pct(self, equity: float) -> float:
         if self.start_balance <= 0:
@@ -70,7 +86,7 @@ class DailyGuard:
             return Verdict(False, self.halt_reason or "gunluk limit")
         pct = self.pnl_pct(equity)
         if sys_cfg.daily_loss_pct > 0 and pct <= -abs(sys_cfg.daily_loss_pct):
-            self._halt(f"Gunluk zarar limiti asildi ({pct:.2f}%). Yeni islem yok.")
+            self._halt(f"Gunluk zarar limiti asildi ({pct:.2f}%). Yeni islem yok.", loss=True)
             return Verdict(False, self.halt_reason)
         if sys_cfg.daily_profit_pct > 0 and pct >= abs(sys_cfg.daily_profit_pct):
             self._halt(f"Gunluk kar hedefi tamamlandi (+{pct:.2f}%). Yeni islem yok.")
@@ -88,11 +104,14 @@ class RiskManager:
     EDGE_MIN, EDGE_MAX = 0.6, 2.2
     # Broker minimum lot may force more risk than configured; beyond this
     # multiple of the intended risk the trade is skipped instead of oversized.
-    # Raised from 2.0x on request - exposure is tracked via account margin
-    # usage (system.max_margin_usage_pct) instead, this is now just a backstop
-    # against a genuinely broken config (e.g. a symbol misresolved to the
-    # wrong contract size), not a per-trade risk-consistency gate.
-    MAX_MIN_LOT_OVERSHOOT = 10.0
+    # Tightened back from 10.0x: margin usage (system.max_margin_usage_pct) is
+    # a position-count/exposure check, not a per-trade one - it does not catch
+    # a single trade quietly running at, say, 8x its configured risk% because
+    # the broker's floor forced the lot up. 3.0x still tolerates ordinary
+    # broker-granularity rounding (the common case this guard has to let
+    # through) while refusing anything that no longer resembles the
+    # configured risk at all.
+    MAX_MIN_LOT_OVERSHOOT = 3.0
 
     def __init__(self, store: Store, client: MT5Client) -> None:
         self.store = store

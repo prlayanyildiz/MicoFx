@@ -949,15 +949,27 @@ class Optimizer:
         # secondary_tickets is engine-owned but persisted, so it is readable
         # here without an engine reference.
         tagged = {int(t) for t in (self.store.get_setting("secondary_tickets", []) or [])}
-        live_tagged = ([p for p in self.client.positions(magic=cfg.magic) if p["ticket"] in tagged]
-                       if tagged else [])
-        if tagged and not self.client.connected:
+        # A fill Engine._try_entry couldn't identify/close is a still-open
+        # secondary candidate too - it just has not made it into ``tagged``
+        # yet (or ever will, since Engine safety-closes it on sight). Gating
+        # only on ``tagged`` here meant that exact in-flight window - between
+        # a secondary fill landing and either its tag or its safety-close
+        # being recorded - let an identity swap through against a position
+        # neither this check nor manage_positions() could yet see as "ours".
+        orphan_tickets = {int(t) for t in (self.store.get_setting("secondary_orphan_tickets", []) or [])}
+        orphan_scan = self.store.get_setting("secondary_orphan_scan", {}) or {}
+        pending_scan = symbol in orphan_scan and int(orphan_scan[symbol].get("magic", -1)) == cfg.magic
+        watch_tickets = tagged | orphan_tickets
+        same_magic = self.client.positions(magic=cfg.magic) if watch_tickets else []
+        if watch_tickets and not self.client.connected:
             # Same mid-call disconnect gap as apply(): this positions() call
             # could have failed and returned [] regardless of what is really
-            # open, which would make live_tagged wrongly look empty.
+            # open, which would make live_tagged/live_orphan wrongly look empty.
             return {"ok": False,
                     "error": f"{symbol}: MT5 baglantisi koptu, acik ikincil pozisyon "
                              f"dogrulanamadi - islem guvenlik icin reddedildi"}
+        live_tagged = [p for p in same_magic if p["ticket"] in tagged]
+        live_orphan = [p for p in same_magic if p["ticket"] in orphan_tickets]
         if identity_changing:
             # A position tagged secondary was opened, sized and its exits
             # picked under the CURRENT secondary_strategy/timeframe's ATR.
@@ -966,10 +978,14 @@ class Optimizer:
             # effect immediately, but replacing it with a *different*
             # family/TF would otherwise hand that same still-open ticket
             # to a signal it was never opened or sized under, same hazard
-            # apply() guards for the primary.
-            if live_tagged:
+            # apply() guards for the primary. An unresolved orphan ticket or
+            # a still-in-progress orphan scan is the same risk before it is
+            # even tagged, so it holds the swap back too.
+            if live_tagged or live_orphan or pending_scan:
+                blocked = len(live_tagged) + len(live_orphan)
+                note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
                 return {"ok": False,
-                        "error": f"{symbol}: {len(live_tagged)} acik ikincil-sinyal pozisyonu var, "
+                        "error": f"{symbol}: {blocked} acik ikincil-sinyal pozisyonu var{note}, "
                                  f"ikincil strateji degistirilemedi (once kapanmasini bekleyin)"}
         elif attempt is not None and live_tagged:
             # Same family/timeframe, just refined params ("refine"). Engine's

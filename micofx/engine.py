@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import math
 import threading
 import time
 from typing import Any
@@ -180,6 +181,21 @@ class Engine:
         self._sec_tickets: set[int] = {
             int(t) for t in (store.get_setting("secondary_tickets") or []) if str(t).isdigit()
         }
+        # Secondary fills whose broker ticket could not be identified/closed at
+        # entry time. Two persisted forms, same goal (never let one silently run
+        # under the primary's exit params): ``_orphan_tickets`` is a known ticket
+        # still needing a retried close; ``_orphan_scan`` is a symbol whose fill
+        # produced zero same-magic candidates yet, so every cycle re-diffs
+        # against the snapshot taken at failure time until one appears (broker
+        # replication lag) or the scan goes stale. Persisted like
+        # weekend_pending_tickets - a restart mid-retry must not forget either.
+        self._orphan_tickets: set[int] = {
+            int(t) for t in (store.get_setting("secondary_orphan_tickets") or []) if str(t).isdigit()
+        }
+        self._orphan_scan: dict[str, dict[str, Any]] = {
+            str(k): v for k, v in (store.get_setting("secondary_orphan_scan") or {}).items()
+            if isinstance(v, dict)
+        }
         self._reopt_at = float(store.get_setting("auto_reopt_at", 0.0) or 0.0)
 
     # ------------------------------------------------------------- lifecycle
@@ -313,6 +329,7 @@ class Engine:
             return
         self._reap_execution()
         self._apply_pending_exits()
+        self._scan_orphan_candidates()
         # Unconditional: this only manages positions already open (trail/BE/
         # partial/session-flatten/day-end-flatten), never opens new ones.
         # Gating it on _trading meant that with close_on_stop=false (the
@@ -333,10 +350,13 @@ class Engine:
         # Runs every cycle while halted, not just once - self-healing if a
         # partial close_all() attempt left something behind.
         sys_cfg = self.store.system
-        loss_halted = (
-            self.risk.daily.halted and sys_cfg.daily_loss_pct > 0
-            and self.risk.daily.pnl_pct(account.get("equity", 0.0)) <= -abs(sys_cfg.daily_loss_pct)
-        )
+        # Sticky (DailyGuard.loss_halted), not re-derived from live equity -
+        # re-checking pnl_pct here every cycle meant a bounce back above the
+        # threshold (another position's floating P/L recovering, a stray
+        # tick) silently turned the flatten off for that cycle even though
+        # the day is still halted and still supposed to be flattening. The
+        # halt itself only ever clears on rollover/resume, so this should too.
+        loss_halted = self.risk.daily.halted and self.risk.daily.loss_halted
         if loss_halted and sys_cfg.daily_loss_flatten and self._positions:
             closed, remaining = self.close_all()
             if closed:
@@ -825,7 +845,11 @@ class Engine:
         secondary = state.signal_source == "secondary"
         cfg = self._secondary_config(base) if secondary else base
         atr = state.sec_atr if secondary else state.atr
-        if atr <= 0:
+        # ``atr <= 0`` alone is not fail-closed for NaN: NaN compares False to
+        # everything, so ``NaN <= 0`` is False and a NaN'd indicator (a bad bar,
+        # a broker glitch) would sail straight through and size sl_dist/tp_dist
+        # off it below - isfinite() is the only thing that actually catches it.
+        if not math.isfinite(atr) or atr <= 0:
             state.note = "ATR yok"
             return
 
@@ -945,30 +969,44 @@ class Engine:
                         self._tag_secondary({int(result["position"])})
                     else:
                         # open_market() itself could not resolve which broker
-                        # ticket this fill became. One more, independent
-                        # attempt here: diff same-magic tickets against the
-                        # snapshot taken before this entry even started.
-                        # Letting an unidentified position run mismanaged
-                        # under the PRIMARY's exit params (wrong stop/trail
-                        # distance for the strategy it was actually sized
-                        # under) is worse than closing it and treating this
-                        # as a failed entry - the signal will simply retry.
-                        after_tickets = {p["ticket"] for p in self._positions
-                                        if p["magic"] == base.magic}
-                        new_tickets = after_tickets - before_tickets
-                        if not new_tickets:
+                        # ticket this fill became. Diff same-magic tickets
+                        # against the snapshot taken before this entry even
+                        # started - retried a few times inside this same lock,
+                        # since positions() can lag the fill by a beat on a
+                        # slow broker. A single clean candidate confirmed this
+                        # way is trustworthy enough to tag normally; ambiguity
+                        # (0 or >1 candidates) is what actually needs the
+                        # safety-close path below.
+                        new_tickets: set[int] = set()
+                        for attempt in range(3):
+                            after_tickets = {p["ticket"] for p in self._positions
+                                            if p["magic"] == base.magic}
+                            new_tickets = after_tickets - before_tickets
+                            if new_tickets or attempt == 2:
+                                break
+                            time.sleep(0.2)
+                            self._positions = self.client.positions()
+                        if len(new_tickets) == 1:
+                            self._tag_secondary(new_tickets)
+                        elif not new_tickets:
                             unresolved_ticket = True
+                            self._orphan_scan[cfg.symbol] = {
+                                "magic": base.magic,
+                                "known": sorted(after_tickets),
+                                "since": time.time(),
+                            }
+                            self._save_orphan_scan()
                             LOG.emit("Ikincil sinyal islemi acildi ama pozisyon ticket'i "
-                                     "cozulemedi (yeni ticket bulunamadi) - bu pozisyon "
-                                     "YANLISLIKLA birincil cikis parametreleriyle "
-                                     "yonetilecek, elle kontrol edin.", "ERROR", cfg.symbol)
+                                     "cozulemedi (yeni ticket bulunamadi) - her dongude "
+                                     "tekrar taranacak, primer parametreyle yonetilmeyecek.",
+                                     "ERROR", cfg.symbol)
                         else:
-                            # Every same-magic ticket that appeared since the fill is a
-                            # candidate - with more than one (a second signal firing on
-                            # this same lock, or a stale snapshot) we cannot tell which
-                            # one is ours, so the safe move is closing all of them rather
-                            # than guessing and leaving an untracked position running
-                            # under the wrong strategy's exits.
+                            # More than one same-magic ticket appeared since the fill -
+                            # a second signal firing on this same lock, or a stale
+                            # snapshot - we cannot tell which one is ours, so the safe
+                            # move is closing all of them rather than guessing and
+                            # leaving an untracked position running under the wrong
+                            # strategy's exits.
                             closed: set[int] = set()
                             for orphan in new_tickets:
                                 if self.client.close_position(
@@ -985,18 +1023,20 @@ class Engine:
                                          f"denenecek.", "ERROR", cfg.symbol)
                             else:
                                 unresolved_ticket = True
-                                remaining = sorted(new_tickets - closed)
+                                failed = new_tickets - closed
+                                self._orphan_tickets |= failed
+                                self._save_orphan_tickets()
                                 if closed:
                                     LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
                                              f"cozulemedi - {sorted(closed)} kapatildi ama "
-                                             f"{remaining} KAPATILAMADI - YANLISLIKLA "
-                                             f"birincil cikis parametreleriyle yonetilecek, "
-                                             f"elle kontrol edin.", "ERROR", cfg.symbol)
+                                             f"{sorted(failed)} KAPATILAMADI - her dongude "
+                                             f"tekrar kapatma denenecek, primer parametreyle "
+                                             f"yonetilmeyecek.", "ERROR", cfg.symbol)
                                 else:
                                     LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
-                                             f"cozulemedi VE {remaining} kapatilamadi - "
-                                             f"YANLISLIKLA birincil cikis parametreleriyle "
-                                             f"yonetilecek, elle kontrol edin.",
+                                             f"cozulemedi VE {sorted(failed)} kapatilamadi - "
+                                             f"her dongude tekrar kapatma denenecek, primer "
+                                             f"parametreyle yonetilmeyecek.",
                                              "ERROR", cfg.symbol)
         if orphan_closed:
             # Treat exactly like a failed entry (the position is flat again,
@@ -1011,13 +1051,15 @@ class Engine:
             state.pending_bar_key = (0, 0)
             return
         if unresolved_ticket:
-            # Position is still open (couldn't be identified or closed) - unlike
-            # orphan_closed above this is NOT a clean failed-entry retry state.
-            # Leave signal/cooldown untouched: can_open()'s position-count check
-            # already blocks a duplicate entry on the next poll, and clearing the
-            # signal here would misreport this as a normal successful fill.
+            # Position is still open (couldn't be identified, or identified but
+            # not closed) - unlike orphan_closed above this is NOT a clean
+            # failed-entry retry state. Leave signal/cooldown untouched:
+            # can_open()'s position-count check already blocks a duplicate
+            # entry on the next poll, and clearing the signal here would
+            # misreport this as a normal successful fill. _scan_orphan_candidates
+            # / manage_positions retry the close every cycle from here on.
             state.note = ("ikincil ticket cozulemedi - pozisyon acik kaldi, "
-                          "tanimlanamadi/kapatilamadi, elle kontrol")
+                          "otomatik tekrar denenecek")
             return
         if not result.get("ok"):
             state.note = result.get("error", "emir hatasi")
@@ -1081,6 +1123,55 @@ class Engine:
         self._sec_tickets |= {int(t) for t in tickets}
         self.store.set_setting("secondary_tickets", sorted(self._sec_tickets))
 
+    def _save_orphan_tickets(self) -> None:
+        self.store.set_setting("secondary_orphan_tickets", sorted(self._orphan_tickets))
+
+    def _save_orphan_scan(self) -> None:
+        self.store.set_setting("secondary_orphan_scan", self._orphan_scan)
+
+    def _scan_orphan_candidates(self) -> None:
+        """Re-diff symbols whose secondary fill produced zero candidates at
+        entry time. Broker replication lag can mean ``positions()`` genuinely
+        had not caught up yet - this keeps checking every cycle instead of
+        writing the position off as untraceable after one failed diff.
+        """
+        if not self._orphan_scan:
+            return
+        stale_after = 900.0  # generous - broker lag, not a retry budget
+        changed = False
+        for symbol in list(self._orphan_scan):
+            entry = self._orphan_scan[symbol]
+            magic = int(entry.get("magic", -1))
+            known = {int(t) for t in entry.get("known", [])}
+            current = {p["ticket"] for p in self._positions if p["magic"] == magic}
+            new_tickets = current - known
+            if new_tickets:
+                closed = set()
+                for ticket in new_tickets:
+                    if self.client.close_position(ticket, self.store.system.slippage_points,
+                                                   "MicoFX gecikmis ikincil ticket"):
+                        closed.add(ticket)
+                if closed:
+                    self._positions = self.client.positions()
+                    LOG.emit(f"Gecikmis ikincil ticket bulundu ve kapatildi: {sorted(closed)}.",
+                             "WARN", symbol)
+                failed = new_tickets - closed
+                if failed:
+                    self._orphan_tickets |= failed
+                    self._save_orphan_tickets()
+                    LOG.emit(f"Gecikmis ikincil ticket bulundu ama kapatilamadi: "
+                             f"{sorted(failed)} - her dongude tekrar denenecek.",
+                             "ERROR", symbol)
+                del self._orphan_scan[symbol]
+                changed = True
+            elif time.time() - float(entry.get("since", 0.0)) > stale_after:
+                LOG.emit("Gecikmis ikincil ticket taramasi zaman asimina ugradi - "
+                         "pozisyon hicbir zaman gorunmedi, birakiliyor.", "ERROR", symbol)
+                del self._orphan_scan[symbol]
+                changed = True
+        if changed:
+            self._save_orphan_scan()
+
     # ---------------------------------------------------- position management
 
     def manage_positions(self, server_now: float) -> None:
@@ -1098,7 +1189,21 @@ class Engine:
         if self._sec_tickets - live:
             self._sec_tickets &= live
             self.store.set_setting("secondary_tickets", sorted(self._sec_tickets))
+        if self._orphan_tickets - live:
+            # Gone from the broker already (closed by a previous cycle's retry,
+            # or manually) - stop chasing it.
+            self._orphan_tickets &= live
+            self._save_orphan_tickets()
         for pos in self._positions:
+            if pos["ticket"] in self._orphan_tickets:
+                # An unresolved secondary fill from a prior cycle - never let it
+                # fall through to normal trail/BE/primary-exit management while
+                # it is still waiting on a close retry; keep retrying instead.
+                if self._close_tracked(pos, "MicoFX cozulemeyen ikincil ticket", "exit"):
+                    self._orphan_tickets.discard(pos["ticket"])
+                    self._save_orphan_tickets()
+                    LOG.emit(f"Cozulemeyen ikincil ticket #{pos['ticket']} kapatildi.", "TRADE")
+                continue
             cfg = by_magic.get(pos["magic"])
             if cfg is None:
                 continue
@@ -1185,8 +1290,12 @@ class Engine:
                     last_bar = state.sec_last_bar if is_secondary else state.last_bar
                 # Secondary tickets must use the secondary ATR they were validated
                 # with. Falling back to the primary ATR (different TF / regime)
-                # silently warps BE, trail and partial distances.
-                if is_secondary and (state is None or state.sec_atr <= 0):
+                # silently warps BE, trail and partial distances. ``<= 0`` alone
+                # is not fail-closed for NaN (NaN <= 0 is False) - without
+                # isfinite() a NaN'd sec_atr slipped past this guard and got
+                # trailed on the silently-substituted primary atr anyway.
+                if is_secondary and (state is None or not math.isfinite(state.sec_atr)
+                                     or state.sec_atr <= 0):
                     continue
                 ticket = pos["ticket"]
                 if last_bar and last_bar != self._stop_bar.get(ticket):
@@ -1577,7 +1686,18 @@ class Engine:
         # loss on an open position - closed trades hadn't caught up yet, so
         # the halt (and the flatten it now triggers - see manage_positions())
         # never fired until that position finally closed and booked it.
+        # ``realised`` above nets the deal's own commission in (day_stats():
+        # ``deal["profit"] + deal["commission"] + deal["swap"]``) - MT5's
+        # TradePosition struct has no live-accruing commission field to match
+        # that with on the *open* side (unlike history deals, positions_get()
+        # genuinely does not expose one), so the still-open round-turn cost is
+        # estimated from cfg.commission_per_lot (documented as the full
+        # round-turn commission in account currency) instead of left at zero.
+        # Slightly conservative if the broker only charges commission at
+        # close - it books the anticipated exit-side cost a bit early - but
+        # that is the safe direction for a loss *halt* to be wrong in.
         floating = sum(p.get("profit", 0.0) + p.get("swap", 0.0)
+                       - cfg.commission_per_lot * p.get("volume", 0.0)
                        for p in self._positions if p["magic"] == cfg.magic)
         if row is None and floating == 0.0:
             return ""

@@ -16,7 +16,7 @@ from pathlib import Path
 from micofx.paths import ROOT
 from micofx.store import Store
 
-EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache"}
+EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache", ".git"}
 
 
 def _iter_files(root: Path):

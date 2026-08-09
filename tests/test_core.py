@@ -13,10 +13,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx import backtest
-from micofx.models import SymbolConfig
+from micofx.models import SymbolConfig, SystemConfig
 from micofx.mt5client import MT5Client
 from micofx.optimizer import Optimizer
-from micofx.risk import RiskManager
+from micofx.risk import DailyGuard, RiskManager
 
 
 # --------------------------------------------------------------------------- session_mask
@@ -168,7 +168,7 @@ def test_lot_for_ai_scale_shrinks_lot_before_floor_when_room_allows():
 
 def test_lot_for_ai_scale_skips_trade_past_overshoot_guard():
     risk = RiskManager(_FakeStore(), _FakeClient())
-    # fixed_lot * ai_scale lands far below the 0.1 floor - beyond the 10x
+    # fixed_lot * ai_scale lands far below the 0.1 floor - beyond the 3x
     # overshoot tolerance, so this should refuse rather than silently size up.
     cfg = _cfg(fixed_lot=0.1)
     lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.05)
@@ -181,6 +181,17 @@ def test_lot_for_ai_scale_within_overshoot_forces_floor():
     cfg = _cfg(fixed_lot=0.1)
     lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.5)
     assert lot == pytest.approx(0.1)
+
+
+def test_lot_for_overshoot_guard_uses_tightened_3x_ceiling():
+    # Regression pin for the B1 tightening (10.0x -> 3.0x): an overshoot that
+    # the old, looser ceiling would have tolerated (silently sizing a trade at
+    # ~5x its configured risk) must now be refused instead.
+    risk = RiskManager(_FakeStore(), _FakeClient())
+    cfg = _cfg(fixed_lot=0.1)
+    lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.2)  # 5x overshoot
+    assert lot == 0.0
+    assert "atlandi" in note
 
 
 def test_lot_for_risk_mode_fails_closed_without_tick_value():
@@ -318,15 +329,21 @@ class _SecCfg:
 
 
 class _SecStore:
-    def __init__(self, cfg, tagged_tickets):
+    def __init__(self, cfg, tagged_tickets, orphan_tickets=None, orphan_scan=None):
         self._cfg = cfg
         self._tagged = tagged_tickets
+        self._orphan_tickets = orphan_tickets or []
+        self._orphan_scan = orphan_scan or {}
         self.symbols = {"XAUUSD": cfg}
         self.updated_with = None
 
     def get_setting(self, key, default=None):
         if key == "secondary_tickets":
             return self._tagged
+        if key == "secondary_orphan_tickets":
+            return self._orphan_tickets
+        if key == "secondary_orphan_scan":
+            return self._orphan_scan
         return default
 
     def opt_params(self):
@@ -386,3 +403,136 @@ def test_apply_secondary_clear_refused_with_open_tagged_position():
     result = opt.apply_secondary("XAUUSD", None)
     assert result["ok"] is False
     assert cfg.secondary_strategy == "micro_rev"  # unchanged
+
+
+def test_apply_secondary_refuses_family_change_with_open_orphan_ticket():
+    # tagged_tickets empty (never made it into the persisted tag set), but
+    # engine.py's H1 orphan tracking still knows about this ticket - identity
+    # swap must be held back just like a tagged position would.
+    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
+    store = _SecStore(cfg, tagged_tickets=[], orphan_tickets=[100])
+    client = _SecClient([{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}])
+    opt = Optimizer(store=store, client=client)
+
+    new_attempt = {"strategy": "burst", "timeframe": "M10",
+                   "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
+                            "selection": {}, "positive_ratio": 1.0}}
+    result = opt.apply_secondary("XAUUSD", new_attempt)
+    assert result["ok"] is False
+    assert cfg.secondary_strategy == "micro_rev"  # unchanged
+
+
+def test_apply_secondary_refuses_family_change_with_pending_orphan_scan():
+    # A fill just landed and Engine hasn't found its ticket at all yet (0
+    # candidates so far) - the symbol-level scan entry alone must block, even
+    # before any concrete ticket number exists to check against positions().
+    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
+    store = _SecStore(cfg, tagged_tickets=[],
+                      orphan_scan={"XAUUSD": {"magic": 1, "known": [], "since": 0.0}})
+    client = _SecClient([])
+    opt = Optimizer(store=store, client=client)
+
+    new_attempt = {"strategy": "burst", "timeframe": "M10",
+                   "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
+                            "selection": {}, "positive_ratio": 1.0}}
+    result = opt.apply_secondary("XAUUSD", new_attempt)
+    assert result["ok"] is False
+    assert cfg.secondary_strategy == "micro_rev"  # unchanged
+
+
+def test_apply_secondary_allows_family_change_when_orphan_belongs_to_other_symbol():
+    # The pending scan is for a different symbol/magic entirely - must not
+    # block this one.
+    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
+    store = _SecStore(cfg, tagged_tickets=[],
+                      orphan_scan={"EURUSD": {"magic": 2, "known": [], "since": 0.0}})
+    client = _SecClient([])
+    opt = Optimizer(store=store, client=client)
+
+    new_attempt = {"strategy": "burst", "timeframe": "M10",
+                   "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
+                            "selection": {}, "positive_ratio": 1.0}}
+    result = opt.apply_secondary("XAUUSD", new_attempt)
+    assert result["ok"] is True
+    assert store.updated_with["secondary_strategy"] == "burst"
+
+
+# --------------------------------------------------------------------------- DailyGuard loss_halted
+
+class _DailyStore:
+    def __init__(self):
+        self.system = SystemConfig(daily_loss_pct=3.0, daily_profit_pct=5.0)
+        self._settings = {}
+
+    def get_setting(self, key, default=None):
+        return self._settings.get(key, default)
+
+    def set_setting(self, key, value):
+        self._settings[key] = value
+
+
+def test_daily_guard_loss_breach_sets_sticky_loss_halted():
+    store = _DailyStore()
+    guard = DailyGuard(store)
+    guard.start_balance = 1000.0
+
+    guard.check(equity=960.0, sys_cfg=store.system)  # -4% breaches the 3% cap
+
+    assert guard.halted is True
+    assert guard.loss_halted is True
+
+
+def test_daily_guard_profit_target_does_not_set_loss_halted():
+    store = _DailyStore()
+    guard = DailyGuard(store)
+    guard.start_balance = 1000.0
+
+    guard.check(equity=1060.0, sys_cfg=store.system)  # +6% hits the 5% profit target
+
+    assert guard.halted is True
+    assert guard.loss_halted is False
+
+
+def test_daily_guard_loss_halted_survives_equity_bounce():
+    # Once tripped, loss_halted must NOT flip back off just because equity
+    # (or pnl_pct recomputed from it) improves mid-day - only rollover/resume
+    # clears it. This is the sticky flag engine._cycle()'s flatten now reads
+    # instead of re-deriving from live pnl_pct every cycle.
+    store = _DailyStore()
+    guard = DailyGuard(store)
+    guard.start_balance = 1000.0
+    guard.check(equity=960.0, sys_cfg=store.system)
+    assert guard.loss_halted is True
+
+    # Equity bounces back above the -3% line; check() short-circuits on
+    # self.halted before even looking at pnl_pct again either way.
+    guard.check(equity=995.0, sys_cfg=store.system)
+    assert guard.halted is True
+    assert guard.loss_halted is True
+
+
+def test_daily_guard_rollover_clears_loss_halted():
+    import time as _time
+    store = _DailyStore()
+    guard = DailyGuard(store)
+    guard.start_balance = 1000.0
+    guard.check(equity=960.0, sys_cfg=store.system)
+    assert guard.loss_halted is True
+
+    guard.rollover(server_epoch=_time.time() + 86400 * 2, balance=1000.0)
+
+    assert guard.halted is False
+    assert guard.loss_halted is False
+
+
+def test_daily_guard_resume_clears_loss_halted():
+    store = _DailyStore()
+    guard = DailyGuard(store)
+    guard.start_balance = 1000.0
+    guard.check(equity=960.0, sys_cfg=store.system)
+    assert guard.loss_halted is True
+
+    guard.resume()
+
+    assert guard.halted is False
+    assert guard.loss_halted is False

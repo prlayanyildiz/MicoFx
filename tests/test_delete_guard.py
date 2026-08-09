@@ -629,7 +629,11 @@ def test_api_accepts_correct_token():
     assert res.status_code == 200
 
 
-def test_index_page_embeds_token_when_configured():
+def test_index_page_requires_token_when_configured():
+    # B4: "/" used to be left out of the gate entirely, so the token embedded
+    # in its own (then-unauthenticated) HTML was readable by anyone who could
+    # reach the port at all - the exact population a non-localhost bind's
+    # token exists to keep out. Must 401 with no credentials.
     store = _FakeStore({})
     client = _FakeClient([])
     engine = _FakeEngine()
@@ -637,5 +641,43 @@ def test_index_page_embeds_token_when_configured():
     tc = TestClient(app)
 
     res = tc.get("/")
+    assert res.status_code == 401
+    assert "secret123" not in res.text
+
+
+def test_index_page_embeds_token_with_query_param():
+    # A plain browser navigation cannot set a custom header, so the token
+    # gate on "/" accepts it as a query param too.
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/?token=secret123")
     assert res.status_code == 200
     assert "secret123" in res.text
+
+
+def test_index_page_embeds_token_with_header():
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/", headers={"X-Mico-Token": "secret123"})
+    assert res.status_code == 200
+    assert "secret123" in res.text
+
+
+def test_index_page_rejects_wrong_token():
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app)
+
+    res = tc.get("/?token=wrong")
+    assert res.status_code == 401
+    assert "secret123" not in res.text
