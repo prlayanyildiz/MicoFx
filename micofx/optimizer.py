@@ -616,11 +616,18 @@ class Optimizer:
             # change that never happened.
             if applied:
                 second = self._pick_secondary(report, attempts)
-                self.apply_secondary(cfg.symbol, second)
+                sec_result = self.apply_secondary(cfg.symbol, second)
+                if not sec_result.get("ok"):
+                    # Primary already landed; surface secondary failure instead
+                    # of silently leaving a stale pairing / empty clear.
+                    report["secondary_error"] = sec_result.get(
+                        "error", "ikincil aday yazilamadi")
+                    LOG.emit(f"{cfg.symbol}: ikincil aday yazilamadi - "
+                             f"{report['secondary_error']}", "WARN", cfg.symbol)
                 report["secondary"] = (
                     {"timeframe": second["timeframe"], "strategy": second["strategy"],
                      "score": second["best"]["score"]} if second else None)
-                if second:
+                if second and sec_result.get("ok"):
                     sec_hold = second["best"]["holdout"]
                     LOG.emit(
                         f"{cfg.symbol}: ikincil aday {second['strategy']}/{second['timeframe']} "
@@ -1150,20 +1157,22 @@ class Optimizer:
                     LOG.emit(f"{symbol}: {len(open_here)} acik pozisyon var{scan_note}, "
                              f"cikis/risk parametreleri ({', '.join(sorted(held_back))}) "
                              f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)
+            # Clear the stale secondary BEFORE writing the new primary family.
+            # Doing it after update_symbol left a window where primary landed
+            # and a failed clear (disconnect mid-call) was ignored - apply
+            # still returned ok:True with the old secondary attached.
+            if primary_changed and cfg.has_secondary():
+                # Called inline (not via apply_secondary(), which re-acquires
+                # entry_lock and would deadlock on this plain Lock) so the
+                # clear lands in the SAME critical section as the primary
+                # write below.
+                sec_clear = self._apply_secondary_locked(symbol, None)
+                if not sec_clear.get("ok"):
+                    return {"ok": False,
+                            "error": sec_clear.get(
+                                "error",
+                                f"{symbol}: eski ikincil sinyal temizlenemedi - "
+                                f"aile degisikligi reddedildi"),
+                            "symbol": symbol, "config": None}
             updated = self.store.update_symbol(symbol, patch)
-            if updated is not None and primary_changed and cfg.has_secondary():
-                # A stored secondary was validated against the OLD primary's
-                # family and timeframe. Every full-search apply already
-                # clears/refreshes it (see the ``_run`` path); this path
-                # (manual re-apply of a past result, or any other one-off
-                # ``apply`` call) was the one place that skipped it, leaving a
-                # secondary that could veto a fresh primary using a signal fit
-                # on a different period/timeframe. No replacement candidate
-                # exists here, so clear rather than guess. Called inline
-                # (not via apply_secondary(), which re-acquires entry_lock and
-                # would deadlock on this plain Lock) so the clear lands in the
-                # SAME critical section as the primary write above - releasing
-                # the lock in between left a window where a fresh
-                # secondary-tagged fill could land under the old pairing.
-                self._apply_secondary_locked(symbol, None)
         return {"ok": updated is not None, "symbol": symbol, "config": updated.to_dict() if updated else None}

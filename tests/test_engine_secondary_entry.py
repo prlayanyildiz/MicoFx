@@ -20,9 +20,11 @@ from micofx.risk import Verdict
 
 class _FakeClient:
     def __init__(self, positions_after):
-        self._positions_after = positions_after
+        self._positions_after = list(positions_after)
         self.closed: list[int] = []
         self.close_ok: set[int] = set()
+        # DONE_PARTIAL: close_position returns True but ticket stays in the book.
+        self.close_partial: set[int] = set()
         self.open_market_calls = 0
         self.connected = True
 
@@ -43,11 +45,16 @@ class _FakeClient:
                 "sl_tp_reanchored": True}
 
     def positions(self):
-        return self._positions_after
+        return list(self._positions_after)
 
     def close_position(self, ticket, slippage_points, comment, volume=None, fill=None):
         self.closed.append(ticket)
-        return ticket in self.close_ok
+        if ticket in self.close_partial:
+            return True  # broker said ok, volume still open
+        if ticket in self.close_ok:
+            self._positions_after = [p for p in self._positions_after if p["ticket"] != ticket]
+            return True
+        return False
 
     def info(self, symbol):
         return {"point": 0.0001}
@@ -386,8 +393,48 @@ def test_manage_positions_retries_orphan_ticket_close_and_skips_normal_managemen
     eng.manage_positions(server_now=0.0)
 
     assert client.closed == [401]
+    # Same cycle: prune ran before the close attempt - tracking stays until
+    # the next cycle's live-book prune confirms the ticket is gone
+    # (DONE_PARTIAL-safe sticky, same as weekend_pending).
+    assert 401 in eng._orphan_tickets
+
+    eng._positions = []
+    eng.manage_positions(server_now=0.0)
     assert eng._orphan_tickets == set()
     assert store.settings["secondary_orphan_tickets"] == []
+
+
+def test_manage_positions_orphan_retry_done_partial_keeps_tracking():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._weekend_pending = set()
+    eng._partials = {}
+    eng._stop_bar = {}
+    pos = {"ticket": 402, "magic": 1, "side": "buy", "volume": 0.2,
+           "time": 0, "profit": 0, "swap": 0}
+    eng._positions = [pos]
+    eng._orphan_tickets = {402}
+    client.close_partial = {402}
+
+    class _Values:
+        def values(self):
+            return [cfg]
+    eng.store.symbols = _Values()
+
+    # Partial close returns True but leaves the ticket in the book.
+    def _partial_close(ticket, slippage_points, comment, volume=None, fill=None):
+        client.closed.append(ticket)
+        if fill is not None:
+            fill.update({"symbol": "EURUSD", "side": "buy", "requested": 1.1,
+                         "price": 1.1, "volume": 0.05, "risk_dist": 0.0})
+        return True
+
+    client.close_position = _partial_close  # type: ignore[method-assign]
+
+    eng.manage_positions(server_now=0.0)
+
+    assert client.closed == [402]
+    assert eng._orphan_tickets == {402}  # must NOT drop on DONE_PARTIAL True
 
 
 def test_scan_orphan_candidates_finds_delayed_ticket_and_closes_it():
@@ -611,3 +658,37 @@ def test_apply_pending_exits_secondary_lands_when_no_orphan_risk():
 
     assert len(updates) == 1
     assert updates[0][1]["secondary_params"]["trail_start_atr"] == 1.5
+
+
+def test_orphan_close_done_partial_keeps_ticket_in_orphan_tracking():
+    # close_position True for DONE_PARTIAL must NOT be treated as fully flat -
+    # re-diff the live book; still-open tickets go to orphan_tickets.
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[
+        {"ticket": 601, "magic": 1},
+    ])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0}}
+    eng._positions = client.positions()
+    client.close_partial = {601}
+
+    eng._scan_orphan_candidates()
+
+    assert client.closed == [601]
+    assert "EURUSD" not in eng._orphan_scan
+    assert eng._orphan_tickets == {601}
+    assert store.settings["secondary_orphan_tickets"] == [601]
+
+
+def test_entry_multi_candidate_done_partial_not_orphan_closed():
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[
+        {"ticket": 611, "magic": 1}, {"ticket": 612, "magic": 1},
+    ])
+    client.close_partial = {611, 612}
+    state = _state()
+
+    eng._try_entry(cfg, state, account={"balance": 1000.0})
+
+    assert set(client.closed) == {611, 612}
+    assert state.signal == "buy"  # not consumed as "fully flat"
+    assert eng._orphan_tickets == {611, 612}

@@ -139,14 +139,24 @@ class _FakeEngine:
         self.execution = _FakeExecution()
         self.entry_lock = threading.Lock()
         self._sec_cfgs = {}
+        self._orphan_scan = {}
+        self._orphan_tickets = set()
+        self.saved_scan = False
+        self.saved_tickets = False
+
+    def _save_orphan_scan(self):
+        self.saved_scan = True
+
+    def _save_orphan_tickets(self):
+        self.saved_tickets = True
 
 
-def _client(symbols, positions=None, settings=None, defaults=None):
+def _client(symbols, positions=None, settings=None, defaults=None, engine=None):
     store = _FakeStore(symbols, settings=settings, defaults=defaults)
     client = _FakeClient(positions or [])
-    engine = _FakeEngine()
-    app = create_app(store, client, engine, optimizer=None)
-    return TestClient(app), store
+    eng = engine or _FakeEngine()
+    app = create_app(store, client, eng, optimizer=None)
+    return TestClient(app), store, eng
 
 
 # --------------------------------------------------------------------- H-R1
@@ -154,7 +164,7 @@ def _client(symbols, positions=None, settings=None, defaults=None):
 def test_delete_symbol_blocked_by_pending_orphan_scan():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.delete("/api/symbols/XAUUSD")
 
@@ -165,7 +175,7 @@ def test_delete_symbol_blocked_by_pending_orphan_scan():
 
 def test_delete_symbol_allowed_when_flat_and_no_scan():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
-    tc, store = _client(symbols)
+    tc, store, _eng = _client(symbols)
 
     res = tc.delete("/api/symbols/XAUUSD")
 
@@ -177,7 +187,7 @@ def test_delete_symbol_allowed_when_flat_and_no_scan():
 def test_seed_overwrite_blocked_by_pending_orphan_scan():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1), "EURUSD": _cfg("EURUSD", magic=2)}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols-seed", params={"overwrite": "true"})
 
@@ -188,7 +198,7 @@ def test_seed_overwrite_blocked_by_pending_orphan_scan():
 
 def test_seed_overwrite_allowed_when_no_scan_pending():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
-    tc, store = _client(symbols)
+    tc, store, _eng = _client(symbols)
 
     res = tc.post("/api/symbols-seed", params={"overwrite": "true"})
 
@@ -201,7 +211,7 @@ def test_create_symbol_avoids_orphan_scan_magic():
     # a brand new symbol must not land on the magic a pending scan still owns.
     symbols = {}
     settings = {"secondary_orphan_scan": {"OLDSYM": {"magic": 990101, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols", json={"symbol": "EURUSD"})
 
@@ -216,7 +226,7 @@ def test_create_symbol_avoids_live_orphan_ticket_magic():
     symbols = {}
     settings = {"secondary_orphan_tickets": [777]}
     positions = [{"ticket": 777, "magic": 990101}]
-    tc, store = _client(symbols, positions=positions, settings=settings)
+    tc, store, _eng = _client(symbols, positions=positions, settings=settings)
 
     res = tc.post("/api/symbols", json={"symbol": "EURUSD"})
 
@@ -229,7 +239,7 @@ def test_create_symbol_avoids_live_orphan_ticket_magic():
 def test_patch_primary_exit_field_blocked_by_pending_scan():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
@@ -240,7 +250,7 @@ def test_patch_primary_exit_field_blocked_by_pending_scan():
 def test_patch_primary_family_change_blocked_by_pending_scan():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15")}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst", "timeframe": "M5"})
 
@@ -250,7 +260,7 @@ def test_patch_primary_family_change_blocked_by_pending_scan():
 
 def test_patch_primary_exit_field_allowed_without_scan():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
-    tc, store = _client(symbols)
+    tc, store, _eng = _client(symbols)
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
@@ -266,7 +276,7 @@ def test_bulk_primary_exit_field_blocked_by_pending_scan():
     # a scan watching the very magic it was about to mutate under.
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols-bulk", json={"symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.0}})
 
@@ -278,7 +288,7 @@ def test_bulk_primary_exit_field_blocked_by_pending_scan():
 def test_bulk_primary_family_change_blocked_by_pending_scan():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15")}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols-bulk",
                   json={"symbols": ["XAUUSD"], "patch": {"strategy": "burst", "timeframe": "M5"}})
@@ -290,7 +300,7 @@ def test_bulk_primary_family_change_blocked_by_pending_scan():
 
 def test_bulk_primary_exit_field_allowed_without_scan_or_position():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
-    tc, store = _client(symbols)
+    tc, store, _eng = _client(symbols)
 
     res = tc.post("/api/symbols-bulk", json={"symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.0}})
 
@@ -304,7 +314,7 @@ def test_bulk_secondary_regression_still_blocked_by_live_tagged():
                               secondary_timeframe="M15")}
     positions = [{"ticket": 500, "magic": 1}]
     settings = {"secondary_tickets": [500]}
-    tc, store = _client(symbols, positions=positions, settings=settings)
+    tc, store, _eng = _client(symbols, positions=positions, settings=settings)
 
     res = tc.post("/api/symbols-bulk",
                   json={"symbols": ["XAUUSD"], "patch": {"secondary_strategy": "burst"}})
@@ -365,7 +375,7 @@ def test_reset_existing_symbol_unaffected_by_orphan_tickets():
     settings = {"secondary_orphan_tickets": [777]}
     defaults = {"symbols": [{"symbol": "EURUSD", "group": "forex"}],
                 "group_presets": {"forex": {}}}
-    tc, store = _client(symbols, settings=settings, defaults=defaults)
+    tc, store, _eng = _client(symbols, settings=settings, defaults=defaults)
 
     res = tc.post("/api/symbols/EURUSD/reset")
 
@@ -498,7 +508,7 @@ def test_patch_magic_blocked_by_ghost_orphan_scan_magic():
     # Manual magic assignment must not bypass next_magic's scan avoid-set.
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
     settings = {"secondary_orphan_scan": {"OLDSYM": {"magic": 990101, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols/XAUUSD", json={"magic": 990101})
 
@@ -509,7 +519,7 @@ def test_patch_magic_blocked_by_ghost_orphan_scan_magic():
 def test_bulk_magic_blocked_by_ghost_orphan_scan_magic():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
     settings = {"secondary_orphan_scan": {"OLDSYM": {"magic": 990101, "known": [], "since": 0.0}}}
-    tc, store = _client(symbols, settings=settings)
+    tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols-bulk", json={
         "symbols": ["XAUUSD"], "patch": {"magic": 990101},
@@ -517,3 +527,45 @@ def test_bulk_magic_blocked_by_ghost_orphan_scan_magic():
 
     assert res.status_code == 409
     assert store.symbols["XAUUSD"].magic == 1
+
+
+def test_patch_magic_blocked_by_live_orphan_ticket_magic():
+    # Orphan ticket still open under a magic nobody in the portfolio owns -
+    # manual PATCH must refuse that magic the same way ghost scan does.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    settings = {"secondary_orphan_tickets": [777]}
+    positions = [{"ticket": 777, "magic": 990101, "symbol": "GONE"}]
+    tc, store, _eng = _client(symbols, positions=positions, settings=settings)
+
+    res = tc.post("/api/symbols/XAUUSD", json={"magic": 990101})
+
+    assert res.status_code == 409
+    assert "orphan" in res.json()["detail"].lower() or "orphan" in res.text.lower() or "990101" in res.text
+    assert store.symbols["XAUUSD"].magic == 1
+
+
+def test_seed_overwrite_clears_live_engine_orphan_maps():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    engine = _FakeEngine()
+    engine._orphan_scan = {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}
+    engine._orphan_tickets = {99}
+    tc, store, eng = _client(symbols, engine=engine)
+
+    res = tc.post("/api/symbols-seed", params={"overwrite": "true"})
+
+    assert res.status_code == 200
+    assert eng._orphan_scan == {}
+    assert eng._orphan_tickets == set()
+    assert eng.saved_scan is True
+    assert eng.saved_tickets is True
+
+
+def test_soft_seed_always_passes_avoid_magics_when_orphan_tickets_empty():
+    # Even with connected=True, avoid must be a set (never the old None ternary).
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    tc, store, _eng = _client(symbols)
+
+    res = tc.post("/api/symbols-seed", params={"overwrite": "false"})
+
+    assert res.status_code == 200
+    assert store.seed_avoid_magics == set()

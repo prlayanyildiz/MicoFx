@@ -220,16 +220,21 @@ class Store:
             "symbol": name,
             "group": group,
             "enabled": bool(enabled),
-            "magic": int(magic) if magic is not None else self.next_magic(avoid_magics),
             "broker_symbol": str(broker_symbol or "").strip(),
         }
         payload.update(presets.get(group, {}))
         payload["symbol"] = name
         payload["group"] = group
         payload["enabled"] = bool(enabled)
-        payload["magic"] = (int(magic) if magic is not None
-                            else payload.get("magic", self.next_magic(avoid_magics)))
         payload["broker_symbol"] = str(broker_symbol or "").strip()
+        if magic is not None:
+            payload["magic"] = int(magic)
+        else:
+            wanted = payload.get("magic")
+            if wanted is None or self._magic_taken(int(wanted), avoid_magics):
+                payload["magic"] = self.next_magic(avoid=avoid_magics)
+            else:
+                payload["magic"] = int(wanted)
         cfg = SymbolConfig.from_dict(payload)
         self.save_symbol(cfg, position=len(self.symbols))
         if self.system.max_total_positions < len(self.symbols):
@@ -328,7 +333,6 @@ class Store:
             "symbol": symbol,
             "group": group,
             "enabled": True,
-            "magic": cfg.magic if cfg else self.next_magic(avoid_magics),
             "broker_symbol": cfg.broker_symbol if cfg else "",
         }
         payload.update(self.defaults.get("group_presets", {}).get(group, {}))
@@ -336,8 +340,23 @@ class Store:
             payload.update({k: v for k, v in entry.items() if k != "group"})
         payload["symbol"] = symbol
         payload["group"] = group
-        payload["magic"] = cfg.magic if cfg else payload.get("magic", self.next_magic(avoid_magics))
         payload["broker_symbol"] = cfg.broker_symbol if cfg else ""
+        # Existing symbol keeps its magic. Recreate (cfg is None) must use the
+        # same clash avoid soft-seed does - defaults.json ships a fixed magic
+        # that may already be owned by another symbol / orphan scan / ticket.
+        if cfg is not None:
+            payload["magic"] = cfg.magic
+        else:
+            wanted = payload.get("magic")
+            if wanted is None or self._magic_taken(int(wanted), avoid_magics):
+                new_magic = self.next_magic(avoid=avoid_magics)
+                if wanted is not None and int(wanted) != new_magic:
+                    LOG.emit(
+                        f"{symbol}: reset-recreate magic {int(wanted)} -> {new_magic} "
+                        f"(cakisma onlendi)", "INFO", symbol)
+                payload["magic"] = new_magic
+            else:
+                payload["magic"] = int(wanted)
         updated = SymbolConfig.from_dict(payload)
         self.save_symbol(updated)
         return updated

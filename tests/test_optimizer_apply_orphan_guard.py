@@ -103,3 +103,57 @@ def test_apply_clean_when_no_orphan_scan_and_no_position():
 
     assert result["ok"] is True
     assert store.updated_with["sl_atr_mult"] == 2.0
+
+
+def test_apply_refuses_when_disconnected_before_positions():
+    cfg = _cfg()
+    store = _Store(cfg)
+    client = _Client(positions=[])
+    client.connected = False
+    opt = Optimizer(store=store, client=client)
+
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0)
+
+    assert result["ok"] is False
+    assert store.updated_with is None
+
+
+def test_apply_refuses_mid_call_disconnect_after_positions():
+    cfg = _cfg()
+    store = _Store(cfg)
+
+    class _Flip:
+        connected = True
+
+        def positions(self, magic=None):
+            self.connected = False
+            return []
+
+    opt = Optimizer(store=store, client=_Flip())
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0)
+
+    assert result["ok"] is False
+    assert store.updated_with is None
+
+
+def test_apply_family_swap_aborts_when_secondary_clear_fails():
+    # Primary must not land if clearing the stale secondary pairing fails.
+    cfg = SymbolConfig(
+        symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15",
+        ensemble_enabled=True, secondary_strategy="micro_rev",
+        secondary_timeframe="M5", sl_atr_mult=1.0, tp_atr_mult=2.0,
+    )
+    store = _Store(cfg)
+    opt = Optimizer(store=store, client=_Client(positions=[]))
+
+    def _fail_clear(symbol, attempt):
+        return {"ok": False, "error": f"{symbol}: secondary clear failed"}
+
+    opt._apply_secondary_locked = _fail_clear  # type: ignore[method-assign]
+
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0,
+                       strategy="burst", timeframe="M5")
+
+    assert result["ok"] is False
+    assert cfg.strategy == "t3_stoch"
+    assert store.updated_with is None

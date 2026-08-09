@@ -73,3 +73,29 @@ def test_soft_seed_passes_through_avoid_magics(tmp_path, monkeypatch):
     s.seed_symbols(overwrite=False, avoid_magics={990101})
 
     assert s.symbols["AUDUSD"].magic != 990101
+
+
+def test_reset_recreate_avoids_magic_taken_by_custom_symbol(tmp_path, monkeypatch):
+    s = _fresh_store(tmp_path, monkeypatch)
+    s.delete_symbol("AUDUSD")
+    custom = s.add_symbol("MYPAIR", group="forex")
+    assert custom.magic == 990101
+
+    updated = s.reset_symbol_to_preset("AUDUSD")
+
+    assert updated is not None
+    assert updated.magic != 990101
+    magics = [c.magic for c in s.symbols.values()]
+    assert len(magics) == len(set(magics))
+
+
+def test_reset_recreate_avoids_magic_held_by_orphan_scan(tmp_path, monkeypatch):
+    s = _fresh_store(tmp_path, monkeypatch)
+    s.delete_symbol("AUDUSD")
+    s.set_setting("secondary_orphan_scan",
+                  {"SOMESYM": {"magic": 990101, "known": [], "since": 0.0}})
+
+    updated = s.reset_symbol_to_preset("AUDUSD")
+
+    assert updated is not None
+    assert updated.magic != 990101

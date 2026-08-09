@@ -475,17 +475,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         return None
 
     def _reject_magic_assignment_if_disconnected_orphans() -> None:
-        """L1: create_symbol/reset(recreate)/soft-seed hand out a fresh magic
-        via Store.next_magic(), which avoids orphan-ticket magics via
-        _orphan_ticket_magics() above - but that needs client.positions() to
-        resolve a ticket to its magic, so while disconnected it silently
-        passes ``avoid_magics=None`` and next_magic falls back to only the
-        portfolio + scan avoid-set it already knows on its own. A still-open
-        orphan ticket's magic is invisible in that fallback, so a brand new
-        symbol (or one being recreated) could land squarely on it. Rather
-        than assign blind, refuse outright until reconnected or the orphan
-        ticket list is cleared - the same "fail closed on disconnect" stance
-        _require_connected() already takes for DELETE/patch.
+        """Refuse fresh magic assignment while disconnected with orphan tickets.
+
+        Callers always pass ``avoid_magics=_orphan_ticket_magics()`` (which
+        503s on mid-call disconnect when tickets are non-empty). This gate
+        covers the complementary case: already disconnected before the call,
+        so ``_orphan_ticket_magics`` short-circuits to ``set()`` without a
+        positions() round-trip and cannot see live orphan magics. Fail closed
+        until reconnected or the orphan ticket list is cleared.
         """
         if client.connected:
             return
@@ -664,7 +661,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 group=body.group or "forex",
                 broker_symbol=body.broker_symbol or "",
                 enabled=body.enabled,
-                avoid_magics=_orphan_ticket_magics() if client.connected else None,
+                # Always resolve avoid via _positions() (503 on mid-call
+                # disconnect) - the previous ``if connected else None`` ternary
+                # dropped avoid_magics on a TOCTOU disconnect and let next_magic
+                # land on a live orphan-ticket magic.
+                avoid_magics=_orphan_ticket_magics(),
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -740,7 +741,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # so the same reuse risk as create_symbol() applies.
             _reject_magic_assignment_if_disconnected_orphans()
             updated = store.reset_symbol_to_preset(
-                symbol, avoid_magics=_orphan_ticket_magics() if client.connected else None)
+                symbol, avoid_magics=_orphan_ticket_magics())
         if updated is None:
             raise HTTPException(404, f"{symbol} icin varsayilan yok")
         LOG.emit("Ayarlar varsayilana dondu.", "INFO", symbol)
@@ -787,12 +788,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             if clash is not None:
                 raise HTTPException(
                     409, f"magic {new_magic} zaten {clash} tarafindan kullaniliyor")
-            # Same orphan-state avoid next_magic/create already enforce -
-            # bulk magic must not be the free door around it.
-            _require_connected()
-            blocked = _magic_blocked_by_orphan_state(new_magic)
-            if blocked:
-                raise HTTPException(409, blocked)
         changed = 0
         rejected: list[str] = []
         # Same hazard patch_symbol guards per-symbol: a strategy/TF/magic
@@ -817,6 +812,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _require_connected()
             engine.entry_lock.acquire()
         try:
+            # Orphan-state magic block under the same lock as apply (matches
+            # patch_symbol) - checking outside left a window where engine
+            # could open a scan on new_magic between the check and the write.
+            if magic_changing:
+                blocked = _magic_blocked_by_orphan_state(new_magic)
+                if blocked:
+                    raise HTTPException(409, blocked)
             # One positions() snapshot for the whole batch - and the
             # post-call connected re-check inside _positions() - so a
             # mid-request positions_get failure cannot make open_magics /
@@ -943,7 +945,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _reject_magic_assignment_if_disconnected_orphans()
             count = store.seed_symbols(
                 overwrite=False,
-                avoid_magics=_orphan_ticket_magics() if client.connected else None,
+                avoid_magics=_orphan_ticket_magics(),
             )
         return {"ok": True, "seeded": count, "symbols": symbol_payload(force=True),
                 "system": store.system.to_dict()}

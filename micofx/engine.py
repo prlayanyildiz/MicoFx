@@ -391,7 +391,13 @@ class Engine:
             closed, remaining = self.close_all()
             if closed:
                 LOG.emit(f"Gunluk zarar limiti: {closed} pozisyon flatten edildi.", "WARN")
-            if remaining:
+            if remaining < 0:
+                # Same honesty as panic(): remaining=-1 means disconnect/resolve
+                # failure, not "minus one ticket still open".
+                LOG.emit("Gunluk zarar limiti: flatten dogrulanamadi "
+                         "(MT5 baglantisi/resolve) - pozisyonlarin gercekten "
+                         "kapandigindan EMIN DEGILIZ, elle kontrol edin.", "ERROR")
+            elif remaining:
                 LOG.emit(f"Gunluk zarar limiti: flatten sonrasi {remaining} pozisyon hala acik.", "ERROR")
         if self.supervisor.due():
             try:
@@ -1090,37 +1096,31 @@ class Engine:
                             # move is closing all of them rather than guessing and
                             # leaving an untracked position running under the wrong
                             # strategy's exits.
-                            closed: set[int] = set()
-                            for orphan in new_tickets:
-                                if self.client.close_position(
-                                        orphan, self.store.system.slippage_points,
-                                        "MicoFX cozulemeyen ikincil ticket"):
-                                    closed.add(orphan)
-                            if closed:
-                                self._reload_positions()
-                            if closed == new_tickets:
+                            gone, still = self._close_orphan_tickets(
+                                new_tickets, "MicoFX cozulemeyen ikincil ticket")
+                            if gone == new_tickets:
                                 orphan_closed = True
                                 LOG.emit(f"Ikincil sinyal islemi acildi ama ticket'i "
-                                         f"cozulemedi - pozisyon(lar) {sorted(closed)} "
+                                         f"cozulemedi - pozisyon(lar) {sorted(gone)} "
                                          f"guvenlik icin hemen kapatildi, sinyal tekrar "
                                          f"denenecek.", "ERROR", cfg.symbol)
                             else:
                                 unresolved_ticket = True
-                                failed = new_tickets - closed
-                                self._orphan_tickets |= failed
+                                self._orphan_tickets |= still
                                 self._save_orphan_tickets()
-                                if closed:
+                                if gone:
                                     LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
-                                             f"cozulemedi - {sorted(closed)} kapatildi ama "
-                                             f"{sorted(failed)} KAPATILAMADI - her dongude "
-                                             f"tekrar kapatma denenecek, primer parametreyle "
-                                             f"yonetilmeyecek.", "ERROR", cfg.symbol)
-                                else:
-                                    LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
-                                             f"cozulemedi VE {sorted(failed)} kapatilamadi - "
-                                             f"her dongude tekrar kapatma denenecek, primer "
+                                             f"cozulemedi - {sorted(gone)} kapatildi ama "
+                                             f"{sorted(still)} KAPATILAMADI/KISMI - her "
+                                             f"dongude tekrar kapatma denenecek, primer "
                                              f"parametreyle yonetilmeyecek.",
                                              "ERROR", cfg.symbol)
+                                else:
+                                    LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
+                                             f"cozulemedi VE {sorted(still)} "
+                                             f"kapatilamadi/kismi - her dongude tekrar "
+                                             f"kapatma denenecek, primer parametreyle "
+                                             f"yonetilmeyecek.", "ERROR", cfg.symbol)
         if orphan_closed:
             # Treat exactly like a failed entry (the position is flat again,
             # closed a moment after opening) - not the normal successful-fill
@@ -1216,6 +1216,27 @@ class Engine:
     def _save_orphan_scan(self) -> None:
         self.store.set_setting("secondary_orphan_scan", self._orphan_scan)
 
+    def _close_orphan_tickets(self, tickets: set[int], comment: str) -> tuple[set[int], set[int]]:
+        """Safety-close orphan tickets; re-diff the live book before trusting gone.
+
+        ``close_position`` returns True for ``TRADE_RETCODE_DONE_PARTIAL`` too
+        (remaining volume still open on the same ticket). Weekend flatten
+        keeps sticky retries until the ticket leaves ``self._positions``;
+        orphan paths used to treat True as fully flat and drop tracking.
+        Returns ``(gone, still_open)``. On reload/disconnect failure every
+        ticket is treated as still open (fail closed - keep tracking).
+        """
+        if not tickets:
+            return set(), set()
+        for ticket in tickets:
+            self.client.close_position(
+                ticket, self.store.system.slippage_points, comment)
+        if not self._reload_positions():
+            return set(), set(tickets)
+        live = {p["ticket"] for p in self._positions}
+        gone = {t for t in tickets if t not in live}
+        return gone, tickets - gone
+
     def _scan_orphan_candidates(self) -> None:
         """Re-diff symbols whose secondary fill produced zero candidates at
         entry time. Broker replication lag can mean ``positions()`` genuinely
@@ -1258,21 +1279,16 @@ class Engine:
             current = {p["ticket"] for p in self._positions if p["magic"] == magic}
             new_tickets = current - known
             if new_tickets:
-                closed = set()
-                for ticket in new_tickets:
-                    if self.client.close_position(ticket, self.store.system.slippage_points,
-                                                   "MicoFX gecikmis ikincil ticket"):
-                        closed.add(ticket)
-                if closed:
-                    self._reload_positions()
-                    LOG.emit(f"Gecikmis ikincil ticket bulundu ve kapatildi: {sorted(closed)}.",
+                gone, still = self._close_orphan_tickets(
+                    new_tickets, "MicoFX gecikmis ikincil ticket")
+                if gone:
+                    LOG.emit(f"Gecikmis ikincil ticket bulundu ve kapatildi: {sorted(gone)}.",
                              "WARN", symbol)
-                failed = new_tickets - closed
-                if failed:
-                    self._orphan_tickets |= failed
+                if still:
+                    self._orphan_tickets |= still
                     self._save_orphan_tickets()
-                    LOG.emit(f"Gecikmis ikincil ticket bulundu ama kapatilamadi: "
-                             f"{sorted(failed)} - her dongude tekrar denenecek.",
+                    LOG.emit(f"Gecikmis ikincil ticket bulundu ama kapatilamadi/kismi: "
+                             f"{sorted(still)} - her dongude tekrar denenecek.",
                              "ERROR", symbol)
                 del self._orphan_scan[symbol]
                 changed = True
@@ -1299,23 +1315,17 @@ class Engine:
                     last_look = {p["ticket"] for p in last_positions if p["magic"] == magic}
                     last_new = last_look - known
                     if last_new:
-                        closed = set()
-                        for ticket in last_new:
-                            if self.client.close_position(
-                                    ticket, self.store.system.slippage_points,
-                                    "MicoFX gecikmis ikincil ticket (son sans)"):
-                                closed.add(ticket)
-                        if closed:
-                            self._reload_positions()
+                        gone, still = self._close_orphan_tickets(
+                            last_new, "MicoFX gecikmis ikincil ticket (son sans)")
+                        if gone:
                             LOG.emit(f"Son sans taramasinda ikincil ticket bulundu ve "
-                                     f"kapatildi: {sorted(closed)}.", "WARN", symbol)
-                        failed = last_new - closed
-                        if failed:
-                            self._orphan_tickets |= failed
+                                     f"kapatildi: {sorted(gone)}.", "WARN", symbol)
+                        if still:
+                            self._orphan_tickets |= still
                             self._save_orphan_tickets()
-                            LOG.emit(f"Son sans taramasinda ticket bulundu ama kapatilamadi: "
-                                     f"{sorted(failed)} - her dongude tekrar denenecek.",
-                                     "ERROR", symbol)
+                            LOG.emit(f"Son sans taramasinda ticket bulundu ama "
+                                     f"kapatilamadi/kismi: {sorted(still)} - her dongude "
+                                     f"tekrar denenecek.", "ERROR", symbol)
                     else:
                         LOG.emit("Gecikmis ikincil ticket taramasi (ek bekleme suresi de doldu) - "
                                  "pozisyon hicbir zaman gorunmedi, tarama tamamen birakiliyor, "
@@ -1365,10 +1375,21 @@ class Engine:
                 # An unresolved secondary fill from a prior cycle - never let it
                 # fall through to normal trail/BE/primary-exit management while
                 # it is still waiting on a close retry; keep retrying instead.
-                if self._close_tracked(pos, "MicoFX cozulemeyen ikincil ticket", "exit"):
-                    self._orphan_tickets.discard(pos["ticket"])
-                    self._save_orphan_tickets()
-                    LOG.emit(f"Cozulemeyen ikincil ticket #{pos['ticket']} kapatildi.", "TRADE")
+                # Sticky like weekend_pending: close_position True includes
+                # DONE_PARTIAL, so do NOT discard tracking on True - the prune
+                # against the live book at the top of the next cycle is what
+                # confirms the ticket is actually gone.
+                fill: dict[str, Any] = {}
+                if self._close_tracked(pos, "MicoFX cozulemeyen ikincil ticket",
+                                       "exit", fill=fill):
+                    filled = float(fill.get("volume", pos["volume"]))
+                    if filled + 1e-9 >= float(pos["volume"]):
+                        LOG.emit(f"Cozulemeyen ikincil ticket #{pos['ticket']} kapatildi.",
+                                 "TRADE")
+                    else:
+                        LOG.emit(f"Cozulemeyen ikincil ticket #{pos['ticket']} kismen "
+                                 f"kapatildi ({filled:g}/{pos['volume']:g} lot), "
+                                 f"kalan tekrar denenecek.", "WARN")
                 continue
             cfg = by_magic.get(pos["magic"])
             if cfg is None:

@@ -820,9 +820,19 @@ class MT5Client:
         # guessing by price similarity - a coincidentally close price on an
         # already-open position (tight ATR/spread day) could otherwise match
         # the WRONG, pre-existing ticket instead of this fresh fill.
+        # positions_get None is a failed call (same as positions()) - folding
+        # it to () via ``or ()`` hid the disconnect and made before_tickets
+        # look empty. Refuse the send rather than open blind.
         with self._lock:
-            before_tickets = {int(p.ticket) for p in (mt5.positions_get(symbol=real) or ())
-                              if p.magic == magic}
+            before_raw = mt5.positions_get(symbol=real)
+        if before_raw is None:
+            self.connected = False
+            LOG.emit(f"positions_get basarisiz oldu (open_market before, "
+                     f"{mt5.last_error()}) - baglanti koptu olarak isaretlendi.", "WARN")
+            return {"ok": False,
+                    "error": f"{symbol}: acik pozisyon listesi dogrulanamadi "
+                             f"(MT5 baglantisi koptu) - emir gonderilmedi"}
+        before_tickets = {int(p.ticket) for p in before_raw if p.magic == magic}
 
         with self._lock:
             result = mt5.order_send(request)
@@ -917,7 +927,16 @@ class MT5Client:
                 pos_ticket = candidate
             else:
                 with self._lock:
-                    others = mt5.positions_get(symbol=real) or ()
+                    others = mt5.positions_get(symbol=real)
+                if others is None:
+                    # Fill already landed; mark disconnect so callers fail closed
+                    # on the next positions() rather than resolving against an
+                    # empty fabricated book.
+                    self.connected = False
+                    LOG.emit(f"positions_get basarisiz oldu (open_market after, "
+                             f"{mt5.last_error()}) - baglanti koptu olarak isaretlendi.",
+                             "WARN")
+                    others = ()
                 same_magic = [p for p in others if p.magic == magic]
                 # Genuinely-new tickets (not present in the before-send
                 # snapshot) first - this is a strictly more reliable signal

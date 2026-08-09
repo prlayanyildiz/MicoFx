@@ -32,3 +32,23 @@ def test_close_all_symbol_resolve_miss_returns_remaining_unknown():
 
     assert closed == 0
     assert remaining == -1
+
+
+def test_close_all_mid_call_positions_fail_returns_remaining_unknown():
+    client = object.__new__(MT5Client)
+    client.connected = True
+
+    def _ensure():
+        return True
+
+    def _positions(**kwargs):
+        client.connected = False
+        return []
+
+    client.ensure = _ensure  # type: ignore[method-assign]
+    client.positions = _positions  # type: ignore[method-assign]
+
+    closed, remaining = MT5Client.close_all(client, magics={1})
+
+    assert closed == 0
+    assert remaining == -1

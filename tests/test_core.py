@@ -522,6 +522,35 @@ def test_apply_secondary_allows_family_change_when_orphan_belongs_to_other_symbo
     assert store.updated_with["secondary_strategy"] == "burst"
 
 
+def test_apply_secondary_refuses_when_disconnected():
+    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
+    store = _SecStore(cfg, tagged_tickets=[])
+    client = _SecClient([])
+    client.connected = False
+    opt = Optimizer(store=store, client=client)
+
+    result = opt.apply_secondary("XAUUSD", None)
+    assert result["ok"] is False
+    assert store.updated_with is None
+
+
+def test_apply_secondary_refuses_mid_call_disconnect_with_watch_tickets():
+    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
+    store = _SecStore(cfg, tagged_tickets=[100])
+
+    class _Flip:
+        connected = True
+
+        def positions(self, magic=None, symbol=None):
+            self.connected = False
+            return []
+
+    opt = Optimizer(store=store, client=_Flip())
+    result = opt.apply_secondary("XAUUSD", None)
+    assert result["ok"] is False
+    assert store.updated_with is None
+
+
 # --------------------------------------------------------------------------- DailyGuard loss_halted
 
 class _DailyStore:
