@@ -129,30 +129,39 @@ function Create-DesktopShortcuts {
     if (Test-Path $publicDesk) { $targets += $publicDesk }
     $targets = $targets | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
 
-    $startBat = Join-Path $Dest "start.bat"
-    if (-not (Test-Path $startBat)) {
-        Write-Host "[kisayol] start.bat bulunamadi, atlandi." -ForegroundColor Yellow
-        return
-    }
+    $items = @(
+        @{ Name = "MicoFX Baslat";   Rel = "start.bat";         Style = 7; Desc = "MicoFX baslat (sessiz)" },
+        @{ Name = "MicoFX Durdur";   Rel = "stop.bat";          Style = 1; Desc = "MicoFX durdur" },
+        @{ Name = "MicoFX Terminal"; Rel = "start_console.bat"; Style = 1; Desc = "MicoFX konsol (log gorunur)" }
+    )
 
     $shell = New-Object -ComObject WScript.Shell
     foreach ($desk in $targets) {
         try {
-            $lnk = Join-Path $desk "MicoFX.lnk"
-            $sc = $shell.CreateShortcut($lnk)
-            $sc.TargetPath = $startBat
-            $sc.WorkingDirectory = $Dest
-            $sc.WindowStyle = 7
-            $sc.Description = "MicoFX baslat ($Dest)"
-            $sc.Save()
+            # Eski tek kisayol adi kalmissa karisiklik olmasin
+            $old = Join-Path $desk "MicoFX.lnk"
+            if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
 
-            $lnkFolder = Join-Path $desk "MicoFX Klasor.lnk"
-            $sc2 = $shell.CreateShortcut($lnkFolder)
-            $sc2.TargetPath = $Dest
-            $sc2.Description = "MicoFX proje klasoru"
-            $sc2.Save()
+            foreach ($it in $items) {
+                $target = Join-Path $Dest $it.Rel
+                if (-not (Test-Path $target)) {
+                    Write-Host "[kisayol] $($it.Rel) yok, atlandi." -ForegroundColor Yellow
+                    continue
+                }
+                $sc = $shell.CreateShortcut((Join-Path $desk "$($it.Name).lnk"))
+                $sc.TargetPath = $target
+                $sc.WorkingDirectory = $Dest
+                $sc.WindowStyle = $it.Style
+                $sc.Description = "$($it.Desc) ($Dest)"
+                $sc.Save()
+            }
 
-            Write-Host "[kisayol] Masaustu: MicoFX.lnk + MicoFX Klasor.lnk ($desk)" -ForegroundColor Cyan
+            $scFolder = $shell.CreateShortcut((Join-Path $desk "MicoFX Klasor.lnk"))
+            $scFolder.TargetPath = $Dest
+            $scFolder.Description = "MicoFX proje klasoru"
+            $scFolder.Save()
+
+            Write-Host "[kisayol] Masaustu: Baslat / Durdur / Terminal / Klasor ($desk)" -ForegroundColor Cyan
         } catch {
             Write-Host "[kisayol] $desk yazilamadi: $_" -ForegroundColor Yellow
         }
@@ -187,5 +196,5 @@ Create-DesktopShortcuts
 Write-Host ""
 Write-Host "Bitti." -ForegroundColor Green
 Write-Host "1) MT5: Algoritmik alim satima izin ver" -ForegroundColor Green
-Write-Host "2) Masaustundeki MicoFX kisayolu ile baslat" -ForegroundColor Green
+Write-Host "2) Masaustu: MicoFX Baslat / Durdur / Terminal" -ForegroundColor Green
 Write-Host "Claude: cd `"$Dest`"; claude   (olmazsa claude.cmd)" -ForegroundColor Green
