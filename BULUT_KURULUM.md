@@ -28,8 +28,9 @@ cd $env:USERPROFILE\MicoFx
 ```
 
 `KUR.bat` Python / Node / Claude Code yoksa kurar, kodu gunceller, paketleri kurar.
-Bitisinde masaustune kisayollar atar (nereye kurulursa kurulsun):
+Bitisinde masaustune kisayollar atar:
 **MicoFX Baslat**, **MicoFX Durdur**, **MicoFX Terminal**, **MicoFX Klasor**.
+Gelmezse klasorde `kisayol.bat`’e cift tikla (sadece kisayol yeniler).
 
 ### 3) MT5 + baslat
 1. MT5’e gir  

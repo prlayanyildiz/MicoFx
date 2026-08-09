@@ -120,54 +120,6 @@ function Ensure-ClaudeCode {
     Refresh-Path
 }
 
-function Create-DesktopShortcuts {
-    # Hangi kullanici (Administrator vs) kuruyorsa onun masaustune.
-    # Public Desktop'a da dener - yetki yoksa atlar.
-    $targets = @()
-    try { $targets += [Environment]::GetFolderPath("Desktop") } catch {}
-    $publicDesk = Join-Path $env:PUBLIC "Desktop"
-    if (Test-Path $publicDesk) { $targets += $publicDesk }
-    $targets = $targets | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
-
-    $items = @(
-        @{ Name = "MicoFX Baslat";   Rel = "start.bat";         Style = 7; Desc = "MicoFX baslat (sessiz)" },
-        @{ Name = "MicoFX Durdur";   Rel = "stop.bat";          Style = 1; Desc = "MicoFX durdur" },
-        @{ Name = "MicoFX Terminal"; Rel = "start_console.bat"; Style = 1; Desc = "MicoFX konsol (log gorunur)" }
-    )
-
-    $shell = New-Object -ComObject WScript.Shell
-    foreach ($desk in $targets) {
-        try {
-            # Eski tek kisayol adi kalmissa karisiklik olmasin
-            $old = Join-Path $desk "MicoFX.lnk"
-            if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
-
-            foreach ($it in $items) {
-                $target = Join-Path $Dest $it.Rel
-                if (-not (Test-Path $target)) {
-                    Write-Host "[kisayol] $($it.Rel) yok, atlandi." -ForegroundColor Yellow
-                    continue
-                }
-                $sc = $shell.CreateShortcut((Join-Path $desk "$($it.Name).lnk"))
-                $sc.TargetPath = $target
-                $sc.WorkingDirectory = $Dest
-                $sc.WindowStyle = $it.Style
-                $sc.Description = "$($it.Desc) ($Dest)"
-                $sc.Save()
-            }
-
-            $scFolder = $shell.CreateShortcut((Join-Path $desk "MicoFX Klasor.lnk"))
-            $scFolder.TargetPath = $Dest
-            $scFolder.Description = "MicoFX proje klasoru"
-            $scFolder.Save()
-
-            Write-Host "[kisayol] Masaustu: Baslat / Durdur / Terminal / Klasor ($desk)" -ForegroundColor Cyan
-        } catch {
-            Write-Host "[kisayol] $desk yazilamadi: $_" -ForegroundColor Yellow
-        }
-    }
-}
-
 Write-Host "=== MicoFX bulut kurulumu (tam otomatik) ===" -ForegroundColor Cyan
 
 Ensure-Git
@@ -191,10 +143,22 @@ Push-Location $Dest
 cmd /c "KURULUM.bat < NUL"
 Pop-Location
 
-Create-DesktopShortcuts
+# Kisayollar ayri script - bootstrap'i dusurmesin diye try/catch.
+$shortcutScript = Join-Path $Dest "Create-Shortcuts.ps1"
+if (Test-Path $shortcutScript) {
+    try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $shortcutScript
+    } catch {
+        Write-Host "[kisayol] Hata (kurulum yine tamam): $_" -ForegroundColor Yellow
+        Write-Host "Elle dene: $Dest\kisayol.bat" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "[kisayol] Create-Shortcuts.ps1 yok - git pull sonrasi kisayol.bat calistir." -ForegroundColor Yellow
+}
 
 Write-Host ""
 Write-Host "Bitti." -ForegroundColor Green
 Write-Host "1) MT5: Algoritmik alim satima izin ver" -ForegroundColor Green
 Write-Host "2) Masaustu: MicoFX Baslat / Durdur / Terminal" -ForegroundColor Green
+Write-Host "   (yoksa: $Dest\kisayol.bat)" -ForegroundColor Green
 Write-Host "Claude: cd `"$Dest`"; claude   (olmazsa claude.cmd)" -ForegroundColor Green
