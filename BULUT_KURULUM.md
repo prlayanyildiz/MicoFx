@@ -66,10 +66,27 @@ yerine tek basina `.\KURULUM.bat` de calistirabilirsin.)
 hata ayiklamak istersen `start_console.bat` (konsol acik kalir).
 
 ### 6) Claude Code ile devam etmek istersen
+PowerShell bazen npm'in `claude.ps1` shim'ini "script calistirma kapali"
+diyerek engeller (`PSSecurityException` / ExecutionPolicy). Once tek seferlik:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Sonra:
+
 ```powershell
 cd $env:USERPROFILE\MicoFx
 claude
 ```
+
+Policy degistirmek istemezsen `.ps1` yerine `.cmd` kullan:
+
+```powershell
+cd $env:USERPROFILE\MicoFx
+claude.cmd
+```
+
 Yeni bir oturum acilir (bu konusmanin hafizasi otomatik gelmez), ama proje
 dosyalari (bu dosya, `MASTER_PROMPT.md`, kod) zaten orada oldugu icin hizli
 baglam kazanir.

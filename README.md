@@ -43,10 +43,18 @@ sorun giderme icin [BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
 
 **4) Claude Code ile devam etmek istersen** (kod uzerinde birlikte
 calismak icin, opsiyonel):
+
+PowerShell `claude.ps1` icin ExecutionPolicy engeli verirse once:
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+Sonra:
 ```powershell
 cd $env:USERPROFILE\MicoFx
 claude
 ```
+Policy degistirmek istemezsen: `claude.cmd`
+
 Yeni bir oturum acilir (bu makinede daha once konusulmus bir sohbetin
 hafizasi otomatik gelmez), ama proje dosyalari zaten orada oldugu icin
 hizli baglam kazanir.

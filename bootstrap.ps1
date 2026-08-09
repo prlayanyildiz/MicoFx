@@ -91,6 +91,19 @@ function Ensure-Node {
 }
 
 function Ensure-ClaudeCode {
+    # npm'in claude.ps1 shim'i Restricted ExecutionPolicy'de patlar
+    # (PSSecurityException). CurrentUser RemoteSigned bunu kalici acar;
+    # admin/MachinePolicy gerekmez. Basarisiz olursa kullanici claude.cmd
+    # ile devam edebilir - asagidaki mesajda hatirlatilir.
+    try {
+        $pol = Get-ExecutionPolicy -Scope CurrentUser
+        if ($pol -eq "Undefined" -or $pol -eq "Restricted" -or $pol -eq "AllSigned") {
+            Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force -ErrorAction Stop
+            Write-Host "[4/5] PowerShell ExecutionPolicy CurrentUser=RemoteSigned ayarlandi (claude.ps1 icin)." -ForegroundColor Cyan
+        }
+    } catch {
+        Write-Host "[4/5] ExecutionPolicy ayarlanamadi: $_ - gerekirse 'claude.cmd' kullan." -ForegroundColor Yellow
+    }
     if (Get-Command claude -ErrorAction SilentlyContinue) {
         Write-Host "[4/5] Claude Code zaten kurulu." -ForegroundColor Cyan
         return
@@ -129,3 +142,6 @@ Write-Host "isaretle, sonra '$Dest\start.bat' ile baslat." -ForegroundColor Gree
 Write-Host ""
 Write-Host "Claude Code ile devam etmek icin:" -ForegroundColor Green
 Write-Host "  cd `"$Dest`"; claude" -ForegroundColor Green
+Write-Host "PowerShell 'script calistirma kapali' derse:" -ForegroundColor Yellow
+Write-Host "  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned" -ForegroundColor Yellow
+Write-Host "  veya: claude.cmd" -ForegroundColor Yellow
