@@ -28,16 +28,21 @@ Local **MetaTrader 5** multi-symbol autotrader with a **FastAPI + browser termin
 6. Optional `autostart_bot` (3s timer) → open browser → `uvicorn.run` until shutdown
 7. Shutdown: engine → MT5 → store
 
-### Launchers (FX tree)
+### Launchers (root — do not move)
 | File | Behavior |
 |---|---|
 | `start.bat` | Silent background start + open browser + short console then exit |
 | `start_silent.vbs` | Prefer `pythonw.exe` / minimized python `run.py` |
 | `start_console.bat` | Foreground; closing window kills app |
-| `stop.bat` | Kill process listening on port |
+| `stop.bat` / `restart.bat` | Kill port listener / silent restart |
+| `KUR.bat` / `bootstrap.ps1` | Cloud install (Git+Python+venv+shortcuts); no Claude/Node |
+| `KURULUM.bat` | Venv at `C:\MicoFX-venv` + pip |
+| `kisayol.bat` / `Create-Shortcuts.ps1` | Desktop shortcuts |
 | `run.py` | Real entry |
 
 Env: `MICO_HOST`, `MICO_PORT`, `MICO_OPEN_BROWSER`.
+
+Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
 
 ### Two modes
 - **Watch-only** (`_trading=False`): indicators, UI, sessions, positions visible; **no new orders**.
@@ -49,11 +54,15 @@ Env: `MICO_HOST`, `MICO_PORT`, `MICO_OPEN_BROWSER`.
 
 ```
 <ROOT>/
-  run.py
-  start*.bat / start_silent.vbs / stop.bat   # FX ops
+  README.md / MASTER_PROMPT.md
+  docs/KULLANIM.md / docs/KURULUM.md
+  run.py / backup.py / requirements.txt
+  KUR.bat / bootstrap.ps1 / KURULUM.bat / kisayol.bat / Create-Shortcuts.ps1
+  start.bat / start_silent.vbs / start_console.bat / stop.bat / restart.bat
   config/defaults.json
-  data/micofx.db                            # runtime
-  logs/micofx.log
+  data/micofx.db                            # runtime (gitignored)
+  logs/micofx.log                           # gitignored
+  tests/
   micofx/
     models.py       SymbolConfig, SystemConfig, OPT_FIELDS, STRATEGIES
     store.py        SQLite settings/symbols/opt_runs

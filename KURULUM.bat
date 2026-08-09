@@ -101,6 +101,6 @@ echo   2^) MT5'te ust menu Araclar ^> Secenekler ^> Uzman Danismanlar sekmesinde
 echo      "Algoritmik alim satima izin ver" kutusunu isaretleyin.
 echo   3^) start.bat dosyasina cift tiklayarak MicoFX'i baslatin.
 echo.
-echo Ayrintili anlatim icin KURULUM.md dosyasina bakabilirsiniz.
+echo Ayrintili anlatim icin docs\KURULUM.md dosyasina bakabilirsiniz.
 echo.
 pause

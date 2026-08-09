@@ -124,7 +124,7 @@ seans durumunu gunceller ama emir acmaz. Emir acmasi icin Panel sekmesinden
       gecirin
 
 Adim adim kullanim (sembol ekleme, optimizasyon, AI denetleyici vb.) icin
-[KULLANIM.md](KULLANIM.md) dosyasina bakin.
+[KULLANIM.md](KULLANIM.md) dosyasina bakin (ayni `docs/` klasoru).
 
 ---
 

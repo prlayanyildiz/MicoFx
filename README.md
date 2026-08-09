@@ -7,9 +7,26 @@ Dort bagimsiz strateji ailesi, ATR tabanli stop/hedef/trailing, gunluk zarar
 kesici, sembol bazli islem saatleri ve gerceklesmis sonuclara gore karar veren
 bir risk denetleyicisi.
 
+## Klasor haritasi
+
+| Yol | Ne |
+|---|---|
+| `micofx/` | Kod (motor, web, MT5, optimizer…) |
+| `config/defaults.json` | Ilk kurulum sablon ayarlari |
+| `data/` | Runtime DB (`micofx.db` — Git’e gitmez) |
+| `logs/` | Loglar (Git’e gitmez) |
+| `tests/` | Pytest |
+| `docs/` | Kullanim + yerel kurulum rehberleri |
+| `MASTER_PROMPT.md` | Agent / gelistirici kaynagi |
+| `KUR.bat` | Bulut: Git+Python+paket+kisayol (tek tik) |
+| `KURULUM.bat` | Sadece Python venv + pip (klasor kopyasi) |
+| `start.bat` / `stop.bat` / `start_console.bat` | Baslat / durdur / konsol |
+| `kisayol.bat` | Masaustu kisayollarini yenile |
+| `requirements.txt` / `run.py` | Bagimliliklar + gercek giris |
+
 ## Hizli kurulum (bulut / bos Windows)
 
-Private depo — tek satir `irm|iex` calismaz. **3 adim:**
+Private depo — tek satir indirme linki calismaz. **3 adim:**
 
 1. [Git kur](https://git-scm.com/download/win) → Next → PowerShell kapat/ac  
 2. PowerShell:
@@ -19,10 +36,12 @@ git clone https://github.com/prlayanyildiz/MicoFx.git
 cd MicoFx
 .\KUR.bat
 ```
-3. MT5’te “Algoritmik alim satima izin ver” → `start.bat`
+3. MT5: **Algoritmik alim satima izin ver** → masaustu **MicoFX Baslat**
 
-Klasor zaten varsa: `cd $env:USERPROFILE\MicoFx` sonra `.\KUR.bat`.  
-Detay: [BULUT_KURULUM.md](BULUT_KURULUM.md).
+Klasor zaten varsa: `cd $env:USERPROFILE\MicoFx` → `.\KUR.bat`.  
+Kisayol gelmezse: `.\kisayol.bat`. Guncelleme: `git pull`.
+
+USB / klasor kopyasi ile kurulum: [docs/KURULUM.md](docs/KURULUM.md) (`KURULUM.bat`).
 
 ## Bu surum: birlestirilmis / genisletilmis surum
 
@@ -93,16 +112,14 @@ maliyete cekme ve kismi kar seviyesidir.
 
 ---
 
-Adim adim kullanim icin bakiniz: **[KULLANIM.md](KULLANIM.md)**.
-Sifir bilgisayara ilk kurulum icin bakiniz: **[KURULUM.md](KURULUM.md)**
-(`KURULUM.bat`'a cift tiklamak yeterli).
+Adim adim kullanim: **[docs/KULLANIM.md](docs/KULLANIM.md)**.  
+Yerel / USB kurulum: **[docs/KURULUM.md](docs/KURULUM.md)**.
 
 ## Kurulum
 
-Yeni/bos bir makinede kurulum icin yukaridaki "Hizli kurulum" bolumune veya
-[BULUT_KURULUM.md](BULUT_KURULUM.md) dosyasina bak.
+Bulut: yukaridaki **Hizli kurulum**. Yerel kopya: `KURULUM.bat` + [docs/KURULUM.md](docs/KURULUM.md).
 
-MetaTrader 5 terminali kurulu ve hesaba giris yapmis olmali. Terminalde
+MetaTrader 5 kurulu ve giris yapilmis olmali. Terminalde
 **Araclar > Secenekler > Uzman Danismanlar > Algoritmik alim satima izin ver**
 acik olmalidir; kapaliysa emirler reddedilir.
 
