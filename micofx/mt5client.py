@@ -1102,6 +1102,17 @@ class MT5Client:
         """
         if not self.ensure():
             return 0, -1
+        # Per-symbol close filters via positions(symbol=...). If resolve()
+        # cannot map the configured name, positions() returns [] WITHOUT
+        # flipping connected (resolve miss ≠ disconnect) - that would look
+        # identical to "flat" and make close_all report (0, 0) / ok:true
+        # while tickets under that magic may still be open. Fail closed.
+        if symbol is not None and self.resolve(symbol) is None:
+            LOG.emit(
+                f"close_all({symbol}): broker sembolu cozulemedi - "
+                f"pozisyon listesi guvenilir degil, flatten reddedildi.",
+                "ERROR", symbol)
+            return 0, -1
         before = {p["ticket"] for p in self.positions(symbol=symbol)
                  if magics is None or p["magic"] in magics}
         if not self.connected:

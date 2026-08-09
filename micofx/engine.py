@@ -295,6 +295,23 @@ class Engine:
         magics = {c.magic for c in list(self.store.symbols.values())}
         return self.client.close_all(magics=magics, symbol=symbol)
 
+    def _reload_positions(self) -> bool:
+        """Refresh ``self._positions`` from the broker.
+
+        ``positions()`` returns ``[]`` both when flat and when
+        ``positions_get`` failed mid-call (which flips ``connected`` False).
+        Assigning that empty list mid-cycle used to make ``manage_positions``
+        prune secondary/orphan tags as "gone" and let ``can_open`` under-count
+        exposure. On failure keep the previous snapshot and return False.
+        """
+        fresh = self.client.positions()
+        if not self.client.connected:
+            LOG.emit("pozisyon listesi yenilenemedi - onceki anlik goruntu korundu "
+                     "(baglanti koptu).", "WARN")
+            return False
+        self._positions = fresh
+        return True
+
     # ------------------------------------------------------------------ loop
 
     def _run(self) -> None:
@@ -338,6 +355,11 @@ class Engine:
         self._reap_execution()
         self._apply_pending_exits()
         self._scan_orphan_candidates()
+        if not self.client.connected:
+            # Scan path may have called positions() again (post-close refresh /
+            # last-look). Same fail-closed stance as cycle-start: do not
+            # manage/entry on an emptied or stale-unverified book.
+            return
         # Unconditional: this only manages positions already open (trail/BE/
         # partial/session-flatten/day-end-flatten), never opens new ones.
         # Gating it on _trading meant that with close_on_stop=false (the
@@ -394,7 +416,8 @@ class Engine:
                      "takibi) tek ticket = tek pozisyon varsayimina dayaniyor, "
                      "netting'de gecersiz kaliyor. Yeni islem acilmasi guvenlik "
                      "icin durduruldu - hedging hesabina gecin.", "ERROR")
-        allow_entry = self._trading and guard.ok and not netting
+        allow_entry = (self._trading and guard.ok and not netting
+                       and self.client.connected)
         # Two-pass cycle: first refresh every symbol, then fill free slots in
         # priority order so a weak signal does not steal the last seat from a
         # stronger one when several bars close in the same poll.
@@ -979,8 +1002,27 @@ class Engine:
                 comment=f"MicoFX {cfg.timeframe}",
             )
             if result.get("ok"):
-                self._positions = self.client.positions()
-                if secondary:
+                if not self._reload_positions():
+                    # Fill reported ok but the book cannot be verified - do
+                    # not treat [] as "no new ticket" (would open a ghost
+                    # orphan-scan or skip tagging). Secondary without a
+                    # broker ticket → scan window with pre-fill known set;
+                    # with a ticket → tag it from the result alone.
+                    if secondary:
+                        if result.get("position"):
+                            self._tag_secondary({int(result["position"])})
+                        else:
+                            unresolved_ticket = True
+                            self._orphan_scan[cfg.symbol] = {
+                                "magic": base.magic,
+                                "known": sorted(before_tickets),
+                                "since": time.time(),
+                            }
+                            self._save_orphan_scan()
+                            LOG.emit("Ikincil sinyal islemi acildi ama pozisyon listesi "
+                                     "dogrulanamadi - orphan tarama baslatildi.",
+                                     "ERROR", cfg.symbol)
+                elif secondary:
                     if result.get("position"):
                         # Tagged inside the same lock as the fill itself -
                         # moved here from after the lock's release because
@@ -1010,8 +1052,24 @@ class Engine:
                             if new_tickets or attempt == 2:
                                 break
                             time.sleep(0.2)
-                            self._positions = self.client.positions()
-                        if len(new_tickets) == 1:
+                            if not self._reload_positions():
+                                # Mid-retry disconnect: do not conclude
+                                # "zero candidates" from a failed list.
+                                unresolved_ticket = True
+                                self._orphan_scan[cfg.symbol] = {
+                                    "magic": base.magic,
+                                    "known": sorted(before_tickets),
+                                    "since": time.time(),
+                                }
+                                self._save_orphan_scan()
+                                LOG.emit("Ikincil ticket cozumlemesi yarida kaldi - "
+                                         "pozisyon listesi dogrulanamadi, orphan tarama "
+                                         "baslatildi.", "ERROR", cfg.symbol)
+                                new_tickets = set()
+                                break
+                        if unresolved_ticket:
+                            pass
+                        elif len(new_tickets) == 1:
                             self._tag_secondary(new_tickets)
                         elif not new_tickets:
                             unresolved_ticket = True
@@ -1039,7 +1097,7 @@ class Engine:
                                         "MicoFX cozulemeyen ikincil ticket"):
                                     closed.add(orphan)
                             if closed:
-                                self._positions = self.client.positions()
+                                self._reload_positions()
                             if closed == new_tickets:
                                 orphan_closed = True
                                 LOG.emit(f"Ikincil sinyal islemi acildi ama ticket'i "
@@ -1173,7 +1231,16 @@ class Engine:
         never by giving up on the wait alone. A same-magic ticket that turns
         up during that grace window is still closed rather than left to run
         under the wrong strategy's exits.
+
+        Locked against seed-overwrite / DELETE magic-reuse paths that clear
+        these maps under the same ``entry_lock`` - otherwise a last-look or
+        failed close could re-persist orphan state against freshly seeded
+        default magics (TOCTOU).
         """
+        with self.entry_lock:
+            self._scan_orphan_candidates_locked()
+
+    def _scan_orphan_candidates_locked(self) -> None:
         if not self._orphan_scan:
             return
         stale_after = 900.0    # generous - broker lag, not a retry budget
@@ -1197,7 +1264,7 @@ class Engine:
                                                    "MicoFX gecikmis ikincil ticket"):
                         closed.add(ticket)
                 if closed:
-                    self._positions = self.client.positions()
+                    self._reload_positions()
                     LOG.emit(f"Gecikmis ikincil ticket bulundu ve kapatildi: {sorted(closed)}.",
                              "WARN", symbol)
                 failed = new_tickets - closed
@@ -1219,7 +1286,17 @@ class Engine:
                     # since after this the symbol is untracked and a ticket
                     # that shows up even one broker tick later would run
                     # under the primary's exit params instead.
-                    last_look = {p["ticket"] for p in self.client.positions() if p["magic"] == magic}
+                    last_positions = self.client.positions()
+                    if not self.client.connected:
+                        # positions_get failed mid-call → [] is not "flat".
+                        # Dropping the scan here would free the magic while a
+                        # live fill may still exist (same fail-open class the
+                        # web _positions() helper closes). Keep watching.
+                        LOG.emit(
+                            f"{symbol}: son sans orphan taramasi ertelendi - "
+                            f"MT5 pozisyon listesi dogrulanamadi.", "WARN", symbol)
+                        continue
+                    last_look = {p["ticket"] for p in last_positions if p["magic"] == magic}
                     last_new = last_look - known
                     if last_new:
                         closed = set()
@@ -1229,7 +1306,7 @@ class Engine:
                                     "MicoFX gecikmis ikincil ticket (son sans)"):
                                 closed.add(ticket)
                         if closed:
-                            self._positions = self.client.positions()
+                            self._reload_positions()
                             LOG.emit(f"Son sans taramasinda ikincil ticket bulundu ve "
                                      f"kapatildi: {sorted(closed)}.", "WARN", symbol)
                         failed = last_new - closed
@@ -1260,6 +1337,10 @@ class Engine:
     # ---------------------------------------------------- position management
 
     def manage_positions(self, server_now: float) -> None:
+        if not self.client.connected:
+            # Caller should have bailed already; never prune tags / exposure
+            # from an unverified empty book.
+            return
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         live = {p["ticket"] for p in self._positions}
         self._stop_bar = {t: v for t, v in self._stop_bar.items() if t in live}

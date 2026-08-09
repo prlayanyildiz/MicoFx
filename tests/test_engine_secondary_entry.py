@@ -24,6 +24,7 @@ class _FakeClient:
         self.closed: list[int] = []
         self.close_ok: set[int] = set()
         self.open_market_calls = 0
+        self.connected = True
 
     def min_stop_distance(self, symbol):
         return 0.0001
@@ -237,6 +238,27 @@ def test_orphan_scan_final_drop_does_a_last_look_and_closes_late_ticket():
 
     assert client.closed == [901]
     assert "EURUSD" not in eng._orphan_scan
+
+
+def test_orphan_scan_final_drop_keeps_scan_when_positions_get_fails():
+    # Mid-call positions_get failure → [] + connected=False must NOT be
+    # treated as "never appeared" and drop the scan (would free magic /
+    # reopen entry while a live fill may still exist).
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._orphan_scan = {"EURUSD": {"magic": 1, "known": [], "since": 0.0,
+                                   "abandoned": True, "abandoned_at": 0.0}}
+
+    def _fail_positions():
+        client.connected = False
+        return []
+
+    client.positions = _fail_positions  # type: ignore[method-assign]
+
+    eng._scan_orphan_candidates()
+
+    assert "EURUSD" in eng._orphan_scan
+    assert eng._orphan_scan["EURUSD"].get("abandoned") is True
 
 
 def test_orphan_scan_final_drop_last_look_close_fails_goes_to_orphan_tickets():

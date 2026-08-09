@@ -395,3 +395,125 @@ def test_soft_seed_allowed_when_disconnected_without_orphan_tickets():
     res = tc.post("/api/symbols-seed", params={"overwrite": "false"})
 
     assert res.status_code == 200
+
+
+# ------------------------------------------------- M-W1 mid-call disconnect
+
+class _FlipDisconnectClient(_FakeClient):
+    """Simulates mt5client.positions(): positions_get fails → [] + connected=False."""
+
+    def positions(self, magic=None, symbol=None):
+        self.connected = False
+        return []
+
+
+def test_delete_refuses_when_positions_get_fails_mid_call():
+    # Pre-check connected=True, but the guard's positions() call itself flips
+    # connected False and returns [] - must NOT read that as flat and delete.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    store = _FakeStore(symbols)
+    client = _FlipDisconnectClient([])
+    engine = _FakeEngine()
+    tc = TestClient(create_app(store, client, engine, optimizer=None))
+
+    res = tc.delete("/api/symbols/XAUUSD")
+
+    assert res.status_code == 503
+    assert "XAUUSD" in store.symbols
+    assert store.deleted == []
+    assert client.connected is False
+
+
+def test_patch_primary_exit_refuses_when_positions_get_fails_mid_call():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.5)}
+    store = _FakeStore(symbols)
+    client = _FlipDisconnectClient([])
+    engine = _FakeEngine()
+    tc = TestClient(create_app(store, client, engine, optimizer=None))
+
+    res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
+
+    assert res.status_code == 503
+    assert store.symbols["XAUUSD"].sl_atr_mult == 1.5
+
+
+def test_seed_overwrite_refuses_when_positions_get_fails_mid_call():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    store = _FakeStore(symbols)
+    client = _FlipDisconnectClient([])
+    engine = _FakeEngine()
+    tc = TestClient(create_app(store, client, engine, optimizer=None))
+
+    res = tc.post("/api/symbols-seed", params={"overwrite": "true"})
+
+    assert res.status_code == 503
+    assert store.replaced is False
+
+
+def test_bulk_primary_refuses_when_positions_get_fails_mid_call():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.5)}
+    store = _FakeStore(symbols)
+    client = _FlipDisconnectClient([])
+    engine = _FakeEngine()
+    tc = TestClient(create_app(store, client, engine, optimizer=None))
+
+    res = tc.post("/api/symbols-bulk", json={
+        "symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.5},
+    })
+
+    assert res.status_code == 503
+    assert store.symbols["XAUUSD"].sl_atr_mult == 1.5
+
+
+def test_close_ticket_refuses_when_positions_get_fails_mid_call():
+    # Mid-call [] must not become 404 "not found" (wrong signal) - 503.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    store = _FakeStore(symbols)
+    client = _FlipDisconnectClient([])
+    engine = _FakeEngine()
+    tc = TestClient(create_app(store, client, engine, optimizer=None))
+
+    res = tc.post("/api/positions/42/close")
+
+    assert res.status_code == 503
+
+
+def test_create_avoids_orphan_ticket_magics_refuses_mid_call_disconnect():
+    # Connected + non-empty orphan_tickets → _orphan_ticket_magics calls
+    # positions(); mid-fail must refuse rather than assign with avoid=empty.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    settings = {"secondary_orphan_tickets": [99]}
+    store = _FakeStore(symbols, settings=settings)
+    client = _FlipDisconnectClient([])
+    engine = _FakeEngine()
+    tc = TestClient(create_app(store, client, engine, optimizer=None))
+
+    res = tc.post("/api/symbols", json={"symbol": "NEWSYM", "group": "forex"})
+
+    assert res.status_code == 503
+    assert "NEWSYM" not in store.symbols
+
+
+def test_patch_magic_blocked_by_ghost_orphan_scan_magic():
+    # Manual magic assignment must not bypass next_magic's scan avoid-set.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    settings = {"secondary_orphan_scan": {"OLDSYM": {"magic": 990101, "known": [], "since": 0.0}}}
+    tc, store = _client(symbols, settings=settings)
+
+    res = tc.post("/api/symbols/XAUUSD", json={"magic": 990101})
+
+    assert res.status_code == 409
+    assert store.symbols["XAUUSD"].magic == 1
+
+
+def test_bulk_magic_blocked_by_ghost_orphan_scan_magic():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    settings = {"secondary_orphan_scan": {"OLDSYM": {"magic": 990101, "known": [], "since": 0.0}}}
+    tc, store = _client(symbols, settings=settings)
+
+    res = tc.post("/api/symbols-bulk", json={
+        "symbols": ["XAUUSD"], "patch": {"magic": 990101},
+    })
+
+    assert res.status_code == 409
+    assert store.symbols["XAUUSD"].magic == 1

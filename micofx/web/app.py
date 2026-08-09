@@ -385,14 +385,32 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 503, "MT5 baglantisi yok: acik pozisyonlar dogrulanamiyor, "
                      "islem guvenlik icin reddedildi")
 
+    def _positions(magic: int | None = None) -> list[dict[str, Any]]:
+        """Live positions for mutate/ownership guards.
+
+        ``positions()`` returns ``[]`` both when the account is flat AND when
+        ``positions_get`` failed mid-call (which flips ``connected`` False -
+        see mt5client.py). Optimizer.apply() already re-checks connected
+        after the call; web guards that only ``_require_connected()`` *before*
+        would treat that empty list as "clear" and fail open (DELETE /
+        seed-overwrite / primary exit-family PATCH / orphan-ticket avoid).
+        Refuse instead - same fail-closed stance as the optimizer.
+        """
+        pos = client.positions(magic=magic) if magic is not None else client.positions()
+        if not client.connected:
+            raise HTTPException(
+                503, "MT5 baglantisi koptu: acik pozisyonlar dogrulanamiyor, "
+                     "islem guvenlik icin reddedildi")
+        return pos
+
     def _open_under_magic(magic: int) -> list[dict[str, Any]]:
-        return [p for p in client.positions() if p["magic"] == magic]
+        return [p for p in _positions() if p["magic"] == magic]
 
     def _open_tagged_secondary(magic: int) -> list[dict[str, Any]]:
         tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
         if not tagged:
             return []
-        return [p for p in client.positions(magic=magic) if p["ticket"] in tagged]
+        return [p for p in _positions(magic=magic) if p["ticket"] in tagged]
 
     def _pending_orphan_scan(magic: int, symbol: str) -> bool:
         """True while engine.py (H1) is still watching this symbol/magic for
@@ -420,7 +438,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
         orphan_tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
         watch = tagged | orphan_tickets
-        live = [p for p in client.positions(magic=magic) if p["ticket"] in watch] if watch else []
+        live = [p for p in _positions(magic=magic) if p["ticket"] in watch] if watch else []
         return live, _pending_orphan_scan(magic, symbol)
 
     def _orphan_ticket_magics() -> set[int]:
@@ -434,7 +452,27 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
         if not tickets:
             return set()
-        return {p["magic"] for p in client.positions() if p["ticket"] in tickets}
+        return {p["magic"] for p in _positions() if p["ticket"] in tickets}
+
+    def _magic_blocked_by_orphan_state(new_magic: int) -> str | None:
+        """Human message if ``new_magic`` is still owned by orphan scan/tickets.
+
+        Manual magic PATCH/bulk only checked portfolio clash - next_magic /
+        soft-seed already avoid scan (+ live orphan-ticket) magics, so a
+        user-typed magic could land on a ghost scan entry (e.g. deleted
+        symbol's window still in settings) and have _scan_orphan_candidates
+        force-close that symbol's fills as "delayed secondary".
+        """
+        scan = store.get_setting("secondary_orphan_scan", {}) or {}
+        if isinstance(scan, dict):
+            for sym, meta in scan.items():
+                if isinstance(meta, dict) and int(meta.get("magic", -1)) == int(new_magic):
+                    return (f"magic {new_magic} tanimlanamayan ikincil ticket taramasinda "
+                            f"({sym}) - tarama bitmeden atanamaz")
+        if int(new_magic) in _orphan_ticket_magics():
+            return (f"magic {new_magic} hala acik orphan ticket uzerinde - "
+                    f"once kapanmasini bekleyin")
+        return None
 
     def _reject_magic_assignment_if_disconnected_orphans() -> None:
         """L1: create_symbol/reset(recreate)/soft-seed hand out a fresh magic
@@ -547,6 +585,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     raise HTTPException(
                         409, f"magic {new_magic} zaten {clash} tarafindan kullaniliyor - "
                              f"ayni magic iki sembole ayni pozisyonu yonetiyormus gibi karistirir")
+                blocked = _magic_blocked_by_orphan_state(new_magic)
+                if blocked:
+                    raise HTTPException(409, blocked)
             if guarded and current is not None:
                 if magic_changing or primary_changing:
                     open_here = _open_under_magic(current.magic)
@@ -648,7 +689,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # between this check and delete_symbol() and come out orphaned.
         _require_connected()
         with engine.entry_lock:
-            open_here = [p for p in client.positions() if p["magic"] == cfg.magic]
+            open_here = [p for p in _positions() if p["magic"] == cfg.magic]
             if open_here:
                 raise HTTPException(
                     409, f"{symbol} silinemedi: {len(open_here)} acik pozisyon var "
@@ -746,6 +787,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             if clash is not None:
                 raise HTTPException(
                     409, f"magic {new_magic} zaten {clash} tarafindan kullaniliyor")
+            # Same orphan-state avoid next_magic/create already enforce -
+            # bulk magic must not be the free door around it.
+            _require_connected()
+            blocked = _magic_blocked_by_orphan_state(new_magic)
+            if blocked:
+                raise HTTPException(409, blocked)
         changed = 0
         rejected: list[str] = []
         # Same hazard patch_symbol guards per-symbol: a strategy/TF/magic
@@ -770,7 +817,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _require_connected()
             engine.entry_lock.acquire()
         try:
-            open_magics = ({p["magic"] for p in client.positions()} if guarded else set())
+            # One positions() snapshot for the whole batch - and the
+            # post-call connected re-check inside _positions() - so a
+            # mid-request positions_get failure cannot make open_magics /
+            # watch_magics look empty while a second raw call might disagree.
+            all_pos = _positions() if guarded else []
+            open_magics = {p["magic"] for p in all_pos} if guarded else set()
             secondary_guarded = secondary_fields or secondary_params_present
             # Same untracked-fill risk class optimizer.apply_secondary() and
             # patch_symbol()'s _secondary_risk() guard for (see engine.py's
@@ -782,7 +834,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
             orphan_tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
             watch_tickets = tagged | orphan_tickets
-            watch_magics = ({p["magic"] for p in client.positions() if p["ticket"] in watch_tickets}
+            watch_magics = ({p["magic"] for p in all_pos if p["ticket"] in watch_tickets}
                             if secondary_guarded and watch_tickets else set())
             # M1: patch_symbol()'s primary guard already treats a pending
             # secondary_orphan_scan window the same as a visible open position
@@ -859,7 +911,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             with engine.entry_lock:
                 symbols_snapshot = list(store.symbols.values())
                 magics = {c.magic for c in symbols_snapshot}
-                open_bot = [p for p in client.positions() if p["magic"] in magics]
+                open_bot = [p for p in _positions() if p["magic"] in magics]
                 if open_bot:
                     raise HTTPException(
                         409, f"portfoy sifirlanamadi: {len(open_bot)} acik bot pozisyonu var "
@@ -872,6 +924,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                              f"devam eden semboller var: {', '.join(scanning)} - taramalarin "
                              f"bitmesini bekleyin")
                 count = store.replace_with_defaults()
+                # replace_with_defaults clears persisted orphan settings; keep
+                # the live engine maps in sync so a stale in-memory window
+                # cannot force-close fills under freshly seeded default magics.
+                if hasattr(engine, "_orphan_scan"):
+                    engine._orphan_scan.clear()
+                if hasattr(engine, "_orphan_tickets"):
+                    engine._orphan_tickets.clear()
+                if hasattr(engine, "_save_orphan_scan"):
+                    engine._save_orphan_scan()
+                if hasattr(engine, "_save_orphan_tickets"):
+                    engine._save_orphan_tickets()
         else:
             # H1: soft-seed can silently reassign a stale defaults.json magic
             # onto whatever it collides with (portfolio/scan handled inside
@@ -978,7 +1041,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # Without this, any ticket number - including a manually/externally
         # opened position sharing this account - could be closed through
         # this route; the ticket itself carries no notion of "ours".
-        pos = next((p for p in client.positions() if p["ticket"] == int(ticket)), None)
+        pos = next((p for p in _positions() if p["ticket"] == int(ticket)), None)
         if pos is None:
             raise HTTPException(404, "pozisyon bulunamadi (zaten kapanmis olabilir)")
         owned_magics = {c.magic for c in store.symbols.values()}

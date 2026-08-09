@@ -256,6 +256,13 @@ class Store:
         """Wipe user portfolio and reload the shipped starter list."""
         for symbol in list(self.symbols):
             self.delete_symbol(symbol)
+        # Drop persisted orphan windows before writing fixed default magics.
+        # Web already refuses overwrite while any scan is pending on the
+        # portfolio; clearing here also covers a stale settings entry for a
+        # symbol that is no longer in the book, so defaults.json magics
+        # cannot collide with a ghost scan (L-R1).
+        self.set_setting("secondary_orphan_scan", {})
+        self.set_setting("secondary_orphan_tickets", [])
         seeded = self.seed_symbols(overwrite=True)
         self.purge_orphan_history()
         return seeded
