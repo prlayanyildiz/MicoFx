@@ -35,6 +35,13 @@ cd $env:USERPROFILE
 git clone https://github.com/prlayanyildiz/MicoFx.git
 cd MicoFx
 ```
+Klasor zaten varsa (`destination path 'MicoFx' already exists`) clone
+atma - iceri girip 3. adıma gec:
+```powershell
+cd $env:USERPROFILE\MicoFx
+```
+(`bootstrap.ps1` mevcut `.git` gorurse `git pull` yapar, yeniden klonlamaz.)
+
 Ozel (private) depo oldugu icin GitHub giris istenebilir - tarayici acilir,
 hesabinla giris yapip onaylarsin.
 
@@ -66,8 +73,13 @@ yerine tek basina `.\KURULUM.bat` de calistirabilirsin.)
 hata ayiklamak istersen `start_console.bat` (konsol acik kalir).
 
 ### 6) Claude Code ile devam etmek istersen
-PowerShell bazen npm'in `claude.ps1` shim'ini "script calistirma kapali"
-diyerek engeller (`PSSecurityException` / ExecutionPolicy). Once tek seferlik:
+`bootstrap.ps1` genelde CurrentUser=RemoteSigned'i kendisi ayarlar.
+`-ExecutionPolicy Bypass -File` ile calistirirken sari "ExecutionPolicy
+ayarlanamadi / overridden by a more specific scope" satiri gorursen bu
+yanlis alarmdir - Process scope Bypass CurrentUser'i gecici ezer; kalici
+ayar yine yazilir. Yeni PowerShell penceresinde `claude` acilir.
+
+Hala engellenirse tek seferlik:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned

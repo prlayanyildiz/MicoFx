@@ -1,6 +1,7 @@
-# MicoFX - tek komutla, ele hic dokunmadan bulut sunucu kurulumu.
-# Calistirma: PowerShell'de (Yonetici degil, normal kullanici yeterli):
-#   irm https://raw.githubusercontent.com/prlayanyildiz/MicoFx/main/bootstrap.ps1 | iex
+# MicoFX - bulut sunucu kurulumu (klonlanmis repo icinden).
+# Calistirma (depo PRIVATE - raw.githubusercontent.com / irm|iex CALISMAZ):
+#   cd $env:USERPROFILE\MicoFx
+#   powershell -ExecutionPolicy Bypass -File .\bootstrap.ps1
 #
 # Yapar: Git, Python, Node.js, Claude Code yoksa kurar (once winget dener,
 # yoksa resmi siteden dogrudan indirip sessizce kurar), depoyu klonlar/
@@ -92,17 +93,24 @@ function Ensure-Node {
 
 function Ensure-ClaudeCode {
     # npm'in claude.ps1 shim'i Restricted ExecutionPolicy'de patlar
-    # (PSSecurityException). CurrentUser RemoteSigned bunu kalici acar;
-    # admin/MachinePolicy gerekmez. Basarisiz olursa kullanici claude.cmd
-    # ile devam edebilir - asagidaki mesajda hatirlatilir.
-    try {
-        $pol = Get-ExecutionPolicy -Scope CurrentUser
-        if ($pol -eq "Undefined" -or $pol -eq "Restricted" -or $pol -eq "AllSigned") {
-            Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force -ErrorAction Stop
-            Write-Host "[4/5] PowerShell ExecutionPolicy CurrentUser=RemoteSigned ayarlandi (claude.ps1 icin)." -ForegroundColor Cyan
+    # (PSSecurityException). CurrentUser RemoteSigned bunu kalici acar.
+    # Not: bootstrap "Bypass -File" ile acildiginda Process scope Bypass
+    # olur; Set-ExecutionPolicy CurrentUser'i yine yazar ama "overridden by
+    # a more specific scope" diye ERROR kaydi dusebilir - bu basarisizlik
+    # degil. Sonrasi Get-ExecutionPolicy -Scope CurrentUser ile dogrulanir.
+    $pol = Get-ExecutionPolicy -Scope CurrentUser
+    if ($pol -eq "Undefined" -or $pol -eq "Restricted" -or $pol -eq "AllSigned") {
+        try {
+            Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force -ErrorAction SilentlyContinue
+        } catch {
+            # ignore - verify below
         }
-    } catch {
-        Write-Host "[4/5] ExecutionPolicy ayarlanamadi: $_ - gerekirse 'claude.cmd' kullan." -ForegroundColor Yellow
+        $polAfter = Get-ExecutionPolicy -Scope CurrentUser
+        if ($polAfter -eq "RemoteSigned" -or $polAfter -eq "Unrestricted" -or $polAfter -eq "Bypass") {
+            Write-Host "[4/5] PowerShell ExecutionPolicy CurrentUser=$polAfter (claude.ps1 icin)." -ForegroundColor Cyan
+        } else {
+            Write-Host "[4/5] ExecutionPolicy CurrentUser hala $polAfter - 'claude' yerine 'claude.cmd' kullan." -ForegroundColor Yellow
+        }
     }
     if (Get-Command claude -ErrorAction SilentlyContinue) {
         Write-Host "[4/5] Claude Code zaten kurulu." -ForegroundColor Cyan
