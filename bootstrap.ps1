@@ -120,6 +120,45 @@ function Ensure-ClaudeCode {
     Refresh-Path
 }
 
+function Create-DesktopShortcuts {
+    # Hangi kullanici (Administrator vs) kuruyorsa onun masaustune.
+    # Public Desktop'a da dener - yetki yoksa atlar.
+    $targets = @()
+    try { $targets += [Environment]::GetFolderPath("Desktop") } catch {}
+    $publicDesk = Join-Path $env:PUBLIC "Desktop"
+    if (Test-Path $publicDesk) { $targets += $publicDesk }
+    $targets = $targets | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+    $startBat = Join-Path $Dest "start.bat"
+    if (-not (Test-Path $startBat)) {
+        Write-Host "[kisayol] start.bat bulunamadi, atlandi." -ForegroundColor Yellow
+        return
+    }
+
+    $shell = New-Object -ComObject WScript.Shell
+    foreach ($desk in $targets) {
+        try {
+            $lnk = Join-Path $desk "MicoFX.lnk"
+            $sc = $shell.CreateShortcut($lnk)
+            $sc.TargetPath = $startBat
+            $sc.WorkingDirectory = $Dest
+            $sc.WindowStyle = 7
+            $sc.Description = "MicoFX baslat ($Dest)"
+            $sc.Save()
+
+            $lnkFolder = Join-Path $desk "MicoFX Klasor.lnk"
+            $sc2 = $shell.CreateShortcut($lnkFolder)
+            $sc2.TargetPath = $Dest
+            $sc2.Description = "MicoFX proje klasoru"
+            $sc2.Save()
+
+            Write-Host "[kisayol] Masaustu: MicoFX.lnk + MicoFX Klasor.lnk ($desk)" -ForegroundColor Cyan
+        } catch {
+            Write-Host "[kisayol] $desk yazilamadi: $_" -ForegroundColor Yellow
+        }
+    }
+}
+
 Write-Host "=== MicoFX bulut kurulumu (tam otomatik) ===" -ForegroundColor Cyan
 
 Ensure-Git
@@ -143,8 +182,10 @@ Push-Location $Dest
 cmd /c "KURULUM.bat < NUL"
 Pop-Location
 
+Create-DesktopShortcuts
+
 Write-Host ""
 Write-Host "Bitti." -ForegroundColor Green
 Write-Host "1) MT5: Algoritmik alim satima izin ver" -ForegroundColor Green
-Write-Host "2) start.bat ile baslat" -ForegroundColor Green
+Write-Host "2) Masaustundeki MicoFX kisayolu ile baslat" -ForegroundColor Green
 Write-Host "Claude: cd `"$Dest`"; claude   (olmazsa claude.cmd)" -ForegroundColor Green
