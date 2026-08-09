@@ -1,10 +1,15 @@
 """MicoFX - scheduled evening backup.
 
-Zips the project (excluding .venv/__pycache__/.pytest_cache) into a
+Zips the project (skipping the throwaway trees in EXCLUDE_DIRS) into a
 timestamped archive under the destination configured in the web panel's
-System tab (system.backup_dir), and keeps only the most recent
-system.backup_keep archives. Invoked by the "MicoFX Aksam Yedegi" Windows
-scheduled task; safe to run manually too.
+System tab (system.backup_dir), optionally copied to a second destination,
+keeping only the most recent system.backup_keep archives at each. Invoked by
+the "MicoFX Aksam Yedegi" Windows scheduled task; safe to run manually too.
+
+The settings DB goes in as a consistent sqlite snapshot rather than a live
+file copy (_snapshot_db), and the finished archive is checked for stray
+duplicates of it (_verify_archive) - it is the only file in here that cannot
+be recovered from git, so it is the only one worth being careful about.
 """
 from __future__ import annotations
 
@@ -19,7 +24,13 @@ from pathlib import Path
 from micofx.paths import DB_PATH, ROOT
 from micofx.store import Store
 
-EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache", ".git"}
+# Throwaway trees that must never reach an archive. ``.pytest_tmp`` is here
+# because it actually happened: a test run started with
+# ``--basetemp=.pytest_tmp`` leaves its fixtures in the workspace, and two
+# nightly archives went out carrying 23 of them - including seven scratch
+# copies of a settings DB (see _verify_archive for why that specifically is
+# dangerous).
+EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache", ".pytest_tmp", ".git"}
 
 # Where the settings DB sits inside the project, resolved once at import
 # against the real paths. Everything below goes through ``ROOT / DB_REL``
@@ -68,6 +79,29 @@ def _snapshot_db(source: Path, workdir: Path) -> Path | None:
     finally:
         src.close()
     return out
+
+
+def _verify_archive(zip_path: Path) -> list[str]:
+    """Report any decoy settings DB in the finished archive.
+
+    EXCLUDE_DIRS is a list of names, so it only ever catches junk somebody has
+    already seen. This catches the class instead, and it is the one thing worth
+    catching: the archive is supposed to contain exactly one ``micofx.db`` -
+    the consistent snapshot at ``data/micofx.db``. When two nightly archives
+    picked up a stray ``.pytest_tmp`` tree they ended up with eight, seven of
+    them 12 KB scratch fixtures. The real one was intact, but ``.pytest_tmp/``
+    sorts before ``data/``, so restoring by "first path ending in micofx.db"
+    silently hands back an empty database.
+
+    Returns the offending entry names; the caller warns rather than failing.
+    A polluted archive still holds a good snapshot at the right path, and
+    refusing to produce a backup over this would trade a restore hazard for
+    no backup at all.
+    """
+    wanted = DB_REL.as_posix()
+    with zipfile.ZipFile(zip_path) as zf:
+        return [n for n in zf.namelist()
+                if n.endswith(DB_REL.name) and n != wanted]
 
 
 def _prune(folder: Path, keep: int) -> None:
@@ -163,6 +197,18 @@ def main() -> int:
         shutil.rmtree(workdir, ignore_errors=True)
 
     print(f"Yedek olusturuldu: {zip_path}")
+
+    decoys = _verify_archive(zip_path)
+    if decoys:
+        print(f"UYARI: arsivde {len(decoys)} adet fazladan '{DB_REL.name}' var - "
+              f"geri yuklerken MUTLAKA '{DB_REL.as_posix()}' yolunu kullanin, "
+              f"yol sonuna bakarak secmeyin:")
+        for name in decoys[:5]:
+            print(f"  {name}")
+        if len(decoys) > 5:
+            print(f"  ... ve {len(decoys) - 5} tane daha")
+        print(f"  Bunlar muhtemelen proje klasorunde kalmis gecici bir "
+              f"klasorden geliyor; EXCLUDE_DIRS'e ekleyin.")
 
     # Copy the finished archive rather than building it twice: a second walk
     # would snapshot the DB again a few seconds later, so the two "copies"
