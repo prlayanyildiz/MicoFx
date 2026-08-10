@@ -130,3 +130,48 @@ def test_every_audit_verdict(configured, broker, expected):
            else "okunamadi" if broker is None
            else "kayik" if close_mismatch else "uyumlu")
     assert got == expected
+
+
+# ------------------------------------------- the missing binding must be quiet
+
+def test_a_missing_binding_returns_none_without_warning(monkeypatch):
+    """20 identical WARN lines per audit run, all of them to disk, for a
+    condition that can never change on this package. A log that buries its own
+    real warnings under a known non-issue is the failure this whole day was
+    about."""
+    from micofx.logbus import LOG
+    from micofx import mt5client as mod
+
+    class _NoSessions:
+        pass
+
+    lines: list[str] = []
+    monkeypatch.setattr(mod, "mt5", _NoSessions())
+    monkeypatch.setattr(LOG, "emit",
+                        lambda msg, level="INFO", symbol="": lines.append(msg))
+
+    c = object.__new__(MT5Client)
+    c.select = lambda s: s
+    assert MT5Client.last_session_close_minute(c, "US30", 5) is None
+    assert lines == []
+
+
+def test_a_real_failure_on_a_capable_build_still_warns(monkeypatch):
+    from micofx.logbus import LOG
+    from micofx import mt5client as mod
+
+    class _Broken:
+        @staticmethod
+        def symbol_info_session_trade(*a):
+            raise RuntimeError("terminal busy")
+
+    lines: list[str] = []
+    monkeypatch.setattr(mod, "mt5", _Broken())
+    monkeypatch.setattr(LOG, "emit",
+                        lambda msg, level="INFO", symbol="": lines.append(msg))
+
+    c = object.__new__(MT5Client)
+    c.select = lambda s: s
+    c._lock = threading.Lock()
+    assert MT5Client.last_session_close_minute(c, "US30", 5) is None
+    assert any("Seans programi okunamadi" in m for m in lines)

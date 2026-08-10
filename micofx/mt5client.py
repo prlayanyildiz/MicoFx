@@ -607,23 +607,27 @@ class MT5Client:
         return int(round(deltas[len(deltas) // 2] / 3600.0))
 
     def last_session_close_minute(self, symbol: str, weekday: int) -> int | None:
-        """NOTE: the MetaTrader5 Python package exposes no session schedule.
-
-        ``symbol_info_session_trade`` is an MQL5 function with no binding in
-        the Python package (verified against 5.0.6090), so every call here
-        raises AttributeError, logs a warning and returns None. Kept because
-        a future package version may add it; callers must treat None as
-        "could not check", never as "nothing wrong" - see
-        ``broker_clock_offset`` for what is measurable today.
-        """
         """Broker-configured close time (minutes since midnight) for ``symbol``
         on ``weekday`` (0=Sunday..6=Saturday, matching MQL5's ENUM_DAY_OF_WEEK).
 
         A symbol can have several sub-sessions in one day (e.g. a lunch break);
-        this returns the *last* one's end, i.e. the real close. None means the
-        broker reports no session at all that day (already closed, or the
-        symbol/terminal does not expose a schedule).
+        this returns the *last* one's end, i.e. the real close.
+
+        None means "could not determine", and callers must never read it as
+        "nothing wrong". On the current MetaTrader5 package that is the only
+        answer it can give: ``symbol_info_session_trade`` is an MQL5 function
+        with no Python binding (checked against 5.0.6090). That absence is a
+        static property of the installed package, not a fault, so it returns
+        quietly - warning about it once per symbol per call buried the log
+        under 20 identical lines every time the audit ran, and those lines go
+        to disk. The audit surfaces it as "okunamadi" instead, which is where
+        it belongs. A genuine runtime failure on a build that *does* expose
+        the call still warns.
+
+        See ``broker_utc_offset_hours`` for what is actually measurable today.
         """
+        if not hasattr(mt5, "symbol_info_session_trade"):
+            return None
         real = self.select(symbol)
         if real is None:
             return None
