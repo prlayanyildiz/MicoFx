@@ -1716,6 +1716,27 @@ class Engine:
         # the tick here used to ratchet stops on wicks the backtest never saw.
         live = tick["bid"] if is_buy else tick["ask"]
         if bars is not None and hasattr(bars, "close") and len(bars.close) > 0:
+            # The reference bar has to have closed AFTER this position opened.
+            # The entry fires on a signal from the bar that just closed, so on
+            # the first pass that same bar is still the last closed one - and
+            # its close is where price was BEFORE the fill, not profit the trade
+            # has made. Every entry filling better than its signal bar's close
+            # (which is most of a mean-reversion book: the whole point is to buy
+            # the dip under it) therefore read as instantly in profit and got
+            # its stop ratcheted in on the strength of it, seconds after
+            # opening, to a distance far tighter than the one the position was
+            # sized against. The walk-forward never modelled that: it enters at
+            # bar j0's open and first consults close[j0], a bar that closes
+            # after the entry by construction.
+            # Absent only on a stand-in bars object; a real Bars always carries
+            # it. Skipping the check then (rather than treating "unknown" as
+            # "too old") keeps the failure pointing at "trail still works",
+            # never at "trail silently switched off for every position".
+            opened_at = int(pos.get("time", 0) or 0)
+            closed_at = getattr(bars, "last_closed_time", None)
+            if opened_at and closed_at is not None \
+                    and int(closed_at) + timeframe_seconds(cfg.timeframe) <= opened_at:
+                return True
             ref = float(bars.close[-1])
             # Everything derived from a closed bar is fixed until the next one
             # closes, so a "no" for those reasons is final for this bar.

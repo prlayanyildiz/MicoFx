@@ -22,11 +22,26 @@ import pytest
 from micofx.engine import Engine
 
 
+TF_SEC = 300          # M5, matching _Cfg below
+BAR_OPEN = 1_000_000  # the reference bar opens here, closing TF_SEC later
+
+
 class _Bars:
+    """Modelled on the real Bars, including the timestamp _update_stop reads.
+
+    ``last_closed_time`` matters: the trail refuses a reference bar that closed
+    before the position opened (see test_trail_ignores_pre_entry_bar), so these
+    fixtures have to place their position inside the bar to exercise the rest.
+    """
+
     def __init__(self, close: float) -> None:
         self.close = np.array([close - 1.0, close])
         self.high = self.close + 0.5
         self.low = self.close - 0.5
+
+    @property
+    def last_closed_time(self) -> int:
+        return BAR_OPEN
 
 
 class _Client:
@@ -52,6 +67,7 @@ class _Client:
 class _Cfg:
     symbol = "NAS100"
     magic = 7
+    timeframe = "M5"          # TF_SEC above
     sl_atr_mult = 1.0
     trail_start_atr = 0.5
     trail_step_atr = 1.0
@@ -67,8 +83,11 @@ def _engine(client) -> Engine:
 
 
 def _pos(sl: float, entry: float = 100.0, ticket: int = 1):
+    # Opened inside the reference bar, so that bar closes after the fill and
+    # its close is genuine post-entry price action.
     return {"ticket": ticket, "symbol": "NAS100", "side": "buy", "sl": sl,
-            "tp": 0.0, "price_open": entry, "volume": 0.3, "magic": 7}
+            "tp": 0.0, "price_open": entry, "volume": 0.3, "magic": 7,
+            "time": BAR_OPEN + 10}
 
 
 ATR = 1.0
