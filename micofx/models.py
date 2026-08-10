@@ -353,14 +353,25 @@ class SymbolConfig:
         return out
 
 
-# Subset of OPT_FIELDS that engine._update_stop reads live off cfg for a
-# position that is ALREADY open - as opposed to entry-signal fields, which only
-# shape NEW entries and can't disturb a trade in flight. A "refine" apply (same
+# Fields that engine._update_stop reads live off cfg for a position that is
+# ALREADY open - as opposed to entry-signal fields, which only shape NEW
+# entries and can't disturb a trade in flight. A "refine" apply (same
 # strategy/timeframe, new numbers) must hold these back while a position is
 # open, or the stop/trail math for that trade silently changes mid-flight to
 # numbers it was never opened or sized against.
+#
+# ``atr_period`` is here for the same reason even though it is not an
+# OPT_FIELD and the optimizer therefore can never write it: every distance
+# _update_stop computes is a multiple of the live ATR (trail at
+# ``close - trail_step_atr * atr``, the original-risk floor at
+# ``atr * sl_atr_mult``), and that ATR is built from cfg.atr_period on every
+# cycle rather than snapshotted at entry. Changing it by hand, or from a
+# script hitting the API, moves an open position's whole stop geometry just
+# as surely as editing trail_step_atr does - it was the one input to that
+# math the mid-trade guard did not cover.
 EXIT_RISK_FIELDS = frozenset({
     "sl_atr_mult", "trail_start_atr", "trail_step_atr", "trail_mode", "trail_lookback",
+    "atr_period",
 })
 
 # Parameters the optimizer is allowed to overwrite on a SymbolConfig.
