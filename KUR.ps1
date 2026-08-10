@@ -73,26 +73,62 @@ if (Test-Path -LiteralPath (Join-Path $Root ".venv\Scripts\python.exe")) {
 # --------------------------------------------------------- [4] Kisayollar
 Step 4 "Masaustu kisayollari olusturuluyor..."
 
-# Birden fazla aday: OneDrive yonlendirmesi, is/okul OneDrive'i ve ortak
-# masaustu ayni makinede farkli yerlerde olabilir; hangisi gercek masaustuyse
-# kullanicinin gordugu o. Hepsine yazmak, yanlis birini secip "kisayol
-# gorunmuyor" demekten iyi.
-$candidates = New-Object System.Collections.Generic.List[string]
+# TEK masaustune yazilir. Onceki surum "hangisi gercek masaustuyse o olsun"
+# diye butun adaylara yaziyordu, ama bunlar alternatif adresler degil: Explorer
+# ortak masaustunu (C:\Users\Public\Desktop) her kullanicinin kendi masaustunun
+# UZERINE bindirir, yani ikisine birden yazmak tek bir masaustunde her ikonu
+# IKI KEZ gosterir - bildirilen "cift kisayol" tam olarak buydu. Ustelik
+# Public'e yazmak yonetici hakki ister ve oradaki kopya, kullanici masaustunden
+# silindiginde geride kalir.
+#
+# GetFolderPath("Desktop") zaten OneDrive/klasor yonlendirmesini bilir ve
+# kullanicinin GERCEKTEN gordugu klasoru dondurur; digerleri yalnizca o
+# okunamazsa devreye giren yedeklerdir.
+$Desktop = $null
 foreach ($p in @(
     [Environment]::GetFolderPath("Desktop"),
-    [Environment]::GetFolderPath("CommonDesktopDirectory"),
-    (Join-Path $env:USERPROFILE "Desktop"),
-    (Join-Path $env:USERPROFILE "OneDrive\Desktop")
+    (Join-Path $env:USERPROFILE "OneDrive\Desktop"),
+    (Join-Path $env:USERPROFILE "Desktop")
 )) {
-    if (-not [string]::IsNullOrWhiteSpace($p) -and -not $candidates.Contains($p)) {
-        [void]$candidates.Add($p)
+    if (-not [string]::IsNullOrWhiteSpace($p) -and (Test-Path -LiteralPath $p)) {
+        # GetFullPath, Get-Item'in aksine diske hic bakmaz. Public masaustu
+        # gibi GIZLI sistem klasorlerinde Get-Item -Force olmadan "bulunamadi"
+        # diyor ve $ErrorActionPreference=Stop yuzunden kurulumu dusuruyordu.
+        $Desktop = [IO.Path]::GetFullPath($p)
+        break
     }
 }
-Get-ChildItem -Path $env:USERPROFILE -Directory -Filter "OneDrive*" -ErrorAction SilentlyContinue |
-    ForEach-Object {
-        $d = Join-Path $_.FullName "Desktop"
-        if (-not $candidates.Contains($d)) { [void]$candidates.Add($d) }
+
+# Eski kurulumlarin diger klasorlere birakmis oldugu kopyalar temizlenir -
+# yoksa bu duzeltme yalnizca YENI makinelerde ise yarar, cift ikonu zaten
+# olusmus olan makinede kisayollar oldugu gibi durmaya devam ederdi.
+function Remove-StaleShortcuts([string]$folder, [string]$keep) {
+    if ([string]::IsNullOrWhiteSpace($folder) -or -not (Test-Path -LiteralPath $folder)) { return 0 }
+    $full = [IO.Path]::GetFullPath($folder)
+    # Yazdigimiz masaustunun kendisine dokunma. Karsilastirma buyuk/kucuk harf
+    # duyarsiz: ayni klasor "OneDrive" ve "Onedrive" olarak gelebiliyor ve
+    # onceki surumun kullandigi List.Contains bunu ayni saymiyordu.
+    if ($keep -and $full.TrimEnd('\') -ieq $keep.TrimEnd('\')) { return 0 }
+    $removed = 0
+    $probe = New-Object -ComObject WScript.Shell
+    foreach ($name in @("MicoFX Baslat", "MicoFX Durdur", "MicoFX Terminal", "MicoFX Klasor")) {
+        $lnk = Join-Path $full "$name.lnk"
+        if (-not (Test-Path -LiteralPath $lnk)) { continue }
+        # Yalnizca gercekten bir MicoFX agacini gosteren kisayol silinir; ayni
+        # isimde baska bir sey varsa elimiz surmez.
+        $target = ""
+        try { $target = $probe.CreateShortcut($lnk).TargetPath } catch { continue }
+        if ($target -notmatch '(?i)micofx') { continue }
+        try {
+            Remove-Item -LiteralPath $lnk -Force -ErrorAction Stop
+            $removed++
+        } catch {
+            # Public masaustu yonetici hakki ister; elde degil, sessizce gec.
+            Say "  Silinemedi (yonetici gerekebilir): $lnk" "Yellow"
+        }
     }
+    return $removed
+}
 
 $items = @(
     @{ Name = "MicoFX Baslat";   Rel = "start.bat";         Style = 7; Desc = "MicoFX baslat (sessiz)" },
@@ -102,13 +138,12 @@ $items = @(
 
 $shell = New-Object -ComObject WScript.Shell
 $written = 0
-foreach ($desk in $candidates) {
-    if (-not (Test-Path -LiteralPath $desk)) { continue }   # yoksa olusturma, gercek masaustu degil
+if ($Desktop) {
     foreach ($it in $items) {
         $target = Join-Path $Root $it.Rel
         if (-not (Test-Path -LiteralPath $target)) { continue }
         try {
-            $lnk = $shell.CreateShortcut((Join-Path $desk "$($it.Name).lnk"))
+            $lnk = $shell.CreateShortcut((Join-Path $Desktop "$($it.Name).lnk"))
             $lnk.TargetPath = $target
             $lnk.WorkingDirectory = $Root
             $lnk.WindowStyle = [int]$it.Style
@@ -116,11 +151,11 @@ foreach ($desk in $candidates) {
             $lnk.Save()
             $written++
         } catch {
-            Say "  Yazilamadi: $desk\$($it.Name).lnk" "Yellow"
+            Say "  Yazilamadi: $Desktop\$($it.Name).lnk" "Yellow"
         }
     }
     try {
-        $lnk = $shell.CreateShortcut((Join-Path $desk "MicoFX Klasor.lnk"))
+        $lnk = $shell.CreateShortcut((Join-Path $Desktop "MicoFX Klasor.lnk"))
         $lnk.TargetPath = $Root
         $lnk.WorkingDirectory = $Root
         $lnk.Description = "MicoFX proje klasoru"
@@ -128,8 +163,22 @@ foreach ($desk in $candidates) {
         $written++
     } catch { }
 }
-if ($written -gt 0) { Say "  $written kisayol yazildi (masaustunde F5)." "Green" }
+if ($written -gt 0) { Say "  $written kisayol yazildi -> $Desktop" "Green" }
 else { Say "  Kisayol yazilamadi - start.bat'i klasorden calistirabilirsiniz." "Yellow" }
+
+# Yazdigimiz masaustu disindaki her yerdeki eski kopyalar temizlenir.
+$stale = New-Object System.Collections.Generic.List[string]
+foreach ($p in @(
+    [Environment]::GetFolderPath("CommonDesktopDirectory"),
+    (Join-Path $env:USERPROFILE "Desktop"),
+    (Join-Path $env:USERPROFILE "OneDrive\Desktop")
+)) { if (-not [string]::IsNullOrWhiteSpace($p)) { [void]$stale.Add($p) } }
+Get-ChildItem -Path $env:USERPROFILE -Directory -Filter "OneDrive*" -ErrorAction SilentlyContinue |
+    ForEach-Object { [void]$stale.Add((Join-Path $_.FullName "Desktop")) }
+
+$cleaned = 0
+foreach ($d in $stale) { $cleaned += Remove-StaleShortcuts $d $Desktop }
+if ($cleaned -gt 0) { Say "  $cleaned eski/cift kisayol temizlendi." "Green" }
 
 # ------------------------------------------------------------------- bitti
 Write-Host ""
