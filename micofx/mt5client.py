@@ -944,6 +944,26 @@ class MT5Client:
                              f"(MT5 baglantisi koptu) - emir gonderilmedi"}
         before_tickets = {int(p.ticket) for p in before_raw if p.magic == magic}
 
+        # This snapshot and the send below are deliberately NOT one critical
+        # section, which looks like an ambiguous-ticket race and mostly is not:
+        #
+        # * open_market has exactly one caller (Engine._open), it runs on the
+        #   single trading-cycle thread, and it is already inside entry_lock -
+        #   so no second entry from this process can land in the gap.
+        # * before_tickets is only consulted by the THIRD resolution fallback.
+        #   The deal's own position_id and then positions_get(result.order)
+        #   are both authoritative and neither looks at this snapshot.
+        # * that third path filters on p.magic == magic (as does this line),
+        #   so a manual trade or another EA - different magic - cannot be
+        #   mistaken for this fill. Only a second MicoFX on the same account
+        #   and magic could, which the README already forbids outright.
+        #
+        # Closing the gap means holding self._lock across order_send, and that
+        # lock serialises EVERY MT5 call in the process - ticks, positions,
+        # the panel's own reads. order_send is a broker round trip that can
+        # take seconds, so the whole app would stall behind each entry. That
+        # is a real, recurring cost against a residual risk already covered
+        # three ways over. Left open on purpose; this note is the record.
         with self._lock:
             result = mt5.order_send(request)
 

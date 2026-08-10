@@ -157,12 +157,17 @@ def _exit_axes(body: dict[str, Any]):
 
 # Engine-internal bookkeeping: Optimizer.apply()/_apply_secondary_locked()
 # write these to defer exit/risk fields until a position is flat (see
-# Engine._apply_pending_exits). They carry no schema/validation of their own
-# - _apply_pending_exits trusts whatever is in them and writes it verbatim
-# once flat - so a client PATCHing this field directly could stage ANY
-# symbol field (not just exit/risk ones) to land later completely
-# unchecked, bypassing every guard above. Never a legitimate thing for a
-# human or external API caller to set.
+# Engine._apply_pending_exits). They carry no schema of their own, so a
+# client PATCHing this field directly could stage ANY symbol field - not
+# just exit/risk ones - to land later, bypassing every guard above. Never a
+# legitimate thing for a human or external API caller to set.
+#
+# _apply_pending_exits does now re-check the exit bounds at the moment a
+# pending patch lands, so that specific class no longer rides through. That
+# is a backstop for stored state (a patch predating the check, a restored
+# backup, a hand-edited row), not a reason to open this door: it covers the
+# three exit numbers only, and every other field staged here would still
+# land without ever meeting the validation on this endpoint.
 _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
 
 

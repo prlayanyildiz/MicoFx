@@ -1463,21 +1463,31 @@ class Engine:
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         live = {p["ticket"] for p in self._positions}
         self._stop_bar = {t: v for t, v in self._stop_bar.items() if t in live}
-        if self._weekend_pending - live:
-            self._weekend_pending &= live
-            self.store.set_setting("weekend_pending_tickets", sorted(self._weekend_pending))
-        if self._force_flat_pending - live:
-            self._force_flat_pending &= live
-            self.store.set_setting("force_flat_pending_tickets",
-                                   sorted(self._force_flat_pending))
-        if self._sec_tickets - live:
-            self._sec_tickets &= live
-            self.store.set_setting("secondary_tickets", sorted(self._sec_tickets))
-        if self._orphan_tickets - live:
-            # Gone from the broker already (closed by a previous cycle's retry,
-            # or manually) - stop chasing it.
-            self._orphan_tickets &= live
-            self._save_orphan_tickets()
+        # The prune is held under entry_lock because the seed-overwrite and
+        # DELETE magic-reuse paths clear these same maps under it (see
+        # web/app.py's seed handler and _scan_orphan_candidates). Pruning
+        # against ``live`` - a snapshot taken from this cycle's position read -
+        # while a clear runs concurrently could otherwise re-persist tag state
+        # the clear had just dropped, against freshly seeded default magics.
+        # Only the prune is inside: the management loop below sends broker
+        # calls (modify/close) that can block for seconds, and holding the
+        # entry lock across those would stall every web write behind them.
+        with self.entry_lock:
+            if self._weekend_pending - live:
+                self._weekend_pending &= live
+                self.store.set_setting("weekend_pending_tickets", sorted(self._weekend_pending))
+            if self._force_flat_pending - live:
+                self._force_flat_pending &= live
+                self.store.set_setting("force_flat_pending_tickets",
+                                       sorted(self._force_flat_pending))
+            if self._sec_tickets - live:
+                self._sec_tickets &= live
+                self.store.set_setting("secondary_tickets", sorted(self._sec_tickets))
+            if self._orphan_tickets - live:
+                # Gone from the broker already (closed by a previous cycle's
+                # retry, or manually) - stop chasing it.
+                self._orphan_tickets &= live
+                self._save_orphan_tickets()
         for pos in self._positions:
             if pos["ticket"] in self._orphan_tickets:
                 # An unresolved secondary fill from a prior cycle - never let it
