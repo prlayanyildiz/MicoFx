@@ -3,6 +3,7 @@ from __future__ import annotations
 import html as html_escape
 import math
 import os
+import re
 import secrets
 import signal
 import subprocess
@@ -130,6 +131,60 @@ def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYM
             raise HTTPException(400, f"{name} gecersiz ({value}) - {lo}'dan buyuk olmali")
         if hi is not None and value > hi:
             raise HTTPException(400, f"{name} gecersiz ({value}) - en fazla {hi} olabilir")
+
+
+_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _validate_sessions(patch: dict[str, Any]) -> None:
+    """Reject session windows and trade days that silently mean 24/7.
+
+    models._hhmm is deliberately lenient - it returns 0 for anything it cannot
+    parse - and session_windows() then drops any window whose start equals its
+    end. Those two reasonable behaviours combine into an unreasonable one: a
+    window typed as "9"-"17" instead of "09:00"-"17:00" parses to (0, 0), gets
+    dropped as zero-length, and evaluate() falls through to its "no windows"
+    branch, which trades every minute of every trade day. The operator asked
+    for eight hours and got twenty-four, on a live account, with the panel
+    showing "7/24" as the only clue.
+
+    Nothing validated this field at all, so every malformed spelling reached
+    the config: "abc", "9", "09:00:00", an empty string, or a deliberate
+    zero-length 09:00-09:00. trade_days had the same gap - [] or [0, 9] was
+    accepted and left the symbol permanently shut with the panel reporting it
+    opens in 0 minutes.
+    """
+    sessions = patch.get("sessions")
+    if sessions is not None:
+        if not isinstance(sessions, list):
+            raise HTTPException(400, "sessions bir liste olmali")
+        for i, item in enumerate(sessions):
+            if not isinstance(item, dict):
+                raise HTTPException(400, f"sessions[{i}] bir nesne olmali")
+            for key in ("start", "end"):
+                value = item.get(key)
+                if not isinstance(value, str) or not _HHMM_RE.match(value.strip()):
+                    raise HTTPException(
+                        400, f"sessions[{i}].{key} gecersiz ({value!r}) - "
+                             f"SS:DD bicimi gerekli, ornegin 09:00")
+            if item["start"].strip() == item["end"].strip():
+                # Dropped by session_windows(), and a config left with no
+                # windows at all trades around the clock - the opposite of
+                # what a zero-length window reads as.
+                raise HTTPException(
+                    400, f"sessions[{i}] baslangic ve bitis ayni ({item['start']}) - "
+                         f"sifir uzunluklu pencere 7/24 islem anlamina gelir; "
+                         f"seansi kapatmak icin use_sessions yerine trade_days kullanin")
+
+    days = patch.get("trade_days")
+    if days is not None:
+        if not isinstance(days, list) or not days:
+            raise HTTPException(400, "trade_days bos olamaz (1=Pazartesi .. 7=Pazar)")
+        for d in days:
+            if not isinstance(d, int) or isinstance(d, bool) or not 1 <= d <= 7:
+                raise HTTPException(
+                    400, f"trade_days gecersiz gun ({d!r}) - 1..7 arasi olmali "
+                         f"(1=Pazartesi, 7=Pazar)")
 
 
 def _exit_axes(body: dict[str, Any]):
@@ -648,6 +703,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _validate_risk_bounds(patch["secondary_params"], label="secondary_params")
         _validate_enum_fields(patch)
         _validate_risk_bounds(patch)
+        _validate_sessions(patch)
         current = store.symbols.get(symbol)
         # Same hazard as DELETE: the magic number is the only thing that maps
         # an open position back to its managing config. Changing it out from
@@ -1043,6 +1099,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _validate_risk_bounds(body.patch["secondary_params"], label="secondary_params")
         _validate_enum_fields(body.patch)
         _validate_risk_bounds(body.patch)
+        # Bulk is the other door to the same write, and the one that would
+        # apply a malformed window to the whole portfolio at once.
+        _validate_sessions(body.patch)
         targets = body.symbols or list(store.symbols)
         needs_tf_check = "strategy" in body.patch or "timeframe" in body.patch
         magic_changing = "magic" in body.patch
