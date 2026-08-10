@@ -300,17 +300,6 @@
       ]
     },
     {
-      "symbol": "EUSTX50",
-      "group": "index",
-      "magic": 990109,
-      "sessions": [
-        {
-          "start": "03:15",
-          "end": "22:55"
-        }
-      ]
-    },
-    {
       "symbol": "FRA40",
       "group": "index",
       "magic": 990102,
@@ -354,17 +343,6 @@
         }
       ],
       "max_spread_atr": 0.05
-    },
-    {
-      "symbol": "SPA35",
-      "group": "index",
-      "magic": 990116,
-      "sessions": [
-        {
-          "start": "09:00",
-          "end": "22:55"
-        }
-      ]
     },
     {
       "symbol": "UK100",
