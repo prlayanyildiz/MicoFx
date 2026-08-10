@@ -46,6 +46,7 @@ def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
             min_stop=payload.get("min_stop"),
             all_hours=bool(payload.get("all_hours")),
             day_end_flatten_min=int(payload.get("day_end_flatten_min") or 0),
+            max_cost_share=float(payload.get("max_cost_share") or 0.0),
         )
     except Exception as exc:                      # keep one bad sweep from killing the run
         outcome = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -317,6 +318,16 @@ class Optimizer:
         # ``backtest.flatten_mask``) - independent of all_hours live, so it is
         # threaded through unconditionally.
         day_end_flatten_min = int(self.store.system.day_end_flatten_min)
+        # Same ceiling engine._try_entry applies before every order, expressed as
+        # a share of R rather than a percentage. Without it the search ranked
+        # tight-stop configs whose spread+commission ate most of the risk, and
+        # live then refused every one of those entries - the optimizer and the
+        # engine disagreeing about what is tradable. Zero when the live gate is
+        # off, which leaves the search unfiltered exactly as before.
+        sys_cfg = self.store.system
+        max_cost_share = (float(sys_cfg.max_cost_pct_of_risk) / 100.0
+                          if (sys_cfg.block_high_cost and sys_cfg.max_cost_pct_of_risk > 0)
+                          else 0.0)
 
         # Timeframe and strategy family are both search dimensions; each pairing is
         # judged on its own held-out slice so they compete on equal terms.
@@ -364,6 +375,12 @@ class Optimizer:
                     "plateau": plateau, "commission": commission, "min_stop": min_stop,
                     "refine_rounds": refine_rounds, "all_hours": all_hours,
                     "day_end_flatten_min": day_end_flatten_min,
+                    # The live entry gate's own ceiling, handed to the search so
+                    # it stops proposing configs the engine will refuse. Read
+                    # from the same setting the engine reads, and only when that
+                    # gate is actually switched on - otherwise 0 leaves the
+                    # search unfiltered, exactly as before.
+                    "max_cost_share": max_cost_share,
                 })
         return plan
 

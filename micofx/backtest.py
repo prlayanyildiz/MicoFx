@@ -597,7 +597,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                  commission_price: float = 0.0, refine_rounds: int = 2,
                  should_cancel=None, on_progress=None,
                  min_stop: float | None = None, all_hours: bool = False,
-                 day_end_flatten_min: int = 0) -> dict[str, Any]:
+                 day_end_flatten_min: int = 0,
+                 max_cost_share: float = 0.0) -> dict[str, Any]:
     """Segmented walk-forward search over a three-way split of history.
 
     History is cut into equal segments and used for three separate jobs, because
@@ -716,6 +717,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     # the plateau blend can see a spike's dead neighbourhood for what it is.
     pool: dict[tuple[int, ...], float] = {}
     rejected_inconsistent = 0
+    rejected_costly = 0
     evaluated = 0
     screened = 0
     cancelled = False
@@ -729,7 +731,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         what is measured or recorded - only how often the indicator stack is
         rebuilt.
         """
-        nonlocal rejected_inconsistent, evaluated, screened
+        nonlocal rejected_inconsistent, rejected_costly, evaluated, screened
         groups: dict[tuple, list[tuple[tuple[int, ...], dict[str, Any], Params]]] = {}
         for idx in batch:
             if idx in pool:
@@ -765,7 +767,20 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                 pool[idx] = 0.0
 
                 if pooled.trades >= min_trades and mean_score > 0:
-                    if positive < min_positive_ratio:
+                    # Spread+commission drag per trade, in R. The simulator has
+                    # always measured this; nothing used it to reject anything,
+                    # so the search happily picked tight-stop configs whose cost
+                    # ate most of the risk - and the LIVE engine then refused
+                    # every one of those entries at its own
+                    # system.max_cost_pct_of_risk gate. The two halves disagreed:
+                    # the optimizer proposed configs the engine would never
+                    # trade, which is why some symbols sat at one or two live
+                    # trades while their backtest looked fine. Screened here so
+                    # a candidate that cannot be traded also cannot win.
+                    cost_share = (pooled.cost_r / pooled.trades) if pooled.trades else 0.0
+                    if max_cost_share > 0 and cost_share > max_cost_share:
+                        rejected_costly += 1
+                    elif positive < min_positive_ratio:
                         rejected_inconsistent += 1
                     else:
                         # Consistency across segments matters more than the size of the edge.
@@ -814,9 +829,19 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         return {"ok": False, "error": "iptal edildi", "cancelled": True}
 
     if not raw:
+        # Name the reason that actually applied. Reporting "inconsistent across
+        # segments" when every candidate was in fact rejected for cost sends
+        # the operator looking for an edge problem that isn't there - the edge
+        # may be fine and simply not worth its spread on this symbol.
+        why = f"{rejected_inconsistent} kombinasyon segmentler arasi tutarsizdi"
+        if rejected_costly:
+            why = (f"{rejected_costly} kombinasyon maliyet tavanini asti"
+                   + (f", {rejected_inconsistent} tanesi segmentler arasi tutarsizdi"
+                      if rejected_inconsistent else ""))
         return {"ok": False, "combos": evaluated, "baseline": baseline,
-                "error": f"tutarli kazanan parametre bulunamadi "
-                         f"({rejected_inconsistent} kombinasyon segmentler arasi tutarsizdi)"}
+                "rejected_inconsistent": rejected_inconsistent,
+                "rejected_costly": rejected_costly,
+                "error": f"tutarli kazanan parametre bulunamadi ({why})"}
 
     blended, neighbours = _plateau_scores(keys, grid, raw,
                                           max(0.0, min(0.8, plateau_weight)), pool)
@@ -869,6 +894,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         "candidates": len(raw),
         "grounded": len(grounded),
         "rejected_inconsistent": rejected_inconsistent,
+        "rejected_costly": rejected_costly,
         "bars": n,
         "segments": segments,
         "holdout_bars": holdout[1] - holdout[0],
