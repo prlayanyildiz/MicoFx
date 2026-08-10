@@ -395,6 +395,20 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 broker_close is not None and configured_close is not None
                 and abs(broker_close - configured_close) > 30
             )
+            # "Could not check" is its own answer. close_mismatch is False both
+            # when the times agree and when the broker's schedule could not be
+            # read at all - and the Python package exposes no schedule, so the
+            # second case is the only one that ever happens. Reporting that as
+            # a clean result made this audit certify all twenty symbols as
+            # aligned while looking at nothing.
+            if configured_close is None:
+                close_check = "session-yok"
+            elif broker_close is None:
+                close_check = "okunamadi"
+            elif close_mismatch:
+                close_check = "kayik"
+            else:
+                close_check = "uyumlu"
             rows.append({
                 "symbol": cfg.symbol, "lot_mode": cfg.lot_mode,
                 "fixed_lot": cfg.fixed_lot, "broker_min_lot": floor,
@@ -402,8 +416,37 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 "configured_friday_close_min": configured_close,
                 "broker_friday_close_min": broker_close,
                 "close_mismatch": close_mismatch,
+                "close_check": close_check,
             })
-        return {"ok": True, "rows": rows}
+        # What is actually measurable about the broker's clock today. Session
+        # windows are configured against the Windows clock (Turkey, UTC+3 all
+        # year); the broker's server follows European DST and drops an hour at
+        # the end of October, which is when every window quietly stops matching
+        # the instrument's real session.
+        broker_utc = client.broker_utc_offset_hours(
+            [c.symbol for c in list(store.symbols.values()) if c.enabled])
+        # Turkey has no DST, so this is +3 year round; taken from the machine
+        # rather than hardcoded so a move or a changed Windows zone shows up.
+        local_utc = -(time.altzone if time.daylight and time.localtime().tm_isdst
+                      else time.timezone) // 3600
+        drift = None if broker_utc is None else broker_utc - local_utc
+        return {
+            "ok": True, "rows": rows,
+            "broker_utc_offset_hours": broker_utc,
+            "local_utc_offset_hours": local_utc,
+            "clock_drift_hours": drift,
+            "clock_note": (
+                "olculemedi - yeterli canli tick yok"
+                if drift is None else
+                f"broker GMT{broker_utc:+d}, yerel GMT{local_utc:+d} - ayni, "
+                f"seans pencereleri enstrumanin gercek seansiyla hizali"
+                if drift == 0 else
+                f"broker GMT{broker_utc:+d}, yerel GMT{local_utc:+d} - "
+                f"{drift:+d} saat KAYMA. Seans pencereleri yerel saate gore "
+                f"yazildi, enstrumanin gercek seansi {drift:+d} saat kaydi - "
+                f"pencereleri buna gore guncelleyin"
+            ),
+        }
 
     @app.get("/api/broker-symbols")
     def broker_symbols(q: str = "", limit: int = 50) -> dict[str, Any]:

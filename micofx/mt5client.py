@@ -565,7 +565,57 @@ class MT5Client:
             return False
         return (self.server_now() - t["time"]) <= max_age_sec
 
+    def broker_utc_offset_hours(self, symbols: list[str]) -> int | None:
+        """The broker server's own UTC offset in whole hours, or None.
+
+        A tick's ``time`` is a naive epoch holding the broker's wall-clock
+        reading encoded as though it were UTC, so subtracting a true epoch
+        yields the broker's own offset from UTC - +3 for a GMT+3 server. It is
+        NOT the difference against this machine's clock; that is the caller's
+        subtraction, and confusing the two turns an aligned setup into a
+        permanent false alarm.
+
+        This is the one number that actually moves under daylight saving here.
+        Session windows are configured against the Windows clock, which in
+        Turkey is UTC+3 all year, while the broker's server follows European
+        DST and drops to GMT+2 at the end of October. Every configured window
+        then sits an hour off the instrument's real session, silently, and the
+        audit meant to catch it cannot (see ``last_session_close_minute``).
+
+        Taken as the median across several symbols and rounded to a whole
+        hour, because one stale or odd quote must not move the answer.
+
+        Deliberately only *reported*, never used to shift a gate. An earlier
+        version of this codebase auto-corrected times from a detected offset
+        and it was removed precisely because a bad detection silently moved
+        every time-based decision; a number on a dashboard cannot do that.
+        """
+        now = time.time()
+        deltas: list[float] = []
+        for symbol in symbols:
+            tick = self.tick(symbol)
+            if not tick or not tick.get("time"):
+                continue
+            delta = float(tick["time"]) - now
+            # Anything further out than half a day is a closed market's last
+            # quote, not a live one, and says nothing about the clock.
+            if abs(delta) < 12 * 3600:
+                deltas.append(delta)
+        if len(deltas) < 3:
+            return None
+        deltas.sort()
+        return int(round(deltas[len(deltas) // 2] / 3600.0))
+
     def last_session_close_minute(self, symbol: str, weekday: int) -> int | None:
+        """NOTE: the MetaTrader5 Python package exposes no session schedule.
+
+        ``symbol_info_session_trade`` is an MQL5 function with no binding in
+        the Python package (verified against 5.0.6090), so every call here
+        raises AttributeError, logs a warning and returns None. Kept because
+        a future package version may add it; callers must treat None as
+        "could not check", never as "nothing wrong" - see
+        ``broker_clock_offset`` for what is measurable today.
+        """
         """Broker-configured close time (minutes since midnight) for ``symbol``
         on ``weekday`` (0=Sunday..6=Saturday, matching MQL5's ENUM_DAY_OF_WEEK).
 
