@@ -14,8 +14,27 @@ DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "review_interval_sec": 120,
     "lookback_days": 14,
-    "min_trades": 8,                 # evidence needed before judging a symbol
-    "quarantine_losses": 4,          # consecutive losers that trip a suspension
+    # Evidence needed before SUSPENDING a symbol. Quarantine is a 12-hour hard
+    # stop, so it has to be paid for with samples: measured against this
+    # portfolio's own validated win rates (26-79%) and profit factors, judging
+    # on 8 trades false-quarantined a healthy symbol 23% of the time while
+    # catching a genuinely broken one only 72% - at 25 it is 11% against 87%,
+    # better on both counts.
+    "min_trades": 25,
+    # Evidence needed to merely SIZE A SYMBOL DOWN. A watch costs 40% of one
+    # symbol's lot and reverses itself the moment the numbers recover, so it
+    # does not need a suspension's proof. Sharing min_trades left a hole:
+    # GER40 at PF 0.62 over 18 trades cleared neither bar and traded at full
+    # size, when the graduated response it deserves is exactly the soft one.
+    "watch_min_trades": 10,
+    # Consecutive losers that trip a suspension. Deliberately far out: with no
+    # take-profit, a trend follower loses often by design, and this book's
+    # validated win rates run 26-40%. Four in a row therefore has a ~30%
+    # probability at any point - XAUUSD's own holdout expects 22 of them, and
+    # US30's 73 - so a 4 trigger fires on the shape of the strategy rather
+    # than on anything going wrong. It suspended US30 while its live profit
+    # factor was 1.55 and it was the best earner in the book.
+    "quarantine_losses": 10,
     "quarantine_pf": 0.80,           # profit factor below this is broken, not unlucky
     "watch_pf": 1.00,                # between watch_pf and quarantine_pf: keep trading, smaller
     "quarantine_hours": 12,
@@ -390,7 +409,8 @@ class Supervisor:
         elif v.quarantine_until > now:
             v.state = "quarantine"
             v.reason = previous.reason if previous else "karantina"
-        elif v.trades >= int(cfgs["min_trades"]) and v.profit_factor < float(cfgs["watch_pf"]):
+        elif (v.trades >= int(cfgs.get("watch_min_trades", cfgs["min_trades"]))
+                and v.profit_factor < float(cfgs["watch_pf"])):
             v.state = "watch"
             v.risk_scale = float(cfgs["watch_risk_scale"])
             # Same PF gate as watch; richer reason when backtest still promised edge

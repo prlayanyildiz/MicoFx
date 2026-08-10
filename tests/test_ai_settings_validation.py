@@ -179,3 +179,47 @@ def test_due_uses_default_interval_when_stored_value_is_bad():
     sup.last_review = time.time()  # just reviewed
     # With a good default interval (120s) "just reviewed" must mean not due.
     assert sup.due() is False
+
+
+# ------------------------------------------- quarantine evidence calibration
+
+def test_quarantine_needs_more_evidence_than_a_size_cut():
+    """A 12-hour suspension and a 40% lot trim must not cost the same proof.
+
+    Measured against this portfolio's own validated win rates (26-79%) and
+    profit factors: judging on 8 trades false-quarantined a healthy symbol 23%
+    of the time while catching a genuinely broken one only 72%; at 25 it is 11%
+    against 87% - better on both axes. But sharing that bar with `watch` left
+    GER40, at PF 0.62 over 18 trades, clearing neither and trading at full
+    size when a soft trim is exactly what it deserved.
+    """
+    from micofx.supervisor import DEFAULTS
+    assert DEFAULTS["watch_min_trades"] < DEFAULTS["min_trades"]
+    assert DEFAULTS["min_trades"] >= 25
+
+
+def test_the_loss_streak_trigger_is_not_a_hair_trigger():
+    """Consecutive losses carry almost no information for this exit model.
+
+    With no take-profit, a trend follower loses often by design - this book's
+    validated win rates run 26-40%, so four losses in a row has a ~30%
+    probability at any point and XAUUSD's own holdout expects 22 of them. The
+    trigger has to sit far enough out to mean something.
+    """
+    from micofx.supervisor import DEFAULTS
+    assert DEFAULTS["quarantine_losses"] >= 10
+
+
+def test_watch_fires_on_the_evidence_quarantine_cannot_use():
+    import types
+    from micofx.supervisor import DEFAULTS, Supervisor, SymbolVerdict
+
+    cfgs = {**DEFAULTS}
+    v = SymbolVerdict(symbol="GER40")
+    v.trades, v.profit_factor, v.consecutive_losses = 18, 0.62, 4
+
+    # 18 trades: below the suspension bar, above the trim bar.
+    assert v.trades < cfgs["min_trades"]
+    assert v.trades >= cfgs["watch_min_trades"]
+    assert v.profit_factor < cfgs["watch_pf"]
+    assert v.consecutive_losses < cfgs["quarantine_losses"]
