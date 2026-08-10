@@ -2,14 +2,17 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-# The LIVE runtime files stay out - the settings database is open and being
-# written to by the running bot, so a plain `git add` can catch it mid-write
-# and commit a database nobody can restore. The committed copy lives in
-# snapshot/ instead and is produced by snapshot.py through sqlite's online
-# backup API. Do not "fix" this by tracking data/ directly.
+# This repo is the SYSTEM, not the account. Nothing that belongs to a live
+# account goes in it - no settings database, no trade log, no balances, no
+# positions. Cloning it must give a clean install and nothing about whoever
+# ran the last one.
+#
+# The full archive - database, log and all - is what backup.py writes to the
+# local backup folder every evening. That is where account state is kept.
 data/*.db
 data/*.db-journal
 logs/
+snapshot/
 _probe_*.py
 .env
 .pytest_cache/
