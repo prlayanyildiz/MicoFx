@@ -103,10 +103,17 @@ _SYSTEM_RISK_BOUNDS = {
 }
 
 
-def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYMBOL_RISK_BOUNDS) -> None:
+def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYMBOL_RISK_BOUNDS,
+                          label: str = "") -> None:
+    """``label`` names the enclosing blob when checking a nested dict, so the
+    400 says which copy of the field was bad - ``secondary_params`` carries
+    its own sl_atr_mult/trail_start_atr/trail_step_atr and the message is
+    otherwise identical to the top-level one.
+    """
     for key, (lo, hi, lo_inclusive) in bounds.items():
         if key not in patch or patch[key] is None:
             continue
+        name = f"{label}.{key}" if label else key
         try:
             value = float(patch[key])
         except (TypeError, ValueError):
@@ -115,11 +122,11 @@ def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYM
             # NaN compares False against everything (< and > both), so it
             # would otherwise sail straight through both bound checks below
             # undetected - json does accept NaN/Infinity by default.
-            raise HTTPException(400, f"{key} gecersiz ({value!r})")
+            raise HTTPException(400, f"{name} gecersiz ({value!r})")
         if (value < lo) if lo_inclusive else (value <= lo):
-            raise HTTPException(400, f"{key} gecersiz ({value}) - {lo}'dan buyuk olmali")
+            raise HTTPException(400, f"{name} gecersiz ({value}) - {lo}'dan buyuk olmali")
         if hi is not None and value > hi:
-            raise HTTPException(400, f"{key} gecersiz ({value}) - en fazla {hi} olabilir")
+            raise HTTPException(400, f"{name} gecersiz ({value}) - en fazla {hi} olabilir")
 
 
 # Engine-internal bookkeeping: Optimizer.apply()/_apply_secondary_locked()
@@ -590,6 +597,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # inside this nested dict, so a garbage trail_mode landed straight
             # in cfg.secondary_params unchecked.
             _validate_enum_fields(patch["secondary_params"], "secondary_params")
+            # Third check the nested blob needs in its own right, for the same
+            # reason as the two above: _validate_risk_bounds below only ever
+            # looked at top-level keys, and secondary_params carries its own
+            # sl_atr_mult/trail_start_atr/trail_step_atr - engine.py builds the
+            # secondary signal's exit payload straight from this dict. So the
+            # 0/negative/absurd values refused at the top level landed here
+            # unchecked and drove the secondary position's real stop.
+            _validate_risk_bounds(patch["secondary_params"], label="secondary_params")
         _validate_enum_fields(patch)
         _validate_risk_bounds(patch)
         current = store.symbols.get(symbol)
@@ -982,6 +997,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if isinstance(body.patch.get("secondary_params"), dict):
             _reject_non_finite_values(body.patch["secondary_params"], "secondary_params")
             _validate_enum_fields(body.patch["secondary_params"], "secondary_params")
+            # Same nested gap patch_symbol closes - bulk is the other door to
+            # the identical write, across every targeted symbol at once.
+            _validate_risk_bounds(body.patch["secondary_params"], label="secondary_params")
         _validate_enum_fields(body.patch)
         _validate_risk_bounds(body.patch)
         targets = body.symbols or list(store.symbols)
@@ -1369,6 +1387,20 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if strategy is not None:
             enum_check["strategy"] = strategy
         _validate_enum_fields(enum_check)
+        # The finite/enum checks above stop garbage, not out-of-range numbers,
+        # and OPT_FIELDS carries sl_atr_mult/trail_start_atr/trail_step_atr -
+        # the exact three _SYMBOL_RISK_BOUNDS makes strictly positive. Without
+        # this line those bounds only guarded PATCH /api/symbols/{symbol}:
+        # this endpoint's own hand-typed path (params straight off the request
+        # body) wrote them into the same SymbolConfig unchecked, so a
+        # trail_start_atr of 0 landed here and switched that symbol's trail
+        # off for good - the failure test_trail_breakeven_invariant.py
+        # documents as "deliberately unreachable from outside". A negative
+        # trail_step_atr put the trail target on the losing side of price, and
+        # sl_atr_mult 0 collapsed the hard stop onto the broker's minimum.
+        # Applied to the run_id path too: no shipped grid produces a 0 or a
+        # negative, so nothing the optimizer can legitimately propose is lost.
+        _validate_risk_bounds(params)
         # A run_id pull carries the search's own verdict - refuse to apply a
         # candidate the walk-forward itself rejected unless the caller
         # explicitly overrides. Hand-typed params (no run_id, no detail) are

@@ -197,6 +197,17 @@ class RiskManager:
         if cfg.lot_mode == "fixed" or sl_distance <= 0:
             raw = float(cfg.fixed_lot) * multiplier
             note = "sabit" if multiplier == 1.0 else f"sabit x{multiplier:.2f}"
+            if raw <= 0:
+                # Nothing below can express "size zero": every branch from here
+                # divides by ``raw`` to report the overshoot, and max(floor, 0)
+                # would hand back the broker's minimum lot - the largest
+                # position this function can produce - as the answer to a
+                # config that asked for none at all. Fail closed instead. The
+                # API refuses fixed_lot <= 0 and every ai_scale of 0 blocks the
+                # entry before this call, so this is the backstop for a value
+                # that reached the DB some other way (hand-edited row, restored
+                # backup), not a path in normal use.
+                return 0.0, f"lot sifir ({note}), islem atlandi"
             if raw < floor:
                 # Same floor-vs-overshoot guard as the risk branch below - a
                 # fixed lot scaled down by the AI throttle silently got
@@ -235,6 +246,12 @@ class RiskManager:
             note = f"risk %{cfg.risk_percent * multiplier:.3g} -> {raw:.3f}"
             if note_edge_capped:
                 note += " (SL broker min'e yapisik, avantaj carpani kisildi)"
+            if raw <= 0:
+                # Same fail-closed backstop as the fixed branch: a zero risk%
+                # (or a zero balance on a fresh/blown account) means "risk
+                # nothing", and max(floor, 0) would answer that with the
+                # broker's minimum lot rather than no trade.
+                return 0.0, f"lot sifir ({note}), islem atlandi"
             if raw < floor:
                 # Rounding up to the broker's minimum lot silently inflates the
                 # real risk taken - a raw of 0.024 forced to a 0.1 floor trades
