@@ -660,6 +660,28 @@ class Optimizer:
     # backtest edge survives contact with a live account.
     MAX_COST_PER_TRADE_R = 0.25
 
+    # The ceiling above is absolute, measured against the trade's RISK - so it
+    # asks "is this instrument expensive?" and never "can this candidate's own
+    # edge carry what it costs?". Those come apart badly at the thin end.
+    # Measured across the live book, cost as a share of gross edge
+    # (cost / (cost + expectancy)):
+    #
+    #   XAUUSD    5%   NAS100  9%   GBPUSD  9%   USDCHF 10%   ... CADJPY 35%
+    #   CA60     43%   COPPER 45%   US30   46%   COFFEE 51%   USDJPY 58%
+    #
+    # USDJPY hands the broker 58% of everything it makes and sails through the
+    # absolute gate, because 0.16 is comfortably under 0.25 - while its gross
+    # edge is only 0.277R and cannot carry that. XAUUSD could carry 0.22R of
+    # cost on a 0.476R gross edge, and is charged 0.025. Same ceiling, opposite
+    # verdicts warranted.
+    #
+    # Set at half rather than at the widest gap in the data (which sits nearer
+    # 40%): past half the trade is more a payment to the broker than a strategy,
+    # and what remains is inside the noise of the cost estimate itself - spread
+    # and commission both vary live. Half is the claim the evidence supports
+    # without curve-fitting the threshold to this particular portfolio.
+    MAX_COST_SHARE_OF_EDGE = 0.50
+
     # A config that is still recent was measured on data that mostly overlaps this
     # run's, so its holdout number is a fair yardstick and worth defending. Past
     # this age the comparison is between two different market periods, the
@@ -797,6 +819,12 @@ class Optimizer:
             return "secim segmentleri arasinda tutarsiz"
         if hold.get("cost_per_trade_r", 0) > self.MAX_COST_PER_TRADE_R:
             return "islem maliyeti riske gore cok yuksek"
+        # ...and the same cost measured against what this candidate actually
+        # earns, which the absolute ceiling above cannot see (see the constant).
+        cost = float(hold.get("cost_per_trade_r", 0.0) or 0.0)
+        gross = cost + float(hold.get("expectancy", 0.0) or 0.0)
+        if gross > 0 and cost / gross > self.MAX_COST_SHARE_OF_EDGE:
+            return "maliyet brut kenarin cogunu yiyor"
         if float(best["score"]) <= 0.0:
             return "arama skoru pozitif degil"
         # Removed once on request, then silently reintroduced by someone else,

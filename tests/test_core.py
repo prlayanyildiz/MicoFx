@@ -420,10 +420,17 @@ def test_merge_round_trips_excludes_still_open_position():
 
 # --------------------------------------------------------------------------- optimizer.reject_reason
 
-def _result(net_r=10.0, trades=30, pf=1.5, cost_per_trade_r=0.05, score=5.0):
+def _result(net_r=10.0, trades=30, pf=1.5, cost_per_trade_r=0.05, score=5.0,
+            expectancy=None):
+    # ``expectancy`` is net_r/trades in the real Result summary (see
+    # backtest.Result.expectancy). Leaving it off made these doubles claim a
+    # candidate that nets +10R over 30 trades while earning 0.0 per trade -
+    # incoherent, and invisible until a gate started reading it.
     return {
         "trades": trades, "net_r": net_r, "profit_factor": pf,
         "cost_per_trade_r": cost_per_trade_r, "score": score,
+        "expectancy": (net_r / trades if trades else 0.0)
+        if expectancy is None else expectancy,
     }
 
 
