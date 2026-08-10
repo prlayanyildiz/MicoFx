@@ -1367,6 +1367,35 @@ function renderAI() {
     return lines.join("\n");
   }
 
+  // "Serbest birak" clears the stored verdict, not the evidence behind it.
+  // review() re-derives quarantine and blocked hours from the same trailing
+  // deal window, so a symbol that still meets the criteria is re-flagged on
+  // the next pass - with a fresh quarantine clock. Pressing a release button
+  // and watching the symbol come straight back, with nothing explaining why,
+  // is what makes it look broken. Say what will happen before it happens.
+  function aiReleaseWarning(r, s) {
+    const back = [];
+    const minTrades = Number(s.min_trades);
+    const qPf = Number(s.quarantine_pf);
+    const qLoss = Number(s.quarantine_losses);
+    if (r.consecutive_losses >= qLoss) {
+      back.push(`ust uste ${r.consecutive_losses} zarar (esik ${qLoss})`);
+    }
+    if (r.trades >= minTrades && r.profit_factor < qPf) {
+      back.push(`${r.trades} islem, PF ${num(r.profit_factor, 2)} < ${num(qPf, 2)}`);
+    }
+    if ((r.blocked_hours || []).length) {
+      back.push(`kapali saatler son ${s.lookback_days} gunun islemlerinden yeniden hesaplanir`);
+    }
+    let msg = `${r.symbol} icin AI kararlari silinecek.`;
+    if (back.length) {
+      msg += `\n\nDIKKAT: kanit hala gecerli, bir sonraki degerlendirmede geri gelecek:\n`
+           + back.map((b) => "  - " + b).join("\n")
+           + `\n\nKalici cozum: sembolu yeniden optimize edin, ya da AI ayarlarindan esikleri degistirin.`;
+    }
+    return msg + "\n\nDevam edilsin mi?";
+  }
+
   const notes = (ai.notes || []).join(" | ");
   const queue = (ai.reopt_queue || []).length
     ? ` | yeniden optimize kuyrugu: ${ai.reopt_queue.join(", ")}` : "";
@@ -1406,6 +1435,7 @@ function renderAI() {
         ? el("button", {
           class: "btn btn-sm btn-ghost", text: "Serbest birak",
           onclick: async () => {
+            if (!confirm(aiReleaseWarning(r, ai.settings || {}))) return;
             try {
               await api(`/api/ai/clear?symbol=${encodeURIComponent(r.symbol)}`, { method: "POST" });
               toast(`${r.symbol} kararlari sifirlandi`, "ok");
@@ -2124,7 +2154,15 @@ function wire() {
       refresh();
     } catch (e) { toast(e.message, "err"); }
   };
-  $("#btn-ai-clear").onclick = confirmThen("Tum AI kararlari sifirlanacak. Onayliyor musunuz?", async () => {
+  // Same caveat as the per-row release: this clears verdicts, not the deal
+  // history they are derived from, so anything that still meets the criteria
+  // is flagged again on the next review.
+  $("#btn-ai-clear").onclick = confirmThen(
+    "Tum AI kararlari sifirlanacak.\n\n"
+    + "DIKKAT: karantina ve kapali saatler son islemlerden yeniden hesaplanir - "
+    + "esikleri hala asan semboller bir sonraki degerlendirmede geri gelir. "
+    + "Kalici cozum icin sembolu yeniden optimize edin ya da AI ayarlarindaki "
+    + "esikleri degistirin.\n\nOnayliyor musunuz?", async () => {
     await api("/api/ai/clear", { method: "POST" });
     toast("AI kararlari sifirlandi", "ok");
     refresh();
