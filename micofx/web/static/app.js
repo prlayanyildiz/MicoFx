@@ -246,6 +246,46 @@ function renderCards() {
   }
 }
 
+// The cost column used to print one number: the share of R that spread and
+// commission take *at this instant*. That is a single live tick, and a tick
+// taken during the broker rollover reads 10-19x the long-run figure on FX -
+// wide enough to make a healthy symbol look permanently unprofitable. Reading
+// it without that context led to four symbols being switched off on evidence
+// that evaporated an hour later, so the column now carries the walk-forward's
+// own long-run cost next to it and says when the live one is inflated.
+function costCell(r) {
+  if (!r.risk_per_trade) return "-";
+  const now = `${num(r.cost_per_trade)} (%${num(r.cost_pct_of_risk, 0)})`;
+  if (!r.cost_pct_typical) return now;
+  const inflated = r.cost_inflation >= 1.8;
+  return inflated
+    ? `${now} <span class="dim">/ normal %${num(r.cost_pct_typical, 0)} · ${num(r.cost_inflation, 1)}x</span>`
+    : `${now} <span class="dim">/ normal %${num(r.cost_pct_typical, 0)}</span>`;
+}
+
+function costCls(r) {
+  // Only call it bad when it is bad on the long-run number too. A high live
+  // reading that matches a low typical one is a moment, not a property.
+  if (r.cost_pct_typical && r.cost_inflation >= 1.8) return "warn-text";
+  return r.cost_pct_of_risk > 15 ? "neg" : "dim";
+}
+
+function costTitle(r) {
+  const lines = [`Su anki tick: maliyet riskin %${num(r.cost_pct_of_risk, 1)}'i`];
+  if (r.cost_pct_typical) {
+    lines.push(`Yuruyen-ileri uzun vade: %${num(r.cost_pct_typical, 1)}`);
+    if (r.cost_inflation >= 1.8) {
+      lines.push(`Su an normalin ${num(r.cost_inflation, 1)} katinda - spread gecici olarak sismis `
+               + `(broker rollover / ince seans). Sembolun kalici ozelligi degil.`);
+      lines.push(`Bu haldeyken block_high_cost zaten girisleri engelliyor; spread normale `
+               + `donunce kendiliginden acilir.`);
+    }
+  } else {
+    lines.push("Uzun vade maliyet yok - bu sembol icin henuz optimizasyon ozeti kaydedilmemis.");
+  }
+  return lines.join("\n");
+}
+
 function renderCapacity() {
   const cap = STATE.capacity || {};
   const rows = (cap.rows || []).map((r) => {
@@ -262,7 +302,7 @@ function renderCapacity() {
       <td class="num ${r.free_slots > 0 ? "pos" : "neg"}"><b>${r.free_slots}</b></td>
       <td class="num">${num(r.margin_per_trade)}</td>
       <td class="num">${r.risk_per_trade ? num(r.risk_per_trade) : "-"}</td>
-      <td class="num ${r.cost_pct_of_risk > 15 ? "neg" : "dim"}">${r.risk_per_trade ? num(r.cost_per_trade) + " (%" + num(r.cost_pct_of_risk, 0) + ")" : "-"}</td>
+      <td class="num ${costCls(r)}" title="${costTitle(r)}">${costCell(r)}</td>
       <td class="num ${cls(r.expected_per_trade)}">${r.expectancy_r ? signed(r.expected_per_trade, 3) : '<span class="dim">-</span>'}</td>
       <td class="num ${cls(r.open_profit)}">${r.open_positions ? signed(r.open_profit) : "-"}</td>`;
     return tr;

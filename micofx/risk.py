@@ -434,6 +434,8 @@ class RiskManager:
             summary = cfg.opt_summary if isinstance(cfg.opt_summary, dict) else {}
             hold = summary.get("holdout") or {}
             expectancy_r = float(hold.get("expectancy", 0.0) or 0.0)
+            # Long-run cost per trade in R, straight from the holdout slice.
+            expectancy_cost = float(hold.get("cost_per_trade_r", 0.0) or 0.0)
             rows.append({
                 "symbol": cfg.symbol,
                 "broker_symbol": broker,
@@ -454,6 +456,19 @@ class RiskManager:
                 "risk_per_trade": round(r_value, 2),
                 "cost_per_trade": round(cost, 2),
                 "cost_pct_of_risk": round(cost / r_value * 100.0, 1) if r_value > 0 else 0.0,
+                # What the walk-forward measured this config costing per trade,
+                # averaged over its whole holdout window. ``cost_pct_of_risk``
+                # above is a single live tick, and a live tick taken during the
+                # broker rollover reads 10-19x the long-run number on FX - wide
+                # enough to make a perfectly healthy symbol look structurally
+                # unprofitable. Shipping the two side by side is the difference
+                # between "expensive right now" and "expensive always"; without
+                # it the panel invites exactly the wrong conclusion, which is
+                # not hypothetical - it produced one.
+                "cost_pct_typical": round(expectancy_cost * 100.0, 1) if expectancy_cost > 0 else 0.0,
+                "cost_inflation": round(
+                    (cost / r_value) / expectancy_cost, 1)
+                if (r_value > 0 and expectancy_cost > 0) else 0.0,
                 "expectancy_r": round(expectancy_r, 3),
                 "expected_per_trade": round(expectancy_r * r_value, 3),
                 "edge_scale": round(self.edge_scale(cfg), 2),
