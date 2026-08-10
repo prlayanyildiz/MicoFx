@@ -8,8 +8,8 @@ from typing import Any
 
 from . import backtest, execution, indicators as ind, sessions
 from .logbus import LOG
-from .models import (SymbolConfig, is_scalp_strategy, strategy_allows_timeframe,
-                     trail_min_step)
+from .models import (SymbolConfig, invalid_exit_param, is_scalp_strategy,
+                     strategy_allows_timeframe, trail_min_step)
 from .mt5client import MT5Client, NON_RETRYABLE_RETCODES, timeframe_seconds
 from .execution import ExecutionMonitor
 from .risk import RiskManager
@@ -1763,21 +1763,57 @@ class Engine:
             for cfg in list(self.store.symbols.values()):
                 if cfg.pending_exit_patch and cfg.magic not in open_magics:
                     pending = dict(cfg.pending_exit_patch)
-                    updated = self.store.update_symbol(cfg.symbol, {**pending, "pending_exit_patch": {}})
+                    # Re-validate at the moment of landing, not only where the
+                    # patch was staged. Optimizer.apply() checks these bounds
+                    # now, but a pending patch is a value that sat in the DB
+                    # across an arbitrary gap - it can predate that check, or
+                    # arrive from a restored backup or a hand-edited row. The
+                    # field is API-blocked (_INTERNAL_ONLY_FIELDS), so this is
+                    # not about a live request; it is about the one write path
+                    # that trusts stored data verbatim.
+                    bad = invalid_exit_param(pending)
+                    if bad:
+                        # Dropped, not retried: nothing about a stored patch
+                        # changes between cycles, so keeping it would re-log
+                        # and re-refuse forever. The live config keeps the
+                        # values it already validated, which is the safe side.
+                        # Only the bad patch is cleared - the secondary block
+                        # below still gets its turn this cycle.
+                        updated = self.store.update_symbol(cfg.symbol, {"pending_exit_patch": {}})
+                        LOG.emit(f"{cfg.symbol}: bekletilen cikis parametresi gecersiz "
+                                 f"({bad}) - uygulanmadi, mevcut ayar korundu.",
+                                 "ERROR", cfg.symbol)
+                    else:
+                        updated = self.store.update_symbol(cfg.symbol,
+                                                           {**pending, "pending_exit_patch": {}})
+                        if updated is not None:
+                            LOG.emit(f"{cfg.symbol}: bekletilen cikis/risk parametreleri "
+                                     f"({', '.join(sorted(pending))}) artik acik pozisyon yok, "
+                                     f"uygulandi.", "OPT", cfg.symbol)
                     if updated is not None:
-                        LOG.emit(f"{cfg.symbol}: bekletilen cikis/risk parametreleri "
-                                 f"({', '.join(sorted(pending))}) artik acik pozisyon yok, uygulandi.",
-                                 "OPT", cfg.symbol)
                         cfg = updated
                 if cfg.pending_secondary_exit_patch and cfg.magic not in sec_open_magics:
                     pending_sec = dict(cfg.pending_secondary_exit_patch)
                     merged_params = {**cfg.secondary_params, **pending_sec}
-                    self.store.update_symbol(cfg.symbol, {
-                        "secondary_params": merged_params, "pending_secondary_exit_patch": {},
-                    })
-                    LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis/risk parametreleri "
-                             f"({', '.join(sorted(pending_sec))}) artik acik ikincil pozisyon yok, "
-                             f"uygulandi.", "OPT", cfg.symbol)
+                    # Validated on the MERGED result, not on the patch alone:
+                    # the patch is applied over the existing secondary_params,
+                    # so what has to be usable is what the merge produces -
+                    # that is the dict engine.py builds the secondary signal's
+                    # exit payload from.
+                    bad_sec = invalid_exit_param(merged_params)
+                    if bad_sec:
+                        self.store.update_symbol(cfg.symbol,
+                                                 {"pending_secondary_exit_patch": {}})
+                        LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis parametresi gecersiz "
+                                 f"({bad_sec}) - uygulanmadi, mevcut ayar korundu.",
+                                 "ERROR", cfg.symbol)
+                    else:
+                        self.store.update_symbol(cfg.symbol, {
+                            "secondary_params": merged_params, "pending_secondary_exit_patch": {},
+                        })
+                        LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis/risk parametreleri "
+                                 f"({', '.join(sorted(pending_sec))}) artik acik ikincil pozisyon "
+                                 f"yok, uygulandi.", "OPT", cfg.symbol)
 
     def _close_tracked(self, pos: dict[str, Any], comment: str, leg: str,
                        volume: float | None = None, fill: dict[str, Any] | None = None) -> bool:
