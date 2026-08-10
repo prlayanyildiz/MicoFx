@@ -214,6 +214,14 @@ class Engine:
             str(k): str(v) for k, v in (store.get_setting("symbol_daily_halted") or {}).items()
         }
         self._reopt_at = float(store.get_setting("auto_reopt_at", 0.0) or 0.0)
+        # Post-fill cooldown, per symbol, as an absolute epoch. Lived only in
+        # SymbolState until now - which is rebuilt empty on every start, so a
+        # restart inside the cooldown window dropped the one guard that stops
+        # the bar's signal being taken twice. See _restore_cooldown().
+        self._cooldowns: dict[str, float] = {
+            str(k): float(v) for k, v in (store.get_setting("entry_cooldowns") or {}).items()
+            if isinstance(v, (int, float))
+        }
 
     # ------------------------------------------------------------- lifecycle
 
@@ -438,7 +446,11 @@ class Engine:
         # stronger one when several bars close in the same poll.
         ready: list[SymbolConfig] = []
         for cfg in list(self.store.symbols.values()):
-            state = self.states.setdefault(cfg.symbol, SymbolState(cfg.symbol))
+            state = self.states.get(cfg.symbol)
+            if state is None:
+                state = SymbolState(cfg.symbol)
+                self._restore_cooldown(state)
+                self.states[cfg.symbol] = state
             if not cfg.enabled:
                 self._evaluate_disabled(cfg, state, server_now, account)
                 continue
@@ -1257,6 +1269,7 @@ class Engine:
         )
 
         state.cooldown_until = time.time() + _cooldown_for(cfg)
+        self._save_cooldown(cfg.symbol, state.cooldown_until)
         state.signal = ""
         state.signal_source = ""
         state.primary_signal = ""
@@ -1590,6 +1603,53 @@ class Engine:
             self.execution.forget(gone)
         except Exception as exc:                  # never let diagnostics stop the loop
             LOG.emit(f"Gerceklesme olcumu hatasi: {exc}", "WARN")
+
+    def _restore_cooldown(self, state: SymbolState) -> None:
+        """Carry a still-running post-fill cooldown across a restart.
+
+        The cooldown is what stops one bar's signal being filled twice. It only
+        ever lived in SymbolState, which is rebuilt empty on every start - so a
+        restart inside the window let the same bar's signal, recomputed from
+        the same still-last-closed bar, open a second position seconds after
+        the first. Seen repeatedly in the live log:
+
+            16:00:03 [US30] BUY 0.2 @ 53994.90 SL=53974.20
+            16:01:33 Yeniden baslatma istegi alindi.
+            16:01:40 [US30] BUY 0.2 @ 53997.10 SL=53976.40
+            16:09:42 [US30] Stop ile kapandi kar=-4.14
+            16:09:42 [US30] Stop ile kapandi kar=-4.14
+
+        One signal, two positions, both stopped out - the loss doubled. The
+        broker-side position cap could not catch it (max_positions is
+        deliberately above 1) and every other guard the entry path relies on is
+        equally in-memory.
+
+        Deliberately not persisted for anything else the state holds: bars,
+        ATR and signals are all recomputed from the broker within a cycle, and
+        a stale copy of those would be worse than no copy.
+        """
+        until = float(self._cooldowns.get(state.symbol, 0.0) or 0.0)
+        if until > time.time():
+            state.cooldown_until = until
+
+    def _save_cooldown(self, symbol: str, until: float) -> None:
+        # Runs on the order path, immediately after a fill and before the TRADE
+        # line is written - so it must not be able to take that log line, or
+        # the rest of the cycle, down with it. Losing one cooldown write costs
+        # a possible duplicate entry; raising here would cost the audit trail
+        # of a fill that already happened.
+        try:
+            now = time.time()
+            # Drop the expired ones on the way past so the blob cannot grow
+            # without bound as symbols come and go.
+            current = getattr(self, "_cooldowns", None)
+            if not isinstance(current, dict):
+                current = {}
+            self._cooldowns = {s: t for s, t in current.items() if t > now}
+            self._cooldowns[symbol] = float(until)
+            self.store.set_setting("entry_cooldowns", self._cooldowns)
+        except Exception as exc:
+            LOG.emit(f"Cooldown kaydedilemedi: {exc}", "WARN", symbol)
 
     def _log_broker_exit(self, report: dict[str, Any]) -> None:
         """Put one broker-generated exit in the log.

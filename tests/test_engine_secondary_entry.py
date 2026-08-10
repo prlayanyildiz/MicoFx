@@ -120,6 +120,7 @@ def _make_engine(cfg, positions_after):
     eng._orphan_tickets = set()
     eng._orphan_scan = {}
     eng.states = {}
+    eng._cooldowns = {}          # persisted post-fill cooldown; see Engine.__init__
     return eng, client, store
 
 
