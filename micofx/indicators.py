@@ -48,6 +48,13 @@ def wilder(src: np.ndarray, length: int, seed: float | None = None) -> np.ndarra
     """Wilder's smoothing (RMA), the average used by RSI/ATR/ADX."""
     if src.size == 0:
         return np.empty(0, dtype=np.float64)
+    # Every other length-taking helper here clamps (sma, ema, atr, rsi, adx);
+    # this one did not, so ``1 / length`` below was a ZeroDivisionError on a 0.
+    # Its in-module callers all clamp before calling, so nothing reachable hit
+    # it - but this is a public helper in a toolkit module, and a future caller
+    # passing a period straight from config would find the one function that
+    # does not defend itself.
+    length = max(1, int(length))
     first = float(seed) if seed is not None else float(src[0])
     return _recursive(src, 1.0 / float(length), first)
 
@@ -506,6 +513,14 @@ def stoch_rsi(close: np.ndarray, rsi_length: int, stoch_length: int,
 
 
 def true_range(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> np.ndarray:
+    if close.size == 0:
+        # ``prev[0] = close[0]`` below is an IndexError on an empty series, and
+        # atr() already carries an ``if tr.size`` guard for exactly this case -
+        # it just never got the chance to use it, because the crash happens one
+        # call earlier. Completing the guard here rather than in atr() keeps
+        # every caller (atr, adx) covered by one check, and matches the empty
+        # handling wilder()/sma() already have.
+        return np.empty(0, dtype=np.float64)
     prev = np.roll(close, 1)
     prev[0] = close[0]
     return np.maximum(high - low, np.maximum(np.abs(high - prev), np.abs(low - prev)))
@@ -620,6 +635,11 @@ def trix(close: np.ndarray, length: int) -> np.ndarray:
     the tradeoff is lag, which is the point: this is meant to be the *slow,
     clean* read sitting next to the fast flip families, not another fast one.
     """
+    if close.size == 0:
+        # Same shape as true_range's guard: ema() already returns empty for an
+        # empty input, so the cascade below is fine - it is the ``prev[0]``
+        # seeding that indexes into nothing.
+        return np.empty(0, dtype=np.float64)
     e1 = ema(close, max(1, int(length)))
     e2 = ema(e1, max(1, int(length)))
     e3 = ema(e2, max(1, int(length)))
