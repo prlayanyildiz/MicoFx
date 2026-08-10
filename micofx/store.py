@@ -192,17 +192,27 @@ class Store:
             self.symbols = {**self.symbols, cfg.symbol: cfg}
 
     def update_symbol(self, symbol: str, patch: dict[str, Any]) -> SymbolConfig | None:
-        cfg = self.symbols.get(symbol)
-        if cfg is None:
-            return None
-        current = cfg.to_dict()
-        for key, value in patch.items():
-            if key in current and value is not None:
-                current[key] = value
-        current["symbol"] = symbol
-        updated = SymbolConfig.from_dict(current)
-        self.save_symbol(updated)
-        return updated
+        # The whole read-modify-write is one critical section, for the same
+        # reason update_system() already is: two threads patching DIFFERENT
+        # fields of the same symbol both start from the config they read here,
+        # and the second one to call save_symbol() writes a snapshot that
+        # still carries the first one's pre-patch value - silently reverting a
+        # write that reported success. Most callers happen to hold
+        # engine.entry_lock as well, but not all of them do, and that lock is
+        # about positions rather than about this dict. self._lock is an RLock,
+        # so the save_symbol() call below re-entering it is fine.
+        with self._lock:
+            cfg = self.symbols.get(symbol)
+            if cfg is None:
+                return None
+            current = cfg.to_dict()
+            for key, value in patch.items():
+                if key in current and value is not None:
+                    current[key] = value
+            current["symbol"] = symbol
+            updated = SymbolConfig.from_dict(current)
+            self.save_symbol(updated)
+            return updated
 
     def delete_symbol(self, symbol: str) -> bool:
         with self._lock:

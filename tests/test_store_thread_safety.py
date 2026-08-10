@@ -131,3 +131,50 @@ def test_next_magic_and_magic_taken_snapshot_iteration(tmp_path, monkeypatch):
     assert magic != 990101
     assert s._magic_taken(990101, avoid_magics=None) is True
     assert s._magic_taken(magic, avoid_magics=None) is False
+
+
+def test_update_symbol_concurrent_single_field_writes_both_land(tmp_path, monkeypatch):
+    """Same lost-update the system config already guarded, for symbols.
+
+    update_symbol() read the config, applied the patch in plain Python, then
+    called save_symbol(). Two threads patching DIFFERENT fields of the SAME
+    symbol both started from the pre-patch snapshot, so whichever saved second
+    wrote back the other's old value - silently reverting a write that had
+    already reported success.
+
+    Unlike the copy-on-write rebind (a few bytecodes wide, never observed),
+    this window spans a to_dict()/from_dict() round trip and reproduced on
+    every single attempt before the fix.
+    """
+    s = _fresh_store(tmp_path, monkeypatch)
+    symbol = next(iter(s.symbols))
+
+    for _ in range(50):
+        s.update_symbol(symbol, {"risk_percent": 0.5, "max_positions": 1})
+        start = threading.Barrier(2)
+
+        def _patch(field, value):
+            start.wait()
+            s.update_symbol(symbol, {field: value})
+
+        threads = [threading.Thread(target=_patch, args=("risk_percent", 1.25)),
+                   threading.Thread(target=_patch, args=("max_positions", 7))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        cfg = s.symbols[symbol]
+        assert cfg.risk_percent == 1.25, "max_positions writer reverted risk_percent"
+        assert cfg.max_positions == 7, "risk_percent writer reverted max_positions"
+
+
+def test_update_symbol_still_returns_the_updated_config(tmp_path, monkeypatch):
+    """Holding the lock must not change what callers get back."""
+    s = _fresh_store(tmp_path, monkeypatch)
+    symbol = next(iter(s.symbols))
+    updated = s.update_symbol(symbol, {"risk_percent": 0.75})
+    assert updated is not None
+    assert updated.risk_percent == 0.75
+    assert s.symbols[symbol].risk_percent == 0.75
+    assert s.update_symbol("YOK_BOYLE_BIR_SEMBOL", {"risk_percent": 1.0}) is None
