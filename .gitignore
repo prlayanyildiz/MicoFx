@@ -2,6 +2,11 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+# The LIVE runtime files stay out - the settings database is open and being
+# written to by the running bot, so a plain `git add` can catch it mid-write
+# and commit a database nobody can restore. The committed copy lives in
+# snapshot/ instead and is produced by snapshot.py through sqlite's online
+# backup API. Do not "fix" this by tracking data/ directly.
 data/*.db
 data/*.db-journal
 logs/
