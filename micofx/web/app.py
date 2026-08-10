@@ -1019,6 +1019,22 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
         Same arithmetic ``simulate`` charges: spread from the bar itself, plus
         commission converted to price, over ``atr * sl_atr_mult``.
+
+        NOT comparable to ``opt_summary.holdout.cost_per_trade_r``, and the
+        difference is not a rounding one - on M5/M10 configs this figure runs
+        5-14x the walk-forward's. Same arithmetic, different population: this
+        averages EVERY bar, while the walk-forward only ever charges cost on
+        bars where a signal actually fired. Signals fire on movement, so entry
+        bars carry a systematically higher ATR than the median bar, and a
+        higher ATR is a bigger denominator. On H1 the two land within 10% of
+        each other because a long bar's ATR is large either way; the shorter
+        the timeframe, the further they diverge.
+
+        So read this for the SHAPE across hours - where in the day cost per
+        unit of risk collapses or spikes, which is what no other view answers -
+        and read cost_per_trade_r for the LEVEL a config actually pays.
+        Comparing the two levels directly has produced wrong calls on which
+        symbols are worth trading; the hourly shape has not.
         """
         cfg = store.symbols.get(symbol)
         if cfg is None:
