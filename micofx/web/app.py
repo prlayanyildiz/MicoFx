@@ -789,6 +789,81 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         rows = engine.risk.lot_mode_diagnostics(float(account.get("balance", 0.0)))
         return {"ok": True, "rows": rows}
 
+    @app.get("/api/analysis/cost-by-hour")
+    def cost_by_hour(symbol: str, timeframe: str = "", bars: int = 5000) -> dict[str, Any]:
+        """Cost as a fraction of the ATR stop distance, bucketed by hour of day.
+
+        Read-only. Answers one question the apply gates cannot: the cost share
+        that decides whether a config is worth trading is an average over the
+        whole day, and it hides the fact that spread and ATR do not move
+        together. If a window exists where ATR expands faster than spread, cost
+        per unit of risk collapses there - which is the only way a fast config
+        can stop giving most of its edge away.
+
+        Same arithmetic ``simulate`` charges: spread from the bar itself, plus
+        commission converted to price, over ``atr * sl_atr_mult``.
+        """
+        cfg = store.symbols.get(symbol)
+        if cfg is None:
+            raise HTTPException(404, f"{symbol} bulunamadi")
+        _require_connected()
+        tf = timeframe if timeframe in TIMEFRAMES else cfg.timeframe
+        count = max(200, min(int(bars), 50000))
+        data = client.bars(cfg.symbol, tf, count)
+        if data is None or len(data) < cfg.atr_period + 10:
+            raise HTTPException(503, f"{symbol}/{tf}: yeterli bar alinamadi")
+        info = client.info(cfg.symbol) or {}
+        point = float(info.get("point", 0.0) or 0.0)
+        if point <= 0:
+            raise HTTPException(503, f"{symbol}: point degeri okunamadi")
+
+        from .. import backtest, indicators as ind
+        commission = backtest.commission_in_price(
+            cfg.commission_per_lot,
+            float(info.get("tick_value", 0.0) or 0.0),
+            float(info.get("tick_size", 0.0) or 0.0))
+        atr = ind.atr(data.high, data.low, data.close, cfg.atr_period)
+        buckets: dict[int, list[float]] = {}
+        atr_buckets: dict[int, list[float]] = {}
+        for i in range(cfg.atr_period + 1, len(data)):
+            a = float(atr[i])
+            if not (a > 0) or a != a:          # zero or NaN
+                continue
+            risk = a * max(cfg.sl_atr_mult, 0.01)
+            if risk <= 0:
+                continue
+            cost = float(data.spread[i]) * point + commission
+            # gmtime, not localtime: an MT5 bar timestamp is a naive epoch
+            # encoding the broker's own wall-clock reading, so gmtime recovers
+            # that reading while localtime would add this machine's UTC offset
+            # on top of it and report every bar three hours late. Same
+            # convention Supervisor._bad_hours/_hour_risk_scales use on deal
+            # timestamps, and the reason its gate compares against
+            # localtime(server_now) - broker and Windows clock read the same
+            # wall time here.
+            hour = time.gmtime(int(data.time[i])).tm_hour
+            buckets.setdefault(hour, []).append(cost / risk)
+            atr_buckets.setdefault(hour, []).append(a)
+
+        rows = []
+        for hour in sorted(buckets):
+            vals = sorted(buckets[hour])
+            atrs = sorted(atr_buckets[hour])
+            rows.append({
+                "hour": hour,
+                "samples": len(vals),
+                "cost_over_risk": round(vals[len(vals) // 2], 4),
+                "atr": round(atrs[len(atrs) // 2], 6),
+            })
+        overall = sorted(v for vs in buckets.values() for v in vs)
+        return {
+            "ok": True, "symbol": symbol, "timeframe": tf,
+            "sl_atr_mult": cfg.sl_atr_mult,
+            "commission_per_lot": cfg.commission_per_lot,
+            "median_cost_over_risk": round(overall[len(overall) // 2], 4) if overall else 0.0,
+            "rows": rows,
+        }
+
     @app.post("/api/symbols/{symbol}/close")
     def close_symbol(symbol: str) -> dict[str, Any]:
         closed, remaining = engine.close_all(symbol=symbol)
