@@ -1047,6 +1047,18 @@ class MT5Client:
                 # this position is running the pre-fill-tick SL/TP rather than
                 # the fill-anchored one until the next trail update touches it.
                 reanchor_ok = False
+            if not reanchor_ok:
+                # The correction did not land, so the broker is still holding
+                # the levels that were actually sent and accepted. Report
+                # those, not the ones we wanted: the caller writes this SL
+                # straight into the TRADE log, and reporting the intended
+                # level would put a stop in the audit trail that no longer
+                # exists anywhere on the broker - the log would say the trade
+                # risked what it was sized for while the live position risked
+                # the pre-fill distance. _verify_ambiguous_send's recovery
+                # path already reverts for exactly this reason; the normal
+                # fill path is the one that did not.
+                final_sl, final_tp = request["sl"], request["tp"]
 
         return {
             "ok": True, "order": int(result.order), "deal": int(result.deal),
