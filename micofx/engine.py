@@ -8,7 +8,8 @@ from typing import Any
 
 from . import backtest, execution, indicators as ind, sessions
 from .logbus import LOG
-from .models import SymbolConfig, is_scalp_strategy, strategy_allows_timeframe
+from .models import (SymbolConfig, is_scalp_strategy, strategy_allows_timeframe,
+                     trail_min_step)
 from .mt5client import MT5Client, NON_RETRYABLE_RETCODES, timeframe_seconds
 from .execution import ExecutionMonitor
 from .risk import RiskManager
@@ -1793,7 +1794,7 @@ class Engine:
             # anyway would place a stop worse than breakeven. Skip this
             # cycle; retry once price allows it.
             return False
-        step = max(min_stop * 0.25, atr * cfg.trail_step_atr * 0.1)
+        step = trail_min_step(min_stop, atr, cfg.trail_step_atr)
         if current_sl != 0 and (target - current_sl < step if is_buy else current_sl - target < step):
             return settled
         # The position's real initial risk is max(atr*sl_atr_mult, min_stop) -

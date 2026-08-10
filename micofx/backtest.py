@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from . import indicators as ind
-from .models import SymbolConfig
+from .models import SymbolConfig, trail_min_step
 from .sessions import WEEKEND_OPEN_GROUPS
 from .strategy import IndicatorCache, Params, compute
 
@@ -405,14 +405,25 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                     if target is None or (trail > target if is_buy else trail < target):
                         target = trail
                 if target is not None:
+                    # Live will not send a modify for an improvement smaller
+                    # than this. Without the same floor here the replay
+                    # ratcheted the stop on ANY improvement, so the simulated
+                    # trail rode closer behind price than live's ever can and
+                    # gave back less on the reversal that ends the trade - a
+                    # one-directional optimism in every number the apply gates
+                    # read, and net_r is what risk._edge_metric turns into a
+                    # live lot multiplier.
+                    step = trail_min_step(min_stop, a, p.trail_step_atr)
                     if is_buy and target > sl:
                         new_sl = min(target, c - min_stop)
-                        if not (breakeven_locked and new_sl < entry):
+                        if (new_sl - sl >= step
+                                and not (breakeven_locked and new_sl < entry)):
                             sl = new_sl
                             trailing = True
                     elif not is_buy and target < sl:
                         new_sl = max(target, c + min_stop)
-                        if not (breakeven_locked and new_sl > entry):
+                        if (sl - new_sl >= step
+                                and not (breakeven_locked and new_sl > entry)):
                             sl = new_sl
                             trailing = True
             exit_bar = j

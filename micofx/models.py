@@ -374,6 +374,22 @@ EXIT_RISK_FIELDS = frozenset({
     "atr_period",
 })
 
+
+def trail_min_step(min_stop: float, atr: float, trail_step_atr: float) -> float:
+    """Smallest stop improvement worth sending to the broker.
+
+    Live needs this so a trade in a slow drift does not put a modify on the
+    wire every poll for a fraction of a point. The simulator needs the exact
+    same number for the opposite reason: without it the replay ratchets on any
+    improvement at all, rides closer behind price than live ever can, and gives
+    back less on the reversal that ends the trade - a one-directional optimism
+    in every figure the apply gates read.
+
+    Shared rather than written out twice so the two cannot drift apart again;
+    engine._update_stop and backtest.simulate are the only callers.
+    """
+    return max(float(min_stop) * 0.25, float(atr) * float(trail_step_atr) * 0.1)
+
 # Parameters the optimizer is allowed to overwrite on a SymbolConfig.
 OPT_FIELDS = [
     "t3_length", "t3_volume_factor", "rsi_length", "stoch_length",
