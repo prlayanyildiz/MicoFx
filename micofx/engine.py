@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Any
 
-from . import backtest, indicators as ind, sessions
+from . import backtest, execution, indicators as ind, sessions
 from .logbus import LOG
 from .models import SymbolConfig, is_scalp_strategy, strategy_allows_timeframe
 from .mt5client import MT5Client, NON_RETRYABLE_RETCODES, timeframe_seconds
@@ -1579,10 +1579,31 @@ class Engine:
             if not gone:
                 return
             deals = self.client.deals_since(time.time() - 7200)
-            self.execution.reap(gone, deals, self.client)
+            for report in self.execution.reap(gone, deals, self.client):
+                self._log_broker_exit(report)
             self.execution.forget(gone)
         except Exception as exc:                  # never let diagnostics stop the loop
             LOG.emit(f"Gerceklesme olcumu hatasi: {exc}", "WARN")
+
+    def _log_broker_exit(self, report: dict[str, Any]) -> None:
+        """Put one broker-generated exit in the log.
+
+        Restricted to this portfolio's magics: the account may carry positions
+        this bot never opened (manual trades, another EA), and reporting their
+        stops as MicoFX exits would make the log lie about what the bot did.
+        A margin stop-out is a WARN, not a TRADE - it means the account ran out
+        of margin, which is an account-level event, not a strategy exit.
+        """
+        magics = {c.magic for c in list(self.store.symbols.values())}
+        if report["magic"] not in magics:
+            return
+        profit = report["profit"]
+        detail = (f"{report['label'].capitalize()} ile kapandi #{report['ticket']} "
+                  f"@ {report['price']:g} ({report['volume']:g} lot) kar={profit:.2f}")
+        if report["reason"] == execution.DEAL_REASON_SO:
+            LOG.emit(detail, "WARN", report["symbol"])
+        else:
+            LOG.emit(detail, "TRADE", report["symbol"])
 
     def _apply_pending_exits(self) -> None:
         """Land exit/risk params an optimizer apply() held back while a position was open.

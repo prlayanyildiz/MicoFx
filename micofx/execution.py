@@ -44,9 +44,18 @@ from typing import Any
 
 from .logbus import LOG
 
-# MT5 deal reason codes for a position closed by the server's own stop/target.
+# MT5 deal reason codes for a position closed by the server itself rather than
+# by an order this engine sent. SO is the broker's margin stop-out.
 DEAL_REASON_SL = 4
 DEAL_REASON_TP = 5
+DEAL_REASON_SO = 6
+
+# Human labels for the exit reports below.
+_REASON_LABEL = {
+    DEAL_REASON_SL: "stop",
+    DEAL_REASON_TP: "hedef",
+    DEAL_REASON_SO: "broker marj kapatmasi",
+}
 
 # Per-symbol rolling sample window. Long enough for the symmetry read below to
 # mean something, short enough that a broker that fixed its routing last month
@@ -175,25 +184,62 @@ class ExecutionMonitor:
         gone = set(self._open) - seen
         return gone
 
-    def reap(self, gone: set[int], deals: list[dict[str, Any]], client) -> None:
+    def reap(self, gone: set[int], deals: list[dict[str, Any]],
+             client) -> list[dict[str, Any]]:
         """Score server-side stop/target fills for positions that just closed.
 
         Only deals the broker itself generated are measured here: a close the
         engine sent was already recorded against its own requested tick, and
         counting it twice would double the sample.
+
+        Returns one report per broker-generated exit, so the caller can put it
+        in the log. That report is the *only* record a stop exit leaves: the
+        engine logs its own closes at the moment it sends them, but a hard SL
+        firing at the broker happens with nothing running here - and since a
+        stop is this system's one and only intended exit, without this the
+        normal way a trade ends is the one event the log never mentions.
+        Reported even when the slippage sample below cannot be built (no
+        remembered SL/TP), because "the trade is gone" is the part the operator
+        needs regardless.
         """
         by_position: dict[int, dict[str, Any]] = {}
         for deal in deals:
-            if int(deal.get("reason", -1)) in (DEAL_REASON_SL, DEAL_REASON_TP):
+            if int(deal.get("reason", -1)) in (DEAL_REASON_SL, DEAL_REASON_TP,
+                                               DEAL_REASON_SO):
                 by_position[int(deal["position"])] = deal
+        # Net realised P/L is the whole round trip, not the closing deal's
+        # ``profit`` field alone - commission (which some brokers charge on the
+        # entry leg) and accumulated swap are just as real to the balance.
+        net: dict[int, float] = {}
+        for deal in deals:
+            pos = int(deal["position"])
+            net[pos] = net.get(pos, 0.0) + float(deal.get("profit", 0.0)) \
+                + float(deal.get("commission", 0.0)) + float(deal.get("swap", 0.0))
+
+        reports: list[dict[str, Any]] = []
         for ticket in gone:
             book = self._open.pop(int(ticket), None)
             deal = by_position.get(int(ticket))
-            if not book or not deal:
+            if not deal:
                 continue
-            is_stop = int(deal["reason"]) == DEAL_REASON_SL
+            reason = int(deal["reason"])
+            reports.append({
+                "ticket": int(ticket),
+                "symbol": (book or {}).get("symbol") or deal["symbol"],
+                "magic": int((book or {}).get("magic", deal.get("magic", 0))),
+                "reason": reason,
+                "label": _REASON_LABEL.get(reason, "broker"),
+                "price": float(deal["price"]),
+                "volume": float(deal.get("volume", 0.0)),
+                "profit": round(net.get(int(ticket), float(deal.get("profit", 0.0))), 2),
+            })
+            if not book:
+                continue
+            is_stop = reason == DEAL_REASON_SL
             expected = book["sl"] if is_stop else book["tp"]
-            if expected <= 0:
+            if reason == DEAL_REASON_SO or expected <= 0:
+                # A margin stop-out has no requested price of ours to compare
+                # against, so it is reported but never scored as slippage.
                 continue
             info = client.info(book["symbol"]) or {}
             self.record(
@@ -207,6 +253,7 @@ class ExecutionMonitor:
                 money_per_price=client.money_per_price_unit(book["symbol"],
                                                             float(deal.get("volume", 0.0))),
             )
+        return reports
 
     def forget(self, gone: set[int]) -> None:
         """Drop bookkeeping for closes we could not attribute to a deal."""
