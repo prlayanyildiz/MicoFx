@@ -23,79 +23,107 @@ def _fresh_store(tmp_path, monkeypatch):
     return Store()
 
 
+def _victim(store) -> tuple[str, int]:
+    """A shipped symbol to delete, and the magic that frees up.
+
+    These tests used to name AUDUSD and the literal 990101, because that pair
+    happened to sit exactly on next_magic()'s starting number. Removing AUDUSD
+    from the portfolio broke six tests that were about magic reuse and not
+    about AUDUSD at all. Picking the victim from whatever defaults.json
+    actually ships keeps them pinned to the behaviour instead of to the
+    roster.
+    """
+    symbol = min(store.symbols, key=lambda s: store.symbols[s].magic)
+    return symbol, store.symbols[symbol].magic
+
+
+def _take_magic(store, name: str, magic: int):
+    """Create a custom symbol holding ``magic`` exactly.
+
+    The old tests relied on next_magic() handing this number out by itself,
+    which only worked while the freed magic was the lowest one it would
+    reach. Claiming it explicitly states the precondition the test needs.
+    """
+    store.add_symbol(name, group="forex")
+    return store.update_symbol(name, {"magic": magic})
+
+
 def test_soft_seed_avoids_magic_taken_by_custom_symbol(tmp_path, monkeypatch):
     s = _fresh_store(tmp_path, monkeypatch)
-    # AUDUSD ships with magic 990101 in defaults.json - delete it, then have
-    # a custom symbol claim that exact magic via next_magic()'s natural
-    # sequence, then soft-seed AUDUSD back in.
-    s.delete_symbol("AUDUSD")
-    custom = s.add_symbol("MYPAIR", group="forex")
-    assert custom.magic == 990101
+    victim, magic = _victim(s)
+    s.delete_symbol(victim)
+    custom = _take_magic(s, "MYPAIR", magic)
+    assert custom.magic == magic
 
     seeded = s.seed_symbols(overwrite=False)
 
     assert seeded >= 1
-    assert "AUDUSD" in s.symbols
-    audusd_magic = s.symbols["AUDUSD"].magic
-    assert audusd_magic != 990101
+    assert victim in s.symbols
+    assert s.symbols[victim].magic != magic
     magics = [c.magic for c in s.symbols.values()]
     assert len(magics) == len(set(magics))  # no duplicate magics anywhere
 
 
 def test_soft_seed_avoids_magic_held_by_pending_orphan_scan(tmp_path, monkeypatch):
     s = _fresh_store(tmp_path, monkeypatch)
-    s.delete_symbol("AUDUSD")
-    # A pending secondary_orphan_scan is watching 990101 even though no
+    victim, magic = _victim(s)
+    s.delete_symbol(victim)
+    # A pending secondary_orphan_scan is watching that magic even though no
     # symbol in the portfolio currently owns it (e.g. the scan outlived its
     # own symbol's deletion).
-    s.set_setting("secondary_orphan_scan", {"SOMESYM": {"magic": 990101, "known": [], "since": 0.0}})
+    s.set_setting("secondary_orphan_scan",
+                  {"SOMESYM": {"magic": magic, "known": [], "since": 0.0}})
 
     s.seed_symbols(overwrite=False)
 
-    assert s.symbols["AUDUSD"].magic != 990101
+    assert s.symbols[victim].magic != magic
 
 
 def test_soft_seed_does_not_overwrite_existing_symbol(tmp_path, monkeypatch):
     s = _fresh_store(tmp_path, monkeypatch)
-    s.update_symbol("AUDUSD", {"sl_atr_mult": 9.99})
+    victim, _ = _victim(s)
+    s.update_symbol(victim, {"sl_atr_mult": 9.99})
 
     s.seed_symbols(overwrite=False)
 
-    assert s.symbols["AUDUSD"].sl_atr_mult == 9.99
+    assert s.symbols[victim].sl_atr_mult == 9.99
 
 
 def test_soft_seed_passes_through_avoid_magics(tmp_path, monkeypatch):
     s = _fresh_store(tmp_path, monkeypatch)
-    s.delete_symbol("AUDUSD")
+    victim, magic = _victim(s)
+    s.delete_symbol(victim)
 
     # Simulates a live orphan-ticket magic the web layer resolved via
     # client.positions() (Store itself has no client access for that half).
-    s.seed_symbols(overwrite=False, avoid_magics={990101})
+    s.seed_symbols(overwrite=False, avoid_magics={magic})
 
-    assert s.symbols["AUDUSD"].magic != 990101
+    assert s.symbols[victim].magic != magic
 
 
 def test_reset_recreate_avoids_magic_taken_by_custom_symbol(tmp_path, monkeypatch):
     s = _fresh_store(tmp_path, monkeypatch)
-    s.delete_symbol("AUDUSD")
-    custom = s.add_symbol("MYPAIR", group="forex")
-    assert custom.magic == 990101
+    victim, magic = _victim(s)
+    s.delete_symbol(victim)
+    custom = _take_magic(s, "MYPAIR", magic)
+    assert custom.magic == magic
 
-    updated = s.reset_symbol_to_preset("AUDUSD")
+    updated = s.reset_symbol_to_preset(victim)
 
     assert updated is not None
-    assert updated.magic != 990101
+    assert updated.magic != magic
     magics = [c.magic for c in s.symbols.values()]
     assert len(magics) == len(set(magics))
 
 
 def test_reset_recreate_avoids_magic_held_by_orphan_scan(tmp_path, monkeypatch):
     s = _fresh_store(tmp_path, monkeypatch)
-    s.delete_symbol("AUDUSD")
+    victim, magic = _victim(s)
+    s.delete_symbol(victim)
     s.set_setting("secondary_orphan_scan",
-                  {"SOMESYM": {"magic": 990101, "known": [], "since": 0.0}})
+                  {"SOMESYM": {"magic": magic, "known": [], "since": 0.0}})
 
-    updated = s.reset_symbol_to_preset("AUDUSD")
+    updated = s.reset_symbol_to_preset(victim)
 
     assert updated is not None
-    assert updated.magic != 990101
+    assert updated.magic != magic

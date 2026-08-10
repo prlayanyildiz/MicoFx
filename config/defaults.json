@@ -212,17 +212,6 @@
   },
   "symbols": [
     {
-      "symbol": "AUDUSD",
-      "group": "forex",
-      "magic": 990101,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
       "symbol": "CADJPY",
       "group": "forex",
       "magic": 990124,
@@ -256,17 +245,6 @@
       ]
     },
     {
-      "symbol": "GBPJPY",
-      "group": "forex",
-      "magic": 990105,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
       "symbol": "GBPUSD",
       "group": "forex",
       "magic": 990114,
@@ -281,17 +259,6 @@
       "symbol": "USDCHF",
       "group": "forex",
       "magic": 990005,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
-      "symbol": "USDJPY",
-      "group": "forex",
-      "magic": 990121,
       "sessions": [
         {
           "start": "01:00",
