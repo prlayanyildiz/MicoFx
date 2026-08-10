@@ -128,8 +128,40 @@ class Supervisor:
             if isinstance(payload, dict):
                 known = {k: v for k, v in payload.items() if k in SymbolVerdict.__dataclass_fields__}
                 known["symbol"] = symbol
+                # hour_risk_scales is keyed by hour-of-day as an int, and JSON
+                # has no integer keys - set_setting() serialises {9: 0.62} and
+                # get_setting() hands back {"9": 0.62}. _gate_locked() looks it
+                # up with an int hour, so a restored map never matched and the
+                # per-hour size throttle silently did nothing. Narrow in
+                # practice (last_review starts at 0.0, so the first cycle's
+                # review() recomputes every verdict with int keys again), but
+                # the restored state should be faithful rather than rely on
+                # being overwritten quickly to stay harmless.
+                known["hour_risk_scales"] = self._coerce_hour_map(
+                    known.get("hour_risk_scales"))
                 self.verdicts[symbol] = SymbolVerdict(**known)
         self.risk_scale = float(saved.get("risk_scale", 1.0) or 1.0)
+
+    @staticmethod
+    def _coerce_hour_map(raw: Any) -> dict[int, float]:
+        """Restore an hour->multiplier map to the int keys the gate looks up.
+
+        Anything unparseable is dropped rather than kept as a key that can
+        never match: a silently inert entry in a size-throttle map reads as
+        "this hour is fine" and is the failure this exists to prevent.
+        """
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[int, float] = {}
+        for key, value in raw.items():
+            try:
+                hour = int(key)
+                scale = float(value)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= hour <= 23:
+                out[hour] = scale
+        return out
 
     def _persist(self) -> None:
         # Snapshot before iterating: self.verdicts can be mutated from another
