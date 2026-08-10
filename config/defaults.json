@@ -256,28 +256,6 @@
       ]
     },
     {
-      "symbol": "EURUSD",
-      "group": "forex",
-      "magic": 990113,
-      "sessions": [
-        {
-          "start": "00:05",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
-      "symbol": "GBPCHF",
-      "group": "forex",
-      "magic": 990123,
-      "sessions": [
-        {
-          "start": "00:05",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
       "symbol": "GBPJPY",
       "group": "forex",
       "magic": 990105,
@@ -318,17 +296,6 @@
         {
           "start": "00:05",
           "end": "23:55"
-        }
-      ]
-    },
-    {
-      "symbol": "CA60",
-      "group": "index",
-      "magic": 990117,
-      "sessions": [
-        {
-          "start": "16:30",
-          "end": "23:10"
         }
       ]
     },
@@ -385,7 +352,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "max_spread_atr": 0.05
     },
     {
       "symbol": "SPA35",
@@ -429,7 +397,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "max_spread_atr": 0.07
     },
     {
       "symbol": "US500",
@@ -438,28 +407,6 @@
       "sessions": [
         {
           "start": "01:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
-      "symbol": "COFFEE",
-      "group": "commodity",
-      "magic": 990104,
-      "sessions": [
-        {
-          "start": "11:15",
-          "end": "20:25"
-        }
-      ]
-    },
-    {
-      "symbol": "COPPER",
-      "group": "commodity",
-      "magic": 990107,
-      "sessions": [
-        {
-          "start": "01:01",
           "end": "23:55"
         }
       ]
