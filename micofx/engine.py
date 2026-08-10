@@ -13,7 +13,7 @@ from .models import (SymbolConfig, invalid_exit_param, is_scalp_strategy,
 from .mt5client import MT5Client, NON_RETRYABLE_RETCODES, timeframe_seconds
 from .execution import ExecutionMonitor
 from .risk import RiskManager
-from .store import Store
+from .store import Store, as_dict, as_list, as_number
 from .strategy import IndicatorCache, Params, Signals, compute, required_bars
 from .supervisor import Supervisor
 
@@ -165,14 +165,14 @@ class Engine:
         # otherwise drop this in-memory set and let the position resume
         # normal trailing without ever landing the flatten it still owes.
         self._weekend_pending: set[int] = {
-            int(t) for t in (store.get_setting("weekend_pending_tickets") or []) if str(t).isdigit()
+            int(t) for t in (as_list(store.get_setting("weekend_pending_tickets"), "weekend_pending_tickets")) if str(t).isdigit()
         }
         # Session / day-end flatten sticky: should_flatten / day_end_close are
         # time windows - a DONE_PARTIAL True during the window used to look
         # "handled", then once the window flipped off the remainder fell into
         # normal trail. Same sticky contract as weekend_pending.
         self._force_flat_pending: set[int] = {
-            int(t) for t in (store.get_setting("force_flat_pending_tickets") or [])
+            int(t) for t in (as_list(store.get_setting("force_flat_pending_tickets"), "force_flat_pending_tickets"))
             if str(t).isdigit()
         }
         self._netting_warned = False
@@ -188,7 +188,7 @@ class Engine:
         # were opened under).
         self._sec_cfgs: dict[str, tuple[tuple, SymbolConfig]] = {}
         self._sec_tickets: set[int] = {
-            int(t) for t in (store.get_setting("secondary_tickets") or []) if str(t).isdigit()
+            int(t) for t in (as_list(store.get_setting("secondary_tickets"), "secondary_tickets")) if str(t).isdigit()
         }
         # Secondary fills whose broker ticket could not be identified/closed at
         # entry time. Two persisted forms, same goal (never let one silently run
@@ -199,10 +199,10 @@ class Engine:
         # replication lag) or the scan goes stale. Persisted like
         # weekend_pending_tickets - a restart mid-retry must not forget either.
         self._orphan_tickets: set[int] = {
-            int(t) for t in (store.get_setting("secondary_orphan_tickets") or []) if str(t).isdigit()
+            int(t) for t in (as_list(store.get_setting("secondary_orphan_tickets"), "secondary_orphan_tickets")) if str(t).isdigit()
         }
         self._orphan_scan: dict[str, dict[str, Any]] = {
-            str(k): v for k, v in (store.get_setting("secondary_orphan_scan") or {}).items()
+            str(k): v for k, v in (as_dict(store.get_setting("secondary_orphan_scan"), "secondary_orphan_scan")).items()
             if isinstance(v, dict)
         }
         # Sticky per-symbol daily-loss halt (see _symbol_daily_halt) - once a
@@ -211,15 +211,15 @@ class Engine:
         # next day rollover, same persistence guarantee DailyGuard.loss_halted
         # already has at the account level. Cleared in _cycle() alongside it.
         self._symbol_halted: dict[str, str] = {
-            str(k): str(v) for k, v in (store.get_setting("symbol_daily_halted") or {}).items()
+            str(k): str(v) for k, v in (as_dict(store.get_setting("symbol_daily_halted"), "symbol_daily_halted")).items()
         }
-        self._reopt_at = float(store.get_setting("auto_reopt_at", 0.0) or 0.0)
+        self._reopt_at = as_number(store.get_setting("auto_reopt_at"), 0.0, "auto_reopt_at")
         # Post-fill cooldown, per symbol, as an absolute epoch. Lived only in
         # SymbolState until now - which is rebuilt empty on every start, so a
         # restart inside the cooldown window dropped the one guard that stops
         # the bar's signal being taken twice. See _restore_cooldown().
         self._cooldowns: dict[str, float] = {
-            str(k): float(v) for k, v in (store.get_setting("entry_cooldowns") or {}).items()
+            str(k): float(v) for k, v in (as_dict(store.get_setting("entry_cooldowns"), "entry_cooldowns")).items()
             if isinstance(v, (int, float))
         }
         # symbol -> [signal_source, bar timestamp] of the last signal actually
@@ -230,8 +230,12 @@ class Engine:
         # it: 2 minutes against a 5-60 minute bar.
         self._filled_bars: dict[str, list] = {
             str(k): [str(v[0]), int(v[1])]
-            for k, v in (store.get_setting("filled_bars") or {}).items()
+            for k, v in (as_dict(store.get_setting("filled_bars"), "filled_bars")).items()
+            # The bar timestamp has to be a number, not merely present: the
+            # length check alone let ["sig", "yok"] through to int(), which
+            # raises inside __init__ and takes the whole start-up with it.
             if isinstance(v, (list, tuple)) and len(v) == 2
+            and isinstance(v[1], (int, float)) and not isinstance(v[1], bool)
         }
 
     # ------------------------------------------------------------- lifecycle

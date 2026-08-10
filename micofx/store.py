@@ -32,6 +32,59 @@ CREATE INDEX IF NOT EXISTS idx_opt_symbol ON opt_runs(symbol, created_at DESC);
 """
 
 
+# Shape guards for values read back out of the settings table.
+#
+# get_setting() guards the stored value being unparseable JSON. It does not
+# guard it being the wrong TYPE, and every caller assumes one: the engine's
+# restore block calls .items() on five settings and int()/float() on two more,
+# all inside __init__. A list where a dict belongs is valid JSON, so it sails
+# past the decode guard and takes the constructor down with an AttributeError -
+# which under pythonw.exe goes to a stream nobody reads, so the app simply
+# never appears. Store.__init__ already refuses to allow exactly that for a
+# corrupt DB *file*, raising a readable RuntimeError instead; the settings
+# inside the file had no equivalent.
+#
+# The element-level guards already at the call sites (``if str(t).isdigit()``,
+# ``if isinstance(v, dict)``) show the intent was there - it stopped one level
+# short, at the container.
+#
+# Deliberately module functions rather than Store methods: DailyGuard, Engine
+# and Supervisor are all constructed with duck-typed fakes in the tests, and
+# growing the Store interface makes every one of those a required update for a
+# guard that has nothing to do with what they are testing.
+
+def as_dict(value: Any, key: str = "") -> dict:
+    if isinstance(value, dict):
+        return value
+    if value is not None:
+        _warn_shape(key, value, "dict")
+    return {}
+
+
+def as_list(value: Any, key: str = "") -> list:
+    if isinstance(value, list):
+        return value
+    if value is not None:
+        _warn_shape(key, value, "list")
+    return []
+
+
+def as_number(value: Any, default: float = 0.0, key: str = "") -> float:
+    # bool is an int subclass; a True stored where an epoch belongs is a shape
+    # error, not the number 1.
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if value is not None:
+        _warn_shape(key, value, "sayi")
+    return float(default)
+
+
+def _warn_shape(key: str, value: Any, expected: str) -> None:
+    LOG.emit(f"Ayar '{key or '?'}' beklenen tipte degil "
+             f"({type(value).__name__}, {expected} bekleniyordu) - "
+             f"varsayilana donuldu.", "WARN")
+
+
 class Store:
     """SQLite-backed configuration store. All public methods are thread safe."""
 

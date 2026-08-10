@@ -8,7 +8,7 @@ from typing import Any
 from .logbus import LOG
 from .models import SymbolConfig, SystemConfig, is_scalp_strategy
 from .mt5client import MT5Client
-from .store import Store
+from .store import Store, as_number
 
 
 @dataclass
@@ -27,7 +27,11 @@ class DailyGuard:
     def __init__(self, store: Store) -> None:
         self.store = store
         self.day_key: str = str(store.get_setting("day_key", ""))
-        self.start_balance: float = float(store.get_setting("day_start_balance", 0.0) or 0.0)
+        # Typed read: a non-numeric value here is valid JSON and raised
+        # ValueError straight out of the constructor, which the engine builds
+        # during its own __init__ - so a single bad row stopped the app
+        # starting rather than degrading anything.
+        self.start_balance: float = as_number(store.get_setting("day_start_balance"), 0.0, "day_start_balance")
         self.halted: bool = bool(store.get_setting("day_halted", False))
         self.halt_reason: str = str(store.get_setting("day_halt_reason", ""))
         # Distinguishes *why* halted is True - a profit-target halt should
