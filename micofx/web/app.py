@@ -792,6 +792,68 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
         return {"ok": True, "symbols": symbol_payload(force=True), "system": store.system.to_dict()}
 
+    @app.get("/api/analysis/breakeven")
+    def breakeven_margin() -> dict[str, Any]:
+        """How far each symbol's validated win rate sits above its own breakeven.
+
+        The apply gates read profit factor, expectancy, retention and cost
+        separately; none of them answers "how much room is there before this
+        config stops paying". That distance is what a small execution
+        degradation eats, and it is not visible in any single number they do
+        check - US30 clears every gate on PF 1.12 while sitting 2.4 points
+        above the line.
+
+        Derived from the untouched holdout only, no assumptions bolted on.
+        The average win W matters here and is easy to get wrong: this exit
+        model has no take-profit, so winners run and W is nothing like 1R -
+        USDJPY's is 3.6R against a 26.5% win rate. Assuming 1R puts its
+        breakeven at 58% instead of 24% and inverts the verdict.
+
+            PF = (w * W) / ((1 - w) * L)          ->  W/L
+            E  = w * W - (1 - w) * L              ->  scale
+            breakeven win rate = L / (W + L)
+        """
+        rows: list[dict[str, Any]] = []
+        for cfg in list(store.symbols.values()):
+            if not cfg.enabled:
+                continue
+            hold = (cfg.opt_summary or {}).get("holdout") or {}
+            wr = float(hold.get("win_rate", 0.0) or 0.0)
+            pf = float(hold.get("profit_factor", 0.0) or 0.0)
+            exp = float(hold.get("expectancy", 0.0) or 0.0)
+            if wr <= 0 or wr >= 100 or pf <= 0:
+                continue
+            w = wr / 100.0
+            ratio = pf * (1 - w) / w                 # W / L
+            denom = w * ratio - (1 - w)
+            if denom == 0:
+                continue
+            loss = exp / denom                       # average loss, in R
+            win = ratio * loss
+            if win + loss <= 0:
+                continue
+            breakeven = loss / (win + loss) * 100.0
+            rows.append({
+                "symbol": cfg.symbol,
+                "win_rate": round(wr, 1),
+                "profit_factor": round(pf, 2),
+                "avg_win_r": round(win, 2),
+                "avg_loss_r": round(loss, 2),
+                "breakeven_win_rate": round(breakeven, 1),
+                "margin_pp": round(wr - breakeven, 1),
+                "trades": hold.get("trades"),
+            })
+        rows.sort(key=lambda r: r["margin_pp"])
+        thin = [r["symbol"] for r in rows if r["margin_pp"] < 4.0]
+        return {
+            "ok": True, "rows": rows, "thin": thin,
+            "note": (
+                f"{len(thin)} sembol 4 puandan az marjla calisiyor: "
+                f"{', '.join(thin)} - kucuk bir icra bozulmasi bunlari negatife cevirir"
+                if thin else "her sembol 4 puandan genis marjla calisiyor"
+            ),
+        }
+
     @app.post("/api/symbols/{symbol}/reset")
     def reset_symbol(symbol: str) -> dict[str, Any]:
         cfg = store.symbols.get(symbol)
