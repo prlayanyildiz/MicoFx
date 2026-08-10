@@ -7,6 +7,7 @@ walk-forward search that ultimately writes live trading params via apply().
 """
 from __future__ import annotations
 
+import pytest
 import sys
 import threading
 from pathlib import Path
@@ -91,3 +92,52 @@ def test_opt_params_accepts_valid_nested_grids():
     })
     assert res.status_code == 200
     assert store.saved is not None
+
+
+# ------------------------------------------------- RecursionError / depth
+
+def _deep(depth: int) -> dict:
+    body: dict = {}
+    cur = body
+    for _ in range(depth):
+        cur["g"] = {}
+        cur = cur["g"]
+    cur["x"] = 1.0
+    return body
+
+
+def test_a_deeply_nested_body_is_refused_not_a_recursion_error():
+    """_reject_non_finite_deep walks a client-supplied body recursively.
+
+    Python's recursion limit is ~1000 frames, so a deep enough payload used to
+    raise RecursionError inside the handler - an opaque 500 rather than a
+    message saying what was wrong with the request.
+    """
+    from fastapi import HTTPException
+
+    from micofx.web.app import _reject_non_finite_deep
+
+    with pytest.raises(HTTPException) as err:
+        _reject_non_finite_deep(_deep(5000))
+    assert err.value.status_code == 400
+    assert "ic ice" in err.value.detail
+
+
+def test_realistic_nesting_still_passes():
+    """The real shape is {strategy: {param: [values]}} - three levels."""
+    from micofx.web.app import _reject_non_finite_deep
+
+    _reject_non_finite_deep({"strategy_grids": {"orb": {"sl_atr_mult": [1.0, 2.0]}},
+                             "grid": {"trail_step_atr": [0.8]}})
+    _reject_non_finite_deep(_deep(50))      # comfortably under the cap
+
+
+def test_the_nan_check_still_fires_inside_nesting():
+    """The cap must not shadow what the function is actually for."""
+    from fastapi import HTTPException
+
+    from micofx.web.app import _reject_non_finite_deep
+
+    with pytest.raises(HTTPException) as err:
+        _reject_non_finite_deep({"grid": {"sl_atr_mult": [1.0, "NaN"]}})
+    assert "sl_atr_mult" in err.value.detail

@@ -221,7 +221,7 @@ def _reject_non_finite_values(d: dict[str, Any], label: str = "") -> None:
             raise HTTPException(400, f"{name} gecersiz ({value!r})")
 
 
-def _reject_non_finite_deep(value: Any, path: str = "") -> None:
+def _reject_non_finite_deep(value: Any, path: str = "", depth: int = 0) -> None:
     """Recursive counterpart to ``_reject_non_finite_values``.
 
     opt_params' numeric leaves (``strategy_grids``/``grid`` search axes) sit
@@ -230,13 +230,23 @@ def _reject_non_finite_deep(value: Any, path: str = "") -> None:
     a NaN buried in one of those lists. Walks dicts and lists to every leaf
     instead.
     """
+    # Depth cap: this walks a client-supplied body, and Python's own recursion
+    # limit is ~1000 frames, so a deeply nested payload raised RecursionError
+    # inside the handler at roughly 1500 levels. The consequence was only an
+    # opaque 500 (Starlette catches it, the bot keeps trading) and the panel
+    # binds to 127.0.0.1 with a token required off-localhost, so this was never
+    # a live risk - but a request that is refused should say why. No legitimate
+    # opt-params body is more than three levels deep
+    # ({strategy: {param: [values]}}), so 60 is far above anything real.
+    if depth > 60:
+        raise HTTPException(400, f"{path or 'govde'} fazla ic ice (60 seviye siniri)")
     if isinstance(value, dict):
         for key, sub in value.items():
-            _reject_non_finite_deep(sub, f"{path}.{key}" if path else str(key))
+            _reject_non_finite_deep(sub, f"{path}.{key}" if path else str(key), depth + 1)
         return
     if isinstance(value, (list, tuple)):
         for i, sub in enumerate(value):
-            _reject_non_finite_deep(sub, f"{path}[{i}]")
+            _reject_non_finite_deep(sub, f"{path}[{i}]", depth + 1)
         return
     bad = ((isinstance(value, (int, float)) and not math.isfinite(value))
           or (isinstance(value, str) and value.strip().lower() in _NON_FINITE_TOKENS))

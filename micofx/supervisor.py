@@ -566,8 +566,24 @@ class Supervisor:
             row = v.to_dict()
             row["quarantine_left_min"] = max(0, int((v.quarantine_until - now) / 60))
             row["enabled"] = cfg.enabled
-            row["effective_scale"] = 0.0 if v.state == "quarantine" else round(
-                self.risk_scale * v.risk_scale, 3)
+            # Ask the gate itself rather than recomputing its arithmetic here.
+            # The old line multiplied risk_scale * verdict.risk_scale without
+            # consulting self.enabled, so with the AI advisory layer switched
+            # OFF - when _gate_locked returns a flat 1.0 for every symbol that
+            # is not quarantined - the panel still showed every row throttled
+            # to 0.4x/0.24x, complete with "kenar dustu" and "lot kisildi"
+            # reasons. That reads as "the AI is holding the portfolio back"
+            # when nothing is being held back at all. It also skipped the
+            # gate's own [0.1, 1.0] clamp and its per-hour scaling, so the
+            # number was wrong in the enabled case too. Deriving it from the
+            # one function that decides means the display cannot drift from
+            # the behaviour again.
+            allowed, reason, scale = self._gate_locked(cfg, now)
+            row["effective_scale"] = round(scale, 3)
+            row["gate_allowed"] = allowed
+            # Why an entry would be refused RIGHT NOW - distinct from
+            # ``reason``, which explains the classification, not the block.
+            row["gate_reason"] = reason
             rows.append(row)
         rows.sort(key=lambda r: ({"quarantine": 0, "watch": 1, "ok": 2, "idle": 3}[r["state"]], r["symbol"]))
         return {
