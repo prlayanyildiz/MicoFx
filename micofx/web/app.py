@@ -1448,13 +1448,34 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # explicitly overrides. Hand-typed params (no run_id, no detail) are
         # a different, pre-existing use case - unrelated to any optimizer
         # run - and are not gated here.
-        if detail is not None and detail.get("validated") is False and not body.force:
+        rejected = detail is not None and detail.get("validated") is False
+        if rejected and not body.force:
             raise HTTPException(
                 400, f"bu sonuc dogrulanmadi ({detail.get('keep_reason', '')}) - "
                      f"uygulamak icin force:true gonderin")
         result = optimizer.apply(body.symbol, params, float(score), detail, timeframe, strategy)
         if not result.get("ok"):
             raise HTTPException(400, result.get("error", "uygulanamadi"))
+
+        # force stays ALLOWED - it is a deliberate override - but it used to
+        # leave no trace: it logged the same success line a fully-validated
+        # apply did, so afterwards nothing distinguished "the walk-forward
+        # approved this" from "someone overrode the walk-forward". That is the
+        # one thing a bypass has to record, since it is the version now
+        # trading real money.
+        #
+        # Only this case is flagged. ``detail is None`` looks like the other
+        # bypass ("hand-typed params, never validated") but it is not a usable
+        # signal: the panel's own results-table apply also posts params
+        # without a run_id, so every ordinary apply from that table would
+        # warn. A real hand-typed call is indistinguishable from it here, and
+        # a warning that fires on the normal path teaches people to ignore it.
+        if rejected:
+            warning = (f"dogrulanmamis sonuc force ile uygulandi "
+                       f"({detail.get('keep_reason', 'sebep yok')})")
+            LOG.emit(f"OPT parametreleri DOGRULANMADAN uygulandi (force, skor {score:.2f}): "
+                     f"{detail.get('keep_reason', 'sebep belirtilmemis')}", "WARN", body.symbol)
+            return {**result, "warning": warning}
         LOG.emit(f"OPT parametreleri uygulandi (skor {score:.2f}).", "OPT", body.symbol)
         return result
 

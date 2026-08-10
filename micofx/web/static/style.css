@@ -348,6 +348,10 @@ select#group-filter { width: 150px; }
 }
 .toast > div.ok { border-left-color: var(--green); }
 .toast > div.err { border-left-color: var(--red); }
+/* Applied, but without the walk-forward's blessing - a force override or
+   hand-typed params. Not a failure, so not red; not routine either, so not
+   the same green a validated apply gets. */
+.toast > div.warn { border-left-color: var(--amber); }
 @keyframes slide { from { opacity: 0; transform: translateX(24px); } }
 
 .saved-flash { animation: flash 1.1s ease-out; }

@@ -1206,12 +1206,16 @@ function renderOptJob() {
             `(PF ${num(h.profit_factor, 2)}, ${signed(h.net_r, 1)}R). Yine de uygulansin mi?`)) return;
           e.target.disabled = true;
           try {
-            await api("/api/opt/apply", {
+            const res = await api("/api/opt/apply", {
               method: "POST",
               body: { symbol: r.symbol, params: r.best.params, score: r.best.score,
                       timeframe: r.timeframe, strategy: r.strategy },
             });
-            toast(`${r.symbol} parametreleri uygulandi (${r.strategy} ${r.timeframe})`, "ok");
+            // An apply that bypassed the walk-forward still succeeds, so a
+            // plain green toast read exactly like a validated one. Surface
+            // what the API reports instead of assuming every 200 is routine.
+            if (res && res.warning) toast(`${r.symbol}: ${res.warning}`, "warn");
+            else toast(`${r.symbol} parametreleri uygulandi (${r.strategy} ${r.timeframe})`, "ok");
             refresh();
           } catch (err) { toast(err.message, "err"); e.target.disabled = false; }
         },
@@ -1256,8 +1260,12 @@ async function loadOptHistory() {
         onclick: async (e) => {
           e.target.disabled = true;
           try {
-            await api("/api/opt/apply", { method: "POST", body: { symbol: h.symbol, run_id: h.id } });
-            toast(`${h.symbol} parametreleri uygulandi`, "ok");
+            const res = await api("/api/opt/apply",
+                                  { method: "POST", body: { symbol: h.symbol, run_id: h.id } });
+            // Same reasoning as the results table above - this is the path a
+            // force override actually comes in on.
+            if (res && res.warning) toast(`${h.symbol}: ${res.warning}`, "warn");
+            else toast(`${h.symbol} parametreleri uygulandi`, "ok");
             loadOptHistory(); refresh();
           } catch (err) { toast(err.message, "err"); e.target.disabled = false; }
         },

@@ -279,3 +279,63 @@ def test_opt_apply_run_id_path_also_validated():
     res = tc2.post("/api/opt/apply", json={"symbol": "XAUUSD", "run_id": 7})
     assert res.status_code == 400
     assert optimizer.calls == []
+
+
+# ------------------------------------------------------ force audit trail
+
+def _history_client(validated, keep_reason="holdout negatif"):
+    optimizer = _FakeOptimizer()
+
+    class _StoreWithHistory(_FakeStore):
+        def opt_history(self, symbol, limit):
+            return [{"id": 5, "symbol": symbol, "params": {"sl_atr_mult": 1.5},
+                     "score": 1.0, "timeframe": "M15", "strategy": "t3_stoch",
+                     "validated": validated, "keep_reason": keep_reason}]
+
+    store = _StoreWithHistory({"XAUUSD": _cfg("XAUUSD", magic=990021)})
+    return TestClient(create_app(store, _FakeClient(), _FakeEngine(), optimizer)), optimizer
+
+
+def test_a_rejected_candidate_still_needs_force():
+    tc, optimizer = _history_client(validated=False)
+    res = tc.post("/api/opt/apply", json={"symbol": "XAUUSD", "run_id": 5})
+    assert res.status_code == 400
+    assert optimizer.calls == []
+
+
+def test_force_applies_but_reports_that_it_bypassed_validation():
+    """force is allowed - it just may not look like a routine apply."""
+    tc, optimizer = _history_client(validated=False)
+    res = tc.post("/api/opt/apply",
+                  json={"symbol": "XAUUSD", "run_id": 5, "force": True})
+    assert res.status_code == 200
+    assert len(optimizer.calls) == 1
+    warning = res.json().get("warning", "")
+    assert warning, "a forced override returned no warning at all"
+    assert "force" in warning
+    assert "holdout negatif" in warning, "the reject reason was dropped"
+
+
+def test_a_validated_apply_carries_no_warning():
+    """The flag has to stay meaningful - no warning on the normal path."""
+    tc, optimizer = _history_client(validated=True)
+    res = tc.post("/api/opt/apply", json={"symbol": "XAUUSD", "run_id": 5})
+    assert res.status_code == 200
+    assert "warning" not in res.json()
+
+
+def test_a_params_apply_without_run_id_carries_no_warning():
+    """The panel's own results table posts params with no run_id.
+
+    Flagging "detail is None" as an unvalidated hand-typed apply would fire
+    on every ordinary apply from that table, which is how a warning gets
+    trained out of usefulness.
+    """
+    tc, optimizer = _client()
+    res = tc.post("/api/opt/apply", json={
+        "symbol": "XAUUSD",
+        "params": {"sl_atr_mult": 1.5, "trail_start_atr": 0.5, "trail_step_atr": 1.6},
+        "strategy": "t3_stoch", "timeframe": "M15",
+    })
+    assert res.status_code == 200
+    assert "warning" not in res.json()
