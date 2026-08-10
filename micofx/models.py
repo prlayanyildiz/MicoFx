@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
@@ -373,6 +374,50 @@ EXIT_RISK_FIELDS = frozenset({
     "sl_atr_mult", "trail_start_atr", "trail_step_atr", "trail_mode", "trail_lookback",
     "atr_period",
 })
+
+# The three numbers that ARE the exit model, and the range each has to stay
+# in. The web layer enforces the same bounds on its own request bodies, but
+# that only covers writes a human makes: Optimizer.apply() is also reached
+# from the auto-apply path of a search run, which never passes through an
+# HTTP handler at all. Since the search grid itself is user-editable, a grid
+# axis containing 0 could be searched, "won", and applied straight to a live
+# symbol with nothing in between. Kept here, next to OPT_FIELDS, because this
+# is the layer both the API and the optimizer already depend on - optimizer.py
+# importing the web app to borrow its validator would invert the layering.
+EXIT_PARAM_BOUNDS = {
+    "sl_atr_mult": (0.0, 20.0),
+    "trail_start_atr": (0.0, 20.0),
+    "trail_step_atr": (0.0, 20.0),
+}
+
+
+def invalid_exit_param(params: dict) -> str:
+    """Reason the exit params are unusable, or "" when they are fine.
+
+    All three bounds are exclusive at the bottom: 0 is not "off" for any of
+    them. ``trail_start_atr`` is the one that reads most like it should be -
+    both the engine and the simulator arm the trail behind
+    ``if trail_start_atr > 0``, so a 0 does not arm it immediately, it stops
+    the trail from ever arming and leaves the position on its hard stop for
+    its whole life. A 0 ``sl_atr_mult`` collapses that hard stop onto the
+    broker's minimum distance, and a negative ``trail_step_atr`` puts the
+    trail target on the losing side of price.
+    """
+    for key, (lo, hi) in EXIT_PARAM_BOUNDS.items():
+        if key not in params or params[key] is None:
+            continue
+        try:
+            value = float(params[key])
+        except (TypeError, ValueError):
+            return f"{key} sayi degil ({params[key]!r})"
+        if not math.isfinite(value):
+            # NaN loses both comparisons below, so it has to be caught first.
+            return f"{key} gecersiz ({value!r})"
+        if value <= lo:
+            return f"{key} {value:g} - {lo:g}'dan buyuk olmali"
+        if value > hi:
+            return f"{key} {value:g} - en fazla {hi:g} olabilir"
+    return ""
 
 
 def trail_min_step(min_stop: float, atr: float, trail_step_atr: float) -> float:

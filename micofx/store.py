@@ -167,17 +167,29 @@ class Store:
                 (cfg.symbol, position, blob),
             )
             self._db.commit()
-        # Replace the dict object rather than mutate it in place. Every
-        # engine/risk/supervisor read site takes a reference via
-        # list(store.symbols.values()) without holding self._lock (locking
-        # every one of those hot-path reads would be its own cost) - mutating
-        # the same dict object a concurrent iterator is walking can raise
-        # "dictionary changed size during iteration" mid-cycle. Rebinding
-        # self.symbols to a brand-new dict never touches the old object, so
-        # any iterator already holding a reference to it keeps working
-        # against a now-stale-but-internally-consistent snapshot instead of
-        # crashing - a single attribute reassignment is atomic under the GIL.
-        self.symbols = {**self.symbols, cfg.symbol: cfg}
+            # Replace the dict object rather than mutate it in place. Every
+            # engine/risk/supervisor read site takes a reference via
+            # list(store.symbols.values()) without holding self._lock (locking
+            # every one of those hot-path reads would be its own cost) -
+            # mutating the same dict object a concurrent iterator is walking
+            # can raise "dictionary changed size during iteration" mid-cycle.
+            # Rebinding self.symbols to a brand-new dict never touches the old
+            # object, so any iterator already holding a reference to it keeps
+            # working against a now-stale-but-internally-consistent snapshot
+            # instead of crashing - a single attribute reassignment is atomic
+            # under the GIL.
+            #
+            # Held INSIDE the lock: copy-on-write is what makes unlocked
+            # READERS safe, but building the new dict is itself a
+            # read-modify-write of self.symbols and only the final assignment
+            # is atomic. Two concurrent WRITERS could both read the pre-write
+            # dict, and the loser's symbol would be missing from memory while
+            # the DB kept both - so it silently reappeared on the next
+            # restart. Not reproducible under load here (the window is a few
+            # bytecodes wide), but the sequence is genuinely unsynchronised
+            # and the lock is already held for the write above, so closing it
+            # costs nothing.
+            self.symbols = {**self.symbols, cfg.symbol: cfg}
 
     def update_symbol(self, symbol: str, patch: dict[str, Any]) -> SymbolConfig | None:
         cfg = self.symbols.get(symbol)
@@ -197,9 +209,11 @@ class Store:
             cur = self._db.execute("DELETE FROM symbols WHERE symbol=?", (symbol,))
             self._db.execute("DELETE FROM opt_runs WHERE symbol=?", (symbol,))
             self._db.commit()
-        # Same copy-on-write reasoning as save_symbol() above.
-        if symbol in self.symbols:
-            self.symbols = {k: v for k, v in self.symbols.items() if k != symbol}
+            # Same copy-on-write reasoning as save_symbol() above, and held
+            # inside the lock for the same reason: a delete racing a save
+            # could otherwise resurrect the deleted symbol in memory.
+            if symbol in self.symbols:
+                self.symbols = {k: v for k, v in self.symbols.items() if k != symbol}
         return cur.rowcount > 0
 
     def purge_orphan_history(self) -> int:

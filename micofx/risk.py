@@ -39,11 +39,33 @@ class DailyGuard:
         # until rollover/resume - the same persistence guarantee ``halted``
         # itself already has.
         self.loss_halted: bool = bool(store.get_setting("day_loss_halted", False))
+        # Deliberately not persisted: it only throttles the log line below to
+        # once per episode, and a restart re-reporting a still-zero balance is
+        # useful rather than noise.
+        self._zero_balance_warned: bool = False
 
     def rollover(self, server_epoch: float, balance: float) -> bool:
         key = time.strftime("%Y-%m-%d", time.localtime(server_epoch))
         if key == self.day_key and self.start_balance > 0:
             return False
+        if balance <= 0:
+            # Nothing to anchor against, so refuse the rollover rather than
+            # anchor at zero. Anchoring at zero re-armed this same branch on
+            # every following cycle (the guard above needs start_balance > 0
+            # to say "already rolled over"), and each of those repeats cleared
+            # ``halted``/``loss_halted`` - and, via Engine._handle_daily_
+            # rollover's return value, wiped every per-symbol sticky halt too.
+            # pnl_pct() also returns a flat 0.0 while start_balance <= 0, so
+            # check() could never re-trip: the daily loss breaker was off for
+            # the rest of the session. Holding the previous day's anchor and
+            # halt state is the fail-closed answer; a real balance arriving on
+            # any later cycle anchors normally.
+            if not self._zero_balance_warned:
+                self._zero_balance_warned = True
+                LOG.emit(f"Bakiye {balance:.2f} - gun baslangici sabitlenemedi, "
+                         f"gunluk limitler onceki durumda tutuluyor.", "WARN")
+            return False
+        self._zero_balance_warned = False
         self.day_key = key
         self.start_balance = float(balance)
         self.halted = False

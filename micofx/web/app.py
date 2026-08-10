@@ -18,7 +18,10 @@ from pydantic import BaseModel
 from .. import APP_NAME, __version__
 from ..engine import Engine
 from ..logbus import LOG
-from ..models import EXIT_RISK_FIELDS, GROUPS, STRATEGIES, TIMEFRAMES, strategy_allows_timeframe
+from ..models import (
+    EXIT_PARAM_BOUNDS, EXIT_RISK_FIELDS, GROUPS, STRATEGIES, TIMEFRAMES,
+    invalid_exit_param, strategy_allows_timeframe,
+)
 from ..mt5client import MT5Client
 from ..optimizer import Optimizer
 from ..paths import ROOT, WEB_DIR
@@ -127,6 +130,29 @@ def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYM
             raise HTTPException(400, f"{name} gecersiz ({value}) - {lo}'dan buyuk olmali")
         if hi is not None and value > hi:
             raise HTTPException(400, f"{name} gecersiz ({value}) - en fazla {hi} olabilir")
+
+
+def _exit_axes(body: dict[str, Any]):
+    """Yield (axis_name, values) for every exit-model axis in an opt-params body.
+
+    The search grid comes in two shapes: a flat shared ``grid`` of
+    {param: [values]}, and ``strategy_grids`` of {strategy: {param: [values]}}
+    that overrides it per family. Both can carry the exit axes, so both are
+    walked - checking only the flat one would leave the per-strategy override
+    as an open door to the same value.
+    """
+    def _axes(container: Any):
+        if not isinstance(container, dict):
+            return
+        for axis, values in container.items():
+            if axis in EXIT_PARAM_BOUNDS and isinstance(values, (list, tuple)):
+                yield axis, values
+
+    yield from _axes(body.get("grid"))
+    per_strategy = body.get("strategy_grids")
+    if isinstance(per_strategy, dict):
+        for sub in per_strategy.values():
+            yield from _axes(sub)
 
 
 # Engine-internal bookkeeping: Optimizer.apply()/_apply_secondary_locked()
@@ -1325,6 +1351,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # numeric axes inside {strategy: {param: [values...]}}, so this needs
         # the recursive check, not the flat top-level-only one.
         _reject_non_finite_deep(body)
+        # The grid is the upstream of every applied parameter: an axis holding
+        # a 0 gets searched, can win on score, and is then written to a live
+        # symbol by the auto-apply path. Optimizer.apply refuses it at the far
+        # end, but a grid that can only produce rejected candidates is a
+        # silently broken search - better to refuse the axis at the point it
+        # is set, while there is a human to read the message.
+        for axis, values in _exit_axes(body):
+            for value in values:
+                bad = invalid_exit_param({axis: value})
+                if bad:
+                    raise HTTPException(400, f"optimizer grid: {bad}")
         return {"ok": True, "params": store.save_opt_params(body)}
 
     @app.post("/api/opt/params/reset")

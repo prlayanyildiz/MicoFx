@@ -15,8 +15,8 @@ from . import backtest
 from .logbus import LOG
 from .models import (
     EXIT_RISK_FIELDS, OPT_FIELDS, SECONDARY_FIELDS, STRATEGIES, STRATEGY_TIMEFRAMES,
-    SWING_GRID_OVERLAY, TIMEFRAMES, SymbolConfig, is_scalp_strategy, strategy_allows_timeframe,
-    uses_swing_exits,
+    SWING_GRID_OVERLAY, TIMEFRAMES, SymbolConfig, invalid_exit_param, is_scalp_strategy,
+    strategy_allows_timeframe, uses_swing_exits,
 )
 from .mt5client import Bars, MT5Client, timeframe_seconds
 from .store import Store
@@ -935,6 +935,13 @@ class Optimizer:
         else:
             best = attempt["best"]
             params = {k: v for k, v in best["params"].items() if k in OPT_FIELDS}
+            # Same gate as apply(): engine.py builds the secondary signal's
+            # exit payload straight from this dict, so a broken exit model
+            # here drives a real position exactly like the primary one does.
+            bad = invalid_exit_param(params)
+            if bad:
+                LOG.emit(f"Ikincil cikis parametresi reddedildi: {bad}", "OPT", symbol)
+                return {"ok": False, "error": f"ikincil cikis parametresi gecersiz: {bad}"}
             patch = {
                 "secondary_strategy": attempt["strategy"],
                 "secondary_timeframe": attempt["timeframe"],
@@ -1056,6 +1063,18 @@ class Optimizer:
             or (timeframe in TIMEFRAMES and timeframe != cfg.timeframe)
         )
         applied_params = {k: v for k, v in params.items() if k in OPT_FIELDS}
+        # Last gate before this reaches a live symbol. The API checks the same
+        # bounds on its own request bodies, but auto-apply (Optimizer.start
+        # with apply_best) lands here straight off a search result without
+        # touching an HTTP handler - and the search grid is user-editable, so
+        # an axis containing 0 could be searched, win, and switch that
+        # symbol's trail off permanently. Refused rather than clamped: a
+        # candidate scored under an exit model this broken is not a candidate
+        # whose numbers should be quietly rewritten into a different one.
+        bad = invalid_exit_param(applied_params)
+        if bad:
+            LOG.emit(f"Cikis parametresi reddedildi: {bad}", "OPT", symbol)
+            return {"ok": False, "error": f"cikis parametresi gecersiz: {bad}"}
         patch = dict(applied_params)
         if timeframe in TIMEFRAMES:
             patch["timeframe"] = timeframe
