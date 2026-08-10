@@ -1282,8 +1282,53 @@ class MT5Client:
         # Full-close log only when not DONE_PARTIAL - otherwise the "kismen"
         # line above already told the truth and a second "kapatildi" lied.
         if volume is None and not partial:
-            LOG.emit(f"Pozisyon kapatildi #{ticket} kar={p.profit:.2f}", "TRADE", p.symbol)
+            realised = self._closing_deal_pnl(result, int(ticket))
+            if realised is None:
+                # History has not caught up (or the call failed). Fall back to
+                # the position's own floating figure, swap folded in, and say
+                # which one this is rather than quietly printing a different
+                # quantity under the same label.
+                LOG.emit(f"Pozisyon kapatildi #{ticket} "
+                         f"kar~{float(p.profit) + float(p.swap):.2f} (anlik)",
+                         "TRADE", p.symbol)
+            else:
+                LOG.emit(f"Pozisyon kapatildi #{ticket} kar={realised:.2f}",
+                         "TRADE", p.symbol)
         return True
+
+    def _closing_deal_pnl(self, result: Any, position: int) -> float | None:
+        """Realised P/L of the close we just sent, or None if not readable yet.
+
+        ``p.profit`` from positions_get is the *floating* figure read a moment
+        BEFORE the order went out, and carries no commission - so logging it as
+        ``kar=`` reported neither the price we actually got nor the full cost of
+        the round trip. The broker-side exit path already reports true realised
+        P/L (see ExecutionMonitor.reap), and two lines in the same log wearing
+        the same label must not be different quantities.
+
+        Read the same way open_market resolves its fill: history_deals_get
+        filters on the ORDER ticket, not the deal ticket. Called only after the
+        close has already succeeded, so a slow or failed lookup can never hold
+        up the close itself - it just falls back.
+        """
+        order = int(getattr(result, "order", 0) or 0)
+        if not order:
+            return None
+        try:
+            with self._lock:
+                deals = mt5.history_deals_get(ticket=order)
+        except Exception:
+            return None
+        if not deals:
+            return None
+        total = 0.0
+        seen = False
+        for d in deals:
+            if int(getattr(d, "position_id", 0)) != position:
+                continue
+            seen = True
+            total += float(d.profit) + float(d.commission) + float(d.swap)
+        return total if seen else None
 
     def close_all(self, magics: set[int] | None = None, symbol: str | None = None) -> tuple[int, int]:
         """Flatten every matching position, retrying what a single pass leaves open.
