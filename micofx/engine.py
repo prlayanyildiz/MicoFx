@@ -1790,9 +1790,13 @@ class Engine:
                         # Only the bad patch is cleared - the secondary block
                         # below still gets its turn this cycle.
                         updated = self.store.update_symbol(cfg.symbol, {"pending_exit_patch": {}})
+                        # WARN, not ERROR: dropping a stale/poisoned pending
+                        # patch is the gate working as designed. ERROR made
+                        # fault scans treat a successful refuse as a live
+                        # failure (and the line persists on disk forever).
                         LOG.emit(f"{cfg.symbol}: bekletilen cikis parametresi gecersiz "
                                  f"({bad}) - uygulanmadi, mevcut ayar korundu.",
-                                 "ERROR", cfg.symbol)
+                                 "WARN", cfg.symbol)
                     else:
                         updated = self.store.update_symbol(cfg.symbol,
                                                            {**pending, "pending_exit_patch": {}})
@@ -1816,7 +1820,7 @@ class Engine:
                                                  {"pending_secondary_exit_patch": {}})
                         LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis parametresi gecersiz "
                                  f"({bad_sec}) - uygulanmadi, mevcut ayar korundu.",
-                                 "ERROR", cfg.symbol)
+                                 "WARN", cfg.symbol)
                     else:
                         self.store.update_symbol(cfg.symbol, {
                             "secondary_params": merged_params, "pending_secondary_exit_patch": {},

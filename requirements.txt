@@ -6,4 +6,4 @@ numpy>=1.26.0
 
 # dev / test
 pytest>=8.0.0
-httpx>=0.27.0          # fastapi.testclient.TestClient transport
+httpx2>=2.0.0          # Starlette TestClient (httpx fallback is deprecated)
