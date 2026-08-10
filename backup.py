@@ -180,21 +180,59 @@ def main() -> int:
               f"yedeklemeyi kapatin.")
         return 1
 
-    stamp = time.strftime("%Y-%m-%d_%H%M")
+    # Seconds in the stamp, not just minutes. The archive is opened "w", so two
+    # runs landing in the same minute silently truncated the first one - which
+    # is exactly what a manual re-run after a failed attempt looks like.
+    stamp = time.strftime("%Y-%m-%d_%H%M%S")
     zip_path = dest_dir / f"MicoFX_{stamp}.zip"
+    # Built under a name _prune does not match, and renamed only once the
+    # archive is complete. Anything that goes wrong partway - the DB locked
+    # past the snapshot timeout, the destination disappearing mid-write, a
+    # file vanishing between the walk and the write - used to leave a
+    # perfectly well-formed zip behind, because ZipFile's context manager
+    # closes cleanly on the way out of an exception. That archive looks like a
+    # backup, carries a current timestamp, and is missing the settings DB: the
+    # one file in it that cannot be recovered from git.
+    #
+    # _prune ranks by mtime and never opens anything, so those decoys occupy
+    # the keep quota and evict real backups. Measured on a scratch copy: three
+    # failed runs followed by one good one left three archives on disk and
+    # zero containing the database.
+    part_path = dest_dir / f".MicoFX_{stamp}.zip.part"
 
     workdir = Path(tempfile.mkdtemp(prefix="micofx-backup-"))
     try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for f in _iter_files(ROOT):
-                zf.write(f, f.relative_to(ROOT))
-            snapshot = _snapshot_db(ROOT / DB_REL, workdir)
-            if snapshot is not None:
-                zf.write(snapshot, DB_REL)
-                print(f"Ayar veritabani tutarli anlik goruntu olarak eklendi "
-                      f"({snapshot.stat().st_size} bayt).")
+        try:
+            with zipfile.ZipFile(part_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in _iter_files(ROOT):
+                    try:
+                        zf.write(f, f.relative_to(ROOT))
+                    except (OSError, ValueError) as exc:
+                        # A file that disappeared between the walk and the
+                        # write (a log rotating, a temp file cleaned up) must
+                        # not cost the whole backup - note it and carry on.
+                        print(f"UYARI: atlandi ({f}): {exc}")
+                snapshot = _snapshot_db(ROOT / DB_REL, workdir)
+                if snapshot is not None:
+                    zf.write(snapshot, DB_REL)
+                    print(f"Ayar veritabani tutarli anlik goruntu olarak eklendi "
+                          f"({snapshot.stat().st_size} bayt).")
+        except (OSError, sqlite3.Error) as exc:
+            # Unattended task: a readable line, and no half-archive left
+            # claiming to be a backup.
+            part_path.unlink(missing_ok=True)
+            print(f"HATA: yedek olusturulamadi: {exc}\n"
+                  f"Onceki yedekler oldugu gibi birakildi.")
+            return 1
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+
+    try:
+        part_path.replace(zip_path)
+    except OSError as exc:
+        part_path.unlink(missing_ok=True)
+        print(f"HATA: yedek adlandirilamadi ({zip_path}): {exc}")
+        return 1
 
     print(f"Yedek olusturuldu: {zip_path}")
 
