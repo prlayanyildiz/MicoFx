@@ -1560,8 +1560,13 @@ class Engine:
                     continue
                 ticket = pos["ticket"]
                 if last_bar and last_bar != self._stop_bar.get(ticket):
-                    self._stop_bar[ticket] = last_bar
-                    self._update_stop(cfg, pos, atr, bars)
+                    # Marked done only once _update_stop reports the bar
+                    # settled. It answers False when the live quote - not the
+                    # closed bar the trail level comes from - is what blocked
+                    # the move, and marking the bar regardless silently threw
+                    # away an earned trail update until the next bar closed.
+                    if self._update_stop(cfg, pos, atr, bars):
+                        self._stop_bar[ticket] = last_bar
 
     # ------------------------------------------------------ execution quality
 
@@ -1683,10 +1688,27 @@ class Engine:
         return ok
 
     def _update_stop(self, cfg: SymbolConfig, pos: dict[str, Any], atr: float,
-                     bars: Any = None) -> None:
+                     bars: Any = None) -> bool:
+        """Ratchet one position's stop. Returns whether this bar is settled.
+
+        ``False`` means "ask again on the next poll, same bar": the trail level
+        this bar wants is computed from the closed bar's close and does not
+        move until the next bar closes, but whether it can be *placed* depends
+        on the live quote, because the broker refuses a stop nearer than
+        min_stop_distance to the current price. Those two facts pull apart
+        whenever price retraces right after the bar closes - the update is
+        legitimately earned and simply not placeable at this instant.
+
+        The caller marks a ticket done for the bar the moment it calls here, so
+        returning nothing made every such deferral permanent for the rest of
+        the bar - an hour on H1 - even though the retry the min-stop branch
+        below promises costs one comparison. Nothing about the *level* is
+        re-derived from the live quote, so retrying does not drift from what
+        the walk-forward validated; only feasibility is re-tested.
+        """
         tick = self.client.tick(cfg.symbol)
         if tick is None:
-            return
+            return False
         is_buy = pos["side"] == "buy"
         # Broker distance checks need the live bid/ask; BE/trail *math* must use
         # the closed bar's close - same input the walk-forward advances on. Using
@@ -1694,12 +1716,18 @@ class Engine:
         live = tick["bid"] if is_buy else tick["ask"]
         if bars is not None and hasattr(bars, "close") and len(bars.close) > 0:
             ref = float(bars.close[-1])
+            # Everything derived from a closed bar is fixed until the next one
+            # closes, so a "no" for those reasons is final for this bar.
+            settled = True
         else:
+            # Without bars the reference IS the live quote, so every decision
+            # below can legitimately change within the same bar.
             ref = live
+            settled = False
         entry = pos["price_open"]
         profit_dist = (ref - entry) if is_buy else (entry - ref)
         if profit_dist <= 0:
-            return
+            return settled
 
         min_stop = self.client.min_stop_distance(cfg.symbol)
         current_sl = pos["sl"]
@@ -1746,22 +1774,28 @@ class Engine:
                 target = trail
 
         if target is None:
-            return
+            return settled
 
         # Respect the broker's stop distance against the *live* quote and only
         # push the stop forward.
         limit = live - min_stop if is_buy else live + min_stop
+        wanted = target
         target = min(target, limit) if is_buy else max(target, limit)
+        # Whether the live quote is what held this update back. When it is, the
+        # refusals below are about *this instant*, not about this bar, and the
+        # ticket must stay eligible for another attempt before the bar closes.
+        if target != wanted:
+            settled = False
         if breakeven_locked and (target < entry if is_buy else target > entry):
             # Price has retraced enough since the bar closed that even a stop
             # placed exactly at entry would violate the broker's min-stop
             # distance from the current live quote right now - moving it
             # anyway would place a stop worse than breakeven. Skip this
             # cycle; retry once price allows it.
-            return
+            return False
         step = max(min_stop * 0.25, atr * cfg.trail_step_atr * 0.1)
         if current_sl != 0 and (target - current_sl < step if is_buy else current_sl - target < step):
-            return
+            return settled
         # The position's real initial risk is max(atr*sl_atr_mult, min_stop) -
         # open_market sizes it that way (see the entry path above) whenever the
         # broker's own floor is wider than the ATR distance. Comparing against
@@ -1770,13 +1804,18 @@ class Engine:
         # that was still a genuine improvement over the real original stop.
         original_risk = max(atr * cfg.sl_atr_mult, min_stop)
         if is_buy and target <= entry - original_risk:
-            return
+            return settled
         if not is_buy and target >= entry + original_risk:
-            return
+            return settled
 
         if self.client.modify_position(pos["ticket"], target, pos["tp"], cfg.symbol):
             LOG.emit(f"SL guncellendi -> {target:.5f} (kar {profit_dist / atr:.2f}xATR)",
                      "TRADE", cfg.symbol)
+            return True
+        # A rejected modify (requote, momentary "invalid stops", a blip in the
+        # trade server) must not cost the position its trail for the rest of
+        # the bar - that is exactly the update the trade earned.
+        return False
 
     # ---------------------------------------------------------------- reports
 
