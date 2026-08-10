@@ -202,14 +202,19 @@ class ExecutionMonitor:
         remembered SL/TP), because "the trade is gone" is the part the operator
         needs regardless.
         """
-        by_position: dict[int, dict[str, Any]] = {}
+        # All the broker-generated closing deals per position, not just one: a
+        # stop can fill in chunks, and keeping only the last of them reported a
+        # fraction of the lot beside a P/L covering the whole position - a log
+        # line internally inconsistent with itself. Volume is summed and the
+        # price is volume-weighted across the chunks.
+        closers: dict[int, list[dict[str, Any]]] = {}
         for deal in deals:
             if int(deal.get("reason", -1)) in (DEAL_REASON_SL, DEAL_REASON_TP,
                                                DEAL_REASON_SO):
-                by_position[int(deal["position"])] = deal
-        # Net realised P/L is the whole round trip, not the closing deal's
-        # ``profit`` field alone - commission (which some brokers charge on the
-        # entry leg) and accumulated swap are just as real to the balance.
+                closers.setdefault(int(deal["position"]), []).append(deal)
+        # Net realised P/L is the whole round trip, not the closing deals'
+        # ``profit`` alone - commission (which some brokers charge on the entry
+        # leg) and accumulated swap are just as real to the balance.
         net: dict[int, float] = {}
         for deal in deals:
             pos = int(deal["position"])
@@ -219,18 +224,25 @@ class ExecutionMonitor:
         reports: list[dict[str, Any]] = []
         for ticket in gone:
             book = self._open.pop(int(ticket), None)
-            deal = by_position.get(int(ticket))
-            if not deal:
+            chunks = closers.get(int(ticket))
+            if not chunks:
                 continue
+            deal = chunks[-1]
             reason = int(deal["reason"])
+            volume = sum(float(d.get("volume", 0.0)) for d in chunks)
+            if volume > 0:
+                price = sum(float(d["price"]) * float(d.get("volume", 0.0))
+                            for d in chunks) / volume
+            else:
+                price = float(deal["price"])
             reports.append({
                 "ticket": int(ticket),
                 "symbol": (book or {}).get("symbol") or deal["symbol"],
                 "magic": int((book or {}).get("magic", deal.get("magic", 0))),
                 "reason": reason,
                 "label": _REASON_LABEL.get(reason, "broker"),
-                "price": float(deal["price"]),
-                "volume": float(deal.get("volume", 0.0)),
+                "price": price,
+                "volume": volume,
                 "profit": round(net.get(int(ticket), float(deal.get("profit", 0.0))), 2),
             })
             if not book:

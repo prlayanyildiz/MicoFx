@@ -8,6 +8,7 @@ vanish between the entry line and the next one.
 from __future__ import annotations
 
 import MetaTrader5 as mt5
+import pytest
 
 from micofx.execution import (DEAL_REASON_SL, DEAL_REASON_SO, DEAL_REASON_TP,
                               ExecutionMonitor)
@@ -109,6 +110,34 @@ def test_exit_without_remembered_book_still_reported():
     reports = mon.reap(gone, [_deal()], _Client())
     assert len(reports) == 1
     assert reports[0]["symbol"] == "NAS100"  # fell back to the deal's symbol
+
+
+def test_a_stop_filled_in_chunks_reports_the_whole_position():
+    # A broker stop can fill in pieces. Keeping only the last closing deal put
+    # a fraction of the lot next to a P/L covering the whole position - a line
+    # that contradicts itself. Volume sums; price is volume-weighted.
+    mon = _monitor()
+    mon.track([_position(price_open=29778.6)])
+    gone = mon.track([])
+    deals = [
+        _deal(profit=-8.0, price=29726.0, volume=0.2),
+        _deal(profit=-5.0, price=29724.0, volume=0.1),
+    ]
+    reports = mon.reap(gone, deals, _Client())
+    assert len(reports) == 1
+    assert reports[0]["volume"] == pytest.approx(0.3)
+    assert reports[0]["profit"] == pytest.approx(-13.0)
+    # (29726*0.2 + 29724*0.1) / 0.3
+    assert reports[0]["price"] == pytest.approx(29725.3333, abs=1e-3)
+
+
+def test_a_single_fill_price_is_unchanged_by_the_weighting():
+    mon = _monitor()
+    mon.track([_position()])
+    gone = mon.track([])
+    reports = mon.reap(gone, [_deal(price=29725.0, volume=0.3)], _Client())
+    assert reports[0]["price"] == 29725.0
+    assert reports[0]["volume"] == 0.3
 
 
 def test_target_exit_still_scores_slippage():
