@@ -124,3 +124,52 @@ def test_status_matches_gate_for_every_row():
             allowed, reason, scale = sup.gate(sup.store.symbols[symbol], now)
             assert row["effective_scale"] == round(scale, 3), f"{symbol} enabled={enabled}"
             assert row["gate_allowed"] == allowed, f"{symbol} enabled={enabled}"
+
+
+# ------------------------------------------------------ per-hour rules
+
+def test_hours_are_reported_as_not_enforced_when_the_ai_is_off():
+    """blocked_hours/hour_risk_scales are consulted only after the enabled
+    check in _gate_locked, so with the AI off they are inert - the panel has
+    to be able to say so instead of listing them like live restrictions."""
+    sup = _sup(enabled=False)
+    v = _verdict("XAUUSD", "watch", risk_scale=0.6)
+    v.blocked_hours = [10]
+    v.hour_risk_scales = {10: 0.495}
+    sup.verdicts = {"XAUUSD": v}
+    row = _rows(sup)["XAUUSD"]
+    assert row["hours_enforced"] is False
+    # ...and the gate agrees: nothing is actually blocked.
+    assert row["gate_allowed"] is True
+    assert row["effective_scale"] == 1.0
+
+
+def test_hours_are_reported_as_enforced_when_the_ai_is_on():
+    sup = _sup(enabled=True, risk_scale=1.0)
+    v = _verdict("XAUUSD", "watch", risk_scale=1.0)
+    v.blocked_hours = [10]
+    v.hour_risk_scales = {10: 0.495}
+    sup.verdicts = {"XAUUSD": v}
+    assert _rows(sup)["XAUUSD"]["hours_enforced"] is True
+
+
+def test_a_blocked_hour_actually_blocks_only_at_that_hour():
+    """Pins what the column means: a time-of-day rule, not a countdown.
+
+    The same verdict refuses an entry during the blocked hour and allows one
+    an hour later, with no timer involved - which is why there is nothing to
+    count down in the panel.
+    """
+    sup = _sup(enabled=True, risk_scale=1.0)
+    v = _verdict("XAUUSD", "watch", risk_scale=1.0)
+    v.blocked_hours = [10]
+    sup.verdicts = {"XAUUSD": v}
+    cfg = sup.store.symbols["XAUUSD"]
+
+    at_ten = time.mktime(time.struct_time((2026, 8, 10, 10, 30, 0, 0, 222, -1)))
+    at_eleven = time.mktime(time.struct_time((2026, 8, 10, 11, 30, 0, 0, 222, -1)))
+
+    allowed_ten, reason_ten, _ = sup.gate(cfg, at_ten)
+    allowed_eleven, _, _ = sup.gate(cfg, at_eleven)
+    assert allowed_ten is False and "10:00" in reason_ten
+    assert allowed_eleven is True

@@ -1327,6 +1327,46 @@ function renderAI() {
       <div class="foot">${c.foot || ""}</div>
     </div>`).join("");
 
+  // The hours column used to print blocked_hours next to a count taken from
+  // hour_risk_scales - two different mechanisms rendered as one phrase - and
+  // it did so whether or not the AI layer was switched on. Both are consulted
+  // in the gate only AFTER the `enabled` check, so with AI off they are inert,
+  // yet a row still read "10:00 (1 saat kisitli)" as though that symbol were
+  // being held out of the market.
+  const hhmm = (h) => String(h).padStart(2, "0") + ":00";
+
+  function aiHoursCell(r) {
+    const hard = (r.blocked_hours || []).map(hhmm);
+    const soft = Object.keys(r.hour_risk_scales || {}).map(Number).filter((h) => !(r.blocked_hours || []).includes(h));
+    if (!hard.length && !soft.length) return "-";
+    const parts = [];
+    if (hard.length) parts.push(hard.join(" ") + " kapali");
+    if (soft.length) parts.push(soft.map(hhmm).join(" ") + " kucultulmus");
+    const text = parts.join(", ");
+    // Say plainly when none of it is in force, instead of looking identical.
+    return r.hours_enforced === false
+      ? `<span class="dim">${text} (AI kapali - uygulanmiyor)</span>`
+      : text;
+  }
+
+  function aiHoursTitle(r) {
+    const soft = Object.entries(r.hour_risk_scales || {})
+      .map(([h, s]) => hhmm(h) + " x" + num(s, 2)).join(", ");
+    const lines = [];
+    lines.push((r.blocked_hours || []).length
+      ? "Kapali saatler: " + (r.blocked_hours || []).map(hhmm).join(", ")
+      : "Kapali saat yok");
+    lines.push(soft ? "Lot carpani: " + soft : "Yumusak kisitlama yok");
+    // The question this column kept raising: there is no countdown because
+    // there is no timer. These are time-of-day rules re-derived from the
+    // recent deal window on every review.
+    lines.push("Bunlar gunun saati kurallari, sureli kisitlama degil - geri sayim yoktur. "
+             + "Her degerlendirmede son islemlerden yeniden hesaplanir ve o saatin "
+             + "islemleri artik zarar ettirmiyorsa kendiliginden kalkar.");
+    if (r.hours_enforced === false) lines.push("Denetleyici kapali: su an hicbiri uygulanmiyor.");
+    return lines.join("\n");
+  }
+
   const notes = (ai.notes || []).join(" | ");
   const queue = (ai.reopt_queue || []).length
     ? ` | yeniden optimize kuyrugu: ${ai.reopt_queue.join(", ")}` : "";
@@ -1335,9 +1375,14 @@ function renderAI() {
     : "Denetleyici kapali - kararlar uygulanmiyor.";
 
   const aiRows = ai.symbols || [];
+  // hours_enforced is part of the signature: toggling the AI switch changes
+  // what the hours column says without changing any of the numbers, and the
+  // table would otherwise keep showing the stale wording.
   const nextAiSig = aiRows.map((r) =>
     [r.symbol, r.state, r.trades, r.net, r.profit_factor, r.priority, r.effective_scale,
-      r.consecutive_losses, r.quarantine_left_min, (r.blocked_hours || []).join(",")].join("|")).join(";");
+      r.consecutive_losses, r.quarantine_left_min, r.hours_enforced,
+      (r.blocked_hours || []).join(","),
+      Object.keys(r.hour_risk_scales || {}).join(",")].join("|")).join(";");
   if (nextAiSig !== aiTableSig) {
     aiTableSig = nextAiSig;
     const rows = aiRows.map((r) => {
@@ -1356,7 +1401,7 @@ function renderAI() {
       <td class="num dim">${r.priority != null ? num(r.priority, 2) : "-"}</td>
       <td class="num ${r.consecutive_losses >= 3 ? "neg" : "dim"}">${r.consecutive_losses}</td>
       <td class="num ${r.effective_scale < 1 ? "neg" : ""}">${num(r.effective_scale, 2)}</td>
-      <td class="dim mono" title="${Object.entries(r.hour_risk_scales || {}).map(([h, s]) => String(h).padStart(2, "0") + ":00 x" + num(s, 2)).join(", ") || "yumusak kisitlama yok"}">${(r.blocked_hours || []).map((h) => String(h).padStart(2, "0") + ":00").join(" ") || "-"}${Object.keys(r.hour_risk_scales || {}).length ? ` <span class="dim">(${Object.keys(r.hour_risk_scales).length} saat kisitli)</span>` : ""}</td>`;
+      <td class="dim mono" title="${aiHoursTitle(r)}">${aiHoursCell(r)}</td>`;
       tr.appendChild(el("td", {}, r.state === "quarantine" || r.blocked_hours.length
         ? el("button", {
           class: "btn btn-sm btn-ghost", text: "Serbest birak",

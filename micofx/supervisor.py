@@ -581,6 +581,16 @@ class Supervisor:
             allowed, reason, scale = self._gate_locked(cfg, now)
             row["effective_scale"] = round(scale, 3)
             row["gate_allowed"] = allowed
+            # Whether the per-hour rules below are actually in force. Both
+            # blocked_hours and hour_risk_scales are consulted in _gate_locked
+            # only AFTER the ``enabled`` check, so with the AI layer off they
+            # are inert - but the panel listed them the same either way, which
+            # reads as "this symbol is restricted at 10:00" when nothing is
+            # restricting it. They are also re-derived from the trailing deal
+            # window on every review() rather than counted down, so there is
+            # no timer to show: the hour clears when its own trades stop
+            # justifying it, not when a clock runs out.
+            row["hours_enforced"] = self.enabled
             # Why an entry would be refused RIGHT NOW - distinct from
             # ``reason``, which explains the classification, not the block.
             row["gate_reason"] = reason
