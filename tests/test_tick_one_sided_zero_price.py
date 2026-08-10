@@ -15,6 +15,7 @@ def _client_with_tick(bid, ask):
     client.connected = True
     client._lock = threading.Lock()
     client._tick_cache = {}
+    client._broker_now = 0.0     # newest broker tick seen; see market_open()
     client.select = lambda symbol: symbol
 
     class _Tick:

@@ -112,6 +112,11 @@ class MT5Client:
         self._last_attempt = 0.0
         self._info_cache: dict[str, tuple[float, Any]] = {}
         self._tick_cache: dict[str, tuple[float, dict[str, float]]] = {}
+        # Newest tick timestamp seen across every symbol, in the broker's own
+        # naive clock. market_open() measures staleness against this rather
+        # than the wall clock, so the broker's UTC offset cancels instead of
+        # landing in the answer.
+        self._broker_now: float = 0.0
         self._name_map: dict[str, str] = {}
         self._overrides: dict[str, str] = {}
         self._symbol_names_cache: list[str] = []
@@ -556,14 +561,37 @@ class MT5Client:
         data = {"bid": float(t.bid), "ask": float(t.ask), "time": float(t.time),
                 "spread": float(t.ask - t.bid)}
         self._tick_cache[symbol] = (now, data)
+        # Newest broker-clock reading seen anywhere in the book - see
+        # market_open() for why this, and not the wall clock, is the yardstick.
+        self._broker_now = max(self._broker_now, data["time"])
         return data
 
     def market_open(self, symbol: str, max_age_sec: int = 180) -> bool:
-        """True when the last tick is fresh relative to broker server time."""
+        """True when this symbol's last tick is fresh against the live feed.
+
+        Measured against the newest tick timestamp seen across the whole book,
+        not against this machine's clock. A tick's ``time`` is a naive epoch
+        holding the broker's wall-clock reading, while ``server_now()`` is a
+        true epoch, so subtracting one from the other leaves the broker's whole
+        UTC offset in the answer - a constant -10800 on this GMT+3 server.
+        Every tick up to three hours stale therefore satisfied a 180 second
+        freshness test, making the one gate that stops entries on a dead feed
+        61x more permissive than it reads.
+
+        Comparing two readings of the same clock cancels the offset entirely
+        and needs no detection - which matters, because this codebase already
+        removed an auto-detected offset for silently shifting every time-based
+        decision when the detection went wrong.
+
+        Degrades safely: with only one symbol ever read, its own tick is also
+        the newest, the age is zero and the answer is "open" - the behaviour
+        this had before. It can never wrongly report a live market closed; it
+        can only stop being blind to a frozen one.
+        """
         t = self.tick(symbol)
         if not t:
             return False
-        return (self.server_now() - t["time"]) <= max_age_sec
+        return (self._broker_now - t["time"]) <= max_age_sec
 
     def broker_utc_offset_hours(self, symbols: list[str]) -> int | None:
         """The broker server's own UTC offset in whole hours, or None.
