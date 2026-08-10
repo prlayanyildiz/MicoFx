@@ -222,6 +222,17 @@ class Engine:
             str(k): float(v) for k, v in (store.get_setting("entry_cooldowns") or {}).items()
             if isinstance(v, (int, float))
         }
+        # symbol -> [signal_source, bar timestamp] of the last signal actually
+        # filled. The cooldown above spaces entries out; this is what stops the
+        # SAME bar's signal being taken twice, which a restart otherwise does
+        # for free - SymbolState is rebuilt empty and the signal recomputes
+        # identically off the same still-last-closed bar. Cooldown cannot cover
+        # it: 2 minutes against a 5-60 minute bar.
+        self._filled_bars: dict[str, list] = {
+            str(k): [str(v[0]), int(v[1])]
+            for k, v in (store.get_setting("filled_bars") or {}).items()
+            if isinstance(v, (list, tuple)) and len(v) == 2
+        }
 
     # ------------------------------------------------------------- lifecycle
 
@@ -747,6 +758,24 @@ class Engine:
         if not state.signal:
             state.note = state.note if state.note else "sinyal yok"
             return False
+        if self._filled_bars.get(cfg.symbol) == [state.signal_source, bar_key]:
+            # This bar's signal has already been filled once. Held in the
+            # store, because it is the only thing standing between a restart
+            # and a second position on the same signal: SymbolState is rebuilt
+            # empty on every start, the signal recomputes identically from the
+            # same still-last-closed bar, and nothing else says no.
+            #
+            # The post-fill cooldown does NOT cover this. It is 2 minutes,
+            # while a bar is 5 to 60, so a restart even slightly later walks
+            # straight past it - which is exactly what happened live:
+            #
+            #   19:00:27 NAS100 BUY @ 29728.00
+            #   19:01:22 restart
+            #   19:09:26 NAS100 BUY @ 29705.90   (same M30 bar, cooldown long gone)
+            #
+            # Both stopped out for -14.22 each.
+            state.note = "bu barin sinyali zaten dolduruldu"
+            return False
         if state.pending_bar_key == (state.signal_source, bar_key):
             # Same bar as when the signal first appeared (see the marking
             # above) and not yet filled - keep offering it every poll until
@@ -1270,6 +1299,8 @@ class Engine:
 
         state.cooldown_until = time.time() + _cooldown_for(cfg)
         self._save_cooldown(cfg.symbol, state.cooldown_until)
+        self._mark_bar_filled(cfg.symbol, state.signal_source,
+                              state.sec_last_bar if secondary else state.last_bar)
         state.signal = ""
         state.signal_source = ""
         state.primary_signal = ""
@@ -1631,6 +1662,27 @@ class Engine:
         until = float(self._cooldowns.get(state.symbol, 0.0) or 0.0)
         if until > time.time():
             state.cooldown_until = until
+
+    def _mark_bar_filled(self, symbol: str, source: str, bar: int) -> None:
+        """Record that this bar's signal has been taken, so a restart cannot
+        take it again. Same order-path safety as _save_cooldown: a failure here
+        must never cost the TRADE line of a fill that already happened.
+        """
+        try:
+            if not bar:
+                return
+            current = getattr(self, "_filled_bars", None)
+            if not isinstance(current, dict):
+                current = {}
+            # One entry per symbol; a symbol only ever fills off whichever leg
+            # is currently driving, and the next fill supersedes this one.
+            current[symbol] = [str(source), int(bar)]
+            # Bounded: only symbols still in the portfolio are worth keeping.
+            live = set(self.store.symbols)
+            self._filled_bars = {s: v for s, v in current.items() if s in live}
+            self.store.set_setting("filled_bars", self._filled_bars)
+        except Exception as exc:
+            LOG.emit(f"Dolum bar kaydi yazilamadi: {exc}", "WARN", symbol)
 
     def _save_cooldown(self, symbol: str, until: float) -> None:
         # Runs on the order path, immediately after a fill and before the TRADE
