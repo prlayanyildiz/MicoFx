@@ -742,9 +742,10 @@ function renderSecToggle(card, cfg) {
       + ` Dokunulmamis test: ${h.trades ?? "-"} islem, PF ${num(h.profit_factor, 2)},`
       + ` net ${signed(h.net_r, 1)}R. Kapatmak icin tikla.`
     : `Saklanmis aday: ${cfg.secondary_strategy}/${cfg.secondary_timeframe}.`
-      + ` Dokunulmamis test: ${h.trades ?? "-"} islem, PF ${num(h.profit_factor, 2)},`
-      + ` net ${signed(h.net_r, 1)}R. Acmak icin tikla - ayni sembolde ikinci bir`
-      + ` sinyal daha giris uretir, ayni pozisyon limitlerini paylasarak.`;
+      + ` Dokunulmamis test (TEK BASINA kostugu tarama): ${h.trades ?? "-"} islem,`
+      + ` PF ${num(h.profit_factor, 2)}, net ${signed(h.net_r, 1)}R.`
+      + ` Acmak icin tikla - ayni sembolde ikinci bir sinyal daha giris uretir,`
+      + ` ayni pozisyon limitlerini ve marji birincille paylasarak.`;
 }
 
 function secondaryNote(cfg) {
@@ -761,7 +762,11 @@ function secondaryNote(cfg) {
     + ` / ${esc(cfg.secondary_timeframe)} - skor ${num(cfg.secondary_score, 2)}`
     + ` | dokunulmamis test ${h.trades != null ? h.trades : "-"} islem`
     + ` PF ${num(h.profit_factor, 2)} net ${signed(h.net_r, 1)}R (${when}).`
-    + " Acikken iki sinyal de giris uretebilir; ayni anda ters yone bakarlarsa bar atlanir.";
+    + " Acikken iki sinyal de giris uretebilir; ayni anda ters yone bakarlarsa bar atlanir."
+    + " <b>Dikkat:</b> yukaridaki test rakamlari bu adayin TEK BASINA kostugu"
+    + " taramadan geliyor. Canlida birincil sinyalle ayni sembol pozisyon limitini,"
+    + " ayni hesap limitini ve ayni marji paylasacak - yani ikisi birlikte, ayri ayri"
+    + " olctugumuz toplamdan daha az islem acabilir.";
 }
 
 function buildSymbolCard(cfg) {
