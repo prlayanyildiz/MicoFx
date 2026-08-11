@@ -220,7 +220,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "EURJPY",
@@ -231,7 +232,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "GBPUSD",
@@ -242,7 +244,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "FRA40",
@@ -254,7 +257,8 @@
           "end": "22:55"
         }
       ],
-      "max_spread_atr": 0.065
+      "max_spread_atr": 0.065,
+      "enabled": true
     },
     {
       "symbol": "GER40",
@@ -265,7 +269,8 @@
           "start": "10:00",
           "end": "22:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "JPN225",
@@ -276,7 +281,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "NAS100",
@@ -288,7 +294,8 @@
           "end": "23:55"
         }
       ],
-      "max_spread_atr": 0.05
+      "max_spread_atr": 0.05,
+      "enabled": true
     },
     {
       "symbol": "UK100",
@@ -299,7 +306,8 @@
           "start": "10:00",
           "end": "22:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "US2000",
@@ -310,7 +318,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "US30",
@@ -322,7 +331,8 @@
           "end": "23:55"
         }
       ],
-      "max_spread_atr": 0.07
+      "max_spread_atr": 0.07,
+      "enabled": true
     },
     {
       "symbol": "US500",
@@ -333,7 +343,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "SpotBrent",
@@ -344,7 +355,8 @@
           "start": "01:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "XAUUSD",
@@ -355,13 +367,14 @@
           "start": "02:00",
           "end": "23:55"
         }
-      ]
+      ],
+      "enabled": true
     },
     {
       "symbol": "USDCHF",
       "group": "forex",
       "magic": 990101,
-      "enabled": false,
+      "enabled": true,
       "sessions": [
         {
           "start": "01:00",
@@ -373,7 +386,7 @@
       "symbol": "AUDUSD",
       "group": "forex",
       "magic": 990104,
-      "enabled": false,
+      "enabled": true,
       "sessions": [
         {
           "start": "01:00",
@@ -385,7 +398,7 @@
       "symbol": "GBPJPY",
       "group": "forex",
       "magic": 990105,
-      "enabled": false,
+      "enabled": true,
       "sessions": [
         {
           "start": "01:00",
@@ -397,7 +410,7 @@
       "symbol": "USDJPY",
       "group": "forex",
       "magic": 990107,
-      "enabled": false,
+      "enabled": true,
       "sessions": [
         {
           "start": "01:00",
@@ -426,6 +439,18 @@
         {
           "start": "16:30",
           "end": "23:10"
+        }
+      ]
+    },
+    {
+      "symbol": "NZDUSD",
+      "group": "forex",
+      "magic": 990109,
+      "enabled": true,
+      "sessions": [
+        {
+          "start": "00:05",
+          "end": "23:55"
         }
       ]
     }
