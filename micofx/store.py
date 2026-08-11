@@ -430,6 +430,21 @@ class Store:
             payload: dict[str, Any] = {"symbol": symbol, "group": group, "enabled": True}
             payload.update(presets.get(group, {}))
             payload.update({k: v for k, v in entry.items() if k != "group"})
+            # A seeded symbol has no searched config, whatever the template
+            # says about ``enabled``. defaults.json carries symbol, group,
+            # magic, sessions and the enabled flag; strategy, timeframe and
+            # every exit parameter live only in the database, so a fresh
+            # install would otherwise start eighteen symbols live on the
+            # dataclass default - t3_stoch/M5, which nothing has validated and
+            # which on an FX symbol pays 25-28% of risk in spread against an
+            # 18% live ceiling.
+            #
+            # That is the exact state EURUSD reached tonight, and the API
+            # guards added for it (patch_symbol, symbols-bulk) do not cover
+            # this path: seeding writes the config directly. So the flag is
+            # forced off here and the operator switches a symbol on once it
+            # has a config the search chose - which those guards then enforce.
+            payload["enabled"] = False
             if not overwrite:
                 wanted = payload.get("magic")
                 if wanted is None or self._magic_taken(int(wanted), avoid_magics):
