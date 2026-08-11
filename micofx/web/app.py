@@ -96,6 +96,27 @@ _SYMBOL_RISK_BOUNDS = {
     "sl_atr_mult": (0.0, 20.0, False),
     "trail_start_atr": (0.0, 20.0, False),
     "trail_step_atr": (0.0, 20.0, False),
+    # Zero is valid (many CFD accounts charge none); negative is not, and it
+    # was accepted. A rebate is a plausible reason someone would try it, and
+    # the consequence is that two live risk controls stop working:
+    #
+    #   engine._try_entry's block_high_cost gate computes
+    #   ``cost = commission_per_lot * lot + spread * money_per_price``. A
+    #   negative commission drags that below zero, so ``cost / r_value >
+    #   max_cost_pct_of_risk`` can never be true and the gate passes every
+    #   entry no matter how wide the spread has gone. Measured at -50: a trade
+    #   whose spread alone eats 90% of R sails straight through.
+    #
+    #   _symbol_daily_halt estimates floating P/L as
+    #   ``profit + swap - commission_per_lot * volume``. A negative commission
+    #   adds to it, so the sticky per-symbol loss halt trips late or not at
+    #   all. Measured at -50: two positions 30 dollars down each reported as
+    #   40 dollars up.
+    #
+    # The walk-forward is already safe here - commission_in_price() returns
+    # 0.0 for a non-positive value - which is exactly why nothing caught this:
+    # the backtest looked fine while the live gates were off.
+    "commission_per_lot": (0.0, 10000.0, True),
 }
 
 _SYSTEM_RISK_BOUNDS = {
