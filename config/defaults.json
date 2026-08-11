@@ -233,7 +233,7 @@
           "end": "23:55"
         }
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "symbol": "GBPUSD",
