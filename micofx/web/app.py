@@ -241,6 +241,53 @@ def _require_optimised_before_enabling(patch: dict[str, Any], cfg) -> None:
         f"icin optimizasyon calistirip uygulayin.")
 
 
+def _require_current_cost_basis_before_enabling(patch: dict[str, Any], cfg,
+                                                optimizer) -> None:
+    """A symbol may not be switched on carrying a config priced too cheaply.
+
+    The rule above catches a config the optimizer never chose. This catches
+    one it DID choose, under a spread assumption since measured to be wrong in
+    the dangerous direction.
+
+    EURJPY is the case. Its recalibrated search produced a candidate that an
+    absolute gate refused - cost 0.045R against a gross edge of 0.088 - so the
+    config still stored is the pre-calibration one, selected at 57% of the
+    symbol's measured spread. Switching it back on would restore a config
+    whose selection basis we have measured to be false, and ``opt_updated_at``
+    cannot see that: it is set, so the first rule waves it through.
+
+    Directional on purpose. Only a config selected CHEAPER than reality is
+    refused; one selected more expensively is conservative and stays
+    enableable. CHFJPY shows why that matters - stamped at 3.35, measuring
+    3.05 an hour later - because the histogram keeps moving as samples
+    accumulate, and a symmetric check would refuse symbols over ordinary
+    drift in the safe direction.
+
+    Self-clearing: a fresh search stamps the current scale, and the symbol
+    becomes enableable the moment it has a config priced against reality.
+    """
+    if not patch.get("enabled") or cfg is None or optimizer is None:
+        return
+    try:
+        measured = float(optimizer._spread_scale(cfg.symbol))
+    except Exception:
+        return
+    summary = getattr(cfg, "opt_summary", None) or {}
+    # Same convention as Optimizer._beats_incumbent: nothing recorded means
+    # the config predates the field, and every one of those WAS measured at
+    # 1.0 - walk_forward's default, with no scale passed at all.
+    stamped = float(summary.get("spread_scale", 0.0) or 0.0) or 1.0
+    if round(measured - stamped, 2) <= 0.05:
+        return
+    raise HTTPException(
+        400,
+        f"{cfg.symbol} acilamaz - tasidigi konfig spread'i {stamped:.2f}x "
+        f"varsayarak secildi, olculen ise {measured:.2f}x. Yani gercekte "
+        f"odedigi maliyetten ucuza secilmis. Once bu sembol icin optimizasyon "
+        f"calistirin; kabul edilen bir aday cikarsa kendiliginden acilabilir "
+        f"hale gelir.")
+
+
 def _exit_axes(body: dict[str, Any]):
     """Yield (axis_name, values) for every exit-model axis in an opt-params body.
 
@@ -760,6 +807,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _validate_sessions(patch)
         current = store.symbols.get(symbol)
         _require_optimised_before_enabling(patch, current)
+        _require_current_cost_basis_before_enabling(patch, current, optimizer)
         # Same hazard as DELETE: the magic number is the only thing that maps
         # an open position back to its managing config. Changing it out from
         # under an open position orphans that position exactly like deleting
@@ -1512,6 +1560,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # yet, and refusing the whole batch is right when part of it is unsafe.
         for target in targets:
             _require_optimised_before_enabling(body.patch, store.symbols.get(target))
+            _require_current_cost_basis_before_enabling(
+                body.patch, store.symbols.get(target), optimizer)
         guarded = (needs_tf_check or magic_changing or secondary_fields
                   or bool(exit_fields) or secondary_params_present)
         if guarded:

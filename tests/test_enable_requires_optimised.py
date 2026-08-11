@@ -157,3 +157,90 @@ def test_bulk_disable_is_never_blocked():
                          _cfg("B", optimised=False, enabled=True, magic=2)])
     assert tc.post("/api/symbols-bulk", json={"patch": {"enabled": False}}).status_code == 200
     assert not any(c.enabled for c in store.symbols.values())
+
+
+# ------------------------------- rule 2: a config priced too cheaply for reality
+
+class _Opt(_Optimizer):
+    def __init__(self, scales=None):
+        self.scales = scales or {}
+
+    def _spread_scale(self, symbol):
+        return self.scales.get(symbol, 1.0)
+
+
+def _cfg_scaled(symbol, *, stamped, magic=1, enabled=False):
+    c = _cfg(symbol, optimised=True, enabled=enabled, magic=magic)
+    summary = {"holdout": {"score": 9.0}}
+    if stamped is not None:
+        summary["spread_scale"] = stamped
+    c.opt_summary = summary
+    return c
+
+
+def _client_scaled(cfgs, scales):
+    store = _Store(cfgs)
+    return TestClient(create_app(store, _Client(), _Engine(), _Opt(scales))), store
+
+
+def test_a_config_selected_cheaper_than_reality_cannot_be_switched_on():
+    """EURJPY: stamped nothing (so 1.0), measured 1.75. Its recalibrated
+    candidate was refused by an absolute gate, so the stored config is the
+    pre-calibration one, selected at 57% of the measured spread."""
+    tc, store = _client_scaled([_cfg_scaled("EURJPY", stamped=None)],
+                               {"EURJPY": 1.75})
+    res = tc.post("/api/symbols/EURJPY", json={"enabled": True})
+    assert res.status_code == 400
+    assert "ucuza secilmis" in res.text
+    assert store.symbols["EURJPY"].enabled is False
+
+
+def test_the_message_states_both_numbers():
+    tc, _ = _client_scaled([_cfg_scaled("EURJPY", stamped=None)], {"EURJPY": 1.75})
+    body = tc.post("/api/symbols/EURJPY", json={"enabled": True}).text
+    assert "1.00x" in body and "1.75x" in body
+
+
+def test_a_config_selected_MORE_expensively_is_still_enableable():
+    """CHFJPY stamped 3.35 and measures 3.05 an hour later. Selected against a
+    harsher cost than reality is conservative - and the histogram keeps moving,
+    so a symmetric check would refuse symbols over ordinary safe drift."""
+    tc, store = _client_scaled([_cfg_scaled("CHFJPY", stamped=3.35)],
+                               {"CHFJPY": 3.05})
+    assert tc.post("/api/symbols/CHFJPY", json={"enabled": True}).status_code == 200
+    assert store.symbols["CHFJPY"].enabled is True
+
+
+@pytest.mark.parametrize("stamped,measured", [(1.0, 1.05), (None, 1.05), (1.15, 1.15)])
+def test_ordinary_drift_does_not_block(stamped, measured):
+    tc, store = _client_scaled([_cfg_scaled("X", stamped=stamped)], {"X": measured})
+    assert tc.post("/api/symbols/X", json={"enabled": True}).status_code == 200
+
+
+def test_a_freshly_stamped_config_is_enableable_at_its_own_scale():
+    """Self-clearing: a new search stamps the current scale."""
+    tc, _ = _client_scaled([_cfg_scaled("XAUUSD", stamped=1.15)], {"XAUUSD": 1.15})
+    assert tc.post("/api/symbols/XAUUSD", json={"enabled": True}).status_code == 200
+
+
+def test_switching_off_is_still_never_blocked():
+    tc, store = _client_scaled([_cfg_scaled("EURJPY", stamped=None, enabled=True)],
+                               {"EURJPY": 1.75})
+    assert tc.post("/api/symbols/EURJPY", json={"enabled": False}).status_code == 200
+    assert store.symbols["EURJPY"].enabled is False
+
+
+def test_bulk_enable_is_refused_for_a_stale_cost_basis_too():
+    tc, store = _client_scaled(
+        [_cfg_scaled("GOOD", stamped=1.0, magic=1),
+         _cfg_scaled("EURJPY", stamped=None, magic=2)],
+        {"GOOD": 1.0, "EURJPY": 1.75})
+    assert tc.post("/api/symbols-bulk", json={"patch": {"enabled": True}}).status_code == 400
+    assert store.symbols["GOOD"].enabled is False, "kismi yazma olmus"
+
+
+def test_a_missing_optimizer_never_blocks():
+    """create_app is called with optimizer=None in places; it must degrade."""
+    store = _Store([_cfg_scaled("X", stamped=None)])
+    tc = TestClient(create_app(store, _Client(), _Engine(), optimizer=None))
+    assert tc.post("/api/symbols/X", json={"enabled": True}).status_code == 200
