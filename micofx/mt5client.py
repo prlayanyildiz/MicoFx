@@ -48,11 +48,16 @@ _FILL_RETCODES: frozenset[int] = frozenset(
 # position book, never by trusting the return value. ``order_send`` returning
 # None (IPC-level failure inside the terminal bridge) is the same class of
 # unknown and is routed through the same verification.
+# Exported under a public name as well: the engine needs to recognise a
+# link-level refusal to know that retrying it on the very next poll is
+# pointless (see Engine.LINK_BACKOFF_SEC).
 _AMBIGUOUS_RETCODES: frozenset[int] = frozenset(
     {getattr(mt5, name) for name in
      ("TRADE_RETCODE_TIMEOUT", "TRADE_RETCODE_CONNECTION")
      if mt5 is not None and hasattr(mt5, name)}
 )
+
+AMBIGUOUS_RETCODES = _AMBIGUOUS_RETCODES
 
 _INFO_TTL = 120.0
 _TICK_TTL = 0.5

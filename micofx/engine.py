@@ -10,7 +10,7 @@ from . import backtest, execution, indicators as ind, sessions
 from .logbus import LOG
 from .models import (SymbolConfig, invalid_exit_param, is_scalp_strategy,
                      strategy_allows_timeframe, trail_min_step)
-from .mt5client import MT5Client, NON_RETRYABLE_RETCODES, timeframe_seconds
+from .mt5client import AMBIGUOUS_RETCODES, MT5Client, NON_RETRYABLE_RETCODES, timeframe_seconds
 from .execution import ExecutionMonitor
 from .risk import RiskManager
 from .store import Store, as_dict, as_list, as_number
@@ -37,6 +37,22 @@ SPREAD_RATIO_BUCKETS = 51
 # Below this many samples the ratio is not reported or applied - a handful of
 # ticks from one hour is exactly the reading that misled us once already.
 SPREAD_RATIO_MIN_SAMPLES = 400
+
+# How long to leave a symbol alone after the broker link refused its order.
+#
+# A connection-class rejection is verified against the position book before it
+# is believed, and that verification sleeps ~2.1s when it finds nothing. The
+# result is correctly marked "safe to retry on the next poll" - but on a 2s
+# cycle, a sustained outage turns that into a retry every couple of seconds,
+# each one paying the 2.1s again. On 2026-08-11 a 40-minute broker outage on
+# UK100 and US30 produced 1090 such rejections: 1090 x 2.1s is 38 minutes of
+# the 40 spent asleep inside the verifier, while manage_positions - trailing
+# stops, breakeven, forced flatten - waited its turn.
+#
+# 30s is chosen against the bar sizes actually traded: it costs at most a few
+# percent of an M15+ bar, and the signal is NOT dropped, only delayed, so a
+# link that recovers still gets the entry on the same bar.
+LINK_BACKOFF_SEC = 30.0
 
 
 def _ratio_percentile(counts: list[int], q: float) -> float | None:
@@ -326,6 +342,10 @@ class Engine:
         }
         self._spread_ratio_dirty = False
         self._spread_ratio_at = 0.0
+        # symbol -> epoch until which entries are not re-attempted after the
+        # broker link refused one. In memory only: a restart has already
+        # lost the connection state this describes.
+        self._link_backoff: dict[str, float] = {}
         # Post-fill cooldown, per symbol, as an absolute epoch. Lived only in
         # SymbolState until now - which is rebuilt empty on every start, so a
         # restart inside the cooldown window dropped the one guard that stops
@@ -1357,6 +1377,16 @@ class Engine:
     def _try_entry(self, base: SymbolConfig, state: SymbolState,
                    account: dict[str, Any]) -> None:
         state.entry_block = ""
+        until = float(self._link_backoff.get(base.symbol, 0.0) or 0.0)
+        if until > time.time():
+            # The broker link refused this symbol's last order and the position
+            # book confirmed nothing landed. Retrying every poll is safe but
+            # not free - each attempt re-runs the ~2.1s verification - so wait
+            # rather than spend the cycle on a link that is still down. The
+            # signal is untouched and fires the moment the wait is over.
+            state.note = f"baglanti reddi - {int(until - time.time())}sn bekleniyor"
+            state.entry_block = "baglanti_beklemede"
+            return
         if base.symbol in self._orphan_scan:
             # A prior secondary fill on this symbol/magic is still waiting on
             # a delayed broker ticket - self._positions cannot be trusted to
@@ -1646,6 +1676,10 @@ class Engine:
             state.note = result.get("error", "emir hatasi")
             state.entry_block = "emir_hatasi"
             LOG.emit(result.get("error", "emir hatasi"), "ERROR", cfg.symbol)
+            if result.get("retcode") in AMBIGUOUS_RETCODES:
+                # Timeout or "no network": the link, not the order, is the
+                # problem, and it will not clear inside one poll interval.
+                self._link_backoff[base.symbol] = time.time() + LINK_BACKOFF_SEC
             if result.get("ambiguous"):
                 # open_market() could not establish whether the order filled
                 # (timeout plus an unreadable position book, or several new

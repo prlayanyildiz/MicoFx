@@ -299,6 +299,7 @@ def _entry_harness(open_market_result):
     eng._sec_cfgs = {}
     eng._orphan_tickets = set()
     eng._orphan_scan = {}
+    eng._link_backoff = {}   # real Engine always has it
     eng.states = {}
 
     state = SymbolState("EURUSD")
