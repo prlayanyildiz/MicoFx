@@ -927,6 +927,33 @@ class Optimizer:
         old_score = float(previous.get("score", 0.0) or 0.0)
         if old_score <= 0.0:
             return True
+        # The incumbent's score is only comparable if it was measured under the
+        # same spread assumption. It very often is not: the live tick spread is
+        # measured continuously now, and the moment that measurement clears its
+        # sample threshold the search starts charging a different - higher -
+        # cost than the incumbent was ever scored against.
+        #
+        # Vetoing on that comparison makes the calibration unreachable by
+        # construction. An honest candidate trades less and earns less in
+        # total, so it loses to a config whose score was inflated by a cost
+        # model we have since measured to be wrong: XAUUSD scored 79.4 at
+        # scale 1.0 against 45.1 at the measured 1.25, CHFJPY 10.4 against 7.4
+        # at 3.00. The older number is not better, it is differently measured.
+        #
+        # So the veto is skipped when the assumption moved. Nothing else is
+        # relaxed - the candidate still has to clear validation, the
+        # consistency ratio, both cost gates and the retention check, all of
+        # which are absolute rather than relative to the incumbent.
+        # Read from the summary, which is where apply() writes it - not from
+        # ``previous`` (the holdout block inside it).
+        old_scale = float(summary.get("spread_scale", 0.0) or 0.0)
+        new_scale = self._spread_scale(getattr(cfg, "symbol", ""))
+        if old_scale <= 0.0 or abs(new_scale - old_scale) > 0.05:
+            LOG.emit(f"{cfg.symbol}: mevcut ayar farkli spread olcegiyle olculmus "
+                     f"({old_scale or 'kayitsiz'} -> {new_scale:.2f}), skor kiyasi "
+                     f"atlandi - aday kendi kapilariyla degerlendirildi.",
+                     "OPT", cfg.symbol)
+            return True
         new_score = float(hold.get("score", 0.0) or 0.0)
         if new_score >= old_score:
             return True
@@ -1156,6 +1183,14 @@ class Optimizer:
                 "holdout_days": detail.get("holdout_days", 0.0),
                 "positive_ratio": detail.get("positive_ratio", 0.0),
                 "params": applied_params,
+                # The spread scale this candidate was measured under. Every
+                # number beside it - score, expectancy, cost_per_trade_r - is
+                # only meaningful against that assumption, and _beats_incumbent
+                # compares scores across runs. Without it, a config measured
+                # while the search still charged the raw bar spread would be
+                # compared, as though like for like, against one measured at
+                # the tick spread the live gate actually enforces.
+                "spread_scale": round(self._spread_scale(symbol), 3),
             }
         # Held across the open-position check + the write so the engine's
         # own entry path (same lock; see Engine.entry_lock) cannot land a
