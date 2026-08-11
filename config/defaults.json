@@ -253,7 +253,8 @@
           "start": "09:00",
           "end": "22:55"
         }
-      ]
+      ],
+      "max_spread_atr": 0.065
     },
     {
       "symbol": "GER40",
