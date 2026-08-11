@@ -79,7 +79,14 @@ def main() -> int:
     ensure_streams()
     cleanup_orphan_workers()
     ensure_dirs()
-    defaults = load_defaults()
+    try:
+        defaults = load_defaults()
+    except RuntimeError as exc:
+        # Same contract as the Store() guard below: a broken config must end
+        # as a readable line and exit 1, not as a traceback into pythonw.exe's
+        # void where the app just fails to appear.
+        print(f"[{APP_NAME}] {exc}")
+        return 1
     host = os.getenv("MICO_HOST", defaults.get("web_host", "127.0.0.1"))
     port = int(os.getenv("MICO_PORT", defaults.get("web_port", 8900)))
 
