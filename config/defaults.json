@@ -380,7 +380,7 @@
     }
   ],
   "optimizer": {
-    "lookback_days": 180,
+    "lookback_days": 365,
     "max_bars": 130000,
     "segments": 5,
     "min_trades": 40,
