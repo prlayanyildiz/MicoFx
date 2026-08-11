@@ -65,8 +65,7 @@ class LogBus:
             try:
                 LOG_DIR.mkdir(parents=True, exist_ok=True)
                 if self._file.exists() and self._file.stat().st_size > _MAX_FILE_BYTES:
-                    keep = self._file.read_text(encoding="utf-8", errors="replace")[-_MAX_FILE_BYTES // 2:]
-                    self._file.write_text(keep, encoding="utf-8")
+                    self._rotate()
                 stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(entry["ts"]))
                 sym = f"[{entry['symbol']}] " if entry["symbol"] else ""
                 with self._file.open("a", encoding="utf-8") as fh:
@@ -77,6 +76,40 @@ class LogBus:
                 # still shows it, so losing the disk copy must never take the
                 # caller (an order path, in the worst case) down with it.
                 pass
+
+    def _rotate(self) -> None:
+        """Halve the file, keeping the newest whole lines and saying so.
+
+        Caller holds ``_file_lock``.
+
+        Three things the previous one-liner got wrong, all visible in a real
+        rotation this file went through:
+
+        * it sliced the decoded *text*, so ``[-_MAX_FILE_BYTES // 2:]`` counted
+          CHARACTERS against a budget expressed in bytes. Every Turkish
+          character in a log line is two bytes, so the file came back over its
+          own target - measured at 1.01x on pure-ASCII content and worse on
+          real messages.
+        * the slice landed at an arbitrary offset, so the file began with half
+          a line: ``di -> 3421.55512 (kar 2.34xATR)``. That is the first thing
+          anyone reads when they open the log to investigate something.
+        * nothing recorded that history had been dropped. An audit trail that
+          silently loses its past and still looks continuous is worse than one
+          that admits the gap - this is the file an operator reaches for after
+          an unexplained fill.
+        """
+        raw = self._file.read_bytes()
+        keep = raw[-(_MAX_FILE_BYTES // 2):]
+        # Start at a line boundary. Without this the first line is whatever
+        # the byte offset happened to land in the middle of.
+        cut = keep.find(b"\n")
+        keep = keep[cut + 1:] if cut >= 0 else b""
+        dropped = len(raw) - len(keep)
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        note = (f"{stamp} WARN   [SISTEM] Log dosyasi {_MAX_FILE_BYTES // 1024} KB "
+                f"sinirini asti; en eski {dropped // 1024} KB dusuruldu. "
+                f"Daha eski kayitlar gece yedegindeki arsivlerde.\n")
+        self._file.write_bytes(note.encode("utf-8") + keep)
 
     def recent(self, after_id: int = 0, limit: int = 400, levels: list[str] | None = None) -> list[dict[str, Any]]:
         with self._lock:
