@@ -212,17 +212,6 @@
   },
   "symbols": [
     {
-      "symbol": "CADJPY",
-      "group": "forex",
-      "magic": 990124,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
       "symbol": "CHFJPY",
       "group": "forex",
       "magic": 990122,
@@ -248,17 +237,6 @@
       "symbol": "GBPUSD",
       "group": "forex",
       "magic": 990114,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
-      "symbol": "USDCHF",
-      "group": "forex",
-      "magic": 990005,
       "sessions": [
         {
           "start": "01:00",
