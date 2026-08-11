@@ -48,7 +48,27 @@ DEFAULTS: dict[str, Any] = {
     "auto_reoptimize": True,
     "reopt_min_age_hours": 48,
     "reopt_on_decay": True,          # also re-opt when live edge decays vs backtest
-    "edge_decay_min_trades": 20,     # trades needed before the live PF-halves decay check runs
+    # Trades needed before the live PF-halves decay check runs. Was 20; the
+    # false-alarm rate at that bar was measured rather than assumed - 20000
+    # Monte Carlo runs of a symbol whose true edge NEVER changes, drawn from
+    # win rates and payoffs matching this book:
+    #
+    #     20 trades   12-17% of the time the rule fires anyway
+    #     30 trades    5-10%
+    #     40 trades    4-9%
+    #     60 trades  1.5-5%
+    #
+    # At 20 that is roughly one symbol in seven cut to half size on nothing
+    # but noise, plus a walk-forward queued behind it by reopt_on_decay. The
+    # rule splits the sample in half and compares two 10-trade profit factors,
+    # which is why it is that noisy.
+    #
+    # The trade-off it was lowered to 20 for still stands (reacting to a real
+    # regime turn inside ~10-15 trades rather than waiting a week longer), but
+    # at this book's frequency 30 trades is about a month, not a quarter, and
+    # US30 was sitting at half size off 21 trades while carrying the most
+    # precisely measured holdout in the portfolio - 407 trades.
+    "edge_decay_min_trades": 30,
     # A re-opt that finds nothing better than the current config never updates
     # opt_updated_at, so without this a "watch" symbol whose decay is a genuine
     # regime shift (not a stale parameter) gets re-queued and re-run in full
