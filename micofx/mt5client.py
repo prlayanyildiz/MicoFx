@@ -56,6 +56,17 @@ _AMBIGUOUS_RETCODES: frozenset[int] = frozenset(
 
 _INFO_TTL = 120.0
 _TICK_TTL = 0.5
+
+# How far ahead of this machine's clock a tick timestamp may sit before it is
+# treated as corrupt. A tick's ``time`` is the broker's wall clock encoded as
+# though it were UTC, so a legitimate reading already runs a whole UTC offset
+# ahead - at most +14h anywhere in the world, +3h on this server. 48h leaves
+# more than triple the headroom over any real offset plus any plausible NTP
+# skew, while still catching the shapes that matter: a millisecond field read
+# into a seconds one lands tens of thousands of years out, and a garbled
+# struct anywhere at all. One-sided on purpose - a tick in the PAST is the
+# exact condition market_open() exists to detect and must never be discarded.
+_MAX_TICK_AHEAD_SEC = 48 * 3600.0
 _RECONNECT_COOLDOWN = 5.0
 
 
@@ -557,6 +568,23 @@ class MT5Client:
             # nonsense spread from it. The broker would reject the zero
             # price anyway, but there's no reason to spend a live order
             # attempt finding that out.
+            return None
+        if float(t.time) > now + _MAX_TICK_AHEAD_SEC:
+            # Same stance as the bid/ask guard above, for the timestamp - and
+            # this one is worse than a rejected order. ``_broker_now`` below is
+            # a monotonic max over every symbol that is never reset, not even
+            # by reconnect(), so ONE tick dated into the future raises the
+            # yardstick permanently. market_open() then measures every other
+            # symbol against it, and instruments quoting perfectly fresh ticks
+            # read as stale for the life of the process.
+            #
+            # engine._evaluate turns that into "piyasa kapali / fiyat akmiyor"
+            # and clears the signal chain for every symbol in the book, so all
+            # entries stop while the panel shows a reason that reads like a
+            # market condition rather than a fault. Open positions keep being
+            # managed - manage_positions() does not consult this gate - so
+            # nothing is left unprotected, but nothing new is ever taken again
+            # until someone restarts the process.
             return None
         data = {"bid": float(t.bid), "ask": float(t.ask), "time": float(t.time),
                 "spread": float(t.ask - t.bid)}
