@@ -38,9 +38,30 @@ def _recursive(src: np.ndarray, alpha: float, first: float) -> np.ndarray:
 
 
 def ema(src: np.ndarray, length: int) -> np.ndarray:
-    """Exponential moving average seeded with the first sample."""
+    """Exponential moving average seeded with the first sample.
+
+    ``length`` is clamped the same way every sibling here clamps it - see
+    wilder(), which was fixed for exactly this and whose comment already
+    claimed this function defended itself. It did not, and the smoothing
+    factor ``2 / (length + 1)`` fails in two different ways below zero:
+
+        length == -1  ->  2.0 / 0.0, a ZeroDivisionError
+        length <= -2  ->  a NEGATIVE alpha, which is the worse case - no
+                          error at all, just a recursion that oscillates and
+                          diverges. ema(x, -2) over a gentle 100..110 ramp
+                          returns -7.3e22, and that flows straight into
+                          signal generation as an ordinary number.
+
+    Zero was wrong too, if quietly: alpha becomes 2.0, outside the (0, 1]
+    range the recursion assumes.
+
+    Reachable, not theoretical. ``pull_fast`` feeds this directly and both
+    POST /api/symbols/{symbol} and POST /api/opt/params accept a negative
+    value with HTTP 200 - the bounds checks there only cover the exit axes.
+    """
     if src.size == 0:
         return np.empty(0, dtype=np.float64)
+    length = max(1, int(length))
     return _recursive(src, 2.0 / (float(length) + 1.0), float(src[0]))
 
 
