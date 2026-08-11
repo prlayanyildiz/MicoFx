@@ -306,6 +306,21 @@ class SymbolConfig:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SymbolConfig":
+        if not isinstance(payload, dict):
+            # _coerce goes straight to payload.items(), so a non-dict used to
+            # surface as AttributeError - a type Store._load_symbols does not
+            # catch, even though it explicitly catches JSONDecodeError and
+            # TypeError to skip exactly this kind of unreadable row. That call
+            # sits outside the sqlite try/except in Store.__init__ and run.py
+            # only converts RuntimeError, so one bad row took the whole
+            # start-up down as a raw traceback - under pythonw.exe, into a
+            # stream nobody sees, with the app simply never appearing.
+            #
+            # ``null``, a list, a string, a number and a bool are all valid
+            # JSON, so they load cleanly and only fail here. TypeError is what
+            # the existing handlers already expect.
+            raise TypeError(
+                f"sembol kaydi bir nesne olmali, {type(payload).__name__} bulundu")
         cfg = _coerce(cls, payload)
         cfg.sessions = [
             {"start": str(s.get("start", "00:00")), "end": str(s.get("end", "23:59"))}
