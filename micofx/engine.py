@@ -624,17 +624,24 @@ class Engine:
         ``signals`` is the number that compares to a holdout trade count;
         ``attempts`` only says how many polls the gate held each one off.
         """
+        # Snapshot every level with list()/dict() before iterating it. This
+        # runs on the web thread while the engine thread is inside
+        # _tally_entry, and nothing serialises the two - a new reason key
+        # appearing mid-iteration (which happens whenever the gate refusing a
+        # symbol changes, so: normally) raised "dictionary changed size during
+        # iteration" and 500'd the view. Same defence list(self.states.items())
+        # already uses at the two other cross-thread reads.
         rows = []
-        for symbol, legs in sorted(self._entry_blocks.items()):
+        for symbol, legs in sorted(list(self._entry_blocks.items())):
             if not isinstance(legs, dict):
                 continue
-            for leg, counts in sorted(legs.items()):
+            for leg, counts in sorted(list(legs.items())):
                 if not isinstance(counts, dict):
                     continue
                 attempts = {str(k): int(v) for k, v in
-                            (counts.get("attempts") or {}).items()}
+                            list((counts.get("attempts") or {}).items())}
                 signals = {str(k): int(v) for k, v in
-                           (counts.get("signals") or {}).items()}
+                           list((counts.get("signals") or {}).items())}
                 total = sum(signals.values())
                 opened = int(signals.get("acildi", 0))
                 rows.append({
