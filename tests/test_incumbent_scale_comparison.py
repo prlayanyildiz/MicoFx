@@ -99,6 +99,14 @@ def test_an_unrecorded_scale_still_yields_when_the_measurement_has_moved():
         assert opt._beats_incumbent(_cfg(score=79.389, scale=None), WEAKER) is True
 
 
+def test_a_half_bucket_live_median_does_not_look_like_a_moved_assumption():
+    """1.05 - 1.0 is 0.050000000000000044 in float - without rounding that
+    drops the guard for every unrecorded incumbent whose median is 1.05."""
+    opt = _optimizer(scale=1.05)
+    assert opt._beats_incumbent(_cfg(score=79.389, scale=None), WEAKER) is False
+    assert opt._beats_incumbent(_cfg(score=79.389, scale=1.0), WEAKER) is False
+
+
 # ------------------------------------------- the veto that must still work
 
 def test_a_weaker_score_under_the_SAME_scale_is_still_vetoed():

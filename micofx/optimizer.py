@@ -964,7 +964,12 @@ class Optimizer:
             # safe direction and self-clears on the first apply.
             old_scale = 1.0
         new_scale = self._spread_scale(getattr(cfg, "symbol", ""))
-        if abs(new_scale - old_scale) > 0.05:
+        # Half a ratio-bucket (SPREAD_RATIO_STEP = 0.1). Round before the
+        # compare: ``1.05 - 1.0`` is ``0.050000000000000044`` in IEEE float,
+        # which would otherwise look like a material move and drop the guard
+        # for every unrecorded incumbent whose live median sits on 1.05
+        # (NZDUSD's window is exactly that). Same bucket = same assumption.
+        if round(abs(new_scale - old_scale), 2) > 0.05:
             LOG.emit(f"{cfg.symbol}: mevcut ayar farkli spread olcegiyle olculmus "
                      f"({old_scale or 'kayitsiz'} -> {new_scale:.2f}), skor kiyasi "
                      f"atlandi - aday kendi kapilariyla degerlendirildi.",
