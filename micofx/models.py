@@ -313,8 +313,25 @@ class SymbolConfig:
             if isinstance(s, dict)
         ]
         days = payload.get("trade_days")
-        if isinstance(days, list):
-            cfg.trade_days = sorted({int(d) for d in days if str(d).isdigit() and 1 <= int(d) <= 7})
+        if days is not None:
+            # Two-sided on purpose. _coerce() assigns list-typed fields
+            # verbatim (there is no cast for them), so a non-list that reached
+            # here used to survive as an int/str/dict and only fail later, in
+            # sessions.evaluate()'s ``day in cfg.trade_days`` - TypeError for
+            # every scalar type. That lands inside manage_positions(), whose
+            # only guard is the loop-level except in start(), so one corrupt
+            # symbol aborted the whole cycle before the risk check and left
+            # EVERY open position untrailed, every cycle, permanently.
+            #
+            # The API rejects all of these outright; this path only ever sees
+            # a hand-edited config/defaults.json or a mangled settings blob,
+            # where falling back to the dataclass default is what _coerce()
+            # does with every other unparseable field. The weekend stays shut
+            # regardless - weekend_closed() runs ahead of trade_days.
+            valid = (sorted({int(d) for d in days
+                             if str(d).isdigit() and 1 <= int(d) <= 7})
+                     if isinstance(days, list) else [])
+            cfg.trade_days = valid or [1, 2, 3, 4, 5]
         summary = payload.get("opt_summary")
         cfg.opt_summary = summary if isinstance(summary, dict) else {}
         pending = payload.get("pending_exit_patch")
