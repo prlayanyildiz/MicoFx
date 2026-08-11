@@ -19,4 +19,5 @@ _probe_*.py
 .pytest_tmp/
 .claude/
 .cursor/
+cursor/
 .vscode/
