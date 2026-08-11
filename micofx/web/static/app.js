@@ -153,7 +153,70 @@ function selectTab(name) {
     if (!OPT_PARAMS) loadOptParams().then(loadOptHistory);
     else syncOptPicker();
   }
+  if (name === "semboller") loadGates();
   if (name === "log") pollLogs();
+}
+
+/* ------------------------------------------------------- pruning gates */
+
+// Four separate gates rather than one verdict, because two symbols were cut
+// this session on the wrong number - one for low productivity that was really
+// a spread ceiling set under its own normal spread, three on a month of data
+// gathered under a session regime fixed twenty minutes earlier. Seeing WHICH
+// gate a symbol fails is the whole point; a single score would hide it again.
+const GATE_LABEL = {
+  olculebilir: "olculemez",
+  maliyet: "maliyet",
+  tavan: "tavan",
+  siklik: "siklik",
+};
+
+function gateCell(value, limit, bad, digits = 3) {
+  if (value == null) return '<span class="dim">-</span>';
+  const shown = limit != null
+    ? `${num(value, digits)} <span class="dim">/ ${num(limit, digits)}</span>`
+    : num(value, digits);
+  return `<span class="${bad ? "neg" : "dim"}">${shown}</span>`;
+}
+
+async function loadGates() {
+  const note = $("#gates-note");
+  let data;
+  try {
+    data = await api("/api/analysis/portfolio-gates");
+  } catch (err) {
+    if (note) note.textContent = `Kapilar okunamadi: ${err.message || err}`;
+    return;
+  }
+  const rows = (data.rows || []).map((r) => {
+    const f = r.fails || [];
+    const has = (g) => f.includes(g);
+    const tr = el("tr");
+    // A thin sample is not a failure, but the measurability flag must not be
+    // read alone under one - n=30 at 0.5R clears 2 SE while saying little.
+    const sigma = r.sigma == null
+      ? '<span class="dim">-</span>'
+      : `<span class="${has("olculebilir") ? "neg" : "pos"}">${num(r.sigma, 2)}</span>`
+        + (r.thin_sample ? ' <span class="warn-text" title="Orneklem ince - bu bayrak tek basina okunmamali">ince</span>' : "");
+    tr.innerHTML = `
+      <td class="sym">${esc(r.symbol)}</td>
+      <td class="dim">${esc(r.strategy || "-")}</td>
+      <td class="dim">${esc(r.timeframe || "-")}</td>
+      <td class="num ${r.thin_sample ? "warn-text" : "dim"}">${r.trades ?? 0}</td>
+      <td class="num">${gateCell(r.expectancy_r, r.needs_r, has("olculebilir"))}</td>
+      <td class="num">${sigma}</td>
+      <td class="num">${gateCell(r.cost_per_trade_r, r.cost_ceiling_r, has("maliyet"))}</td>
+      <td class="num">${gateCell(r.spread_atr_now, r.max_spread_atr, has("tavan"), 4)}</td>
+      <td class="num">${gateCell(r.fill_rate, null, has("siklik"), 2)}</td>
+      <td>${f.length
+        ? f.map((g) => `<span class="pill off">${esc(GATE_LABEL[g] || g)}</span>`).join(" ")
+        : '<span class="pill on">temiz</span>'}</td>`;
+    return tr;
+  });
+  rowsInto($("#gates-table"), rows, "Aktif sembol yok", 10);
+  if (note) {
+    note.textContent = `${data.note || ""} Siklik penceresi ${data.window_days} gun.`;
+  }
 }
 
 /* ----------------------------------------------------------- panel: cards */
@@ -1976,6 +2039,9 @@ function confirmThen(message, fn) {
 
 function wire() {
   $$(".tab").forEach((t) => t.addEventListener("click", () => selectTab(t.dataset.tab)));
+
+  const gatesBtn = $("#btn-gates-refresh");
+  if (gatesBtn) gatesBtn.onclick = () => loadGates();
 
   const call = async (path, body) => {
     try {

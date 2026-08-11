@@ -987,6 +987,132 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             ),
         }
 
+    @app.get("/api/analysis/portfolio-gates")
+    def portfolio_gates(min_sample: int = 100, min_fill_rate: float = 0.25) -> dict[str, Any]:
+        """Which gate each live symbol fails, in one view. Read-only.
+
+        Pruning decisions kept being made on whichever number was in front of
+        us, and twice they were made on the wrong one - a symbol dropped for
+        low productivity that was actually a ceiling set under its own normal
+        spread, and three dropped on a month of data collected under a session
+        regime that had been fixed twenty minutes earlier. This puts every gate
+        beside every symbol so the failing one is visible before anything gets
+        cut.
+
+        Four gates, each answering a different question:
+
+        ``olculebilir``  Do we KNOW the edge is positive? Holdout expectancy
+            against 2 standard errors, SE = 1.2/sqrt(n) on this book's R
+            spread. ``min_sample`` is separate and matters: n=30 with a 0.5R
+            edge clears 2 SE while telling us very little, and n=407 with
+            0.107R fails it while telling us a great deal - that the edge is
+            small, precisely. Read the two together, never the flag alone.
+
+        ``maliyet``      Does the config give its edge away? holdout
+            cost_per_trade_r against the optimizer's own accept ceiling. This
+            is deliberately NOT the cost-by-hour median: that view averages
+            every bar while the walk-forward only charges cost where a signal
+            fired, so it runs 5-14x higher on short timeframes. Comparing its
+            level to a gate has already produced wrong calls on which symbols
+            are worth trading.
+
+        ``tavan``        Can the symbol pass its own spread ceiling? The live
+            spread/ATR the engine is gating on right now against
+            max_spread_atr. One instant, not a distribution - a symbol sitting
+            just over the line here may still trade when the tick dips, which
+            is exactly how a strangled config looks busy enough to keep.
+
+        ``siklik``       Is it taking the trades the holdout promised? Live
+            trades over the supervisor's window against the rate the holdout
+            implies. Everything in this book runs far under its modelled
+            frequency; this says by how much, per symbol.
+
+        No verdict is returned, on purpose. The gates are evidence for a
+        decision a human makes, and a symbol whose config changed hours ago
+        has not yet earned any of these numbers - ``config_age_note`` says so
+        where it applies.
+        """
+        sample_floor = max(1, int(min_sample))
+        fill_floor = max(0.0, float(min_fill_rate))
+        ceiling_r = float(getattr(optimizer, "MAX_COST_PER_TRADE_R", 0.25) or 0.25)
+        window_days = 14
+        try:
+            window_days = max(1, int(engine.supervisor.settings.get("lookback_days", 14)))
+        except Exception:
+            pass
+        live = {}
+        try:
+            live = {r["symbol"]: r for r in (engine.supervisor.status().get("symbols") or [])}
+        except Exception:
+            live = {}
+
+        rows: list[dict[str, Any]] = []
+        for cfg in list(store.symbols.values()):
+            if not cfg.enabled:
+                continue
+            summary = cfg.opt_summary or {}
+            hold = summary.get("holdout") or {}
+            n = int(hold.get("trades") or 0)
+            edge = float(hold.get("expectancy") or 0.0)
+            se2 = (2 * 1.2 / (n ** 0.5)) if n > 0 else None
+            cost_r = float(hold.get("cost_per_trade_r") or 0.0)
+
+            state = engine.states.get(cfg.symbol)
+            spread_atr = float(getattr(state, "spread_atr", 0.0) or 0.0) if state else 0.0
+            ceiling = float(cfg.max_spread_atr or 0.0)
+
+            hold_days = float(summary.get("holdout_days") or 0.0)
+            expected = (n / hold_days * window_days) if (n and hold_days > 0) else None
+            actual = int((live.get(cfg.symbol) or {}).get("trades") or 0)
+            fill = (actual / expected) if expected else None
+
+            fails: list[str] = []
+            if se2 is None or abs(edge) <= se2:
+                fails.append("olculebilir")
+            if cost_r > ceiling_r:
+                fails.append("maliyet")
+            # A ceiling of 0 disables the filter entirely; only judge a live
+            # reading against a ceiling that is actually switched on.
+            if ceiling > 0 and spread_atr > 0 and spread_atr > ceiling:
+                fails.append("tavan")
+            if fill is not None and fill < fill_floor:
+                fails.append("siklik")
+
+            rows.append({
+                "symbol": cfg.symbol,
+                "strategy": cfg.strategy, "timeframe": cfg.timeframe,
+                "trades": n,
+                "expectancy_r": round(edge, 3),
+                "needs_r": round(se2, 3) if se2 is not None else None,
+                "sigma": round(abs(edge) / (se2 / 2), 2) if se2 else None,
+                "thin_sample": n < sample_floor,
+                "cost_per_trade_r": round(cost_r, 3),
+                "cost_ceiling_r": ceiling_r,
+                "spread_atr_now": round(spread_atr, 4) if spread_atr else None,
+                "max_spread_atr": ceiling or None,
+                "expected_trades": round(expected, 1) if expected else None,
+                "actual_trades": actual,
+                "fill_rate": round(fill, 3) if fill is not None else None,
+                "fails": fails,
+                "clean": not fails,
+            })
+
+        rows.sort(key=lambda r: (-len(r["fails"]), r["symbol"]))
+        by_gate = {g: [r["symbol"] for r in rows if g in r["fails"]]
+                   for g in ("olculebilir", "maliyet", "tavan", "siklik")}
+        thin = [r["symbol"] for r in rows if r["thin_sample"]]
+        return {
+            "ok": True, "rows": rows, "by_gate": by_gate,
+            "window_days": window_days, "min_sample": sample_floor,
+            "min_fill_rate": fill_floor,
+            "thin_sample": thin,
+            "note": (
+                f"{sum(1 for r in rows if r['clean'])}/{len(rows)} sembol dort kapiyi da geciyor. "
+                f"Orneklemi {sample_floor} altinda kalan: {', '.join(thin) if thin else 'yok'} - "
+                f"bu sembollerde 'olculebilir' bayragi tek basina okunmamali."
+            ),
+        }
+
     @app.post("/api/symbols/{symbol}/reset")
     def reset_symbol(symbol: str) -> dict[str, Any]:
         cfg = store.symbols.get(symbol)
