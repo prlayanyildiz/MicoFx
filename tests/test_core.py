@@ -568,7 +568,7 @@ def test_apply_secondary_refuses_family_change_with_open_tagged_position():
     client = _SecClient([{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}])
     opt = Optimizer(store=store, client=client)
 
-    new_attempt = {"strategy": "burst", "timeframe": "M10",
+    new_attempt = {"strategy": "burst", "timeframe": "M5",
                    "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
                             "selection": {}, "positive_ratio": 1.0}}
     result = opt.apply_secondary("XAUUSD", new_attempt)
@@ -582,7 +582,7 @@ def test_apply_secondary_allows_family_change_with_no_open_tagged_position():
     client = _SecClient([])
     opt = Optimizer(store=store, client=client)
 
-    new_attempt = {"strategy": "burst", "timeframe": "M10",
+    new_attempt = {"strategy": "burst", "timeframe": "M5",
                    "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
                             "selection": {}, "positive_ratio": 1.0}}
     result = opt.apply_secondary("XAUUSD", new_attempt)
@@ -610,7 +610,7 @@ def test_apply_secondary_refuses_family_change_with_open_orphan_ticket():
     client = _SecClient([{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}])
     opt = Optimizer(store=store, client=client)
 
-    new_attempt = {"strategy": "burst", "timeframe": "M10",
+    new_attempt = {"strategy": "burst", "timeframe": "M5",
                    "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
                             "selection": {}, "positive_ratio": 1.0}}
     result = opt.apply_secondary("XAUUSD", new_attempt)
@@ -628,7 +628,7 @@ def test_apply_secondary_refuses_family_change_with_pending_orphan_scan():
     client = _SecClient([])
     opt = Optimizer(store=store, client=client)
 
-    new_attempt = {"strategy": "burst", "timeframe": "M10",
+    new_attempt = {"strategy": "burst", "timeframe": "M5",
                    "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
                             "selection": {}, "positive_ratio": 1.0}}
     result = opt.apply_secondary("XAUUSD", new_attempt)
@@ -645,7 +645,7 @@ def test_apply_secondary_allows_family_change_when_orphan_belongs_to_other_symbo
     client = _SecClient([])
     opt = Optimizer(store=store, client=client)
 
-    new_attempt = {"strategy": "burst", "timeframe": "M10",
+    new_attempt = {"strategy": "burst", "timeframe": "M5",
                    "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
                             "selection": {}, "positive_ratio": 1.0}}
     result = opt.apply_secondary("XAUUSD", new_attempt)

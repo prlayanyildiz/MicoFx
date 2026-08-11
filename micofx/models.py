@@ -4,7 +4,7 @@ import math
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
-TIMEFRAMES = ["M5", "M10", "M15", "M30", "H1"]
+TIMEFRAMES = ["M5", "M15", "M30", "H1"]
 GROUPS = ["forex", "index", "commodity", "crypto"]
 
 
@@ -506,14 +506,14 @@ STRATEGIES = ["t3_stoch", "orb", "vwap_rev", "donchian",
 SCALP_STRATEGIES = frozenset({"micro_rev", "burst"})
 
 # Which timeframes each family is allowed to search / trade. Missing families
-# fall back to every configured TF. Scalps stay on M5/M10; swing/trend families
+# fall back to every configured TF. Scalps stay on M5; swing/trend families
 # own M15+ so the opt budget is not wasted pairing micro_rev with H1.
 STRATEGY_TIMEFRAMES: dict[str, list[str]] = {
-    "micro_rev": ["M5", "M10"],
-    "burst": ["M5", "M10"],
-    "t3_ribbon": ["M5", "M10"],
+    "micro_rev": ["M5"],
+    "burst": ["M5"],
+    "t3_ribbon": ["M5"],
     "flow_rev": ["M5", "M15", "M30"],
-    "dual_t3": ["M5", "M10", "M15", "M30", "H1"],
+    "dual_t3": ["M5", "M15", "M30", "H1"],
     "mtf_pullback": ["M5", "M15", "M30", "H1"],
     "t3_stoch": ["M5", "M15", "M30", "H1"],
     "t3_flip": ["M15", "M30", "H1"],
@@ -571,7 +571,10 @@ def uses_swing_exits(strategy: str, timeframe: str) -> bool:
     """Longer bars (or non-scalp families) need the wider exit search envelope."""
     if is_scalp_strategy(strategy):
         return False
-    # Keep this table local so models.py never imports the MT5 bridge.
+    # Keep this table local so models.py never imports the MT5 bridge, and
+    # wider than TIMEFRAMES on purpose: M10 and H4 are no longer offered, but
+    # a config stored while they were must still translate to the right
+    # number of seconds rather than silently reading as something else.
     seconds = {"M5": 300, "M10": 600, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400}
     return int(seconds.get(timeframe, 0)) >= 900
 

@@ -19,7 +19,7 @@ let OPT_PARAMS = null;
 let activeTab = "panel";
 let optSelection = new Set();
 let optTfSelection = new Set();
-const OPT_TF_OPTIONS = ["M5", "M10", "M15", "M30", "H1"];
+const OPT_TF_OPTIONS = ["M5", "M15", "M30", "H1"];
 let logAfter = 0;
 let logFilter = new Set(LOG_LEVELS);
 let cardsBuilt = false;
@@ -624,7 +624,7 @@ const SECTIONS = [
                ["st_trend", "SuperTrend Donusu (hedefsiz, sadece trail)"],
                ["t3_flip", "Tek Tillson T3 Yon Donusu (tek cizgi)"]],
       },
-      { k: "timeframe", t: "select", label: "Zaman dilimi", opts: [["M5", "M5"], ["M10", "M10"], ["M15", "M15"], ["M30", "M30"], ["H1", "H1"]] },
+      { k: "timeframe", t: "select", label: "Zaman dilimi", opts: [["M5", "M5"], ["M15", "M15"], ["M30", "M30"], ["H1", "H1"]] },
     ],
   },
   {

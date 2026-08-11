@@ -462,12 +462,10 @@
     ],
     "strategy_timeframes": {
       "micro_rev": [
-        "M5",
-        "M10"
+        "M5"
       ],
       "burst": [
-        "M5",
-        "M10"
+        "M5"
       ],
       "flow_rev": [
         "M5",
@@ -476,7 +474,6 @@
       ],
       "dual_t3": [
         "M5",
-        "M10",
         "M15",
         "M30",
         "H1"

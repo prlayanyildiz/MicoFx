@@ -73,6 +73,11 @@ _RECONNECT_COOLDOWN = 5.0
 def timeframe_const(name: str) -> int:
     if mt5 is None:
         return 0
+    # Wider than models.TIMEFRAMES on purpose. M10 and H4 are no longer offered
+    # anywhere - not in the search, not in the symbol editor, not as a valid
+    # PATCH value - but a config stored while they were must still resolve to
+    # the right MT5 constant. Dropping them here would send such a symbol down
+    # the ``.get`` fallback and quietly trade it on M5 bars instead.
     table = {
         "M5": mt5.TIMEFRAME_M5, "M10": mt5.TIMEFRAME_M10, "M15": mt5.TIMEFRAME_M15,
         "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
