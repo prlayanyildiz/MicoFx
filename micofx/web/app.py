@@ -209,6 +209,38 @@ def _validate_sessions(patch: dict[str, Any]) -> None:
                          f"(1=Pazartesi, 7=Pazar)")
 
 
+def _require_optimised_before_enabling(patch: dict[str, Any], cfg) -> None:
+    """A symbol may not be switched on until the optimizer has chosen its config.
+
+    EURUSD reached ``enabled`` carrying nothing but the dataclass defaults -
+    ``opt_updated_at`` 0.0, ``opt_score`` 0.0, an empty ``opt_summary`` and
+    ``t3_stoch/M5``. That is not a config the search picked; it is the factory
+    setting, and the search had in fact already refused this symbol outright
+    (365 days, four timeframes, fourteen families, no candidate cleared the
+    accept gate). On M5 an FX symbol pays 25-28% of risk in spread against an
+    18% live ceiling, so it would either be refused at the gate on every
+    signal or fill on parameters nothing has ever validated.
+
+    The same state is one restore away for the whole book: config/defaults.json
+    seeds symbol, group, magic, sessions and enabled, while the strategy and
+    every exit parameter live only in the gitignored database. A fresh install
+    would otherwise start eighteen symbols in exactly EURUSD's position.
+
+    ``opt_updated_at`` is the test rather than the summary, because that is the
+    single field apply() stamps when it writes a searched config.
+    """
+    if not patch.get("enabled"):
+        return
+    if cfg is None or float(getattr(cfg, "opt_updated_at", 0.0) or 0.0) > 0:
+        return
+    raise HTTPException(
+        400,
+        f"{getattr(cfg, 'symbol', '?')} optimize edilmeden acilamaz - su an "
+        f"tasidigi {getattr(cfg, 'strategy', '?')}/{getattr(cfg, 'timeframe', '?')} "
+        f"aramanin sectigi konfig degil, dokunulmamis varsayilan. Once bu sembol "
+        f"icin optimizasyon calistirip uygulayin.")
+
+
 def _exit_axes(body: dict[str, Any]):
     """Yield (axis_name, values) for every exit-model axis in an opt-params body.
 
@@ -727,6 +759,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _validate_risk_bounds(patch)
         _validate_sessions(patch)
         current = store.symbols.get(symbol)
+        _require_optimised_before_enabling(patch, current)
         # Same hazard as DELETE: the magic number is the only thing that maps
         # an open position back to its managing config. Changing it out from
         # under an open position orphans that position exactly like deleting
@@ -1473,6 +1506,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # exit_fields above, this can't be reduced to one static key list
         # up front. Any presence of secondary_params in the patch has to be
         # treated as guard-worthy; the precise per-symbol diff happens below.
+        # Bulk is the other door to enabling a symbol - "Tumunu Ac" walks the
+        # whole book - so it has to refuse an unsearched config exactly as the
+        # per-symbol route does. Checked before the lock: nothing is written
+        # yet, and refusing the whole batch is right when part of it is unsafe.
+        for target in targets:
+            _require_optimised_before_enabling(body.patch, store.symbols.get(target))
         guarded = (needs_tf_check or magic_changing or secondary_fields
                   or bool(exit_fields) or secondary_params_present)
         if guarded:
