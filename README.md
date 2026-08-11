@@ -16,11 +16,17 @@ Tek dosya. [Git](https://git-scm.com/download/win) kurulu degilse once onu
 kurun ve PowerShell'i kapatip yeniden acin.
 
 ```powershell
-cd $env:USERPROFILE
-git clone https://github.com/prlayanyildiz/MicoFx.git
-cd MicoFx
-.\KUR.bat
+cd $env:USERPROFILE; if (Test-Path MicoFx\.git) { cd MicoFx; git pull } else { git clone https://github.com/prlayanyildiz/MicoFx.git; cd MicoFx }; .\KUR.bat
 ```
+
+Tek satir, hem ilk kurulum hem guncelleme icin. Klasor zaten varsa yeniden
+klonlamak yerine `git pull` eder - `git clone` bos olmayan bir klasore
+yazmayi reddeder ve o hatadan sonra `.\KUR.bat` da bulunamaz.
+
+Klasor var ama depo degilse (yarim kalmis bir klonlama, elle acilmis bos
+klasor) once onu tasiyin ya da silin: `Remove-Item $env:USERPROFILE\MicoFx
+-Recurse -Force`. Icinde eski bir kurulumun `data\` klasoru olabilecegi icin
+bu komut kasitli olarak tek satirin disinda birakildi.
 
 `KUR.bat` Python'u, sanal ortami, paketleri ve masaustu kisayollarini
 halleder. Bastan calistirmak guvenli - yapilmis adimlari atlar, bu yuzden
