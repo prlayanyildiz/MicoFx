@@ -285,3 +285,55 @@ def test_a_duplicate_or_blank_extra_is_ignored():
     res = tc.get("/api/analysis/correlation?extra=GER40, ,,")
     assert res.json()["symbols"] == ["GER40"]
     assert res.json()["candidates"] == []
+
+
+# ------------------------------ different session lengths must not fake a zero
+
+def _stamped(close, step_sec, start=0):
+    b = _Bars(close)
+    b.time = (start + np.arange(b.close.size, dtype=np.int64) * step_sec)
+    return b
+
+
+def test_two_symbols_on_different_session_lengths_still_align():
+    """The bug this replaced: last-N-bars alignment compared different weeks.
+
+    Both series are driven by the same shocks on the hours they share, but one
+    only quotes every other hour - so position alignment slides them apart.
+    """
+    rng = np.random.default_rng(301)
+    shared = rng.normal(0, 0.01, 800)
+    dense_close = 100 * np.exp(np.cumsum(shared))
+    dense = _stamped(dense_close, 3600)
+    # Same instrument sampled every 2nd hour: identical path, half the bars.
+    sparse = _stamped(dense_close[::2], 7200)
+
+    store = _Store([SymbolConfig(symbol="DENSE", magic=1)])
+    tc = TestClient(create_app(store, _Client({"DENSE": dense, "SPARSE": sparse}),
+                               _Engine(), _Optimizer()))
+    res = tc.get("/api/analysis/correlation?extra=SPARSE")
+    pair = _pair(res, "DENSE", "SPARSE")
+    # Every shared timestamp carries the same underlying move.
+    assert pair["r"] > 0.5, f"zaman hizalamasi calismiyor: {pair}"
+    assert pair["bars"] <= sparse.close.size
+
+
+def test_pairs_with_no_overlapping_bars_are_dropped_not_invented():
+    a = _stamped(_walk(311), 3600, start=0)
+    b = _stamped(_walk(312), 3600, start=10_000_000)
+    store = _Store([SymbolConfig(symbol="A", magic=1)])
+    tc = TestClient(create_app(store, _Client({"A": a, "B": b}),
+                               _Engine(), _Optimizer()))
+    res = tc.get("/api/analysis/correlation?extra=B")
+    assert res.status_code == 200
+    assert res.json()["pairs"] == []
+
+
+def test_the_shared_count_is_the_overlap_not_the_shorter_series():
+    a = _stamped(_walk(321, n=400), 3600, start=0)
+    b = _stamped(_walk(322, n=400), 3600, start=200 * 3600)   # half overlap
+    store = _Store([SymbolConfig(symbol="A", magic=1)])
+    tc = TestClient(create_app(store, _Client({"A": a, "B": b}),
+                               _Engine(), _Optimizer()))
+    pair = _pair(tc.get("/api/analysis/correlation?extra=B"), "A", "B")
+    assert 150 <= pair["bars"] <= 205, pair["bars"]

@@ -1147,9 +1147,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
         Computed on log returns of the closing series, which is the right
         input: raw prices trend and would report almost everything as
-        correlated. Pairs are aligned on their own bar count rather than by
-        timestamp; symbols quoting different session lengths therefore compare
-        over their shared tail, which is why the count is returned per pair.
+        correlated. Pairs are matched on the bar CLOCK, not on position -
+        taking the last N bars of each symbol compares different calendar
+        windows the moment two instruments trade different hours per day, and
+        that is how US400 first read -0.066 against US500. ``bars`` is the
+        number of timestamps the pair actually shared.
         """
         _require_connected()
         tf = timeframe if timeframe in TIMEFRAMES else "H1"
@@ -1174,25 +1176,39 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 skipped[symbol] = f"yeterli bar yok ({len(data) if data else 0})"
                 continue
             close = np.asarray(data.close, dtype=np.float64)
+            times = np.asarray(data.time, dtype=np.int64)
             with np.errstate(divide="ignore", invalid="ignore"):
                 rets = np.diff(np.log(np.where(close > 0, close, np.nan)))
-            series[symbol] = rets[np.isfinite(rets)]
+            # Return at index i belongs to the bar that CLOSED at times[i+1].
+            stamps = times[1:]
+            good = np.isfinite(rets)
+            series[symbol] = (stamps[good], rets[good])
 
         names = sorted(series)
         pairs: list[dict[str, Any]] = []
         for i, a in enumerate(names):
             for b in names[i + 1:]:
-                x, y = series[a], series[b]
-                n = min(x.size, y.size)
-                if n < 60:
+                ta, xa_all = series[a]
+                tb, yb_all = series[b]
+                # Match on the bar CLOCK, not on position. Aligning the last N
+                # bars of each symbol silently compares different calendar
+                # windows whenever the two trade different hours per day: a
+                # 7-hour session covers three times the days a 23-hour one
+                # does in the same 1500 bars. That is not a small error - it
+                # reported US400 against US500 at -0.066, two US equity
+                # indices that plainly move together, purely because their
+                # windows barely overlapped.
+                shared, ia, ib = np.intersect1d(ta, tb, return_indices=True)
+                if shared.size < 60:
                     continue
-                xa, yb = x[-n:], y[-n:]
+                xa, yb = xa_all[ia], yb_all[ib]
                 if xa.std() <= 0 or yb.std() <= 0:
                     continue
                 r = float(np.corrcoef(xa, yb)[0, 1])
                 if not math.isfinite(r):
                     continue
-                pairs.append({"a": a, "b": b, "r": round(r, 3), "bars": int(n)})
+                pairs.append({"a": a, "b": b, "r": round(r, 3),
+                              "bars": int(shared.size)})
         pairs.sort(key=lambda p: -abs(p["r"]))
 
         live = {c.symbol for c in list(store.symbols.values()) if c.enabled}
