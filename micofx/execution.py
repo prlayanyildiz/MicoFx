@@ -38,6 +38,7 @@ only fixable once it is visible.
 """
 from __future__ import annotations
 
+import math
 import statistics
 import time
 from typing import Any
@@ -82,6 +83,37 @@ MIN_SAMPLES_FOR_SYMMETRY = 100
 _WARN_COOLDOWN = 3600.0
 
 
+def _usable_sample(row: Any) -> bool:
+    """Whether a restored sample row can survive ``_summarise``.
+
+    ``_summarise`` reads ``row["adverse"]`` and ``row["leg"]`` without a
+    default - correctly, because ``record()`` always writes both, and the
+    optional fields (``r``, ``money``) are already guarded with ``in`` checks.
+    The gap is on the way back in: ``_restore`` filtered rows to ``isinstance(
+    r, dict)`` and stopped there, so a row missing either key reached
+    ``_summarise`` and raised KeyError.
+
+    That matters more than where it sits: ``stats()`` is called by /api/state
+    on every panel poll, so one malformed row does not degrade the execution
+    view, it takes the whole panel down with a 500.
+
+    Nothing the current ``record()`` writes can fail this. It is for a blob
+    restored from a backup written by an older row shape, or a hand-edited
+    row - the same class the store's own shape guards cover for containers,
+    applied here to the elements.
+    """
+    if not isinstance(row, dict):
+        return False
+    adverse = row.get("adverse")
+    if not isinstance(adverse, (int, float)) or isinstance(adverse, bool):
+        return False
+    if not math.isfinite(float(adverse)):
+        # A NaN sorts into neither the adverse nor the favourable bucket and
+        # then poisons every mean computed from the set.
+        return False
+    return isinstance(row.get("leg"), str)
+
+
 class ExecutionMonitor:
     """Rolling requested-vs-filled statistics, per symbol and overall.
 
@@ -107,8 +139,9 @@ class ExecutionMonitor:
         if isinstance(blob, dict):
             for symbol, rows in blob.items():
                 if isinstance(rows, list):
-                    self._samples[str(symbol)] = [r for r in rows[-MAX_SAMPLES:]
-                                                  if isinstance(r, dict)]
+                    kept = [r for r in rows[-MAX_SAMPLES:] if _usable_sample(r)]
+                    if kept:
+                        self._samples[str(symbol)] = kept
 
     def _persist(self, force: bool = False) -> None:
         # Writing every sample would put an SQLite round trip on the fill path;
