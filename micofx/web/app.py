@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Any
 
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -1128,6 +1129,78 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 f"{sum(1 for r in rows if r['clean'])}/{len(rows)} sembol dort kapiyi da geciyor. "
                 f"Orneklemi {sample_floor} altinda kalan: {', '.join(thin) if thin else 'yok'} - "
                 f"bu sembollerde 'olculebilir' bayragi tek basina okunmamali."
+            ),
+        }
+
+    @app.get("/api/analysis/correlation")
+    def correlation(timeframe: str = "H1", bars: int = 1500) -> dict[str, Any]:
+        """Return correlation between every pair of live symbols. Read-only.
+
+        The portfolio is 8 equity indices out of 13, and whether that is a
+        concentration problem or merely a long list has been argued both ways
+        without either side measuring it. Stops cap what any ONE trade loses;
+        they do nothing about several positions losing at the same time,
+        because each one stops out independently at full risk. So the question
+        that matters is not how many indices there are, it is how much they
+        move together - and that is a number, not an opinion.
+
+        Computed on log returns of the closing series, which is the right
+        input: raw prices trend and would report almost everything as
+        correlated. Pairs are aligned on their own bar count rather than by
+        timestamp; symbols quoting different session lengths therefore compare
+        over their shared tail, which is why the count is returned per pair.
+        """
+        _require_connected()
+        tf = timeframe if timeframe in TIMEFRAMES else "H1"
+        count = max(200, min(int(bars), 20000))
+
+        series: dict[str, Any] = {}
+        skipped: dict[str, str] = {}
+        for cfg in list(store.symbols.values()):
+            if not cfg.enabled:
+                continue
+            data = client.bars(cfg.symbol, tf, count)
+            if data is None or len(data) < 60:
+                skipped[cfg.symbol] = f"yeterli bar yok ({len(data) if data else 0})"
+                continue
+            close = np.asarray(data.close, dtype=np.float64)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                rets = np.diff(np.log(np.where(close > 0, close, np.nan)))
+            series[cfg.symbol] = rets[np.isfinite(rets)]
+
+        names = sorted(series)
+        pairs: list[dict[str, Any]] = []
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                x, y = series[a], series[b]
+                n = min(x.size, y.size)
+                if n < 60:
+                    continue
+                xa, yb = x[-n:], y[-n:]
+                if xa.std() <= 0 or yb.std() <= 0:
+                    continue
+                r = float(np.corrcoef(xa, yb)[0, 1])
+                if not math.isfinite(r):
+                    continue
+                pairs.append({"a": a, "b": b, "r": round(r, 3), "bars": int(n)})
+        pairs.sort(key=lambda p: -abs(p["r"]))
+
+        groups = {c.symbol: c.group for c in list(store.symbols.values())}
+        same, cross = [], []
+        for p in pairs:
+            (same if groups.get(p["a"]) == groups.get(p["b"]) else cross).append(p["r"])
+        high = [p for p in pairs if abs(p["r"]) >= 0.7]
+        return {
+            "ok": True, "timeframe": tf, "symbols": names, "pairs": pairs,
+            "skipped": skipped,
+            "median_same_group": round(float(np.median(same)), 3) if same else None,
+            "median_cross_group": round(float(np.median(cross)), 3) if cross else None,
+            "high_pairs": high,
+            "note": (
+                f"{len(high)} cift 0.70 ve uzeri birlikte hareket ediyor"
+                + (f" (grup ici medyan {round(float(np.median(same)), 2)}, "
+                   f"gruplar arasi {round(float(np.median(cross)), 2)})" if same and cross else "")
+                if pairs else "yeterli veri yok"
             ),
         }
 
