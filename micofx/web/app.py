@@ -1133,7 +1133,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         }
 
     @app.get("/api/analysis/correlation")
-    def correlation(timeframe: str = "H1", bars: int = 1500) -> dict[str, Any]:
+    def correlation(timeframe: str = "H1", bars: int = 1500,
+                    extra: str = "") -> dict[str, Any]:
         """Return correlation between every pair of live symbols. Read-only.
 
         The portfolio is 8 equity indices out of 13, and whether that is a
@@ -1154,19 +1155,28 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         tf = timeframe if timeframe in TIMEFRAMES else "H1"
         count = max(200, min(int(bars), 20000))
 
+        # ``extra`` is a comma-separated list of broker symbols that are not in
+        # the book. Judging a candidate on the one thing that decides whether
+        # it adds information - how much it moves with what we already hold -
+        # otherwise required adding it to the config first, and adding then
+        # removing a symbol destroys its opt_runs history. A candidate should
+        # be measurable without paying that.
+        names_wanted = [c.symbol for c in list(store.symbols.values()) if c.enabled]
+        for name in (s.strip() for s in extra.split(",")):
+            if name and name not in names_wanted:
+                names_wanted.append(name)
+
         series: dict[str, Any] = {}
         skipped: dict[str, str] = {}
-        for cfg in list(store.symbols.values()):
-            if not cfg.enabled:
-                continue
-            data = client.bars(cfg.symbol, tf, count)
+        for symbol in names_wanted:
+            data = client.bars(symbol, tf, count)
             if data is None or len(data) < 60:
-                skipped[cfg.symbol] = f"yeterli bar yok ({len(data) if data else 0})"
+                skipped[symbol] = f"yeterli bar yok ({len(data) if data else 0})"
                 continue
             close = np.asarray(data.close, dtype=np.float64)
             with np.errstate(divide="ignore", invalid="ignore"):
                 rets = np.diff(np.log(np.where(close > 0, close, np.nan)))
-            series[cfg.symbol] = rets[np.isfinite(rets)]
+            series[symbol] = rets[np.isfinite(rets)]
 
         names = sorted(series)
         pairs: list[dict[str, Any]] = []
@@ -1185,6 +1195,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 pairs.append({"a": a, "b": b, "r": round(r, 3), "bars": int(n)})
         pairs.sort(key=lambda p: -abs(p["r"]))
 
+        live = {c.symbol for c in list(store.symbols.values()) if c.enabled}
         groups = {c.symbol: c.group for c in list(store.symbols.values())}
         same, cross = [], []
         for p in pairs:
@@ -1193,6 +1204,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         return {
             "ok": True, "timeframe": tf, "symbols": names, "pairs": pairs,
             "skipped": skipped,
+            "candidates": [n for n in names if n not in live],
             "median_same_group": round(float(np.median(same)), 3) if same else None,
             "median_cross_group": round(float(np.median(cross)), 3) if cross else None,
             "high_pairs": high,

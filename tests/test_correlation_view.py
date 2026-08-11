@@ -228,3 +228,60 @@ def test_an_unknown_timeframe_falls_back_rather_than_failing():
     res = _client(book).get("/api/analysis/correlation?timeframe=ZZ")
     assert res.status_code == 200
     assert res.json()["timeframe"] == "H1"
+
+
+# --------------------------------------- judging a symbol that is not ours yet
+
+def test_a_candidate_can_be_measured_without_being_added():
+    """Adding then removing a symbol destroys its opt_runs history, so a
+    candidate has to be judgeable from outside the book."""
+    book = {"GER40": _Bars(_walk(81)), "CA60": _Bars(_walk(82))}
+    store = _Store([SymbolConfig(symbol="GER40", magic=1)])
+    tc = TestClient(create_app(store, _Client(book), _Engine(), _Optimizer()))
+    res = tc.get("/api/analysis/correlation?extra=CA60")
+    assert res.status_code == 200
+    assert set(res.json()["symbols"]) == {"GER40", "CA60"}
+    assert res.json()["candidates"] == ["CA60"]
+    _pair(res, "GER40", "CA60")
+
+
+def test_a_candidate_that_duplicates_the_book_shows_it():
+    rng = np.random.default_rng(91)
+    shared = rng.normal(0, 0.01, 400)
+    book = {"US500": _Bars(_walk(92, shared=shared, weight=0.95)),
+            "US400": _Bars(_walk(93, shared=shared, weight=0.95))}
+    store = _Store([SymbolConfig(symbol="US500", magic=1)])
+    tc = TestClient(create_app(store, _Client(book), _Engine(), _Optimizer()))
+    res = tc.get("/api/analysis/correlation?extra=US400")
+    assert _pair(res, "US500", "US400")["r"] > 0.8
+
+
+def test_several_candidates_at_once():
+    book = {"GER40": _Bars(_walk(101)), "A": _Bars(_walk(102)),
+            "B": _Bars(_walk(103))}
+    store = _Store([SymbolConfig(symbol="GER40", magic=1)])
+    tc = TestClient(create_app(store, _Client(book), _Engine(), _Optimizer()))
+    res = tc.get("/api/analysis/correlation?extra=A,B")
+    assert sorted(res.json()["candidates"]) == ["A", "B"]
+
+
+def test_a_candidate_the_broker_does_not_know_is_skipped():
+    class _Partial(_Client):
+        def bars(self, symbol, timeframe, count):
+            return self.book.get(symbol)
+
+    store = _Store([SymbolConfig(symbol="GER40", magic=1)])
+    tc = TestClient(create_app(store, _Partial({"GER40": _Bars(_walk(111))}),
+                               _Engine(), _Optimizer()))
+    res = tc.get("/api/analysis/correlation?extra=YOKBOYLESEMBOL")
+    assert res.status_code == 200
+    assert "YOKBOYLESEMBOL" in res.json()["skipped"]
+
+
+def test_a_duplicate_or_blank_extra_is_ignored():
+    book = {"GER40": _Bars(_walk(121))}
+    store = _Store([SymbolConfig(symbol="GER40", magic=1)])
+    tc = TestClient(create_app(store, _Client(book), _Engine(), _Optimizer()))
+    res = tc.get("/api/analysis/correlation?extra=GER40, ,,")
+    assert res.json()["symbols"] == ["GER40"]
+    assert res.json()["candidates"] == []
