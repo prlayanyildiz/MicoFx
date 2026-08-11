@@ -78,6 +78,11 @@ WARN_ADVERSE_R = 0.05
 MAX_ADVERSE_RATIO = 3.0
 MIN_SAMPLES_FOR_SYMMETRY = 100
 
+# Reported when literally every fill came out against us and none for us: the
+# most one-sided a venue can be. A finite stand-in rather than inf because this
+# is serialised into /api/state and json.dumps writes ``Infinity``.
+RATIO_ALL_ADVERSE = 99.0
+
 # How often a repeated finding may be logged again, so a bad venue does not
 # flood the log on every review.
 _WARN_COOLDOWN = 3600.0
@@ -322,8 +327,19 @@ class ExecutionMonitor:
         points = [float(r.get("points", 0.0)) for r in rows]
         r_vals = [float(r["r"]) for r in rows if "r" in r]
         money = [float(r.get("money", 0.0)) for r in rows if "money" in r]
-        ratio = (len(adverse) / len(favourable)) if favourable else \
-            (float(len(adverse)) if adverse else 0.0)
+        # A fill landing exactly on the requested price is neither adverse nor
+        # favourable, so with no favourable fills at all there is no multiple to
+        # take and the count alone would say nothing about one-sidedness - it
+        # would only grow with the window. Compare instead against everything
+        # that did not go against us, which is the same question the ratio asks.
+        if favourable:
+            ratio = len(adverse) / len(favourable)
+        elif not adverse:
+            ratio = 0.0
+        elif len(adverse) < len(rows):
+            ratio = len(adverse) / (len(rows) - len(adverse))
+        else:
+            ratio = RATIO_ALL_ADVERSE
         return {
             "samples": len(rows),
             "adverse": len(adverse),
