@@ -1010,7 +1010,8 @@ class MT5Client:
             return self._verify_ambiguous_send(
                 symbol, real, magic, before_tickets, float(price),
                 f"{symbol}: order_send bos dondu ({code}: {text})",
-                side=side, req_sl=request["sl"], req_tp=request["tp"])
+                side=side, req_sl=request["sl"], req_tp=request["tp"],
+                retcode=code)
 
         if result.retcode == mt5.TRADE_RETCODE_INVALID_STOPS:
             # The broker rejected the level, not the trade's risk. Widen only
@@ -1062,13 +1063,20 @@ class MT5Client:
             # filled too, so this must go through verification rather than be
             # reported as a clean reject.
             if result is None or code in _AMBIGUOUS_RETCODES:
+                # When result is None inside the INVALID_* ladder, last_error
+                # is the only code we have; prefer that over the sentinel -1
+                # from getattr(None, "retcode", -1) so the engine's link
+                # backoff can still recognise a connection-class refusal.
+                if result is None:
+                    code, text = mt5.last_error()
                 return self._verify_ambiguous_send(
                     symbol, real, magic, before_tickets, float(price),
                     f"{symbol}: emir sonucu belirsiz ({code} {text})",
                     # request["sl"]/["tp"] not the sl/tp params: the
                     # INVALID_STOPS ladder above may have widened them, and
                     # the widened pair is what the broker actually holds.
-                    side=side, req_sl=request["sl"], req_tp=request["tp"])
+                    side=side, req_sl=request["sl"], req_tp=request["tp"],
+                    retcode=code)
             return {"ok": False, "retcode": code, "error": f"{symbol}: emir reddedildi ({code} {text})"}
         # DONE_PARTIAL (IOC took less than the requested volume) is a real
         # fill, not a rejection - treating it as ok:False here left a live
@@ -1220,7 +1228,8 @@ class MT5Client:
     def _verify_ambiguous_send(self, symbol: str, real: str, magic: int,
                                before_tickets: set[int], requested: float,
                                reason: str, side: str = "", req_sl: float = 0.0,
-                               req_tp: float = 0.0) -> dict[str, Any]:
+                               req_tp: float = 0.0,
+                               retcode: int | None = None) -> dict[str, Any]:
         """Decide what actually happened after an unconfirmed ``order_send``.
 
         Timeouts and IPC failures are not rejections: the request may already
@@ -1235,6 +1244,10 @@ class MT5Client:
           consumed, instead of being retried into a duplicate position.
         * **no new ticket after the whole retry window** - genuinely never
           reached the market. Plain failure, safe to retry on the next poll.
+          ``retcode`` is forwarded so Engine can park the symbol for
+          ``LINK_BACKOFF_SEC`` on connection-class codes (10031/10012) -
+          without it the 2.1s verifier would be re-run every poll for the
+          whole outage (see 2026-08-11 UK100/US30 storm).
         * **anything we cannot see** (positions_get failing, or more than one
           new ticket) - flagged ``ambiguous`` so the caller refuses to send
           another order for this symbol rather than guessing. Fail closed: a
@@ -1256,7 +1269,7 @@ class MT5Client:
                 LOG.emit(f"{reason} - pozisyon listesi de okunamadi ({mt5.last_error()}), "
                          f"emrin acilip acilmadigi BILINMIYOR. Yeni emir gonderilmeyecek, "
                          f"MT5'i elle kontrol edin.", "ERROR", symbol)
-                return {"ok": False, "ambiguous": True,
+                return {"ok": False, "ambiguous": True, "retcode": retcode,
                         "error": f"{reason} - pozisyon durumu dogrulanamadi"}
             new = [p for p in after
                    if p.magic == magic and int(p.ticket) not in before_tickets]
@@ -1264,14 +1277,14 @@ class MT5Client:
                 LOG.emit(f"{reason} - ayni magic altinda {len(new)} yeni pozisyon var, "
                          f"hangisinin bu emir oldugu belirlenemedi. Yeni emir "
                          f"gonderilmeyecek, MT5'i elle kontrol edin.", "ERROR", symbol)
-                return {"ok": False, "ambiguous": True,
+                return {"ok": False, "ambiguous": True, "retcode": retcode,
                         "error": f"{reason} - birden fazla yeni pozisyon, cozulemedi"}
             if len(new) == 1:
                 adopted = new[0]
                 break
 
         if adopted is None:
-            return {"ok": False,
+            return {"ok": False, "retcode": retcode,
                     "error": f"{reason} - dogrulandi: yeni pozisyon olusmamis, emir gecmemis"}
 
         LOG.emit(f"{reason} - ancak pozisyon #{int(adopted.ticket)} gercekten acilmis; "

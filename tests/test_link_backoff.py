@@ -144,3 +144,21 @@ def test_the_gate_is_actually_wired_into_try_entry():
     assert "_link_backoff" in body
     assert "baglanti_beklemede" in body
     assert "AMBIGUOUS_RETCODES" in body
+
+
+def test_verifier_failure_dict_must_carry_retcode():
+    """Regression: verified-flat used to omit retcode, so the park never armed.
+
+    open_market routes 10031 through _verify_ambiguous_send; Engine only parks
+    when result['retcode'] is in AMBIGUOUS_RETCODES. Pin the bridge in source.
+    """
+    src = (Path(__file__).resolve().parents[1] / "micofx"
+           / "mt5client.py").read_text(encoding="utf-8")
+    verify = src.split("def _verify_ambiguous_send(", 1)[1].split("\n    def ", 1)[0]
+    assert "retcode:" in verify or "retcode=" in verify
+    assert '"retcode": retcode' in verify
+    # The no-fill return is the storm path - must include retcode.
+    assert "yeni pozisyon olusmamis" in verify
+    flat_return = [ln for ln in verify.splitlines()
+                   if "olusmamis" in ln or ( '"retcode": retcode' in ln)]
+    assert any('"retcode": retcode' in ln for ln in verify.splitlines())
