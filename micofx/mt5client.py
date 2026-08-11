@@ -1284,7 +1284,12 @@ class MT5Client:
                 break
 
         if adopted is None:
-            return {"ok": False, "retcode": retcode,
+            # verified_unfilled: the book was readable and nothing landed. Safe
+            # to retry later - but Engine must see this flag (not only retcode)
+            # so IPC/None sends (retcode -10001 etc., outside AMBIGUOUS_RETCODES)
+            # still get LINK_BACKOFF_SEC instead of re-paying the 2.1s sleep
+            # every poll.
+            return {"ok": False, "retcode": retcode, "verified_unfilled": True,
                     "error": f"{reason} - dogrulandi: yeni pozisyon olusmamis, emir gecmemis"}
 
         LOG.emit(f"{reason} - ancak pozisyon #{int(adopted.ticket)} gercekten acilmis; "

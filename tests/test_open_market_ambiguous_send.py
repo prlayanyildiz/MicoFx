@@ -139,9 +139,10 @@ def test_timeout_retcode_with_no_new_position_is_a_plain_retryable_failure(monke
     # Not flagged ambiguous: verified as "never filled", so a retry is safe.
     assert not out.get("ambiguous")
     assert client.connected is True
-    # Engine.LINK_BACKOFF keys off this: without it a 10012/10031 storm
-    # re-runs the 2.1s verifier every poll (2026-08-11 UK100/US30).
+    # Engine.LINK_BACKOFF keys off retcode and verified_unfilled: without
+    # them a 10012/10031 storm re-runs the 2.1s verifier every poll.
     assert out.get("retcode") == 10012
+    assert out.get("verified_unfilled") is True
 
 
 def test_connection_retcode_verified_flat_forwards_retcode(monkeypatch):
@@ -161,7 +162,27 @@ def test_connection_retcode_verified_flat_forwards_retcode(monkeypatch):
     assert out["ok"] is False
     assert not out.get("ambiguous")
     assert out.get("retcode") == 10031
+    assert out.get("verified_unfilled") is True
     assert "olusmamis" in out["error"]
+
+
+def test_order_send_none_verified_flat_still_marks_unfilled(monkeypatch):
+    """IPC/None is outside AMBIGUOUS_RETCODES - flag must still arm the park."""
+    client = _make_client()
+
+    mt5_cls, _ = _mt5_stub(lambda request: None, [
+        (),
+        (),
+    ])
+    _install(monkeypatch, mt5_cls)
+
+    out = MT5Client.open_market(client, "EURUSD", "buy", 0.10, 1.0950, 1.1050, magic=7)
+
+    assert out["ok"] is False
+    assert not out.get("ambiguous")
+    assert out.get("verified_unfilled") is True
+    # last_error from the stub is an IPC code, not 10031/10012
+    assert out.get("retcode") not in (10012, 10031)
 
 
 def test_timeout_with_unreadable_position_book_is_ambiguous(monkeypatch):
@@ -215,9 +236,7 @@ def test_pre_existing_ticket_is_not_mistaken_for_the_new_fill(monkeypatch):
     assert out["ok"] is False
     assert not out.get("ambiguous")
     assert "olusmamis" in out["error"]
-
-
-def test_engine_clears_signal_chain_on_ambiguous_result():
+    assert out.get("verified_unfilled") is True
     """An ambiguous send must not be re-offered on the next poll.
 
     The signal chain is what keeps an entry pending until the bar rolls over;
@@ -257,13 +276,15 @@ def test_engine_parks_after_verified_connection_refusal():
     """Storm path: book readable, nothing filled, retcode 10031 -> 30s park.
 
     Signal stays (delayed, not dropped) - that is the distinction from
-    ambiguous. Without retcode on the open_market dict the park never armed.
+    ambiguous. Without retcode/verified_unfilled on the open_market dict
+    the park never armed.
     """
     from micofx.engine import LINK_BACKOFF_SEC
 
     engine, client, state, cfg = _entry_harness({
         "ok": False,
         "retcode": 10031,
+        "verified_unfilled": True,
         "error": "EURUSD: emir sonucu belirsiz (10031 no network) - "
                  "dogrulandi: yeni pozisyon olusmamis, emir gecmemis",
     })
@@ -281,6 +302,22 @@ def test_engine_parks_after_verified_connection_refusal():
     engine._try_entry(cfg, state, account={"balance": 1000.0})
     assert client.open_market_calls == 0
     assert state.entry_block == "baglanti_beklemede"
+
+
+def test_engine_parks_ipc_verified_flat_without_ambiguous_retcode():
+    """order_send None / IPC last_error is not in AMBIGUOUS_RETCODES."""
+    engine, client, state, cfg = _entry_harness({
+        "ok": False,
+        "retcode": -10001,
+        "verified_unfilled": True,
+        "error": "EURUSD: order_send bos dondu (-10001: IPC) - "
+                 "dogrulandi: yeni pozisyon olusmamis, emir gecmemis",
+    })
+
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+
+    assert engine._link_backoff.get("EURUSD", 0.0) > time.time()
+    assert state.signal == "buy"
 
 
 # --------------------------------------------------------------- engine harness

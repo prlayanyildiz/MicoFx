@@ -149,16 +149,18 @@ def test_the_gate_is_actually_wired_into_try_entry():
 def test_verifier_failure_dict_must_carry_retcode():
     """Regression: verified-flat used to omit retcode, so the park never armed.
 
-    open_market routes 10031 through _verify_ambiguous_send; Engine only parks
-    when result['retcode'] is in AMBIGUOUS_RETCODES. Pin the bridge in source.
+    open_market routes 10031 through _verify_ambiguous_send; Engine parks on
+    verified_unfilled (and AMBIGUOUS retcodes). Pin both bridges in source.
     """
-    src = (Path(__file__).resolve().parents[1] / "micofx"
-           / "mt5client.py").read_text(encoding="utf-8")
-    verify = src.split("def _verify_ambiguous_send(", 1)[1].split("\n    def ", 1)[0]
+    root = Path(__file__).resolve().parents[1]
+    mt5_src = (root / "micofx" / "mt5client.py").read_text(encoding="utf-8")
+    eng_src = (root / "micofx" / "engine.py").read_text(encoding="utf-8")
+    verify = mt5_src.split("def _verify_ambiguous_send(", 1)[1].split("\n    def ", 1)[0]
     assert "retcode:" in verify or "retcode=" in verify
     assert '"retcode": retcode' in verify
-    # The no-fill return is the storm path - must include retcode.
+    assert "verified_unfilled" in verify
     assert "yeni pozisyon olusmamis" in verify
-    flat_return = [ln for ln in verify.splitlines()
-                   if "olusmamis" in ln or ( '"retcode": retcode' in ln)]
     assert any('"retcode": retcode' in ln for ln in verify.splitlines())
+    fail_branch = eng_src.split("if not result.get(\"ok\"):", 1)[1].split("\n            if result.get(\"ambiguous\")", 1)[0]
+    assert "verified_unfilled" in fail_branch
+    assert "_link_backoff" in fail_branch

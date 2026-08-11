@@ -1675,11 +1675,19 @@ class Engine:
         if not result.get("ok"):
             state.note = result.get("error", "emir hatasi")
             state.entry_block = "emir_hatasi"
-            LOG.emit(result.get("error", "emir hatasi"), "ERROR", cfg.symbol)
-            if result.get("retcode") in AMBIGUOUS_RETCODES:
-                # Timeout or "no network": the link, not the order, is the
-                # problem, and it will not clear inside one poll interval.
+            # Park on any verified-flat link refusal, not only TRADE_RETCODE_*
+            # in AMBIGUOUS_RETCODES. order_send None / IPC last_error codes
+            # (-10001 etc.) are outside that set but took the same verifier
+            # path - without verified_unfilled they would still hammer every
+            # poll. Retcode check kept as belt-and-suspenders.
+            if result.get("verified_unfilled") or result.get("retcode") in AMBIGUOUS_RETCODES:
                 self._link_backoff[base.symbol] = time.time() + LINK_BACKOFF_SEC
+            # Verified-flat is the gate working: book readable, nothing filled,
+            # symbol parked. WARN so fault scans do not treat a successful
+            # refuse as a live Error (same reason pending-drop went WARN).
+            # Still ERROR when the book itself is unreadable (ambiguous).
+            _lvl = "WARN" if result.get("verified_unfilled") else "ERROR"
+            LOG.emit(result.get("error", "emir hatasi"), _lvl, cfg.symbol)
             if result.get("ambiguous"):
                 # open_market() could not establish whether the order filled
                 # (timeout plus an unreadable position book, or several new
