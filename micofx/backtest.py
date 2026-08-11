@@ -621,7 +621,29 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
 
     tradable = session_mask(cfg, bars.time, all_hours)
     flatten = flatten_mask(cfg, bars.time, all_hours, day_end_flatten_min)
-    point = float(point) if point > 0 else 1e-5
+    if not (float(point) > 0):
+        # This used to substitute 1e-5, which is not a conservative default -
+        # it is a made-up price scale, and every cost in the sweep is measured
+        # against it. ``spread_price = bars.spread * point``, so on an index
+        # quoting point 0.01 the substitution understates spread by a factor
+        # of a thousand and the search prices trading as very nearly free.
+        #
+        # Measured, not argued: same 3000 bars, spread 30 points. With the
+        # real 0.01 the sweep finds no viable config at all. With point 0 it
+        # returns ok=True and a winner carrying cost_per_trade_r 0.0003. So
+        # the failure is not a slightly optimistic number - it turns "nothing
+        # here is tradable" into "here is your config, and it costs nothing".
+        #
+        # Optimizer._plan_symbol checks ``info is None`` but never the point
+        # inside it, so a partially populated symbol_info reaches this
+        # unguarded. Refusing matches what the rest of the codebase already
+        # does with an unusable cost input: cost_by_hour raises 503 on the
+        # same condition, and IndicatorCache treats a missing cost series as
+        # "produce no signals" rather than invent one.
+        return {"ok": False,
+                "error": (f"{cfg.symbol}: point degeri okunamadi ({point}) - "
+                          f"maliyet modeli kurulamaz, arama yapilmadi")}
+    point = float(point)
 
     # Identical for every combination in the sweep, so it is built once instead
     # of reallocated inside every one of the tens of thousands of simulations.
