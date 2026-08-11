@@ -40,8 +40,15 @@ from micofx.engine import Engine, SymbolState
 
 
 class _Store:
-    def __init__(self):
+    """Real Store always exposes .symbols; the flush prunes against it."""
+
+    def __init__(self, symbols=None):
         self.saved = {}
+        self.symbols = {s: object() for s in
+                        (symbols if symbols is not None else
+                         ("X", "A", "B", "AYNI", "EURJPY", "UK100", "GER40",
+                          "FRA40", "GBPUSD", "NAS100", "BUSY", "QUIET",
+                          "KALAN", "US500", "US30"))}
 
     def get_setting(self, key, default=None):
         return self.saved.get(key, default)

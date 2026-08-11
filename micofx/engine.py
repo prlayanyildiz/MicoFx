@@ -688,6 +688,15 @@ class Engine:
         if now - self._spread_ratio_at < interval:
             return
         try:
+            # Drop symbols that have left the portfolio, the same way
+            # _mark_bar_filled bounds its own record. Two reasons, and the
+            # second is not just tidiness: the panel showed measurements for
+            # seven symbols that no longer exist, and _spread_scale looks the
+            # histogram up BY NAME - so re-adding one of them later would have
+            # applied a stale distribution to a fresh config.
+            live = set(self.store.symbols)
+            self._spread_ratio = {s: c for s, c in self._spread_ratio.items()
+                                  if s in live}
             self.store.set_setting("spread_ratio", self._spread_ratio)
             self._spread_ratio_dirty = False
             self._spread_ratio_at = now
@@ -773,6 +782,12 @@ class Engine:
         if not self._entry_blocks_dirty:
             return
         try:
+            # Same bound as the spread histogram and _mark_bar_filled: a
+            # deleted symbol's counters are neither readable nor meaningful,
+            # and left alone they grow the blob forever.
+            live = set(self.store.symbols)
+            self._entry_blocks = {s: c for s, c in self._entry_blocks.items()
+                                  if s in live}
             self.store.set_setting("entry_blocks", self._entry_blocks)
             self.store.set_setting("entry_blocks_since", self._entry_blocks_since)
             self._entry_blocks_dirty = False

@@ -47,8 +47,15 @@ class _Bars:
 
 
 class _Store:
-    def __init__(self):
+    """Real Store always exposes .symbols; the flush prunes against it."""
+
+    def __init__(self, symbols=None):
         self.saved = {}
+        self.symbols = {s: object() for s in
+                        (symbols if symbols is not None else
+                         ("X", "A", "B", "AYNI", "EURJPY", "UK100", "GER40",
+                          "FRA40", "GBPUSD", "NAS100", "BUSY", "QUIET",
+                          "KALAN", "US500", "US30"))}
         self.writes = 0
 
     def get_setting(self, k, d=None):
@@ -292,3 +299,27 @@ def test_the_panel_is_wired_to_the_endpoint():
     for panel in ("gates-table", "blocks-table", "ratio-table"):
         assert html.index(panel) > html.index('id="page-tani"'), \
             f"{panel} Tani sekmesinde degil"
+
+
+# ------------------------------------------ a deleted symbol leaves no trace
+
+def test_a_deleted_symbol_is_dropped_from_the_histogram():
+    """The panel was showing measurements for seven symbols that were gone."""
+    store = _Store(symbols=("KALAN",))
+    eng = _engine(store)
+    _feed(eng, "KALAN", 10, 0.13, times=5)
+    _feed(eng, "SILINDI", 10, 0.13, times=5)
+    eng._flush_spread_ratio(interval=0.0)
+    names = {r["symbol"] for r in eng.spread_ratio()["rows"]}
+    assert names == {"KALAN"}
+    assert "SILINDI" not in store.saved["spread_ratio"]
+
+
+def test_the_stale_histogram_cannot_be_reapplied_to_a_fresh_config():
+    """_spread_scale looks the histogram up by name; a re-added symbol must
+    not inherit a distribution measured under its previous config."""
+    store = _Store(symbols=("KALAN",))
+    eng = _engine(store)
+    _feed(eng, "SILINDI", 10, 30 * POINT, times=SPREAD_RATIO_MIN_SAMPLES)
+    eng._flush_spread_ratio(interval=0.0)
+    assert store.saved["spread_ratio"].get("SILINDI") is None
