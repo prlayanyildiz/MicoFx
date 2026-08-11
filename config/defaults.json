@@ -482,7 +482,6 @@
     "refine_rounds": 3,
     "timeframes": [
       "M5",
-      "M10",
       "M15",
       "M30",
       "H1"
