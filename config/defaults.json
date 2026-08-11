@@ -416,6 +416,18 @@
           "end": "23:55"
         }
       ]
+    },
+    {
+      "symbol": "EURUSD",
+      "group": "forex",
+      "magic": 990110,
+      "enabled": false,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
     }
   ],
   "optimizer": {
