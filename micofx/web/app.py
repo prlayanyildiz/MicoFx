@@ -1113,6 +1113,39 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             ),
         }
 
+    @app.get("/api/analysis/entry-blocks")
+    def entry_blocks() -> dict[str, Any]:
+        """Which gate refuses entries, counted per symbol. Read-only.
+
+        The portfolio-gates view says every symbol trades far under the
+        frequency its holdout implies; this says why. Counted only where a
+        signal actually reached the entry stage, so the totals separate the
+        two causes that look identical from outside - a gate refusing the
+        trade, versus the signal never firing in the first place.
+
+        ``attempts`` is signals that reached _try_entry, not bars. Compare it
+        against the holdout's implied trade count: if attempts match and
+        ``opened`` does not, a gate is eating them and ``blocks`` names it. If
+        attempts themselves are short, the entry gates are innocent and the
+        shortfall is upstream, in signal generation.
+        """
+        data = engine.entry_blocks()
+        total = data["attempts"]
+        top = next(iter(data["totals"].items()), None)
+        data["note"] = (
+            "Henuz giris denemesi kaydedilmedi - sayac bu surumle basladi, "
+            "bir sinyal gelene kadar bos kalir."
+            if not total else
+            f"{data['opened']}/{total} deneme islemle sonuclandi"
+            + (f"; en cok engelleyen: {top[0]} ({top[1]})" if top else "")
+        )
+        return {"ok": True, **data}
+
+    @app.post("/api/analysis/entry-blocks/reset")
+    def entry_blocks_reset() -> dict[str, Any]:
+        engine.reset_entry_blocks()
+        return {"ok": True, "message": "Giris engeli sayaclari sifirlandi."}
+
     @app.post("/api/symbols/{symbol}/reset")
     def reset_symbol(symbol: str) -> dict[str, Any]:
         cfg = store.symbols.get(symbol)

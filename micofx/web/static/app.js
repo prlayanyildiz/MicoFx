@@ -153,7 +153,7 @@ function selectTab(name) {
     if (!OPT_PARAMS) loadOptParams().then(loadOptHistory);
     else syncOptPicker();
   }
-  if (name === "semboller") loadGates();
+  if (name === "semboller") { loadGates(); loadBlocks(); }
   if (name === "log") pollLogs();
 }
 
@@ -217,6 +217,38 @@ async function loadGates() {
   if (note) {
     note.textContent = `${data.note || ""} Siklik penceresi ${data.window_days} gun.`;
   }
+}
+
+// Counted only where a signal actually reached the entry stage, which is what
+// makes the number decisive: attempts near the holdout's implied count with
+// few opens means a gate is eating them and the blocks column names it, while
+// attempts that are themselves short clears the gates and points upstream at
+// signal generation.
+async function loadBlocks() {
+  const note = $("#blocks-note");
+  let data;
+  try {
+    data = await api("/api/analysis/entry-blocks");
+  } catch (err) {
+    if (note) note.textContent = `Sayaclar okunamadi: ${err.message || err}`;
+    return;
+  }
+  const rows = (data.rows || []).map((r) => {
+    const blocks = Object.entries(r.blocks || {});
+    const tr = el("tr");
+    tr.innerHTML = `
+      <td class="sym">${esc(r.symbol)}</td>
+      <td class="num">${r.attempts}</td>
+      <td class="num ${r.opened ? "pos" : "dim"}">${r.opened}</td>
+      <td class="num ${r.fill_rate != null && r.fill_rate < 0.25 ? "neg" : "dim"}">${
+        r.fill_rate != null ? num(r.fill_rate, 2) : "-"}</td>
+      <td>${blocks.length
+        ? blocks.map(([k, v]) => `<span class="pill off">${esc(k)} ${v}</span>`).join(" ")
+        : '<span class="dim">-</span>'}</td>`;
+    return tr;
+  });
+  rowsInto($("#blocks-table"), rows, "Henuz giris denemesi yok", 5);
+  if (note) note.textContent = data.note || "";
 }
 
 /* ----------------------------------------------------------- panel: cards */
@@ -2042,6 +2074,16 @@ function wire() {
 
   const gatesBtn = $("#btn-gates-refresh");
   if (gatesBtn) gatesBtn.onclick = () => loadGates();
+  const blocksBtn = $("#btn-blocks-refresh");
+  if (blocksBtn) blocksBtn.onclick = () => loadBlocks();
+  const blocksReset = $("#btn-blocks-reset");
+  if (blocksReset) blocksReset.onclick = async () => {
+    try {
+      const res = await api("/api/analysis/entry-blocks/reset", { method: "POST" });
+      toast(res.message || "Sifirlandi", "ok");
+      loadBlocks();
+    } catch (e) { toast(e.message, "err"); }
+  };
 
   const call = async (path, body) => {
     try {

@@ -49,7 +49,7 @@ class SymbolState:
                  "note", "session", "spread", "spread_atr", "last_signal_at", "htf", "bars",
                  "primary_signal", "sec_signal", "sec_atr", "sec_last_bar",
                  "sec_next_bar_at", "sec_last_fetch", "sec_bars", "signal_source",
-                 "pending_bar_key")
+                 "pending_bar_key", "entry_block")
 
     def __init__(self, symbol: str) -> None:
         self.symbol = symbol
@@ -85,6 +85,10 @@ class SymbolState:
         # and not yet filled - lets _evaluate retry a signal a transient block
         # (spread/slot/AI gate) ate earlier in the same bar. (0, 0) means none.
         self.pending_bar_key = (0, 0)
+        # Which gate refused THIS cycle's entry attempt, as a stable key rather
+        # than the display note. Only meaningful right after _try_entry ran;
+        # _cycle reads it once and tallies it. See Engine._entry_blocks.
+        self.entry_block = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -214,6 +218,28 @@ class Engine:
             str(k): str(v) for k, v in (as_dict(store.get_setting("symbol_daily_halted"), "symbol_daily_halted")).items()
         }
         self._reopt_at = as_number(store.get_setting("auto_reopt_at"), 0.0, "auto_reopt_at")
+        # Why entries do not happen, counted per symbol per gate.
+        #
+        # Every symbol in this book trades far under the frequency its own
+        # holdout implies - 7% to 38% of it - and until now nothing recorded
+        # which gate ate the difference. _try_entry sets state.note and
+        # returns; the note is overwritten on the next cycle, nothing is
+        # logged and nothing is counted, so the one question that matters for
+        # the shortfall was simply unanswerable from a running system.
+        #
+        # Counted only where a signal actually reached the entry stage, which
+        # is exactly what _try_entry being called means (_cycle skips a symbol
+        # with no signal). So the totals separate the two candidate causes
+        # that look identical from outside: a gate refusing entries, versus
+        # signals never firing at all. "acildi" is counted alongside the
+        # refusals to give the denominator.
+        self._entry_blocks: dict[str, dict[str, int]] = {
+            str(sym): {str(k): int(v) for k, v in as_dict(counts, "entry_blocks").items()}
+            for sym, counts in as_dict(store.get_setting("entry_blocks"), "entry_blocks").items()
+        }
+        self._entry_blocks_since = as_number(
+            store.get_setting("entry_blocks_since"), 0.0, "entry_blocks_since") or time.time()
+        self._entry_blocks_dirty = False
         # Post-fill cooldown, per symbol, as an absolute epoch. Lived only in
         # SymbolState until now - which is rebuilt empty on every start, so a
         # restart inside the cooldown window dropped the one guard that stops
@@ -491,6 +517,7 @@ class Engine:
                     # An entry triggered by the secondary signal is executed with
                     # the parameters it was validated under, not the primary's.
                     self._try_entry(cfg, state, account)
+                    self._tally_entry(cfg.symbol, state.entry_block)
                     # account was a single snapshot taken at the top of this
                     # cycle - if that entry just filled, every later symbol in
                     # this same ready list would otherwise size/margin-check
@@ -498,7 +525,70 @@ class Engine:
                     account = self.refresh_account(force=True) or account
                 except Exception as exc:
                     state.note = f"hata: {exc}"
+                    self._tally_entry(cfg.symbol, "hata")
                     LOG.emit(f"Giris hatasi: {exc}", "ERROR", cfg.symbol)
+            self._flush_entry_blocks()
+
+    # ----------------------------------------------------- entry diagnostics
+
+    def _tally_entry(self, symbol: str, reason: str) -> None:
+        """Record the outcome of one entry attempt. Never raises.
+
+        An empty reason means _try_entry returned without passing any of the
+        marked points, which should not happen - bucket it rather than lose
+        it, so a future edit that adds a return without a key shows up here
+        as a rising "isaretsiz" instead of silently shrinking the total.
+        """
+        try:
+            key = str(reason or "isaretsiz")
+            counts = self._entry_blocks.setdefault(str(symbol), {})
+            counts[key] = int(counts.get(key, 0)) + 1
+            self._entry_blocks_dirty = True
+        except Exception:
+            pass
+
+    def _flush_entry_blocks(self) -> None:
+        """Persist the tally. Diagnostics must never interrupt a cycle."""
+        if not self._entry_blocks_dirty:
+            return
+        try:
+            self.store.set_setting("entry_blocks", self._entry_blocks)
+            self.store.set_setting("entry_blocks_since", self._entry_blocks_since)
+            self._entry_blocks_dirty = False
+        except Exception:
+            pass
+
+    def entry_blocks(self) -> dict[str, Any]:
+        """The tally, plus the share of attempts each gate refused."""
+        rows = []
+        for symbol, counts in sorted(self._entry_blocks.items()):
+            total = sum(int(v) for v in counts.values())
+            opened = int(counts.get("acildi", 0))
+            rows.append({
+                "symbol": symbol, "attempts": total, "opened": opened,
+                "fill_rate": round(opened / total, 3) if total else None,
+                "blocks": {k: int(v) for k, v in
+                           sorted(counts.items(), key=lambda kv: -int(kv[1]))
+                           if k != "acildi"},
+            })
+        rows.sort(key=lambda r: -r["attempts"])
+        totals: dict[str, int] = {}
+        for row in rows:
+            for k, v in row["blocks"].items():
+                totals[k] = totals.get(k, 0) + v
+        return {
+            "since": self._entry_blocks_since,
+            "rows": rows,
+            "totals": dict(sorted(totals.items(), key=lambda kv: -kv[1])),
+            "attempts": sum(r["attempts"] for r in rows),
+            "opened": sum(r["opened"] for r in rows),
+        }
+
+    def reset_entry_blocks(self) -> None:
+        self._entry_blocks = {}
+        self._entry_blocks_since = time.time()
+        self._entry_blocks_dirty = True
+        self._flush_entry_blocks()
 
     # ------------------------------------------------- scheduled re-optimize
 
@@ -1000,6 +1090,7 @@ class Engine:
 
     def _try_entry(self, base: SymbolConfig, state: SymbolState,
                    account: dict[str, Any]) -> None:
+        state.entry_block = ""
         if base.symbol in self._orphan_scan:
             # A prior secondary fill on this symbol/magic is still waiting on
             # a delayed broker ticket - self._positions cannot be trusted to
@@ -1016,6 +1107,7 @@ class Engine:
             # contradiction of calling a symbol "abandoned" while still
             # letting fresh trades stack on top of an unresolved one.
             state.note = "ikincil ticket taramasi devam ediyor - giris beklemede"
+            state.entry_block = "ikincil_tarama"
             return
         side = state.signal
         secondary = state.signal_source == "secondary"
@@ -1027,6 +1119,7 @@ class Engine:
         # off it below - isfinite() is the only thing that actually catches it.
         if not math.isfinite(atr) or atr <= 0:
             state.note = "ATR yok"
+            state.entry_block = "atr_yok"
             return
 
         # Scalp families (micro_rev/burst) only belong on M1/M5. A leftover
@@ -1040,6 +1133,7 @@ class Engine:
         if not strategy_allows_timeframe(cfg.strategy, cfg.timeframe, allow):
             state.note = f"{cfg.strategy}/{cfg.timeframe} eslesmesi yasak"
             state.signal = ""
+            state.entry_block = "tf_yasak"
             return
 
         # Last mile before the order. The session gate already refuses weekends,
@@ -1048,24 +1142,29 @@ class Engine:
         if sessions.weekend_closed(base, self.client.server_now()):
             state.note = "hafta sonu kapali"
             state.signal = ""
+            state.entry_block = "hafta_sonu"
             return
 
         tick = self.client.tick(cfg.symbol)
         if tick is None:
             state.note = "fiyat yok"
+            state.entry_block = "fiyat_yok"
             return
 
         if cfg.max_spread_atr > 0 and tick["spread"] > atr * cfg.max_spread_atr:
             state.note = f"spread genis ({tick['spread'] / atr:.2f}xATR)"
+            state.entry_block = "spread"
             return
         price_ref = tick["ask"] if side == "buy" else tick["bid"]
         if cfg.min_atr_ratio > 0 and price_ref > 0 and (atr / price_ref) < cfg.min_atr_ratio:
             state.note = "volatilite dusuk"
+            state.entry_block = "volatilite"
             return
 
         allowed, ai_reason, scale = self.supervisor.gate(cfg, self.client.server_now())
         if not allowed:
             state.note = ai_reason
+            state.entry_block = "ai_gate"
             return
 
         min_stop = self.client.min_stop_distance(cfg.symbol)
@@ -1090,17 +1189,20 @@ class Engine:
                 if r_value > 0 and (cost / r_value * 100.0) > sys.max_cost_pct_of_risk:
                     state.note = (f"maliyet yuksek "
                                   f"(%{cost / r_value * 100.0:.0f} > %{sys.max_cost_pct_of_risk:g})")
+                    state.entry_block = "maliyet"
                     return
 
         lot, note = self.risk.lot_for(cfg, sl_dist, account.get("balance", 0.0), ai_scale=scale)
         if lot <= 0:
             state.note = f"lot hesaplanamadi ({note})"
+            state.entry_block = "lot"
             return
 
         verdict = self.risk.can_open(cfg, side, lot, self._positions, account,
                                      sec_tickets=frozenset(self._sec_tickets))
         if not verdict.ok:
             state.note = verdict.reason
+            state.entry_block = "risk_limiti"
             return
 
         entry = tick["ask"] if side == "buy" else tick["bid"]
@@ -1124,6 +1226,7 @@ class Engine:
             live_cfg = self.store.symbols.get(base.symbol)
             if live_cfg is None or live_cfg.magic != base.magic:
                 state.note = "sembol silindi/degisti - islem iptal"
+                state.entry_block = "sembol_degisti"
                 return
             result = self.client.open_market(
                 cfg.symbol, side, lot, sl, tp, cfg.magic,
@@ -1250,6 +1353,7 @@ class Engine:
             # path below, which would record execution/cooldown/state.signal
             # bookkeeping for a "trade" that no longer exists.
             state.note = "ikincil ticket cozulemedi - guvenlik icin kapatildi"
+            state.entry_block = "ikincil_cozulemedi_kapatildi"
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
@@ -1270,9 +1374,11 @@ class Engine:
             # every cycle from here on.
             state.note = ("ikincil ticket cozulemedi - pozisyon acik kaldi, "
                           "otomatik tekrar denenecek")
+            state.entry_block = "ikincil_cozulemedi_acik"
             return
         if not result.get("ok"):
             state.note = result.get("error", "emir hatasi")
+            state.entry_block = "emir_hatasi"
             LOG.emit(result.get("error", "emir hatasi"), "ERROR", cfg.symbol)
             if result.get("ambiguous"):
                 # open_market() could not establish whether the order filled
@@ -1289,6 +1395,7 @@ class Engine:
                 state.sec_signal = ""
                 state.pending_bar_key = (0, 0)
                 state.note = "emir sonucu belirsiz - tekrar denenmeyecek, MT5'i kontrol edin"
+                state.entry_block = "emir_belirsiz"
                 return
             if result.get("retcode") in NON_RETRYABLE_RETCODES:
                 # This reject will not clear up before the bar rolls over -
@@ -1300,6 +1407,9 @@ class Engine:
                 state.primary_signal = ""
                 state.sec_signal = ""
                 state.pending_bar_key = (0, 0)
+            # Key is set on the branch above; restated here so this exit carries
+            # it locally and the coverage guard can stay strict.
+            state.entry_block = state.entry_block or "emir_hatasi"
             return
 
         if result.get("partial_fill"):
@@ -1334,6 +1444,7 @@ class Engine:
         state.primary_signal = ""
         state.sec_signal = ""
         state.note = "islem acildi"
+        state.entry_block = "acildi"
         LOG.emit(
             f"{side.upper()} {result['volume']:g} lot @ {result['price']:.5f} "
             f"SL={result['sl']:.5f} TP={result['tp']:.5f} | lot: {note}"
