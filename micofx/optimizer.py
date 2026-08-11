@@ -947,8 +947,24 @@ class Optimizer:
         # Read from the summary, which is where apply() writes it - not from
         # ``previous`` (the holdout block inside it).
         old_scale = float(summary.get("spread_scale", 0.0) or 0.0)
+        if old_scale <= 0.0:
+            # Nothing recorded means the config predates this field, and every
+            # such config WAS measured at 1.0: walk_forward's spread_scale
+            # defaults to 1.0 and the optimizer did not pass one at all before
+            # the calibration shipped. So this is a fact about how it was
+            # measured, not a guess - and treating it as "unknown, skip the
+            # comparison" would drop the incumbent guard for the entire book
+            # on the next run, including the ~10 symbols whose measured scale
+            # is 1.0 and whose assumption therefore never moved.
+            #
+            # A config applied in the narrow window between the calibration
+            # shipping and this field existing could have used a real scale
+            # while recording none. The error that produces is a wrongly
+            # KEPT incumbent, never a wrongly applied candidate, which is the
+            # safe direction and self-clears on the first apply.
+            old_scale = 1.0
         new_scale = self._spread_scale(getattr(cfg, "symbol", ""))
-        if old_scale <= 0.0 or abs(new_scale - old_scale) > 0.05:
+        if abs(new_scale - old_scale) > 0.05:
             LOG.emit(f"{cfg.symbol}: mevcut ayar farkli spread olcegiyle olculmus "
                      f"({old_scale or 'kayitsiz'} -> {new_scale:.2f}), skor kiyasi "
                      f"atlandi - aday kendi kapilariyla degerlendirildi.",

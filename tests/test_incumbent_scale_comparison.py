@@ -82,10 +82,21 @@ def test_any_material_move_in_the_assumption_skips_the_comparison(old, new):
     assert opt._beats_incumbent(_cfg(score=79.389, scale=old), WEAKER) is True
 
 
-def test_an_incumbent_with_no_recorded_scale_cannot_veto():
-    """Everything applied before the calibration existed is in this state."""
+def test_an_unrecorded_scale_is_read_as_the_1_0_it_was_measured_at():
+    """Everything applied before this field existed WAS measured at 1.0 -
+    walk_forward defaults to it and the optimizer passed nothing. Treating it
+    as unknown would drop the incumbent guard for the whole book on the next
+    run, including the ~10 symbols whose measured scale is 1.0 anyway."""
     opt = _optimizer(scale=1.0)
-    assert opt._beats_incumbent(_cfg(score=79.389, scale=None), WEAKER) is True
+    assert opt._beats_incumbent(_cfg(score=79.389, scale=None), WEAKER) is False
+
+
+def test_an_unrecorded_scale_still_yields_when_the_measurement_has_moved():
+    """CHFJPY and XAUUSD are exactly this case: nothing recorded, and a
+    measured scale that is nowhere near 1.0."""
+    for scale in (1.15, 1.55, 3.00):
+        opt = _optimizer(scale=scale)
+        assert opt._beats_incumbent(_cfg(score=79.389, scale=None), WEAKER) is True
 
 
 # ------------------------------------------- the veto that must still work
