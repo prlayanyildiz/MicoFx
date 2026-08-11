@@ -280,3 +280,65 @@ def test_the_thresholds_are_tunable():
     assert "siklik" in _rows(tight)["X"]["fails"]
     wide = tc.get("/api/analysis/portfolio-gates?min_sample=500")
     assert _rows(wide)["X"]["thin_sample"] is True
+
+
+# ------------------------------------------------- the weekly review layers
+
+def _layer(res, symbol):
+    return _rows(res)[symbol]["layer"]
+
+
+def test_a_measurable_edge_on_a_thick_sample_is_normal():
+    cfg = _cfg("GER40", trades=155, edge=0.271, cost_r=0.03, ceiling=0.5)
+    tc = _client([cfg], {"GER40": _State(0.05)}, {"GER40": 155})
+    assert _layer(tc.get("/api/analysis/portfolio-gates"), "GER40") == "normal"
+
+
+def test_a_weak_edge_on_a_THICK_sample_is_only_watched():
+    """US30: 1.80 sigma over 407 trades. The edge is small and precisely
+    known - which is not the same thing as unknown, and must not share a
+    bucket with it."""
+    cfg = _cfg("US30", trades=407, edge=0.107, cost_r=0.08, ceiling=0.5)
+    tc = _client([cfg], {"US30": _State(0.05)}, {"US30": 407})
+    assert _layer(tc.get("/api/analysis/portfolio-gates"), "US30") == "izle_zayif"
+
+
+def test_a_weak_edge_on_a_THIN_sample_is_flagged_for_review():
+    """CHFJPY: 0.28 sigma over 39 trades - we cannot tell yet."""
+    cfg = _cfg("CHFJPY", trades=39, edge=0.054, cost_r=0.05, ceiling=0.5)
+    tc = _client([cfg], {"CHFJPY": _State(0.05)}, {"CHFJPY": 39})
+    assert _layer(tc.get("/api/analysis/portfolio-gates"), "CHFJPY") == "soft_aday"
+
+
+def test_a_sigma_earned_on_a_thin_sample_is_not_called_normal():
+    """USDJPY passes at 2.75 sigma on 21 trades. A pass bought that cheaply is
+    the least trustworthy kind, and the reverse of the trap above."""
+    cfg = _cfg("USDJPY", trades=21, edge=0.719, cost_r=0.16, ceiling=0.5)
+    tc = _client([cfg], {"USDJPY": _State(0.05)}, {"USDJPY": 21})
+    assert _layer(tc.get("/api/analysis/portfolio-gates"), "USDJPY") == "izle_ince_sigma"
+
+
+def test_the_layers_are_grouped_for_the_review():
+    cfgs = [_cfg("GER40", trades=155, edge=0.271, cost_r=0.03, ceiling=0.5, magic=1),
+            _cfg("CHFJPY", trades=39, edge=0.054, cost_r=0.05, ceiling=0.5, magic=2)]
+    tc = _client(cfgs, {"GER40": _State(0.05), "CHFJPY": _State(0.05)},
+                 {"GER40": 155, "CHFJPY": 39})
+    by_layer = tc.get("/api/analysis/portfolio-gates").json()["by_layer"]
+    assert by_layer["normal"] == ["GER40"]
+    assert by_layer["soft_aday"] == ["CHFJPY"]
+
+
+def test_the_classification_never_switches_anything_off():
+    """Layers are for a human review; the supervisor is the only automatic
+    actor on sizing and a second one would fight it."""
+    cfg = _cfg("CHFJPY", trades=39, edge=0.054, cost_r=0.05, ceiling=0.5)
+    tc = _client([cfg], {"CHFJPY": _State(0.05)}, {"CHFJPY": 39})
+    tc.get("/api/analysis/portfolio-gates")
+    assert cfg.enabled is True
+
+
+def test_every_layer_has_a_label_in_the_panel():
+    js = (Path(__file__).resolve().parents[1] / "micofx" / "web" / "static"
+          / "app.js").read_text(encoding="utf-8")
+    for layer in ("normal", "izle_zayif", "izle_ince_sigma", "soft_aday"):
+        assert f"{layer}:" in js, f"LAYER_LABEL'da {layer} yok"

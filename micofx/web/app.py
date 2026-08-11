@@ -1164,6 +1164,26 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             actual = int((live.get(cfg.symbol) or {}).get("trades") or 0)
             fill = (actual / expected) if expected else None
 
+            # Which review layer this symbol falls in. Classification only -
+            # nothing here switches anything off. Capital allocation is a
+            # decision to take deliberately, and the supervisor is already the
+            # one automatic actor on sizing; a second one would fight it.
+            #
+            # The split that matters is between a weak edge measured on a thick
+            # sample and one measured on a thin one. US30 sits at 1.80 sigma on
+            # 407 trades - that is "the edge is small, and we know it precisely"
+            # - while CHFJPY's 0.28 on 39 is "we cannot tell yet". Treating
+            # those the same is how half a book gets cut in one evening.
+            #
+            # The reverse trap is worth naming too: USDJPY passes at 2.75 sigma
+            # on 21 trades and carries the book's highest cost. A sigma earned
+            # on a thin sample is the least trustworthy kind of pass.
+            thin = n < sample_floor // 2
+            if se2 is None or abs(edge) <= se2:
+                layer = "soft_aday" if thin else "izle_zayif"
+            else:
+                layer = "izle_ince_sigma" if thin else "normal"
+
             fails: list[str] = []
             if se2 is None or abs(edge) <= se2:
                 fails.append("olculebilir")
@@ -1195,14 +1215,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 "fill_rate": round(fill, 3) if fill is not None else None,
                 "fails": fails,
                 "clean": not fails,
+                "layer": layer,
             })
 
         rows.sort(key=lambda r: (-len(r["fails"]), r["symbol"]))
+        by_layer: dict[str, list[str]] = {}
+        for row in rows:
+            by_layer.setdefault(row["layer"], []).append(row["symbol"])
         by_gate = {g: [r["symbol"] for r in rows if g in r["fails"]]
                    for g in ("olculebilir", "maliyet", "tavan", "siklik")}
         thin = [r["symbol"] for r in rows if r["thin_sample"]]
         return {
             "ok": True, "rows": rows, "by_gate": by_gate,
+            "by_layer": by_layer,
             "window_days": window_days, "min_sample": sample_floor,
             "min_fill_rate": fill_floor,
             "thin_sample": thin,

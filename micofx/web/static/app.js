@@ -164,6 +164,18 @@ function selectTab(name) {
 // a spread ceiling set under its own normal spread, three on a month of data
 // gathered under a session regime fixed twenty minutes earlier. Seeing WHICH
 // gate a symbol fails is the whole point; a single score would hide it again.
+// Review layers, as classification only - nothing here switches a symbol off.
+// The split that matters is a weak edge measured on a THICK sample (US30,
+// 1.80 sigma over 407 trades: small edge, precisely known) against one on a
+// thin sample (CHFJPY, 0.28 over 39: cannot tell yet). Treating those the same
+// is how half a book gets cut in one evening.
+const LAYER_LABEL = {
+  normal: ["normal", "on"],
+  izle_zayif: ["izle - kalin ama zayif", "off"],
+  izle_ince_sigma: ["izle - sigma ince ornekten", "off"],
+  soft_aday: ["gozden gecir - ince + olculemez", "off"],
+};
+
 const GATE_LABEL = {
   olculebilir: "olculemez",
   maliyet: "maliyet",
@@ -210,10 +222,12 @@ async function loadGates() {
       <td class="num">${gateCell(r.fill_rate, null, has("siklik"), 2)}</td>
       <td>${f.length
         ? f.map((g) => `<span class="pill off">${esc(GATE_LABEL[g] || g)}</span>`).join(" ")
-        : '<span class="pill on">temiz</span>'}</td>`;
+        : '<span class="pill on">temiz</span>'}</td>
+      <td><span class="pill ${(LAYER_LABEL[r.layer] || ["", "off"])[1]}">${
+        esc((LAYER_LABEL[r.layer] || [r.layer || "-"])[0])}</span></td>`;
     return tr;
   });
-  rowsInto($("#gates-table"), rows, "Aktif sembol yok", 10);
+  rowsInto($("#gates-table"), rows, "Aktif sembol yok", 11);
   if (note) {
     note.textContent = `${data.note || ""} Siklik penceresi ${data.window_days} gun.`;
   }
