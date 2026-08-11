@@ -356,6 +356,66 @@
           "end": "23:55"
         }
       ]
+    },
+    {
+      "symbol": "USDCHF",
+      "group": "forex",
+      "magic": 990101,
+      "enabled": false,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "AUDUSD",
+      "group": "forex",
+      "magic": 990104,
+      "enabled": false,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "GBPJPY",
+      "group": "forex",
+      "magic": 990105,
+      "enabled": false,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "USDJPY",
+      "group": "forex",
+      "magic": 990107,
+      "enabled": false,
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "XAGUSD",
+      "group": "commodity",
+      "magic": 990109,
+      "enabled": false,
+      "sessions": [
+        {
+          "start": "02:00",
+          "end": "23:55"
+        }
+      ]
     }
   ],
   "optimizer": {
