@@ -312,11 +312,31 @@ class Optimizer:
             median = _ratio_percentile(counts, 0.50)
             if not median or median <= 0:
                 return 1.0
-            # Bounded both ways. A ratio under 1 would make the search
-            # cheerier than the bars justify, and an absurd upper reading
-            # (a frozen feed, a one-off gap) must not price the symbol out of
-            # existence on its own.
-            return float(min(3.0, max(1.0, median)))
+            # Bounded both ways, but the two bounds do different jobs.
+            #
+            # The floor is a stance: a ratio under 1 says the live tick is
+            # TIGHTER than the bar, and letting that make the search cheerier
+            # than the bars justify is the one direction this whole mechanism
+            # exists to prevent. Clamped to 1.0.
+            #
+            # The ceiling is only a sanity bound, and the first version set it
+            # at 3.0 with no data behind it. There is data now: across fifteen
+            # symbols the highest measured median is CHFJPY at 3.35 over 3204
+            # samples - above that ceiling. So 3.0 was not catching an absurd
+            # reading, it was truncating the single measurement that matters
+            # most, and searching the book's most expensive symbol ~10% cheaper
+            # than it really is.
+            #
+            # The glitch guard is SPREAD_RATIO_MIN_SAMPLES, not this: a frozen
+            # feed or a one-off gap cannot hold a stable median across hundreds
+            # of samples spanning hours.
+            #
+            # 5.0 is the histogram's own maximum - its last bucket is an
+            # overflow reported at its lower edge, so no median can exceed it.
+            # The ceiling is therefore the measurement's resolution rather than
+            # a number picked here, and anything lower would clip real data
+            # again the moment a symbol measures above it.
+            return float(min(5.0, max(1.0, median)))
         except Exception:
             return 1.0
 

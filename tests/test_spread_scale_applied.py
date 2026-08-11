@@ -7,8 +7,11 @@ the search picks is one live can actually clear.
 
 Deliberately inert until there is evidence: the scale is 1.0 - the previous
 behaviour exactly - until a symbol has cleared SPREAD_RATIO_MIN_SAMPLES, and
-it is clamped to [1.0, 3.0] so neither a sub-1 reading nor a frozen-feed
-outlier can rewrite the economics of a symbol on its own.
+it is clamped at 1.0 from below so a sub-1 reading can never make the search
+cheerier than the bars justify. The upper bound is the histogram's own
+maximum: an earlier 3.0 was picked before any data existed and turned out to
+sit BELOW the highest real measurement (CHFJPY, 3.35 over 3204 samples),
+clipping the one symbol the whole mechanism was built for.
 """
 from __future__ import annotations
 
@@ -132,12 +135,6 @@ def test_a_ratio_below_one_never_makes_the_search_cheerier():
     assert _optimizer(blob)._spread_scale("GBPUSD") == 1.0
 
 
-def test_an_absurd_reading_is_capped():
-    """A frozen feed must not price a symbol out of existence by itself."""
-    blob = {"X": _hist(SPREAD_RATIO_BUCKETS - 1, SPREAD_RATIO_MIN_SAMPLES)}
-    assert _optimizer(blob)._spread_scale("X") == 3.0
-
-
 @pytest.mark.parametrize("blob", [
     {"X": "bozuk"}, {"X": None}, {"X": [1, 2, 3]}, {"X": {"a": 1}},
     {"X": [None] * SPREAD_RATIO_BUCKETS}, "hic dict degil",
@@ -149,3 +146,37 @@ def test_a_corrupt_histogram_never_disturbs_a_search(blob):
 def test_an_unmeasured_symbol_in_a_populated_blob_is_untouched():
     blob = {"FRA40": _hist(20, SPREAD_RATIO_MIN_SAMPLES)}
     assert _optimizer(blob)._spread_scale("XAUUSD") == 1.0
+
+
+# ------------------------------------------------ the ceiling is a sanity bound
+
+def test_the_highest_measured_symbol_is_not_truncated():
+    """CHFJPY measures 3.35 over 3204 samples. A 3.0 ceiling was not catching
+    an absurd reading, it was clipping the one measurement that matters most
+    and searching the book's most expensive symbol ~10% cheaper than it is."""
+    blob = {"CHFJPY": _hist(33, SPREAD_RATIO_MIN_SAMPLES)}   # ratios in [3.3, 3.4)
+    assert _optimizer(blob)._spread_scale("CHFJPY") == pytest.approx(3.35, abs=0.01)
+
+
+def test_the_ceiling_is_the_histograms_own_maximum():
+    """The last bucket is an overflow reported at its lower edge, so 5.0 is
+    the highest median that can exist. The ceiling is the measurement's
+    resolution, not a number chosen here - which is what stops it clipping
+    real data the way the first 3.0 did."""
+    blob = {"X": _hist(SPREAD_RATIO_BUCKETS - 1, SPREAD_RATIO_MIN_SAMPLES)}
+    assert _optimizer(blob)._spread_scale("X") == 5.0
+    assert (SPREAD_RATIO_BUCKETS - 1) * SPREAD_RATIO_STEP == pytest.approx(5.0)
+
+
+def test_the_floor_still_refuses_to_make_the_search_cheerier():
+    """The one direction the whole mechanism exists to prevent."""
+    for bucket in (0, 5, 9):
+        blob = {"X": _hist(bucket, SPREAD_RATIO_MIN_SAMPLES)}
+        assert _optimizer(blob)._spread_scale("X") == 1.0
+
+
+def test_the_sample_threshold_is_what_guards_against_a_glitch():
+    """A frozen feed cannot hold a stable median across the threshold; below
+    it nothing is applied at all, whatever the reading says."""
+    blob = {"X": _hist(SPREAD_RATIO_BUCKETS - 1, SPREAD_RATIO_MIN_SAMPLES - 1)}
+    assert _optimizer(blob)._spread_scale("X") == 1.0
