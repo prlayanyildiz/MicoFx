@@ -281,15 +281,31 @@ class Engine:
         # for free - SymbolState is rebuilt empty and the signal recomputes
         # identically off the same still-last-closed bar. Cooldown cannot cover
         # it: 2 minutes against a 5-60 minute bar.
-        self._filled_bars: dict[str, list] = {
-            str(k): [str(v[0]), int(v[1])]
-            for k, v in (as_dict(store.get_setting("filled_bars"), "filled_bars")).items()
-            # The bar timestamp has to be a number, not merely present: the
-            # length check alone let ["sig", "yok"] through to int(), which
-            # raises inside __init__ and takes the whole start-up with it.
-            if isinstance(v, (list, tuple)) and len(v) == 2
-            and isinstance(v[1], (int, float)) and not isinstance(v[1], bool)
-        }
+        # {symbol: {signal_source: bar timestamp}}. Per LEG, not per symbol.
+        # A single slot per symbol assumed "a symbol only ever fills off
+        # whichever leg is currently driving", which is not true once the
+        # ensemble is on: the primary fills and records its bar, then the
+        # secondary fills and OVERWRITES it, and the primary's already-taken
+        # bar is unguarded again. A restart inside that bar then re-enters it -
+        # precisely the double entry this record exists to stop.
+        self._filled_bars: dict[str, dict[str, int]] = {}
+        for sym, value in (as_dict(store.get_setting("filled_bars"), "filled_bars")).items():
+            legs: dict[str, int] = {}
+            # The bar timestamp has to be a number, not merely present: a bare
+            # length check let ["sig", "yok"] through to int(), which raises
+            # inside __init__ and takes the whole start-up with it.
+            def _ok(bar: Any) -> bool:
+                return isinstance(bar, (int, float)) and not isinstance(bar, bool)
+            if isinstance(value, dict):
+                legs = {str(k): int(v) for k, v in value.items() if _ok(v)}
+            elif (isinstance(value, (list, tuple)) and len(value) == 2
+                  and _ok(value[1])):
+                # The single-slot shape this replaced. Migrated rather than
+                # dropped so the guard keeps covering the leg it did record
+                # across the restart that installs this change.
+                legs = {str(value[0]): int(value[1])}
+            if legs:
+                self._filled_bars[str(sym)] = legs
 
     # ------------------------------------------------------------- lifecycle
 
@@ -939,7 +955,7 @@ class Engine:
         if not state.signal:
             state.note = state.note if state.note else "sinyal yok"
             return False
-        if self._filled_bars.get(cfg.symbol) == [state.signal_source, bar_key]:
+        if self._filled_bars.get(cfg.symbol, {}).get(state.signal_source) == bar_key:
             # This bar's signal has already been filled once. Held in the
             # store, because it is the only thing standing between a restart
             # and a second position on the same signal: SymbolState is rebuilt
@@ -1910,9 +1926,14 @@ class Engine:
             current = getattr(self, "_filled_bars", None)
             if not isinstance(current, dict):
                 current = {}
-            # One entry per symbol; a symbol only ever fills off whichever leg
-            # is currently driving, and the next fill supersedes this one.
-            current[symbol] = [str(source), int(bar)]
+            # Per LEG. A single slot per symbol let a secondary fill erase the
+            # primary's record (and the reverse), leaving an already-taken bar
+            # unguarded against the restart this whole record exists for.
+            legs = current.get(symbol)
+            if not isinstance(legs, dict):
+                legs = {}
+            legs[str(source)] = int(bar)
+            current[symbol] = legs
             # Bounded: only symbols still in the portfolio are worth keeping.
             live = set(self.store.symbols)
             self._filled_bars = {s: v for s, v in current.items() if s in live}

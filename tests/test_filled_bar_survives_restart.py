@@ -38,12 +38,26 @@ class _Store:
 def _engine(store):
     eng = Engine.__new__(Engine)
     eng.store = store
-    eng._filled_bars = {
-        str(k): [str(v[0]), int(v[1])]
-        for k, v in (store.get_setting("filled_bars") or {}).items()
-        if isinstance(v, (list, tuple)) and len(v) == 2
-    }
+    # Mirrors Engine.__init__: records are kept per (symbol, leg) so a
+    # secondary fill cannot erase the primary's already-taken bar. The old
+    # single-slot shape is migrated rather than dropped.
+    def _ok(bar):
+        return isinstance(bar, (int, float)) and not isinstance(bar, bool)
+
+    eng._filled_bars = {}
+    for sym, value in (store.get_setting("filled_bars") or {}).items():
+        legs = {}
+        if isinstance(value, dict):
+            legs = {str(k): int(v) for k, v in value.items() if _ok(v)}
+        elif isinstance(value, (list, tuple)) and len(value) == 2 and _ok(value[1]):
+            legs = {str(value[0]): int(value[1])}
+        if legs:
+            eng._filled_bars[str(sym)] = legs
     return eng
+
+
+def _legs(eng, symbol):
+    return eng._filled_bars.get(symbol, {})
 
 
 BAR = 1_786_000_000          # the M30 bar that closed at 19:00
@@ -54,7 +68,7 @@ def test_the_filled_bar_is_remembered_across_a_restart():
     _engine(store)._mark_bar_filled("NAS100", "primary", BAR)
 
     # ...process dies and comes back.
-    assert _engine(store)._filled_bars["NAS100"] == ["primary", BAR]
+    assert _legs(_engine(store), "NAS100") == {"primary": BAR}
 
 
 def test_the_same_bar_is_refused_after_the_restart():
@@ -62,14 +76,14 @@ def test_the_same_bar_is_refused_after_the_restart():
     _engine(store)._mark_bar_filled("NAS100", "primary", BAR)
     eng = _engine(store)
     # The exact comparison _ready_for_entry makes.
-    assert eng._filled_bars.get("NAS100") == ["primary", BAR]
+    assert _legs(eng, "NAS100").get("primary") == BAR
 
 
 def test_the_next_bar_is_allowed():
     store = _Store()
     _engine(store)._mark_bar_filled("NAS100", "primary", BAR)
     eng = _engine(store)
-    assert eng._filled_bars.get("NAS100") != ["primary", BAR + 1800]
+    assert _legs(eng, "NAS100").get("primary") != BAR + 1800
 
 
 def test_the_other_leg_on_the_same_bar_is_allowed():
@@ -78,7 +92,7 @@ def test_the_other_leg_on_the_same_bar_is_allowed():
     store = _Store()
     _engine(store)._mark_bar_filled("NAS100", "primary", BAR)
     eng = _engine(store)
-    assert eng._filled_bars.get("NAS100") != ["secondary", BAR]
+    assert _legs(eng, "NAS100").get("secondary") != BAR
 
 
 def test_another_symbol_is_unaffected():
@@ -92,7 +106,7 @@ def test_a_later_fill_supersedes_the_earlier_one():
     eng = _engine(store)
     eng._mark_bar_filled("NAS100", "primary", BAR)
     eng._mark_bar_filled("NAS100", "primary", BAR + 1800)
-    assert _engine(store)._filled_bars["NAS100"] == ["primary", BAR + 1800]
+    assert _legs(_engine(store), "NAS100") == {"primary": BAR + 1800}
 
 
 def test_deleted_symbols_are_pruned():

@@ -119,7 +119,10 @@ def test_healthy_settings_are_still_restored(tmp_path, monkeypatch):
     assert engine._weekend_pending == {111, 222}
     assert engine._sec_tickets == {333}
     assert engine._cooldowns == {"XAUUSD": 1786400000.0}
-    assert engine._filled_bars == {"XAUUSD": ["primary", 1786399999]}
+    # Kept per (symbol, leg) now, so a secondary fill cannot erase the
+    # primary's already-taken bar. The single-slot shape written by older
+    # versions is migrated on read rather than dropped.
+    assert engine._filled_bars == {"XAUUSD": {"primary": 1786399999}}
     assert engine._reopt_at == 1786400123.0
     store.close()
 
