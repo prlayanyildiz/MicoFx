@@ -221,7 +221,7 @@
           "end": "23:55"
         }
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "symbol": "EURJPY",
@@ -344,7 +344,7 @@
           "end": "23:55"
         }
       ],
-      "enabled": true
+      "enabled": false
     },
     {
       "symbol": "SpotBrent",
@@ -374,7 +374,7 @@
       "symbol": "USDCHF",
       "group": "forex",
       "magic": 990101,
-      "enabled": true,
+      "enabled": false,
       "sessions": [
         {
           "start": "01:00",
@@ -386,7 +386,7 @@
       "symbol": "AUDUSD",
       "group": "forex",
       "magic": 990104,
-      "enabled": true,
+      "enabled": false,
       "sessions": [
         {
           "start": "01:00",
@@ -398,7 +398,7 @@
       "symbol": "GBPJPY",
       "group": "forex",
       "magic": 990105,
-      "enabled": true,
+      "enabled": false,
       "sessions": [
         {
           "start": "01:00",
@@ -446,7 +446,7 @@
       "symbol": "NZDUSD",
       "group": "forex",
       "magic": 990109,
-      "enabled": true,
+      "enabled": false,
       "sessions": [
         {
           "start": "00:05",
