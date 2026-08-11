@@ -21,3 +21,4 @@ _probe_*.py
 .cursor/
 cursor/
 .vscode/
+claude/

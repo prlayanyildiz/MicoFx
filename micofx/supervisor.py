@@ -10,6 +10,13 @@ from .models import SymbolConfig
 from .mt5client import MT5Client
 from .store import Store
 
+# What _pf() reports for a run with no losing trades at all. The ratio is
+# undefined there, and every threshold in this module reads it as "excellent"
+# - quarantine_pf 0.8, watch_pf 1.0, bad_hour_pf 0.7 - so any value comfortably
+# above them works. Finite rather than inf because this is serialised into
+# /api/ai and json.dumps writes Infinity, which is not valid JSON.
+PF_NO_LOSSES = 99.0
+
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "review_interval_sec": 120,
@@ -471,9 +478,36 @@ class Supervisor:
 
     @staticmethod
     def _pf(nets: list[float]) -> float:
+        """Profit factor of a run of trades, in money.
+
+        With no losing trades the ratio is undefined, and returning the raw
+        win SUM there - what this used to do - silently changes the unit of
+        the answer. ``nets`` is currency (profit + commission + swap), so a
+        loss-free run reported dollars while every caller compares the result
+        against a ratio threshold of 1.0.
+
+        The consequence is backwards, and reachable at the live settings:
+
+          * _hour_risk_scales buckets an hour's trades over the whole lookback
+            window and scales the hour down when ``pf < 1.0``. Six winning
+            trades in that hour totalling $0.60 returned 0.60 and earned a
+            size cut; the same six winners totalling $3.60 returned 3.60 and
+            did not. Nothing but the dollar size of the wins decided it.
+          * The edge-decay check fires on ``recent_pf < older_pf * 0.5 and
+            recent_pf < 1.0``. A recent half of fifteen trades, ALL of them
+            winners, totalling $0.75 returned 0.75 and tripped both halves -
+            a perfect winning streak cut to half size.
+
+        A loss-free run is the best possible outcome, so it returns a large
+        finite value. Finite rather than ``inf`` on purpose: this number is
+        serialised into /api/ai, and json.dumps writes ``Infinity``, which is
+        not valid JSON and would break the panel that reads it.
+        """
         win = sum(x for x in nets if x > 0)
         loss = -sum(x for x in nets if x < 0)
-        return win / loss if loss > 0 else (win if win > 0 else 0.0)
+        if loss > 0:
+            return win / loss
+        return PF_NO_LOSSES if win > 0 else 0.0
 
     def _hour_risk_scales(self, trades: list[dict[str, Any]], nets: list[float],
                           cfgs: dict[str, Any]) -> dict[int, float]:
