@@ -233,13 +233,40 @@ class Engine:
         # that look identical from outside: a gate refusing entries, versus
         # signals never firing at all. "acildi" is counted alongside the
         # refusals to give the denominator.
-        self._entry_blocks: dict[str, dict[str, int]] = {
-            str(sym): {str(k): int(v) for k, v in as_dict(counts, "entry_blocks").items()}
-            for sym, counts in as_dict(store.get_setting("entry_blocks"), "entry_blocks").items()
-        }
+        # Shape is {symbol: {leg: {"attempts": {reason: n}, "signals": {...}}}}.
+        # Anything that does not match - including the flat {symbol: {reason:
+        # n}} this shipped with for one afternoon - is dropped rather than
+        # coerced: a half-read counter is worse than an empty one, because it
+        # looks like evidence.
+        self._entry_blocks: dict[str, dict[str, dict[str, dict[str, int]]]] = {}
+        for sym, legs in as_dict(store.get_setting("entry_blocks"), "entry_blocks").items():
+            if not isinstance(legs, dict):
+                continue
+            kept: dict[str, dict[str, dict[str, int]]] = {}
+            for leg, counts in legs.items():
+                if not isinstance(counts, dict):
+                    continue
+                buckets: dict[str, dict[str, int]] = {}
+                for field in ("attempts", "signals"):
+                    raw = counts.get(field)
+                    if not isinstance(raw, dict):
+                        break
+                    try:
+                        buckets[field] = {str(k): int(v) for k, v in raw.items()}
+                    except (TypeError, ValueError):
+                        break
+                else:
+                    kept[str(leg)] = buckets
+            if kept:
+                self._entry_blocks[str(sym)] = kept
         self._entry_blocks_since = as_number(
             store.get_setting("entry_blocks_since"), 0.0, "entry_blocks_since") or time.time()
         self._entry_blocks_dirty = False
+        # In-memory only: the (bar, reason) episode each leg was last counted
+        # for, so the per-poll retry loop cannot inflate the signal count. A
+        # restart starting a fresh episode is the honest reading - the new
+        # process re-derives the signal from bars it fetched itself.
+        self._entry_last_bar: dict[str, dict[str, tuple]] = {}
         # Post-fill cooldown, per symbol, as an absolute epoch. Lived only in
         # SymbolState until now - which is rebuilt empty on every start, so a
         # restart inside the cooldown window dropped the one guard that stops
@@ -517,7 +544,9 @@ class Engine:
                     # An entry triggered by the secondary signal is executed with
                     # the parameters it was validated under, not the primary's.
                     self._try_entry(cfg, state, account)
-                    self._tally_entry(cfg.symbol, state.entry_block)
+                    self._tally_entry(cfg.symbol, state.entry_block,
+                                      bar_key=state.pending_bar_key,
+                                      source=state.signal_source)
                     # account was a single snapshot taken at the top of this
                     # cycle - if that entry just filled, every later symbol in
                     # this same ready list would otherwise size/margin-check
@@ -531,18 +560,49 @@ class Engine:
 
     # ----------------------------------------------------- entry diagnostics
 
-    def _tally_entry(self, symbol: str, reason: str) -> None:
+    def _tally_entry(self, symbol: str, reason: str,
+                     bar_key: tuple | None = None, source: str = "") -> None:
         """Record the outcome of one entry attempt. Never raises.
 
-        An empty reason means _try_entry returned without passing any of the
-        marked points, which should not happen - bucket it rather than lose
-        it, so a future edit that adds a return without a key shows up here
-        as a rising "isaretsiz" instead of silently shrinking the total.
+        Two counts, because they answer different questions and the first one
+        alone is misleading. A blocked signal is re-offered every poll until
+        its bar rolls over, so on a 2s interval one refused M15 signal shows
+        up as several hundred "attempts" - EURJPY produced 339 of them from a
+        single sell in thirteen minutes. Comparing that to a holdout trade
+        count, which counts distinct trades, is meaningless.
+
+        ``attempts`` therefore measures persistence: how long the gate held
+        the signal off. ``signals`` counts distinct (bar, source) episodes and
+        is the one that compares to the walk-forward.
+
+        ``source`` matters because a symbol with the ensemble on has two legs
+        with their own parameters, and it is routinely the SECONDARY that is
+        refused - six of thirteen live symbols carry a secondary spread
+        ceiling tighter than their primary, up to 3.6x. A tally that did not
+        separate them would report the symbol as blocked without saying which
+        config owns the ceiling doing it.
+
+        An empty reason means _try_entry returned without passing any marked
+        point, which should not happen - bucket it rather than lose it, so a
+        future edit that adds an unmarked return shows up as a rising
+        "isaretsiz" instead of silently shrinking the total.
         """
         try:
             key = str(reason or "isaretsiz")
-            counts = self._entry_blocks.setdefault(str(symbol), {})
-            counts[key] = int(counts.get(key, 0)) + 1
+            leg = "secondary" if source == "secondary" else "primary"
+            legs = self._entry_blocks.setdefault(str(symbol), {})
+            counts = legs.setdefault(leg, {"attempts": {}, "signals": {}})
+            attempts, signals = counts["attempts"], counts["signals"]
+            attempts[key] = int(attempts.get(key, 0)) + 1
+            # One episode per (bar, leg, reason); the retry loop must not
+            # inflate it. Held in memory only - a restart starting a fresh
+            # episode is the honest reading, since the signal is re-derived
+            # from bars the new process fetches for itself.
+            seen = self._entry_last_bar.setdefault(str(symbol), {})
+            episode = (repr(bar_key), key)
+            if seen.get(leg) != episode:
+                seen[leg] = episode
+                signals[key] = int(signals.get(key, 0)) + 1
             self._entry_blocks_dirty = True
         except Exception:
             pass
@@ -559,19 +619,37 @@ class Engine:
             pass
 
     def entry_blocks(self) -> dict[str, Any]:
-        """The tally, plus the share of attempts each gate refused."""
+        """The tally, per symbol and per leg.
+
+        ``signals`` is the number that compares to a holdout trade count;
+        ``attempts`` only says how many polls the gate held each one off.
+        """
         rows = []
-        for symbol, counts in sorted(self._entry_blocks.items()):
-            total = sum(int(v) for v in counts.values())
-            opened = int(counts.get("acildi", 0))
-            rows.append({
-                "symbol": symbol, "attempts": total, "opened": opened,
-                "fill_rate": round(opened / total, 3) if total else None,
-                "blocks": {k: int(v) for k, v in
-                           sorted(counts.items(), key=lambda kv: -int(kv[1]))
-                           if k != "acildi"},
-            })
-        rows.sort(key=lambda r: -r["attempts"])
+        for symbol, legs in sorted(self._entry_blocks.items()):
+            if not isinstance(legs, dict):
+                continue
+            for leg, counts in sorted(legs.items()):
+                if not isinstance(counts, dict):
+                    continue
+                attempts = {str(k): int(v) for k, v in
+                            (counts.get("attempts") or {}).items()}
+                signals = {str(k): int(v) for k, v in
+                           (counts.get("signals") or {}).items()}
+                total = sum(signals.values())
+                opened = int(signals.get("acildi", 0))
+                rows.append({
+                    "symbol": symbol, "leg": leg,
+                    "signals": total, "opened": opened,
+                    "attempts": sum(attempts.values()),
+                    "fill_rate": round(opened / total, 3) if total else None,
+                    "blocks": dict(sorted(
+                        ((k, v) for k, v in signals.items() if k != "acildi"),
+                        key=lambda kv: -kv[1])),
+                    "retries": dict(sorted(
+                        ((k, v) for k, v in attempts.items() if k != "acildi"),
+                        key=lambda kv: -kv[1])),
+                })
+        rows.sort(key=lambda r: (-r["signals"], -r["attempts"]))
         totals: dict[str, int] = {}
         for row in rows:
             for k, v in row["blocks"].items():
@@ -580,12 +658,14 @@ class Engine:
             "since": self._entry_blocks_since,
             "rows": rows,
             "totals": dict(sorted(totals.items(), key=lambda kv: -kv[1])),
+            "signals": sum(r["signals"] for r in rows),
             "attempts": sum(r["attempts"] for r in rows),
             "opened": sum(r["opened"] for r in rows),
         }
 
     def reset_entry_blocks(self) -> None:
         self._entry_blocks = {}
+        self._entry_last_bar = {}
         self._entry_blocks_since = time.time()
         self._entry_blocks_dirty = True
         self._flush_entry_blocks()

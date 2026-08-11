@@ -1059,7 +1059,23 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
             state = engine.states.get(cfg.symbol)
             spread_atr = float(getattr(state, "spread_atr", 0.0) or 0.0) if state else 0.0
+            # The ensemble's second leg carries its own max_spread_atr, and it
+            # is routinely the TIGHTER of the two - six of thirteen live
+            # symbols, up to 3.6x on EURJPY (primary 0.18, secondary 0.05).
+            # _try_entry gates whichever leg produced the signal, so reading
+            # only the primary reported EURJPY as clear at 0.074/0.18 while
+            # its secondary sell was being refused on every poll. Judge
+            # against the binding ceiling, and name which leg owns it.
             ceiling = float(cfg.max_spread_atr or 0.0)
+            ceiling_leg = "primary"
+            if cfg.has_secondary():
+                sec_ceiling = (cfg.secondary_params or {}).get("max_spread_atr")
+                try:
+                    sec_ceiling = float(sec_ceiling) if sec_ceiling is not None else 0.0
+                except (TypeError, ValueError):
+                    sec_ceiling = 0.0
+                if sec_ceiling > 0 and (ceiling <= 0 or sec_ceiling < ceiling):
+                    ceiling, ceiling_leg = sec_ceiling, "secondary"
 
             hold_days = float(summary.get("holdout_days") or 0.0)
             expected = (n / hold_days * window_days) if (n and hold_days > 0) else None
@@ -1090,6 +1106,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 "cost_ceiling_r": ceiling_r,
                 "spread_atr_now": round(spread_atr, 4) if spread_atr else None,
                 "max_spread_atr": ceiling or None,
+                "ceiling_leg": ceiling_leg,
+                "primary_max_spread_atr": float(cfg.max_spread_atr or 0.0) or None,
                 "expected_trades": round(expected, 1) if expected else None,
                 "actual_trades": actual,
                 "fill_rate": round(fill, 3) if fill is not None else None,

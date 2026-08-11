@@ -237,8 +237,8 @@ async function loadBlocks() {
     const blocks = Object.entries(r.blocks || {});
     const tr = el("tr");
     tr.innerHTML = `
-      <td class="sym">${esc(r.symbol)}</td>
-      <td class="num">${r.attempts}</td>
+      <td class="sym">${esc(r.symbol)} <span class="dim">${esc(r.leg || "")}</span></td>
+      <td class="num">${r.signals}<span class="dim"> / ${r.attempts} deneme</span></td>
       <td class="num ${r.opened ? "pos" : "dim"}">${r.opened}</td>
       <td class="num ${r.fill_rate != null && r.fill_rate < 0.25 ? "neg" : "dim"}">${
         r.fill_rate != null ? num(r.fill_rate, 2) : "-"}</td>
