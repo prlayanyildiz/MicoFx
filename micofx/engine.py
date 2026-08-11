@@ -1069,9 +1069,6 @@ class Engine:
             state.spread_atr = tick["spread"] / state.atr if state.atr > 0 else 0.0
 
         primary_fresh = self._refresh_signals(cfg, state, params)
-        # After the refresh so the bar series is this cycle's, and with the
-        # tick read a few lines above: the two must describe the same instant.
-        self._sample_spread_ratio(cfg, state, tick)
         if cfg.has_secondary():
             sec_fresh = self._refresh_secondary(cfg, state)
         elif self._has_open_secondary_ticket(cfg):
@@ -1146,6 +1143,26 @@ class Engine:
             state.sec_signal = ""
             state.pending_bar_key = (0, 0)
             return False
+        # Sampled here, past BOTH gates, rather than beside the tick read.
+        #
+        # The point of this measurement is what _try_entry's spread gate will
+        # see when it tries to enter, and that gate only ever runs on a symbol
+        # whose session is open and whose feed is live. Taken earlier it also
+        # recorded the hours the symbol never trades - and those are not a
+        # small perturbation. Measured at 00:01 with every session closed:
+        # AUDUSD's tick sat at 57x its own ceiling and GBPJPY's at 59x, while
+        # the same symbols run near 1.0x during their sessions.
+        #
+        # This book already knows that hour is different: FX sessions were
+        # moved off hour 0 precisely because it cost 216% of risk, 6.3x the
+        # median. Feeding the excluded hours back into the number that prices
+        # the search undoes that.
+        #
+        # The weekend is what makes it urgent rather than cosmetic. Friday
+        # close to Sunday open is ~48 hours of dead-market spread, more
+        # samples than a whole trading day, all of it from hours no entry can
+        # happen in.
+        self._sample_spread_ratio(cfg, state, tick)
         if not fresh and state.signal == "":
             state.note = state.note or "bekliyor"
             return False

@@ -323,3 +323,48 @@ def test_the_stale_histogram_cannot_be_reapplied_to_a_fresh_config():
     _feed(eng, "SILINDI", 10, 30 * POINT, times=SPREAD_RATIO_MIN_SAMPLES)
     eng._flush_spread_ratio(interval=0.0)
     assert store.saved["spread_ratio"].get("SILINDI") is None
+
+
+# --------------------------- only the hours an entry can actually happen in
+
+def test_sampling_sits_behind_both_gates_in_the_cycle():
+    """The measurement must describe what _try_entry's spread gate will see,
+    and that gate only runs on an open session with a live feed.
+
+    Taken before those gates it also recorded the hours the symbol never
+    trades, and that is not a small perturbation. Measured at 00:01 with every
+    session closed, AUDUSD's tick sat at 57x its own ceiling and GBPJPY's at
+    59x, against roughly 1.0x during their sessions. This book already moved
+    FX off hour 0 because it cost 216% of risk; feeding those hours back into
+    the number that prices the search undoes that.
+
+    The weekend is what makes it urgent: Friday close to Sunday open is ~48
+    hours of dead-market spread, more samples than a whole trading day.
+    """
+    src = (Path(__file__).resolve().parents[1] / "micofx"
+           / "engine.py").read_text(encoding="utf-8")
+    body = src.split("def _evaluate(", 1)[1].split("\n    def ", 1)[0]
+
+    sample_at = body.index("self._sample_spread_ratio(")
+    session_gate = body.index("if not sess.open:")
+    market_gate = body.index("if not self.client.market_open(")
+
+    assert sample_at > session_gate, "seans kapisindan ONCE ornekleniyor"
+    assert sample_at > market_gate, "piyasa kapisindan ONCE ornekleniyor"
+
+
+def test_it_is_sampled_exactly_once_per_cycle():
+    """Two call sites would double-count every reading."""
+    src = (Path(__file__).resolve().parents[1] / "micofx"
+           / "engine.py").read_text(encoding="utf-8")
+    body = src.split("def _evaluate(", 1)[1].split("\n    def ", 1)[0]
+    assert body.count("self._sample_spread_ratio(") == 1
+
+
+def test_the_tick_is_still_in_scope_where_it_is_sampled():
+    """It has to be the same instant's tick, not a re-read."""
+    src = (Path(__file__).resolve().parents[1] / "micofx"
+           / "engine.py").read_text(encoding="utf-8")
+    body = src.split("def _evaluate(", 1)[1].split("\n    def ", 1)[0]
+    assert body.index("tick = self.client.tick(") < body.index("self._sample_spread_ratio(")
+    assert "self._sample_spread_ratio(cfg, state, tick)" in body
