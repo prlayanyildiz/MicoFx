@@ -825,8 +825,28 @@ class Engine:
         need = required_bars(params)
         bars = self.client.bars(cfg.symbol, cfg.timeframe, need)
         state.last_fetch = now
-        if bars is None or len(bars) < 60:
-            state.note = "yeterli bar yok"
+        # required_bars() states what the indicator stack needs to be
+        # trustworthy, and the fetch above asks for exactly that - but the
+        # guard used to accept a flat 60, which is 8% of it. MT5 populates
+        # chart history lazily, so a symbol can genuinely return far less than
+        # was asked for during the first cycles after start-up, and the
+        # signals computed on that stub are not weaker versions of the real
+        # ones, they are different ones.
+        #
+        # Measured on a 4000-bar series, 20 families, 100 sample bars each,
+        # comparing the last bar's signal against the same bar computed with
+        # full history: 720 bars disagreed on 0 of 116 real signals, 360 on 2,
+        # 240 on 2, then 200 on 24 and 60 on 82 - wrong more often than right
+        # at the old floor, and 100% wrong for mtf_pullback, wavetrend_flip
+        # and stoch_flip.
+        #
+        # Half of required_bars sits in the flat part of that curve and is
+        # derived from the number the code already computes rather than one
+        # picked by hand. Every live symbol currently holds 400-1680 bars, so
+        # this costs nothing today; it closes the start-up window.
+        min_bars = max(60, need // 2)
+        if bars is None or len(bars) < min_bars:
+            state.note = f"yeterli bar yok ({len(bars) if bars else 0}/{min_bars})"
             state.bars_ready = len(bars) if bars else 0
             return False
 
@@ -903,9 +923,13 @@ class Engine:
         if not (due or stale or state.sec_last_bar == 0):
             return False
 
-        bars = self.client.bars(cfg.symbol, sec.timeframe, required_bars(params))
+        sec_need = required_bars(params)
+        bars = self.client.bars(cfg.symbol, sec.timeframe, sec_need)
         state.sec_last_fetch = now
-        if bars is None or len(bars) < 60:
+        # Same warmup floor as the primary leg above - the secondary signal
+        # opens real positions on the same account and has no reason to run on
+        # a shallower stack than the primary would accept.
+        if bars is None or len(bars) < max(60, sec_need // 2):
             return False
 
         state.sec_bars = bars
