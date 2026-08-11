@@ -30,6 +30,36 @@ _COOLDOWN_BARS = 2
 # post-fill silence is enough. Two H1 bars would idle the symbol for two hours.
 _COOLDOWN_BARS_SWING = 1
 
+# Live-tick-spread / bar-spread histogram: buckets of 0.1 from 0.0 to 5.0,
+# plus a final overflow bucket for anything above.
+SPREAD_RATIO_STEP = 0.1
+SPREAD_RATIO_BUCKETS = 51
+# Below this many samples the ratio is not reported or applied - a handful of
+# ticks from one hour is exactly the reading that misled us once already.
+SPREAD_RATIO_MIN_SAMPLES = 400
+
+
+def _ratio_percentile(counts: list[int], q: float) -> float | None:
+    """Percentile of the bucketed tick/bar spread ratio, or None when empty.
+
+    Reported at the CENTRE of the bucket that crosses ``q``: the value is
+    known to 0.1, and naming the lower edge would understate every reading by
+    half a bucket. The overflow bucket reports its lower edge instead, since
+    it has no upper bound to take a centre of.
+    """
+    total = sum(counts)
+    if total <= 0:
+        return None
+    target = q * total
+    seen = 0
+    for idx, n in enumerate(counts):
+        seen += n
+        if seen >= target:
+            if idx >= SPREAD_RATIO_BUCKETS - 1:
+                return round(idx * SPREAD_RATIO_STEP, 2)
+            return round((idx + 0.5) * SPREAD_RATIO_STEP, 2)
+    return round((len(counts) - 1) * SPREAD_RATIO_STEP, 2)
+
 
 def _cooldown_for(cfg: SymbolConfig) -> float:
     """Per-symbol pause after a fill, clamped to a few bars of its TF."""
@@ -267,6 +297,35 @@ class Engine:
         # restart starting a fresh episode is the honest reading - the new
         # process re-derives the signal from bars it fetched itself.
         self._entry_last_bar: dict[str, dict[str, tuple]] = {}
+        # How much wider the live tick's spread runs than the bar spread the
+        # walk-forward charges, per symbol, as a coarse histogram of the ratio.
+        #
+        # The two gate on different numbers and always have. simulate() checks
+        # ``spread_price[j0] > atr * max_spread_atr`` using the ENTRY BAR's
+        # recorded spread; _try_entry checks the CURRENT TICK's. A ceiling
+        # chosen against the first is applied against the second, so the search
+        # can pick a bound the live gate then breaches on ordinary ticks - which
+        # is what FRA40 and USDCHF were doing, and why one was nearly deleted
+        # for it.
+        #
+        # Sampling continuously rather than estimating it: a spot reading is
+        # worthless here. Measured over 2.5 minutes of one liquid hour the
+        # median came out 1.28x, but the same method reported ratios below 1.0
+        # on symbols whose bar median spans hours the sample never touched. The
+        # bot is already awake every second of every session, so it can collect
+        # the whole distribution for free.
+        #
+        # Buckets of 0.1 up to 5.0 plus an overflow. Coarse on purpose: this
+        # feeds a ceiling that moves in steps, a median is all it needs, and a
+        # histogram stays bounded where a growing sample list would not.
+        self._spread_ratio: dict[str, list[int]] = {
+            str(sym): [int(v) for v in counts][:SPREAD_RATIO_BUCKETS]
+            for sym, counts in as_dict(store.get_setting("spread_ratio"), "spread_ratio").items()
+            if isinstance(counts, (list, tuple))
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in counts)
+        }
+        self._spread_ratio_dirty = False
+        self._spread_ratio_at = 0.0
         # Post-fill cooldown, per symbol, as an absolute epoch. Lived only in
         # SymbolState until now - which is rebuilt empty on every start, so a
         # restart inside the cooldown window dropped the one guard that stops
@@ -573,8 +632,94 @@ class Engine:
                     self._tally_entry(cfg.symbol, "hata")
                     LOG.emit(f"Giris hatasi: {exc}", "ERROR", cfg.symbol)
             self._flush_entry_blocks()
+        self._flush_spread_ratio()
 
     # ----------------------------------------------------- entry diagnostics
+
+    def _sample_spread_ratio(self, cfg: SymbolConfig, state: SymbolState,
+                             tick: dict[str, Any] | None) -> None:
+        """Record one live-tick vs bar spread reading. Never raises.
+
+        Both numbers have to describe the same instant to be comparable, so
+        this uses the bar currently forming (the last row of the fetched
+        series) against the tick that was just read for the same symbol in the
+        same cycle.
+        """
+        try:
+            if not tick:
+                return
+            bars = state.bars
+            if bars is None or len(bars) < 1:
+                return
+            info = self.client.info(cfg.symbol) or {}
+            point = float(info.get("point", 0.0) or 0.0)
+            if point <= 0:
+                return
+            bar_spread = float(bars.spread[-1]) * point
+            tick_spread = float(tick.get("spread", 0.0) or 0.0)
+            if not (bar_spread > 0 and tick_spread > 0):
+                return
+            ratio = tick_spread / bar_spread
+            if not math.isfinite(ratio) or ratio <= 0:
+                return
+            counts = self._spread_ratio.setdefault(
+                cfg.symbol, [0] * SPREAD_RATIO_BUCKETS)
+            if len(counts) != SPREAD_RATIO_BUCKETS:
+                counts = [0] * SPREAD_RATIO_BUCKETS
+                self._spread_ratio[cfg.symbol] = counts
+            idx = min(SPREAD_RATIO_BUCKETS - 1, int(ratio / SPREAD_RATIO_STEP))
+            counts[idx] += 1
+            self._spread_ratio_dirty = True
+        except Exception:
+            pass
+
+    def _flush_spread_ratio(self, interval: float = 300.0) -> None:
+        """Persist the histogram, at most once every few minutes.
+
+        Every symbol contributes a sample on every cycle, so the dirty flag is
+        set continuously and a naive flush would rewrite the whole blob to
+        SQLite every two seconds forever. Losing the last few minutes of
+        counts to a hard kill costs nothing - this is a distribution, not a
+        ledger.
+        """
+        if not self._spread_ratio_dirty:
+            return
+        now = time.time()
+        if now - self._spread_ratio_at < interval:
+            return
+        try:
+            self.store.set_setting("spread_ratio", self._spread_ratio)
+            self._spread_ratio_dirty = False
+            self._spread_ratio_at = now
+        except Exception:
+            pass
+
+    def spread_ratio(self) -> dict[str, Any]:
+        """Per-symbol median and 90th percentile of tick spread / bar spread."""
+        rows = []
+        for symbol, counts in sorted(list(self._spread_ratio.items())):
+            counts = list(counts)
+            total = sum(counts)
+            if total <= 0:
+                continue
+            rows.append({
+                "symbol": symbol, "samples": total,
+                "median": _ratio_percentile(counts, 0.50),
+                "p90": _ratio_percentile(counts, 0.90),
+                "enough": total >= SPREAD_RATIO_MIN_SAMPLES,
+            })
+        rows.sort(key=lambda r: -(r["median"] or 0))
+        ready = [r for r in rows if r["enough"]]
+        return {
+            "rows": rows,
+            "min_samples": SPREAD_RATIO_MIN_SAMPLES,
+            "ready": len(ready),
+            "note": (
+                f"{len(ready)}/{len(rows)} sembolde {SPREAD_RATIO_MIN_SAMPLES} "
+                f"orneklik esik asildi"
+                if rows else "henuz olcum yok - bot calistikca birikir"
+            ),
+        }
 
     def _tally_entry(self, symbol: str, reason: str,
                      bar_key: tuple | None = None, source: str = "") -> None:
@@ -859,6 +1004,9 @@ class Engine:
             state.spread_atr = tick["spread"] / state.atr if state.atr > 0 else 0.0
 
         primary_fresh = self._refresh_signals(cfg, state, params)
+        # After the refresh so the bar series is this cycle's, and with the
+        # tick read a few lines above: the two must describe the same instant.
+        self._sample_spread_ratio(cfg, state, tick)
         if cfg.has_secondary():
             sec_fresh = self._refresh_secondary(cfg, state)
         elif self._has_open_secondary_ticket(cfg):

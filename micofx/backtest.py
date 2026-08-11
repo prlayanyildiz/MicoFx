@@ -598,7 +598,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                  should_cancel=None, on_progress=None,
                  min_stop: float | None = None, all_hours: bool = False,
                  day_end_flatten_min: int = 0,
-                 max_cost_share: float = 0.0) -> dict[str, Any]:
+                 max_cost_share: float = 0.0,
+                 spread_scale: float = 1.0) -> dict[str, Any]:
     """Segmented walk-forward search over a three-way split of history.
 
     History is cut into equal segments and used for three separate jobs, because
@@ -647,7 +648,23 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
 
     # Identical for every combination in the sweep, so it is built once instead
     # of reallocated inside every one of the tens of thousands of simulations.
-    spread_price = bars.spread * point
+    # ``spread_scale`` closes the one gap between what this charges and what
+    # the live engine enforces. simulate() gates on the entry BAR's recorded
+    # spread; engine._try_entry gates on the CURRENT TICK's, and the tick runs
+    # wider. So a ceiling chosen here was applied there against a bigger
+    # number - which is how FRA40's 0.05 shut all fourteen hours of its own
+    # session, and why USDCHF was deleted for the same thing.
+    #
+    # The factor is the engine's own measured median of tick spread over bar
+    # spread for this symbol, collected continuously and only used once it has
+    # cleared its sample threshold. Median rather than a high percentile on
+    # purpose: the bar spread is itself a typical value with half the bars
+    # above it, so scaling by the median shifts the LEVEL to what live sees
+    # while leaving that statistical relationship where the backtest already
+    # had it. A p90 would make the search far more pessimistic than the
+    # backtest has ever been, on no evidence that it should be.
+    scale = float(spread_scale) if spread_scale and spread_scale > 0 else 1.0
+    spread_price = bars.spread * point * scale
     # The round-turn cost the simulation will actually charge this trade. The
     # scalping families size their entry threshold against it, so it has to be
     # this exact series and not an approximation of it.

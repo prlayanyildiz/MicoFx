@@ -1232,6 +1232,24 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             ),
         }
 
+    @app.get("/api/analysis/spread-ratio")
+    def spread_ratio() -> dict[str, Any]:
+        """How much wider the live tick's spread runs than the bar's. Read-only.
+
+        The walk-forward gates on the entry BAR's recorded spread; the live
+        engine gates on the CURRENT TICK's. A ceiling chosen against the first
+        is enforced against the second, which is how FRA40 ended up unable to
+        trade a single hour of its own session and USDCHF was nearly deleted
+        for it.
+
+        Sampled continuously by the engine rather than estimated, because a
+        spot reading is worthless here: 2.5 minutes of one liquid hour put the
+        median at 1.28x while reporting sub-1.0 ratios for symbols whose own
+        bar median spans hours that sample never touched. Nothing is reported
+        as usable until the sample count clears the threshold.
+        """
+        return {"ok": True, **engine.spread_ratio()}
+
     @app.get("/api/analysis/entry-blocks")
     def entry_blocks() -> dict[str, Any]:
         """Which gate refuses entries, counted per symbol. Read-only.

@@ -47,6 +47,7 @@ def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
             all_hours=bool(payload.get("all_hours")),
             day_end_flatten_min=int(payload.get("day_end_flatten_min") or 0),
             max_cost_share=float(payload.get("max_cost_share") or 0.0),
+            spread_scale=float(payload.get("spread_scale") or 1.0),
         )
     except Exception as exc:                      # keep one bad sweep from killing the run
         outcome = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -283,6 +284,42 @@ class Optimizer:
             LOG.emit(f"{tag} tamamlandi | uygulanan {len(applied)}{applied_txt} | "
                      f"uygulanmayan {len(rejected)}{rejected_txt}", "OPT")
 
+    def _spread_scale(self, symbol: str) -> float:
+        """Measured live-tick / bar spread median for this symbol, or 1.0.
+
+        Read from the store rather than from the engine: the engine already
+        persists the histogram there, so the search does not need a handle on
+        a running engine (and the pooled workers could not have one anyway).
+
+        Returns 1.0 - the old behaviour, exactly - until the symbol has
+        cleared the sample threshold. Half a session of ticks from one hour is
+        the reading that already misled us once; nothing moves the search
+        until the distribution is real.
+        """
+        try:
+            from .engine import (SPREAD_RATIO_BUCKETS, SPREAD_RATIO_MIN_SAMPLES,
+                                 _ratio_percentile)
+            blob = self.store.get_setting("spread_ratio", {}) or {}
+            counts = blob.get(symbol)
+            if not isinstance(counts, (list, tuple)):
+                return 1.0
+            counts = [int(v) for v in counts
+                      if isinstance(v, (int, float)) and not isinstance(v, bool)]
+            if len(counts) != SPREAD_RATIO_BUCKETS:
+                return 1.0
+            if sum(counts) < SPREAD_RATIO_MIN_SAMPLES:
+                return 1.0
+            median = _ratio_percentile(counts, 0.50)
+            if not median or median <= 0:
+                return 1.0
+            # Bounded both ways. A ratio under 1 would make the search
+            # cheerier than the bars justify, and an absurd upper reading
+            # (a frozen feed, a one-off gap) must not price the symbol out of
+            # existence on its own.
+            return float(min(3.0, max(1.0, median)))
+        except Exception:
+            return 1.0
+
     def _plan_symbol(self, cfg, lookback_days: int, bar_cap: int,
                      variants: list[dict[str, Any]],
                      min_trades: int, segments: int, max_combos: int, min_positive: float,
@@ -310,6 +347,16 @@ class Optimizer:
         # symbol whose broker requires a wider stop than that guess gets judged
         # against the floor it will actually have to trade under.
         min_stop = self.client.min_stop_distance(cfg.symbol)
+        # What the LIVE gate will actually see, rather than what the bars
+        # recorded. simulate() charges and gates on the entry bar's spread;
+        # engine._try_entry uses the current tick, which runs wider, so a
+        # ceiling picked here was enforced there against a bigger number -
+        # FRA40 could not clear a single hour of its own session because of
+        # it. The engine measures the ratio continuously and parks it in the
+        # same store this reads, so nothing new is coupled; 1.0 until the
+        # sample threshold is cleared, which leaves the search exactly as it
+        # was until there is real evidence to move it.
+        spread_scale = self._spread_scale(cfg.symbol)
         # The system-wide override that drops session windows live - the search
         # has to score the same product that is actually trading (see
         # ``backtest.session_mask``'s ``all_hours`` branch).
@@ -370,6 +417,7 @@ class Optimizer:
                              for name in ("time", "open", "high", "low", "close",
                                           "spread", "volume")},
                     "point": float(info["point"]), "tf_seconds": timeframe_seconds(tf),
+                    "spread_scale": spread_scale,
                     "grid": grid, "min_trades": min_trades, "segments": segments,
                     "max_combos": max_combos, "min_positive": min_positive,
                     "plateau": plateau, "commission": commission, "min_stop": min_stop,
