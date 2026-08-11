@@ -26,6 +26,7 @@
 <nav class="tabs" id="tabs">
   <button class="tab active" data-tab="panel">Panel</button>
   <button class="tab" data-tab="semboller">Semboller</button>
+  <button class="tab" data-tab="tani">Tani</button>
   <button class="tab" data-tab="opt">Optimizasyon</button>
   <button class="tab" data-tab="ai">AI Denetleyici</button>
   <button class="tab" data-tab="sistem">Sistem</button>
@@ -145,6 +146,10 @@
         </select>
       </div>
     </div>
+    <div id="symbol-list" class="symbol-list"></div>
+  </section>
+
+  <section class="page" id="page-tani">
     <div class="panel">
       <div class="panel-head"><h2>Eleme Kapilari</h2>
         <div class="panel-note" id="gates-note">Yukleniyor...</div>
@@ -187,7 +192,25 @@
       </div>
     </div>
 
-    <div id="symbol-list" class="symbol-list"></div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Spread Kalibrasyonu</h2>
+        <div class="panel-note" id="ratio-note">Yukleniyor...</div>
+        <button class="btn btn-sm" id="btn-ratio-refresh">Yenile</button>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="ratio-table">
+          <thead>
+            <tr><th>Sembol</th>
+                <th class="num" title="Toplanan olcum sayisi">Ornek</th>
+                <th class="num" title="Canli tick spread / bar spread, medyan">Medyan</th>
+                <th class="num" title="90. yuzdelik - kuyrugun nereye gittigi">p90</th>
+                <th>Durum</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
   <section class="page" id="page-opt">

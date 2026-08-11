@@ -275,3 +275,20 @@ def test_the_percentile_reports_the_bucket_centre():
     counts = [0] * SPREAD_RATIO_BUCKETS
     counts[13] = 100                      # ratios in [1.3, 1.4)
     assert _ratio_percentile(counts, 0.5) == pytest.approx(1.35, abs=0.001)
+
+
+def test_the_panel_is_wired_to_the_endpoint():
+    """A renamed id leaves the view blank and nothing else notices."""
+    web = Path(__file__).resolve().parents[1] / "micofx" / "web"
+    js = (web / "static" / "app.js").read_text(encoding="utf-8")
+    html = (web / "templates" / "index.html").read_text(encoding="utf-8")
+
+    assert "/api/analysis/spread-ratio" in js
+    for element_id in ("ratio-table", "ratio-note", "btn-ratio-refresh"):
+        assert f'id="{element_id}"' in html, f"index.html'de {element_id} yok"
+        assert f'"#{element_id}"' in js, f"app.js {element_id} kullanmiyor"
+    # All three diagnostic views live on the Tani tab and load together.
+    assert 'name === "tani"' in js and "loadSpreadRatio()" in js
+    for panel in ("gates-table", "blocks-table", "ratio-table"):
+        assert html.index(panel) > html.index('id="page-tani"'), \
+            f"{panel} Tani sekmesinde degil"

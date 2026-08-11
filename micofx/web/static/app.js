@@ -153,7 +153,7 @@ function selectTab(name) {
     if (!OPT_PARAMS) loadOptParams().then(loadOptHistory);
     else syncOptPicker();
   }
-  if (name === "semboller") { loadGates(); loadBlocks(); }
+  if (name === "tani") { loadGates(); loadBlocks(); loadSpreadRatio(); }
   if (name === "log") pollLogs();
 }
 
@@ -224,6 +224,35 @@ async function loadGates() {
 // few opens means a gate is eating them and the blocks column names it, while
 // attempts that are themselves short clears the gates and points upstream at
 // signal generation.
+// The search charges the bar's spread; the live gate enforces the tick's. This
+// is the measured distance between them, per symbol, and nothing acts on it
+// until the sample count clears the threshold - a spot reading here is what
+// misled the first attempt at this number.
+async function loadSpreadRatio() {
+  const note = $("#ratio-note");
+  let data;
+  try {
+    data = await api("/api/analysis/spread-ratio");
+  } catch (err) {
+    if (note) note.textContent = `Olcum okunamadi: ${err.message || err}`;
+    return;
+  }
+  const rows = (data.rows || []).map((r) => {
+    const tr = el("tr");
+    tr.innerHTML = `
+      <td class="sym">${esc(r.symbol)}</td>
+      <td class="num ${r.enough ? "dim" : "warn-text"}">${r.samples}</td>
+      <td class="num ${r.median >= 1.5 ? "neg" : "dim"}"><b>${num(r.median, 2)}x</b></td>
+      <td class="num dim">${num(r.p90, 2)}x</td>
+      <td>${r.enough
+        ? '<span class="pill on">aramaya uygulaniyor</span>'
+        : `<span class="pill off">ornek yetersiz (${data.min_samples})</span>`}</td>`;
+    return tr;
+  });
+  rowsInto($("#ratio-table"), rows, "Henuz olcum yok", 5);
+  if (note) note.textContent = data.note || "";
+}
+
 async function loadBlocks() {
   const note = $("#blocks-note");
   let data;
@@ -2076,6 +2105,8 @@ function wire() {
   if (gatesBtn) gatesBtn.onclick = () => loadGates();
   const blocksBtn = $("#btn-blocks-refresh");
   if (blocksBtn) blocksBtn.onclick = () => loadBlocks();
+  const ratioBtn = $("#btn-ratio-refresh");
+  if (ratioBtn) ratioBtn.onclick = () => loadSpreadRatio();
   const blocksReset = $("#btn-blocks-reset");
   if (blocksReset) blocksReset.onclick = async () => {
     try {

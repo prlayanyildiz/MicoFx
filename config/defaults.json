@@ -406,18 +406,6 @@
       ]
     },
     {
-      "symbol": "XAGUSD",
-      "group": "commodity",
-      "magic": 990109,
-      "enabled": false,
-      "sessions": [
-        {
-          "start": "02:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
       "symbol": "EURUSD",
       "group": "forex",
       "magic": 990110,
@@ -430,44 +418,14 @@
       ]
     },
     {
-      "symbol": "BTCUSD",
-      "group": "crypto",
-      "magic": 990111,
-      "enabled": false,
-      "trade_days": [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7
-      ],
+      "symbol": "CA60",
+      "group": "index",
+      "magic": 990113,
+      "enabled": true,
       "sessions": [
         {
-          "start": "00:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
-      "symbol": "ETHUSD",
-      "group": "crypto",
-      "magic": 990112,
-      "enabled": false,
-      "trade_days": [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7
-      ],
-      "sessions": [
-        {
-          "start": "00:00",
-          "end": "23:55"
+          "start": "16:30",
+          "end": "23:10"
         }
       ]
     }

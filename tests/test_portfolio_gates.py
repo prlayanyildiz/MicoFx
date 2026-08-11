@@ -256,7 +256,8 @@ def test_the_panel_is_actually_wired_to_this_endpoint():
         assert f'id="{element_id}"' in html, f"index.html'de {element_id} yok"
         assert f'"#{element_id}"' in js, f"app.js {element_id} kullanmiyor"
     # The tab hook, without which the table only ever fills on a manual click.
-    assert 'name === "semboller"' in js and "loadGates()" in js
+    assert 'name === "tani"' in js and "loadGates()" in js
+    assert 'id="page-tani"' in html and 'data-tab="tani"' in html
 
 
 def test_the_gate_labels_cover_every_gate_the_api_emits():
