@@ -428,6 +428,48 @@
           "end": "23:55"
         }
       ]
+    },
+    {
+      "symbol": "BTCUSD",
+      "group": "crypto",
+      "magic": 990111,
+      "enabled": false,
+      "trade_days": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "sessions": [
+        {
+          "start": "00:00",
+          "end": "23:55"
+        }
+      ]
+    },
+    {
+      "symbol": "ETHUSD",
+      "group": "crypto",
+      "magic": 990112,
+      "enabled": false,
+      "trade_days": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "sessions": [
+        {
+          "start": "00:00",
+          "end": "23:55"
+        }
+      ]
     }
   ],
   "optimizer": {
