@@ -55,6 +55,36 @@ SPREAD_RATIO_MIN_SAMPLES = 400
 LINK_BACKOFF_SEC = 30.0
 
 
+# can_open()'s refusals collapsed into one "risk_limiti" bucket, which was not
+# enough to answer the question they were being read for. Working out that the
+# ensemble's second leg is refused for signalling AGAINST an open primary
+# position - rather than for hitting a count limit - took an elimination
+# argument across three separate settings (max_positions 10, 4 positions open,
+# scalp/swing caps off). The counter should just say so.
+#
+# Matched on the stable prefix of each reason, because most of them carry the
+# limit value in the text. Anything unrecognised keeps the old bucket rather
+# than growing the key space from a string the caller controls.
+_RISK_BLOCK_KEYS: tuple[tuple[str, str], ...] = (
+    ("sembol pozisyon limiti", "risk_sembol_limiti"),
+    ("ters yonde acik pozisyon", "risk_ters_yon"),
+    ("toplam pozisyon limiti", "risk_toplam_limit"),
+    ("pozisyon limiti", "risk_kova_limiti"),      # scalp/swing bucket
+    ("marj hesaplanamadi", "risk_marj_okunamadi"),
+    ("serbest marj yetersiz", "risk_serbest_marj"),
+    ("marj kullanimi limiti", "risk_marj_kullanimi"),
+)
+
+
+def _risk_block_key(reason: str) -> str:
+    """Stable counter key for a can_open refusal."""
+    text = str(reason or "").lower()
+    for needle, key in _RISK_BLOCK_KEYS:
+        if needle in text:
+            return key
+    return "risk_limiti"
+
+
 def _ratio_percentile(counts: list[int], q: float) -> float | None:
     """Percentile of the bucketed tick/bar spread ratio, or None when empty.
 
@@ -1498,7 +1528,7 @@ class Engine:
                                      sec_tickets=frozenset(self._sec_tickets))
         if not verdict.ok:
             state.note = verdict.reason
-            state.entry_block = "risk_limiti"
+            state.entry_block = _risk_block_key(verdict.reason)
             return
 
         entry = tick["ask"] if side == "buy" else tick["bid"]
