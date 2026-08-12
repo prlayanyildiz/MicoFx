@@ -316,7 +316,7 @@ File: `optimizer.py` + `backtest.walk_forward`.
 ### Calendar window
 Same lookback for every TF:  
 `want = min(max_bars, lookback_days * 86400 / timeframe_seconds(tf))`  
-so H4 is not judged on years while M5 is judged on days.
+so H1 is not judged on years while M5 is judged on days.
 
 ### Segment split (`segments` clamped 4–8; defaults often 5)
 Equal bar edges:
