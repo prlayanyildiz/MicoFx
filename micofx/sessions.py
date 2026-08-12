@@ -106,8 +106,21 @@ def evaluate(cfg: SymbolConfig, server_epoch: float,
             inside = evening or morning
             remaining = (end + _DAY - minute) if evening else (end - minute)
         if inside:
-            active = f"{_fmt(start)}-{_fmt(end)}"
-            best_close = remaining if best_close is None else min(best_close, remaining)
+            # The LAST window to expire, not the first. While two windows
+            # overlap, the earlier one running out closes nothing - the later
+            # one still holds this minute - and should_flatten reads this
+            # number directly: on 08:00-12:00 plus 09:00-17:00 the smaller
+            # value made it force-close every position at 11:55, five hours
+            # early, after which the first window expired, the count jumped
+            # back to five hours and entries resumed. A flatten and a re-entry
+            # from a config that asked for neither.
+            #
+            # Chosen together with the label so the panel names the window it
+            # is actually counting down; they used to be picked by different
+            # rules (last match wins vs first to expire) and could disagree.
+            if best_close is None or remaining > best_close:
+                best_close = remaining
+                active = f"{_fmt(start)}-{_fmt(end)}"
 
     if best_close is not None:
         return SessionState(open=True, reason="", minutes_to_close=best_close,
