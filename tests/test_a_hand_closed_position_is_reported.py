@@ -44,8 +44,11 @@ class _Client:
 def _tracker(book=None) -> ExecutionMonitor:
     t = ExecutionMonitor.__new__(ExecutionMonitor)
     t._open = dict(book or {})
+    # Mirrors __init__ without touching the store: reap()'s scoring path
+    # writes through _samples/_dirty on the way past.
     t.store = None
-    t.samples = []
+    t._samples = {}
+    t._dirty = False
     return t
 
 
@@ -116,3 +119,38 @@ def test_net_includes_commission_and_swap_on_a_hand_close():
     deal["commission"] = -1.0
     deal["swap"] = -0.5
     assert t.reap(gone={7}, deals=[deal], client=_Client())[0]["profit"] == -6.5
+
+# ------------------------------------- reported is wider than measured
+
+def test_a_hand_close_is_reported_but_never_scored():
+    """The boundary the widened filter must not move. A slippage sample needs a
+    requested price to compare the fill against, and a hand close has none -
+    scoring it would put a meaningless number into the execution statistics
+    that decide whether fills are getting worse.
+    """
+    t = _tracker({7: {"symbol": "GER40", "magic": 1, "sl": 99.0, "tp": 0.0,
+                      "side": "buy", "volume": 0.1}})
+    reports = t.reap(gone={7}, deals=[_deal(7, execution.DEAL_REASON_CLIENT)],
+                     client=_Client())
+    assert len(reports) == 1, "elle kapanis raporlanmali"
+    assert not any(t._samples.values()), "elle kapanis kayma ornegi uretmemeli"
+
+
+def test_a_broker_stop_is_still_scored():
+    """The other side of the same boundary - remove this and the widened filter
+    could quietly stop measuring anything."""
+    t = _tracker({7: {"symbol": "GER40", "magic": 1, "sl": 99.0, "tp": 0.0,
+                      "side": "buy", "volume": 0.1}})
+    t.reap(gone={7}, deals=[_deal(7, execution.DEAL_REASON_SL, price=98.5)],
+           client=_Client())
+    assert any(t._samples.values()), "broker stopu hala olculmeli"
+
+
+def test_a_margin_stopout_is_reported_but_not_scored():
+    """Documented already: a margin stop-out has no requested price of ours."""
+    t = _tracker({7: {"symbol": "GER40", "magic": 1, "sl": 99.0, "tp": 0.0,
+                      "side": "buy", "volume": 0.1}})
+    reports = t.reap(gone={7}, deals=[_deal(7, execution.DEAL_REASON_SO)],
+                     client=_Client())
+    assert len(reports) == 1
+    assert not any(t._samples.values())

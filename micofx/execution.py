@@ -246,14 +246,20 @@ class ExecutionMonitor:
 
     def reap(self, gone: set[int], deals: list[dict[str, Any]],
              client) -> list[dict[str, Any]]:
-        """Score server-side stop/target fills for positions that just closed.
+        """Report every close this engine did not order, and score the ones
+        that can be scored.
 
-        Only deals the broker itself generated are measured here: a close the
-        engine sent was already recorded against its own requested tick, and
-        counting it twice would double the sample.
+        Two scopes, and they are no longer the same one. What is MEASURED is
+        unchanged: only a server-generated stop or target builds a slippage
+        sample, because that is the only case with a price of ours to compare
+        the fill against. A close the engine sent was already recorded against
+        its own requested tick, and counting it twice would double the sample.
 
-        Returns one report per broker-generated exit, so the caller can put it
-        in the log. That report is the *only* record a stop exit leaves: the
+        What is REPORTED is wider. A position closed by hand - from the
+        terminal, the phone or the web client - used to match nothing here and
+        left no record at all, which is how a day showed thirty-four closes on
+        the panel against twenty-nine in the log. It is reported now and scored
+        never: there is no requested price behind it to measure. That report is the *only* record a stop exit leaves: the
         engine logs its own closes at the moment it sends them, but a hard SL
         firing at the broker happens with nothing running here - and since a
         stop is this system's one and only intended exit, without this the
