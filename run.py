@@ -51,9 +51,23 @@ def cleanup_orphan_workers() -> None:
     operation. Best-effort: any failure here must never block startup.
     """
     try:
+        # Scoped to THIS interpreter. The filter named only the process name
+        # and --multiprocessing-fork, which describes every orphaned Python
+        # worker on the machine, not ours - on a box running anything else in
+        # Python this reaches past MicoFx entirely. A multiprocessing-fork
+        # child's command line carries no script path, so the executable is
+        # what identifies it: MicoFx runs from its own venv, and a worker
+        # started by that venv's interpreter is one of ours.
+        #
+        # Strictly narrowing - it can only ever kill fewer processes than
+        # before, never more. The parent-alive check is left as it was; PID
+        # reuse makes it MISS an orphan rather than kill a live process, which
+        # is the safe direction for a best-effort sweep.
+        exe = os.path.abspath(sys.executable).replace("'", "''")
         script = (
             "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' or Name='python.exe'\" "
             "| Where-Object { $_.CommandLine -like '*--multiprocessing-fork*' "
+            f"-and $_.ExecutablePath -eq '{exe}' "
             "-and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) } "
             "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
         )
