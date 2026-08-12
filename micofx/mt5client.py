@@ -78,20 +78,32 @@ _RECONNECT_COOLDOWN = 5.0
 def timeframe_const(name: str) -> int:
     if mt5 is None:
         return 0
-    # Wider than models.TIMEFRAMES on purpose. M10 and H4 are no longer offered
-    # anywhere - not in the search, not in the symbol editor, not as a valid
-    # PATCH value - but a config stored while they were must still resolve to
-    # the right MT5 constant. Dropping them here would send such a symbol down
-    # the ``.get`` fallback and quietly trade it on M5 bars instead.
+    # M10 and H4 used to be listed here so a config stored while they were
+    # offered still resolved to the right constant. No stored symbol carries
+    # either any more, so the entries described a state of the world that had
+    # stopped existing - and keeping them made the real hazard easy to miss.
+    #
+    # That hazard is the fallback, not the retired names. Anything this table
+    # does not recognise resolves to M5, which means a symbol trading
+    # five-minute bars when it was validated on something else - the quietest
+    # possible way to be wrong. Refusing outright would take the engine down
+    # over a single bad row, so the fallback stays; it just no longer looks
+    # like an ordinary resolution.
     table = {
-        "M5": mt5.TIMEFRAME_M5, "M10": mt5.TIMEFRAME_M10, "M15": mt5.TIMEFRAME_M15,
-        "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
+        "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
+        "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1,
     }
-    return table.get(str(name).upper(), mt5.TIMEFRAME_M5)
+    key = str(name).upper()
+    if key not in table:
+        LOG.emit(f"Bilinmeyen zaman dilimi '{name}' - M5 barlarina dusuldu. "
+                 f"Sembolun dogrulandigi bar bu degilse sonuclar yaniltici olur.",
+                 "WARN")
+        return mt5.TIMEFRAME_M5
+    return table[key]
 
 
 def timeframe_seconds(name: str) -> int:
-    table = {"M5": 300, "M10": 600, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400}
+    table = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
     return table.get(str(name).upper(), 300)
 
 

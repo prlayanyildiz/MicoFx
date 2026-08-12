@@ -1,10 +1,20 @@
-"""M10 is no longer offered anywhere, but a config stored while it was must not break.
+"""M10 is gone from every menu, and now from the lookups behind them too.
 
-Removed from the search, the symbol editor and the set of valid PATCH values.
-Deliberately KEPT in the two name->number translation tables: those are
-lookups, not menus, and dropping M10 from them would send a legacy config
-down the fallback and quietly trade it on M5 bars instead of refusing or
-correcting it. H4 has always sat there on the same footing.
+It was removed from the search, the symbol editor and the set of valid PATCH
+values, but deliberately KEPT in the two name->number translation tables on the
+argument that they are lookups rather than menus: dropping M10 would send a
+config stored while it was offered down the fallback and quietly trade it on M5
+bars. H4 sat there on the same footing.
+
+That argument depended on such a config existing. None does - every stored
+symbol row uses one of TIMEFRAMES, and the last mention anywhere in the database
+was a stale ``opt_params.strategy_timeframes`` blob naming M10 for micro_rev and
+burst, inert because the search never asks about a bar outside TIMEFRAMES, and
+now filtered on read. So the entries were protecting nothing while making the
+real hazard easy to overlook: the fallback itself, which turns any unrecognised
+timeframe into M5 bars. That fallback stays - refusing outright would take the
+engine down over one bad row - but it now announces itself. See
+test_no_retired_timeframes.py.
 """
 from __future__ import annotations
 
@@ -73,15 +83,32 @@ def test_a_stored_secondary_on_m10_is_cleared_not_kept():
     assert cfg.secondary_timeframe == ""
 
 
-def test_the_translation_tables_still_know_it():
-    """A lookup, not a menu - dropping it would silently reinterpret a config."""
+def test_the_translation_tables_no_longer_know_it():
+    """Nothing stores M10 any more, so the lookups stopped carrying it."""
     from micofx.models import uses_swing_exits
     from micofx.mt5client import timeframe_seconds
 
-    assert timeframe_seconds("M10") == 600
-    assert timeframe_seconds("H4") == 14400
-    # models.py keeps its own copy of the same table for the swing-exit rule;
-    # M10 is under the 900s swing threshold and H4 is over it, and both must
-    # still land on the correct side rather than on the 0 default.
+    assert timeframe_seconds("M10") == 300, "taninmayan bar M5'e dusmeli"
+    assert timeframe_seconds("H4") == 300
+    # Both now land on the narrow exit envelope by way of the 0 default rather
+    # than on their own second counts.
     assert uses_swing_exits("t3_flip", "M10") is False
-    assert uses_swing_exits("t3_flip", "H4") is True
+    assert uses_swing_exits("t3_flip", "H4") is False
+
+
+def test_no_stored_symbol_relies_on_the_entries_that_were_dropped():
+    """The premise of the removal, asserted rather than assumed."""
+    import sqlite3
+    db = ROOT / "data" / "micofx.db"
+    if not db.exists():
+        pytest.skip("canli veritabani yok")
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = [json.loads(r[0]) for r in con.execute("SELECT payload FROM symbols")]
+    finally:
+        con.close()
+    for cfg in rows:
+        for field in ("timeframe", "secondary_timeframe"):
+            value = cfg.get(field) or ""
+            assert value == "" or value in TIMEFRAMES, (
+                f"{cfg.get('symbol')}.{field} = {value!r} artik cozulemez")

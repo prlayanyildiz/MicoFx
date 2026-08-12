@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from .logbus import LOG
-from .models import OPT_FIELDS, SymbolConfig, SystemConfig
+from .models import OPT_FIELDS, TIMEFRAMES, SymbolConfig, SystemConfig
 from .paths import DB_PATH, ensure_dirs, load_defaults
 
 _SCHEMA = """
@@ -543,6 +543,20 @@ class Store:
                 fam: {k: v for k, v in axes.items() if k in allowed}
                 for fam, axes in base["strategy_grids"].items()
                 if isinstance(axes, dict)
+            }
+        # Same reasoning, one axis over: a stored family->timeframe map outlives
+        # the timeframes it was written against. The live blob still carried
+        # "M10" for micro_rev and burst, a bar this system stopped offering -
+        # inert only because the search never asks about a timeframe outside
+        # TIMEFRAMES, which makes it exactly the kind of crumb that reads as
+        # configuration when someone opens the panel. Drop what can no longer
+        # be searched; a family left with nothing keeps an empty list, which
+        # strategy_allows_timeframe already reads as a deliberate "nothing".
+        if isinstance(base.get("strategy_timeframes"), dict):
+            base["strategy_timeframes"] = {
+                fam: [t for t in tfs if t in TIMEFRAMES]
+                for fam, tfs in base["strategy_timeframes"].items()
+                if isinstance(tfs, list)
             }
         # Same reasoning for the whole exit-style block: the optimizer no longer
         # splits a family into targeted/trail sweeps because there is only one

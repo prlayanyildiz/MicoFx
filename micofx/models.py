@@ -505,31 +505,24 @@ STRATEGIES = ["t3_stoch", "orb", "vwap_rev", "donchian",
 # Longer TFs turn them into slow mean-reversion with the wrong cost geometry.
 SCALP_STRATEGIES = frozenset({"micro_rev", "burst"})
 
-# Which timeframes each family is allowed to search / trade. Missing families
-# fall back to every configured TF. Scalps stay on M5; swing/trend families
-# own M15+ so the opt budget is not wasted pairing micro_rev with H1.
-STRATEGY_TIMEFRAMES: dict[str, list[str]] = {
-    "micro_rev": ["M5"],
-    "burst": ["M5"],
-    "t3_ribbon": ["M5"],
-    "flow_rev": ["M5", "M15", "M30"],
-    "dual_t3": ["M5", "M15", "M30", "H1"],
-    "mtf_pullback": ["M5", "M15", "M30", "H1"],
-    "t3_stoch": ["M5", "M15", "M30", "H1"],
-    "t3_flip": ["M15", "M30", "H1"],
-    "macd_flip": ["M5", "M15", "M30", "H1"],
-    "wavetrend_flip": ["M5", "M15", "M30", "H1"],
-    "stoch_flip": ["M5", "M15", "M30", "H1"],
-    "parabolic_flip": ["M15", "M30", "H1"],
-    "trix_flip": ["M15", "M30", "H1"],
-    "aroon_flip": ["M5", "M15", "M30", "H1"],
-    "st_trend": ["M15", "M30", "H1"],
-    "orb": ["M5", "M15"],
-    "vwap_rev": ["M5", "M15", "M30"],
-    "liq_sweep": ["M5", "M15", "M30"],
-    "donchian": ["M15", "M30", "H1"],
-    "squeeze_brk": ["M15", "M30", "H1"],
-}
+# Which timeframes each family is allowed to search / trade. An absent family
+# means "every configured TF", so an empty map states that no family is
+# restricted - which is now the case, deliberately.
+#
+# This used to keep the scalps on M5 and hand M15+ to the swing families, on
+# the budget argument that was written right here: "so the opt budget is not
+# wasted pairing micro_rev with H1". That argument does not hold. max_combos
+# is spent per sweep - one family on one timeframe - not shared across the
+# search, so an extra pairing costs wall-clock and takes nothing away from the
+# pairings already running. What the restriction did cost was optionality, and
+# the pairings that have actually won were not the predictable ones: XAUUSD
+# came back with micro_rev/M5 and NAS100 with stoch_flip/M5. Which bar length
+# suits which family on which symbol is exactly the judgement the
+# out-of-sample gates exist to make on evidence rather than by assumption.
+#
+# The mechanism stays. Adding an entry restricts that family again, and an
+# explicit empty list still means "nothing" rather than "everything".
+STRATEGY_TIMEFRAMES: dict[str, list[str]] = {}
 
 # Exit/risk axes used when searching M15+ (or any non-scalp pairing). A
 # multi-hour hold wants a wider hard stop and a looser trail than a five-minute
@@ -568,14 +561,26 @@ def strategy_allows_timeframe(strategy: str, timeframe: str,
 
 
 def uses_swing_exits(strategy: str, timeframe: str) -> bool:
-    """Longer bars (or non-scalp families) need the wider exit search envelope."""
-    if is_scalp_strategy(strategy):
-        return False
-    # Keep this table local so models.py never imports the MT5 bridge, and
-    # wider than TIMEFRAMES on purpose: M10 and H4 are no longer offered, but
-    # a config stored while they were must still translate to the right
-    # number of seconds rather than silently reading as something else.
-    seconds = {"M5": 300, "M10": 600, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400}
+    """Longer bars need the wider exit search envelope.
+
+    Decided by the bar, not by the family. The scalp families used to be
+    refused this envelope at every bar length, which was harmless only while
+    they were pinned to M5. Now that every family may be searched on every
+    timeframe, that early return would have handed micro_rev on H1 a stop grid
+    sized for five-minute bars - exactly what SWING_GRID_OVERLAY's own comment
+    warns about: "the search only ever offers H1 candidates a stop tight enough
+    to be noise". A scalp family on hourly bars is holding for hours; what it
+    is called does not change how far price travels while it does.
+
+    ``is_scalp_strategy`` still decides position caps and cooldowns elsewhere -
+    only the exit-grid question moved to the timeframe.
+    """
+    # Kept local so models.py never imports the MT5 bridge. This used to carry
+    # M10 and H4 as well, so a config stored while those bars were offered
+    # still translated to the right number of seconds. Nothing stores them any
+    # more - every symbol row uses one of TIMEFRAMES - so the entries were
+    # describing a state of the world that no longer exists.
+    seconds = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
     return int(seconds.get(timeframe, 0)) >= 900
 
 
