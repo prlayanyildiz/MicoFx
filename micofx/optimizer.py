@@ -247,7 +247,12 @@ class Optimizer:
         # more: the system has exactly one exit regime (hard ATR stop, then ATR
         # trail), so there is nothing left to split on and every candidate is
         # comparable to every other without it.
+        # ``own`` is kept apart from the merged grid because the swing overlay
+        # has to sit between them: it widens what the shared grid proposes and
+        # steps aside for any axis the family itself has an opinion about.
         variants = [{"key": name, "strategy": name,
+                     "own": {k: v for k, v in (family_grids.get(name) or {}).items()
+                             if isinstance(v, list) and v},
                      "grid": {**shared, **{k: v for k, v in (family_grids.get(name) or {}).items()
                                            if isinstance(v, list) and v}}}
                     for name in families]
@@ -283,6 +288,34 @@ class Optimizer:
             rejected_txt = " (" + ", ".join(rejected) + ")" if rejected else ""
             LOG.emit(f"{tag} tamamlandi | uygulanan {len(applied)}{applied_txt} | "
                      f"uygulanmayan {len(rejected)}{rejected_txt}", "OPT")
+
+    @staticmethod
+    def _exit_grid_for(merged: dict[str, Any], own: dict[str, Any],
+                       family: str, timeframe: str) -> dict[str, Any]:
+        """Search grid for one family/timeframe pairing.
+
+        Precedence is shared -> swing overlay -> the family's own statement.
+
+        It used to be written the other way round - overlay first, then
+        ``merged`` on top - with the intent "a family that states its own
+        stop/trail range means it". But ``merged`` is not the family's own
+        grid, it is ``{**shared, **own}``, and the shared grid defines all four
+        overlay axes. So the shared values overwrote the overlay for every
+        family on every timeframe and the widening never happened at all -
+        exactly the failure SWING_GRID_OVERLAY's own comment names, "the search
+        only ever offers H1 candidates a stop tight enough to be noise".
+
+        It showed in what the search returned: FRA40 came back with burst/M30
+        carrying sl_atr_mult 0.5, half the overlay's own floor and a value that
+        exists only in the shared grid, on thirty-minute bars.
+        """
+        grid = dict(merged)
+        if uses_swing_exits(family, timeframe):
+            # Widen what the shared grid proposed, but never over an axis the
+            # family itself has an opinion about - that is the part the old
+            # comment got right.
+            grid.update({k: v for k, v in SWING_GRID_OVERLAY.items() if k not in own})
+        return grid
 
     def _spread_scale(self, symbol: str) -> float:
         """Measured live-tick / bar spread median for this symbol, or 1.0.
@@ -424,11 +457,7 @@ class Optimizer:
                          "order": len(plan["jobs"]) + len(plan["attempts"]),
                          "error": f"veri yetersiz ({len(bars) if bars else 0} bar)"})
                     continue
-                # Swing overlay first, then the family's own grid on top: a
-                # family that states its own stop/trail range means it, and the
-                # generic M15+ widening must not clobber it.
-                grid = dict(SWING_GRID_OVERLAY) if uses_swing_exits(family, tf) else {}
-                grid.update(variant["grid"])
+                grid = self._exit_grid_for(variant["grid"], variant["own"], family, tf)
                 plan["jobs"].append({
                     "symbol": cfg.symbol, "timeframe": tf, "strategy": family,
                     "order": len(plan["jobs"]) + len(plan["attempts"]),
