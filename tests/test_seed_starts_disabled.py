@@ -83,10 +83,17 @@ def test_the_template_enabled_flag_cannot_switch_one_on(tmp_path, monkeypatch):
 
 def test_the_shipped_template_still_records_intent(tmp_path):
     """The flag stays meaningful in git - it says what SHOULD be on once
-    optimised - it just cannot switch anything on by itself."""
+    optimised - it just cannot switch anything on by itself.
+
+    This used to pin EURUSD and EURJPY as the deliberately-off examples. Both
+    were removed from the book, so the pins outlived what they described; the
+    property that matters is that every entry states its intent explicitly and
+    the template is not shipped switched off entirely.
+    """
     template = json.loads((ROOT / "config" / "defaults.json")
                           .read_text(encoding="utf-8-sig"))
-    flags = {e["symbol"]: e.get("enabled", True) for e in template["symbols"]}
-    assert flags.get("EURUSD") is False
-    assert flags.get("EURJPY") is False
+    flags = {e["symbol"]: e.get("enabled") for e in template["symbols"]}
+    assert flags, "sablonda sembol yok"
+    assert all(isinstance(v, bool) for v in flags.values()), (
+        "her sembol enabled bayragini acikca soylemeli")
     assert any(v for v in flags.values()), "sablon tum sembolleri kapali gosteriyor"
