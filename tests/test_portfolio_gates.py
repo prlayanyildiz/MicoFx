@@ -70,8 +70,11 @@ class _Client:
 
 
 class _State:
-    def __init__(self, spread_atr=0.0):
+    def __init__(self, spread_atr=0.0, session_open=None):
         self.spread_atr = spread_atr
+        # None mirrors a state the engine has not filled in yet; the real one
+        # carries the dict sessions.evaluate() builds.
+        self.session = None if session_open is None else {"open": session_open}
 
 
 class _Supervisor:
@@ -342,3 +345,61 @@ def test_every_layer_has_a_label_in_the_panel():
           / "app.js").read_text(encoding="utf-8")
     for layer in ("normal", "izle_zayif", "izle_ince_sigma", "soft_aday"):
         assert f"{layer}:" in js, f"LAYER_LABEL'da {layer} yok"
+
+
+# ------------------------------------------- the ceiling needs a live spread
+
+def test_a_shut_market_does_not_fail_its_spread_ceiling():
+    """A quote taken while the symbol's own session is closed is a pre-open
+    spread, not a cost any entry will pay - the gate that would refuse the
+    entry is never consulted outside the session either.
+
+    Measured live: at 08:53 UK100 read 0.3727 against a 0.080 ceiling and GER40
+    0.1627 against 0.120, both with sessions that do not open until 10:00. Both
+    were reported as failing "tavan". That reading is what made scan-007 record
+    "GER40 dropped to a ceiling failure" as if a config had regressed.
+    """
+    cfg = _cfg("GER40", trades=400, edge=0.30, cost_r=0.05, ceiling=0.12)
+    tc = _client([cfg], {"GER40": _State(0.1627, session_open=False)}, {"GER40": 400})
+    row = _rows(tc.get("/api/analysis/portfolio-gates"))["GER40"]
+    assert "tavan" not in row["fails"], (
+        "piyasasi kapali sembol acilis oncesi kotasyonla tavan ihlali sayildi")
+
+
+def test_the_reader_can_see_the_session_was_shut():
+    """Suppressing the flag silently would trade one wrong reading for another;
+    the row has to say why the ceiling was not judged."""
+    cfg = _cfg("UK100", trades=400, edge=0.30, cost_r=0.05, ceiling=0.08)
+    tc = _client([cfg], {"UK100": _State(0.3727, session_open=False)}, {"UK100": 400})
+    row = _rows(tc.get("/api/analysis/portfolio-gates"))["UK100"]
+    assert row["session_open"] is False
+    assert row["spread_atr_now"] == 0.3727, "olcum gizlenmemeli, sadece hukum verilmemeli"
+
+
+def test_an_open_market_over_its_ceiling_is_still_flagged():
+    cfg = _cfg("US500", trades=400, edge=0.30, cost_r=0.05, ceiling=0.05)
+    tc = _client([cfg], {"US500": _State(0.0730, session_open=True)}, {"US500": 400})
+    row = _rows(tc.get("/api/analysis/portfolio-gates"))["US500"]
+    assert "tavan" in row["fails"]
+    assert row["session_open"] is True
+
+
+def test_an_unknown_session_still_judges_the_ceiling():
+    """Only an explicit "shut" waives the test. A state the engine has not
+    filled in yet must not become a way for a real ceiling breach to hide."""
+    cfg = _cfg("EURJPY", trades=400, edge=0.30, cost_r=0.05, ceiling=0.05)
+    tc = _client([cfg], {"EURJPY": _State(0.1236)}, {"EURJPY": 400})
+    row = _rows(tc.get("/api/analysis/portfolio-gates"))["EURJPY"]
+    assert "tavan" in row["fails"]
+    assert row["session_open"] is None
+
+
+def test_a_shut_market_still_fails_every_other_gate():
+    """Only the ceiling depends on a live quote. Cost, measurability and fill
+    rate are all history and must keep reporting through a closed session."""
+    cfg = _cfg("CA60", trades=40, edge=0.10, cost_r=0.40, ceiling=0.18)
+    tc = _client([cfg], {"CA60": _State(0.9, session_open=False)}, {"CA60": 1})
+    row = _rows(tc.get("/api/analysis/portfolio-gates"))["CA60"]
+    assert "olculebilir" in row["fails"]
+    assert "maliyet" in row["fails"]
+    assert "tavan" not in row["fails"]

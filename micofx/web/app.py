@@ -1141,6 +1141,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
             state = engine.states.get(cfg.symbol)
             spread_atr = float(getattr(state, "spread_atr", 0.0) or 0.0) if state else 0.0
+            # ``state.spread_atr`` is rewritten every cycle from the last tick,
+            # with no session gate in front of it, so outside a symbol's own
+            # hours it holds a pre-open quote rather than a spread anything
+            # will ever pay.
+            session = getattr(state, "session", None) if state else None
+            session_open = session.get("open") if isinstance(session, dict) else None
             # The ensemble's second leg carries its own max_spread_atr, and it
             # is routinely the TIGHTER of the two - six of thirteen live
             # symbols, up to 3.6x on EURJPY (primary 0.18, secondary 0.05).
@@ -1191,7 +1197,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 fails.append("maliyet")
             # A ceiling of 0 disables the filter entirely; only judge a live
             # reading against a ceiling that is actually switched on.
-            if ceiling > 0 and spread_atr > 0 and spread_atr > ceiling:
+            #
+            # And only while the symbol's own session is open. _try_entry never
+            # consults this ceiling outside the session - the session gate
+            # refuses the entry first - so a breach reported there describes a
+            # cost no config can pay. At 08:53 UK100 read 0.3727 against a
+            # 0.080 ceiling and GER40 0.1627 against 0.120, both shut until
+            # 10:00, and both were reported as failing. That is what made
+            # scan-007 record GER40 as having "dropped to a ceiling failure",
+            # reading a config regression into the hour of day. Only an
+            # explicit "shut" waives it: a state the engine has not filled in
+            # yet must not become somewhere a real breach can hide.
+            if (ceiling > 0 and spread_atr > 0 and spread_atr > ceiling
+                    and session_open is not False):
                 fails.append("tavan")
             if fill is not None and fill < fill_floor:
                 fails.append("siklik")
@@ -1207,6 +1225,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 "cost_per_trade_r": round(cost_r, 3),
                 "cost_ceiling_r": ceiling_r,
                 "spread_atr_now": round(spread_atr, 4) if spread_atr else None,
+                # The reading stays visible either way; this says whether it was
+                # taken from a market that was actually trading.
+                "session_open": session_open,
                 "max_spread_atr": ceiling or None,
                 "ceiling_leg": ceiling_leg,
                 "primary_max_spread_atr": float(cfg.max_spread_atr or 0.0) or None,
