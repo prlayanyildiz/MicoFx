@@ -104,6 +104,33 @@ def _verify_archive(zip_path: Path) -> list[str]:
                 if n.endswith(DB_REL.name) and n != wanted]
 
 
+def _database_missing(zip_path: Path) -> bool:
+    """True when the finished archive has no settings DB at the restore path.
+
+    The companion to _verify_archive, which reports the wrong half of the same
+    property: it lists DECOY entries - anything ending in micofx.db that is not
+    the wanted path - and never asks whether the wanted one is there. An archive
+    containing no micofx.db at all therefore produced an empty decoy list and
+    passed.
+
+    That is the state this module already describes as the bad one: it looks
+    like a backup, carries a current timestamp, and is missing the one file in
+    it that cannot be recovered from git. The .part promotion closed the route
+    where an exception left such an archive behind; this closes the quiet one,
+    where _snapshot_db returns None because the source database is not where
+    DB_REL says it is, and the caller writes the entry only when it is not None.
+
+    Unlike a decoy this is fatal to the run. A polluted archive still holds a
+    good snapshot at the right path, so warning is the proportionate answer
+    there. An archive with no database holds only files git already has - and
+    _prune, which ranks by mtime and never opens anything, would let it evict a
+    real backup.
+    """
+    wanted = DB_REL.as_posix()
+    with zipfile.ZipFile(zip_path) as zf:
+        return wanted not in zf.namelist()
+
+
 def _prune(folder: Path, keep: int) -> None:
     """Keep only the ``keep`` newest archives in ``folder``."""
     existing = sorted(folder.glob("MicoFX_*.zip"),
@@ -226,6 +253,16 @@ def main() -> int:
             return 1
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+
+    # Checked on the .part, before it becomes a backup: an archive without the
+    # database must never reach the folder _prune ranks, or it takes a real
+    # one's place there.
+    if _database_missing(part_path):
+        part_path.unlink(missing_ok=True)
+        print(f"HATA: arsivde '{DB_REL.as_posix()}' yok - bu bir yedek degil.")
+        print(f"  Kaynak veritabani beklenen yerde mi: {ROOT / DB_REL}")
+        print("  Onceki yedekler oldugu gibi birakildi.")
+        return 1
 
     try:
         part_path.replace(zip_path)

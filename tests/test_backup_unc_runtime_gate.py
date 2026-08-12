@@ -16,6 +16,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import backup
 
 
+
+def _seed_db(root):
+    """A real settings DB under the fake project root.
+
+    These cases are about the UNC destination gate, and the fixture never
+    needed a database until backup.py started refusing to promote an archive
+    without one - which it should, since an archive with no micofx.db holds
+    only files git already has. A real run always has it; the fixture was the
+    thing that did not.
+    """
+    import sqlite3
+
+    (root / "data").mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(root / "data" / "micofx.db")
+    con.execute("create table settings (key text primary key, value text)")
+    con.commit()
+    con.close()
+
 class _FakeSystem:
     def __init__(self, backup_dir, backup_dir_allow_unc=False, backup_keep=3):
         self.backup_dir = backup_dir
@@ -52,6 +70,7 @@ def test_backup_allows_unc_dest_with_allow_flag(tmp_path, monkeypatch):
     root = tmp_path / "project"
     root.mkdir()
     (root / "sample.txt").write_text("hi")
+    _seed_db(root)
     dest = tmp_path / "dest"
     # A syntactically-UNC string is all the gate itself checks (a real UNC
     # share isn't available in a unit test) - redirect Path() to a real local
@@ -75,6 +94,7 @@ def test_backup_allows_local_dest_without_allow_flag(tmp_path, monkeypatch):
     root = tmp_path / "project"
     root.mkdir()
     (root / "sample.txt").write_text("hi")
+    _seed_db(root)
     dest = tmp_path / "dest"
     monkeypatch.setattr(backup, "Store",
                         lambda: _FakeStore(_FakeSystem(str(dest), backup_dir_allow_unc=False)))
