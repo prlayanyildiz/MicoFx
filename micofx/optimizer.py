@@ -190,6 +190,27 @@ class Optimizer:
             else:
                 targets = [s for s, c in self.store.symbols.items() if c.enabled]
             if not targets:
+                # "Sembol secilmedi" was the answer to three different
+                # situations, and it was the wrong answer to two of them.
+                #
+                # The one that actually happens: the picker's selection is a
+                # Set that survives a symbol leaving the book, so a name
+                # selected before the book was cut is still sent afterwards.
+                # Every name filters out above, and the panel reported "no
+                # symbol selected" about a request that named several. Nothing
+                # in that message points at the cause, and the picker shows no
+                # chip lit either (the "Tumu" chip only lights at size 0), so
+                # there is nothing on screen to contradict it.
+                if symbols:
+                    unknown = [str(s) for s in symbols]
+                    return {"ok": False, "error": (
+                        f"Kitapta olmayan sembol: {', '.join(unknown)}. "
+                        f"Secim listesi eskimis olabilir - sayfayi yenileyin "
+                        f"veya 'Tumu' secip tekrar deneyin.")}
+                if self.store.symbols:
+                    return {"ok": False, "error": (
+                        "Etkin sembol yok - hepsi kapali. Once bir sembolu "
+                        "acin ya da adiyla secerek arayin.")}
                 return {"ok": False, "error": "Sembol secilmedi."}
             # One-off restriction of this run to a subset of the configured
             # timeframes (e.g. "just scan M5 today") - None/empty means the

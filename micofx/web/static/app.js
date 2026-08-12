@@ -1163,6 +1163,14 @@ function renderOptForm() {
 function renderOptPicker() {
   const box = $("#opt-picker");
   if (!box) return;
+  // Drop names that have left the book. The selection is a Set that outlives
+  // the symbol list, so a pick made before the book was cut kept being sent
+  // afterwards - the backend filtered every one of them out and answered
+  // "Sembol secilmedi" about a request that named several. Nothing was lit on
+  // screen either, because the "Tumu" chip only lights when the set is empty.
+  // Pruning here means it empties instead, which IS "Tumu" and runs the book.
+  const live = new Set(SYMBOLS.map((s) => s.symbol));
+  optSelection.forEach((s) => { if (!live.has(s)) optSelection.delete(s); });
   box.innerHTML = "";
   const all = el("div", {
     class: "chip" + (optSelection.size === 0 ? " sel" : ""), text: "Tumu",
