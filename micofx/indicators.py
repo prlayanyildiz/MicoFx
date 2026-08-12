@@ -148,43 +148,6 @@ def rolling_std(src: np.ndarray, length: int) -> np.ndarray:
     return np.sqrt(np.maximum(mean_sq - mean * mean, 0.0))
 
 
-def bollinger(close: np.ndarray, length: int, sd: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Classic Bollinger Bands: SMA mid with +/- ``sd`` standard deviations."""
-    mid = sma(close, max(2, int(length)))
-    dev = rolling_std(close, length) * float(sd)
-    return mid, mid + dev, mid - dev
-
-
-def keltner(high: np.ndarray, low: np.ndarray, close: np.ndarray, length: int,
-            atr_mult: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Keltner Channel: EMA mid with +/- ``atr_mult`` ATR."""
-    mid = ema(close, max(2, int(length)))
-    band = atr(high, low, close, max(2, int(length))) * float(atr_mult)
-    return mid, mid + band, mid - band
-
-
-def linreg_slope(src: np.ndarray, length: int) -> np.ndarray:
-    """Slope of a least-squares fit over the trailing ``length`` bars.
-
-    Used as the momentum leg of a squeeze release: the direction a compressed
-    range breaks is far better predicted by the slope of the run-up than by the
-    breakout bar itself.
-    """
-    length = max(3, int(length))
-    n = src.size
-    out = np.zeros(n, dtype=np.float64)
-    if n < length:
-        return out
-    x = np.arange(length, dtype=np.float64)
-    x_mean = x.mean()
-    denom = float(((x - x_mean) ** 2).sum())
-    win = sliding_window_view(src.astype(np.float64), length)
-    y_mean = win.mean(axis=1)
-    cov = (win * (x - x_mean)).sum(axis=1) - y_mean * (x - x_mean).sum()
-    out[length - 1:] = cov / denom
-    return out
-
-
 def close_location_value(open_: np.ndarray, high: np.ndarray, low: np.ndarray,
                          close: np.ndarray) -> np.ndarray:
     """Where a bar closed inside its own range, on -1..+1.
@@ -356,106 +319,6 @@ def htf_t3_trend(times: np.ndarray, high: np.ndarray, low: np.ndarray, close: np
     return rising, falling
 
 
-def session_index(times: np.ndarray, session_start_min: int) -> np.ndarray:
-    """Group bars into trading sessions that begin at ``session_start_min``.
-
-    Bars before the day's session start belong to the previous session, so an
-    index that opens at 16:30 keeps its whole evening in one bucket.
-    """
-    shifted = times.astype(np.int64) - int(session_start_min) * 60
-    return shifted // 86400
-
-
-def session_vwap(times: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray,
-                 volume: np.ndarray, session_start_min: int) -> tuple[np.ndarray, np.ndarray]:
-    """Session-anchored VWAP and its volume-weighted standard deviation.
-
-    Institutional flow is benchmarked against VWAP, which is why stretched
-    distance from it mean-reverts far more reliably than VWAP crossovers trend.
-    """
-    n = close.size
-    if n == 0:
-        return np.zeros(0), np.zeros(0)
-
-    sess = session_index(times, session_start_min)
-    typical = (high + low + close) / 3.0
-    vol = np.where(volume > 0, volume, 1.0)
-
-    # Cumulative sums restarted at every session boundary.
-    starts = np.flatnonzero(np.diff(sess, prepend=sess[0] - 1) != 0)
-    cum_v = np.cumsum(vol)
-    cum_pv = np.cumsum(typical * vol)
-    cum_pv2 = np.cumsum(typical * typical * vol)
-
-    base = np.zeros(n, dtype=np.float64)
-    base_pv = np.zeros(n, dtype=np.float64)
-    base_pv2 = np.zeros(n, dtype=np.float64)
-    for s in starts:
-        if s > 0:
-            base[s:] = cum_v[s - 1]
-            base_pv[s:] = cum_pv[s - 1]
-            base_pv2[s:] = cum_pv2[s - 1]
-
-    v = np.maximum(cum_v - base, 1e-9)
-    pv = cum_pv - base_pv
-    pv2 = cum_pv2 - base_pv2
-    vwap = pv / v
-    variance = np.maximum(pv2 / v - vwap * vwap, 0.0)
-    return vwap, np.sqrt(variance)
-
-
-def opening_range(times: np.ndarray, high: np.ndarray, low: np.ndarray,
-                  session_start_min: int, minutes: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """High/low of each session's first ``minutes``, broadcast to every bar.
-
-    The third return value marks bars that come *after* the range is complete,
-    which are the only ones allowed to trade the breakout.
-    """
-    n = high.size
-    empty = np.zeros(n, dtype=np.float64)
-    if n == 0:
-        return empty, empty, np.zeros(n, dtype=bool)
-
-    sess = session_index(times, session_start_min)
-    minute_of_day = (times.astype(np.int64) - int(session_start_min) * 60) % 86400 // 60
-    in_range = minute_of_day < int(minutes)
-    after = ~in_range
-
-    uniq, inverse = np.unique(sess, return_inverse=True)
-    hi = np.full(uniq.size, -np.inf)
-    lo = np.full(uniq.size, np.inf)
-    count = np.zeros(uniq.size, dtype=np.int64)
-    np.maximum.at(hi, inverse[in_range], high[in_range])
-    np.minimum.at(lo, inverse[in_range], low[in_range])
-    np.add.at(count, inverse[in_range], 1)
-
-    usable = count >= 1
-    hi = np.where(usable, hi, np.nan)
-    lo = np.where(usable, lo, np.nan)
-    return hi[inverse], lo[inverse], after & usable[inverse]
-
-
-def donchian(high: np.ndarray, low: np.ndarray, length: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Highest high / lowest low of the ``length`` bars *before* each bar.
-
-    The current bar is excluded so a close above the channel is a genuine break
-    of prior structure rather than a comparison against itself. The third value
-    marks bars with a full lookback behind them.
-    """
-    length = max(2, int(length))
-    n = high.size
-    if n == 0:
-        return np.zeros(0), np.zeros(0), np.zeros(0, dtype=bool)
-    lo_l, _ = rolling_min_max(low, length)
-    _, hi_h = rolling_min_max(high, length)
-    prior_hi = np.roll(hi_h, 1)
-    prior_lo = np.roll(lo_l, 1)
-    prior_hi[0], prior_lo[0] = hi_h[0], lo_l[0]
-    valid = np.zeros(n, dtype=bool)
-    valid[min(n, length):] = True
-    return prior_hi, prior_lo, valid
-
-
 def first_of_run(flags: np.ndarray) -> np.ndarray:
     """Keep only the bar that starts each True run.
 
@@ -467,41 +330,6 @@ def first_of_run(flags: np.ndarray) -> np.ndarray:
     prev = np.roll(flags, 1)
     prev[0] = False
     return flags & ~prev
-
-
-def first_per_group(flags: np.ndarray, group: np.ndarray) -> np.ndarray:
-    """Keep only the first True in each group; later repeats are dropped."""
-    out = np.zeros_like(flags)
-    idx = np.flatnonzero(flags)
-    if idx.size == 0:
-        return out
-    keep = np.empty(idx.size, dtype=bool)
-    keep[0] = True
-    keep[1:] = group[idx[1:]] != group[idx[:-1]]
-    out[idx[keep]] = True
-    return out
-
-
-def any_before_in_group(flags: np.ndarray, group: np.ndarray) -> np.ndarray:
-    """True at bar i if `flags` fired at any earlier bar in the same group (session).
-
-    Used for retest logic: "already broke out earlier this session". Vectorized
-    cumulative count with a reset at each group boundary so a prior session's
-    breakout never leaks into the next one.
-    """
-    if flags.size == 0:
-        return flags.astype(bool)
-    flags_i = flags.astype(np.int64)
-    csum = np.cumsum(flags_i)
-    change = np.empty(group.shape, dtype=bool)
-    change[0] = True
-    change[1:] = group[1:] != group[:-1]
-    starts = np.flatnonzero(change)
-    baseline_at_start = csum[starts] - flags_i[starts]  # count strictly before each group started
-    counts = np.diff(np.append(starts, group.size))
-    baseline = np.repeat(baseline_at_start, counts)
-    before_count = csum - flags_i - baseline  # count within this group, strictly before this bar
-    return before_count > 0
 
 
 def rsi(close: np.ndarray, length: int) -> np.ndarray:

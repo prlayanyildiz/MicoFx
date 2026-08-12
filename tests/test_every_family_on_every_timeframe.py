@@ -1,11 +1,12 @@
 """Every strategy family, on every timeframe the book runs, checked as a set.
 
-Families were only ever exercised one at a time, by whichever test needed the
+Families are only ever exercised one at a time, by whichever test needed the
 one it was about. That leaves the properties EVERY family has to hold no matter
 which one it is - and those are the ones that go wrong quietly, because no
 single family's test is the place to notice them.
 
-Five invariants, run over all twenty families against M5/M15/M30/H1:
+Five invariants, run over every family in the registry against
+M5/M15/M30/H1:
 
   * it computes at all, on ordinary bars;
   * every series it hands back is the length of the input and free of NaN and
@@ -89,8 +90,13 @@ IDS = [f"{f}-{tf}" for f, tf, _ in CASES]
 
 
 def test_the_registry_is_the_whole_book():
-    """Guards the sweep from silently covering fewer families than exist."""
-    assert len(FAMILIES) == 20, f"aile sayisi degisti: {FAMILIES}"
+    """Guards the sweep from silently covering fewer families than exist.
+
+    Fourteen since the six the search never offered were removed - orb,
+    vwap_rev, donchian, squeeze_brk, t3_ribbon and liq_sweep. Pinned rather
+    than derived so dropping a family stays a deliberate act.
+    """
+    assert len(FAMILIES) == 14, f"aile sayisi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

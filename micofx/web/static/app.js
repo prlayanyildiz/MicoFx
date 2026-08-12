@@ -594,18 +594,22 @@ function renderLive() {
 
 const STRATEGY_LABEL = {
   t3_stoch: "T3 + Stochastic RSI",
-  orb: "Acilis Araligi Kirilimi",
-  vwap_rev: "VWAP Ortalamaya Donus",
-  donchian: "Donchian Kirilimi",
-  squeeze_brk: "Bollinger/Keltner Sikisma Kirilimi",
   flow_rev: "Emir Akisi Tukenme Donusu",
   mtf_pullback: "Ust TF Trend Geri Cekilmesi",
   micro_rev: "Mikro Ortalamaya Donus (maliyet olcekli)",
   burst: "Momentum Patlamasi Devami",
-  t3_ribbon: "Tillson T3 Seridi (hizli/yavas kesisim)",
   dual_t3: "Ikili T3 + ATR (sade cekirdek)",
   st_trend: "SuperTrend Donusu (hedefsiz, sadece trail)",
   t3_flip: "Tek Tillson T3 Yon Donusu (tek cizgi)",
+  // The flip families were missing here entirely, so four of the ten live
+  // symbols showed a raw key instead of a name. Must stay in step with
+  // models.STRATEGIES - the dropdown below is the same list.
+  macd_flip: "MACD Yon Donusu",
+  wavetrend_flip: "WaveTrend Yon Donusu",
+  stoch_flip: "Stochastic Yon Donusu",
+  parabolic_flip: "Parabolic SAR Yon Donusu",
+  trix_flip: "TRIX Yon Donusu",
+  aroon_flip: "Aroon Yon Donusu",
 };
 
 // Visible on every symbol card without expanding anything: pure risk/sizing
@@ -632,17 +636,7 @@ const SECTIONS = [
     fields: [
       {
         k: "strategy", t: "select", label: "Strateji ailesi",
-        opts: [["t3_stoch", "T3 + Stochastic RSI"], ["orb", "Acilis Araligi (ORB)"],
-               ["vwap_rev", "VWAP Ortalamaya Donus"], ["donchian", "Donchian Kirilimi"],
-               ["squeeze_brk", "Bollinger/Keltner Sikisma Kirilimi"],
-               ["flow_rev", "Emir Akisi Tukenme Donusu"],
-               ["mtf_pullback", "Ust TF Trend Geri Cekilmesi"],
-               ["micro_rev", "Mikro Ortalamaya Donus (maliyet olcekli)"],
-               ["burst", "Momentum Patlamasi Devami"],
-               ["t3_ribbon", "Tillson T3 Seridi (hizli/yavas kesisim)"],
-               ["dual_t3", "Ikili T3 + ATR (sade cekirdek)"],
-               ["st_trend", "SuperTrend Donusu (hedefsiz, sadece trail)"],
-               ["t3_flip", "Tek Tillson T3 Yon Donusu (tek cizgi)"]],
+        opts: Object.entries(STRATEGY_LABEL),
       },
       { k: "timeframe", t: "select", label: "Zaman dilimi", opts: [["M5", "M5"], ["M15", "M15"], ["M30", "M30"], ["H1", "H1"]] },
     ],
@@ -688,38 +682,6 @@ const SECTIONS = [
     ],
   },
   {
-    title: "Acilis Araligi (ORB)",
-    fields: [
-      { k: "orb_minutes", t: "int", label: "Aralik suresi (dk)", min: 5, max: 240 },
-      { k: "orb_buffer_atr", t: "num", label: "Kirilim payi x ATR", step: 0.05, min: 0, max: 2 },
-      { k: "orb_retest", t: "bool", label: "Sadece geri test (retest) sonrasi gir" },
-    ],
-  },
-  {
-    title: "Donchian Kirilimi",
-    fields: [
-      { k: "don_length", t: "int", label: "Kanal uzunlugu (bar)", min: 5, max: 300 },
-      { k: "don_buffer_atr", t: "num", label: "Kirilim payi x ATR", step: 0.05, min: 0, max: 2 },
-      { k: "don_squeeze", t: "num", label: "Maks kanal genisligi yuzdeligi (0=kapali)", step: 0.05, min: 0, max: 1 },
-    ],
-  },
-  {
-    title: "VWAP Ortalamaya Donus",
-    fields: [
-      { k: "vwap_sd", t: "num", label: "Uzama esigi (std sapma)", step: 0.25, min: 0.5, max: 6 },
-      { k: "adx_max", t: "num", label: "Maks ADX (0=kapali)", step: 1, min: 0, max: 60 },
-    ],
-  },
-  {
-    title: "Bollinger/Keltner Sikisma Kirilimi",
-    fields: [
-      { k: "sqz_length", t: "int", label: "Bant uzunlugu (BB ve KC)", min: 5, max: 100 },
-      { k: "sqz_bb_sd", t: "num", label: "Bollinger std sapma", step: 0.1, min: 0.5, max: 4 },
-      { k: "sqz_kc_atr", t: "num", label: "Keltner x ATR", step: 0.1, min: 0.5, max: 4 },
-      { k: "sqz_momentum_len", t: "int", label: "Yon icin regresyon penceresi", min: 3, max: 60 },
-    ],
-  },
-  {
     title: "Emir Akisi Tukenme Donusu",
     fields: [
       { k: "flow_length", t: "int", label: "Akis penceresi (bar)", min: 3, max: 120 },
@@ -749,16 +711,6 @@ const SECTIONS = [
       { k: "brst_lookback", t: "int", label: "Menzil penceresi (bar)", min: 5, max: 120 },
       { k: "brst_range_z", t: "num", label: "Menzil genislemesi (z skor)", step: 0.1, min: 0.5, max: 5 },
       { k: "brst_close_pct", t: "num", label: "Kapanis barin ucunda (oran)", step: 0.05, min: 0.5, max: 0.99 },
-    ],
-  },
-  {
-    title: "Tillson T3 Seridi (hizli/yavas kesisim)",
-    fields: [
-      { k: "t3_fast", t: "int", label: "Hizli T3 uzunluk", min: 2, max: 60 },
-      { k: "t3_slow_mult", t: "num", label: "Yavas T3 carpani", step: 0.5, min: 1.2, max: 10 },
-      { k: "t3_slope_atr", t: "num", label: "Min yavas T3 egimi x ATR (0=kapali)", step: 0.01, min: 0, max: 1 },
-      { k: "t3_fast_vf", t: "num", label: "Hizli T3 hacim faktoru (0=yavas ile ayni)", step: 0.001, min: 0, max: 1 },
-      { k: "t3_accel_min", t: "num", label: "Min T3 ivmesi x ATR (0=kapali, T3 aileleri)", step: 0.01, min: 0, max: 1 },
     ],
   },
   {

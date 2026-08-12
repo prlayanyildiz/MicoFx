@@ -16,13 +16,8 @@ class Params:
     """Flat parameter view so the optimizer can vary values without a full config."""
 
     strategy: str = "t3_stoch"
-    session_start_min: int = 0       # anchors ORB and VWAP to the trading session
 
     # ---- Bollinger/Keltner squeeze breakout ----
-    sqz_length: int = 20
-    sqz_bb_sd: float = 2.0
-    sqz_kc_atr: float = 1.5
-    sqz_momentum_len: int = 12
 
     # ---- order-flow-proxy exhaustion reversion ----
     flow_length: int = 20
@@ -47,7 +42,6 @@ class Params:
     # ---- Tillson T3 ribbon (fast/slow T3 cross) ----
     t3_fast: int = 5                 # fast T3 length
     t3_slow_mult: float = 3.0        # slow T3 length = fast * this
-    t3_slope_atr: float = 0.0        # 0 disables; min |slow T3 slope| per bar, in ATR
     t3_fast_vf: float = 0.0          # fast line's own volume factor; 0 inherits t3_volume_factor
 
     # ---- T3 slope-quality (curvature) filter, shared by the T3 families ----
@@ -61,23 +55,12 @@ class Params:
     cost_rank_max: float = 0.0       # 0 disables; percentile ceiling on cost/range
 
     # ---- opening range breakout ----
-    orb_minutes: int = 30
-    orb_buffer_atr: float = 0.1
-    orb_retest: bool = False         # wait for a pullback + reclaim instead of chasing the break
 
-    # ---- Donchian breakout ----
-    don_length: int = 20
-    don_buffer_atr: float = 0.0
-    don_squeeze: float = 0.0         # 0 disables; channel-width percentile ceiling
 
     # ---- VWAP mean reversion ----
-    vwap_sd: float = 2.0
-    vwap_reentry: bool = True        # wait for price to turn back toward VWAP
     adx_max: float = 0.0             # 0 disables; reversion dies in strong trends
 
     # ---- liquidity sweep / stop hunt reversal ----
-    swp_lookback: int = 20           # bars defining the swing high/low that gets swept
-    swp_wick_atr: float = 0.15       # how far past that swing the wick must reach, in ATR
 
     # ---- MACD histogram zero-cross ----
     macd_fast: int = 12
@@ -131,7 +114,6 @@ class Params:
     @classmethod
     def from_config(cls, cfg: SymbolConfig, **overrides: Any) -> "Params":
         base = {f: getattr(cfg, f) for f in cls.__dataclass_fields__ if hasattr(cfg, f)}
-        base["session_start_min"] = cfg.session_start_minutes()
         base.update({k: v for k, v in overrides.items() if k in cls.__dataclass_fields__})
         return cls(**base)
 
@@ -148,18 +130,14 @@ class Params:
                 self.stoch_length, self.smooth_k, self.smooth_d, self.stoch_band,
                 self.stoch_extreme, self.atr_period, self.adx_period, self.adx_min,
                 self.adx_max, self.htf_factor, self.htf_mode, self.min_body_ratio,
-                self.atr_pct_min, self.orb_minutes, self.orb_buffer_atr, self.orb_retest,
-                self.don_length, self.don_buffer_atr, self.don_squeeze,
-                self.vwap_sd, self.vwap_reentry, self.session_start_min,
-                self.sqz_length, self.sqz_bb_sd, self.sqz_kc_atr, self.sqz_momentum_len,
+                self.atr_pct_min,
                 self.flow_length, self.flow_z, self.flow_divergence,
                 self.pull_fast, self.pull_depth_atr, self.pull_max_bars,
                 self.mr_fast, self.mr_stretch_cost, self.mr_confirm,
                 self.brst_lookback, self.brst_range_z, self.brst_close_pct,
-                self.t3_fast, self.t3_slow_mult, self.t3_slope_atr, self.t3_fast_vf,
+                self.t3_fast, self.t3_slow_mult, self.t3_fast_vf,
                 self.t3_accel_min,
                 self.st_period, self.st_mult,
-                self.swp_lookback, self.swp_wick_atr,
                 self.cost_rank_max,
                 self.macd_fast, self.macd_slow, self.macd_signal,
                 self.wt_channel_len, self.wt_avg_len,
@@ -193,15 +171,7 @@ class IndicatorCache:
         self._adx: dict[int, np.ndarray] = {}
         self._htf: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._rank: dict[tuple, np.ndarray] = {}
-        self._vwap: dict[int, tuple[np.ndarray, np.ndarray]] = {}
-        self._orb: dict[tuple, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._don: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._squeeze: dict[tuple, np.ndarray] = {}
-        self._session: dict[int, np.ndarray] = {}
         self._body: np.ndarray | None = None
-        self._bb: dict[tuple, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._kc: dict[tuple, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-        self._slope: dict[int, np.ndarray] = {}
         self._ema: dict[int, np.ndarray] = {}
         self._flow: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._supertrend: dict[tuple, np.ndarray] = {}
@@ -243,7 +213,7 @@ class IndicatorCache:
             # "unknown cost" is not "cheap enough", it is the one case this
             # filter exists to catch. micro_rev already refuses to trade blind
             # when cost is unavailable; every other cost_ok() caller (burst,
-            # t3_ribbon) was silently getting an all-pass instead, which turned
+            # was silently getting an all-pass instead, which turned
             # a real cost gate into a no-op exactly when it mattered.
             return np.zeros(size, dtype=bool)
         key = int(window)
@@ -254,26 +224,6 @@ class IndicatorCache:
             rank = ind.rolling_rank(ratio, key)
             self._cost_rank[key] = rank
         return rank <= float(rank_max)
-
-    # ---- Bollinger / Keltner squeeze --------------------------------------
-
-    def bollinger(self, length: int, sd: float):
-        key = (int(length), round(float(sd), 4))
-        if key not in self._bb:
-            self._bb[key] = ind.bollinger(self.close, key[0], key[1])
-        return self._bb[key]
-
-    def keltner(self, length: int, atr_mult: float):
-        key = (int(length), round(float(atr_mult), 4))
-        if key not in self._kc:
-            self._kc[key] = ind.keltner(self.high, self.low, self.close, key[0], key[1])
-        return self._kc[key]
-
-    def slope(self, length: int) -> np.ndarray:
-        key = int(length)
-        if key not in self._slope:
-            self._slope[key] = ind.linreg_slope(self.close, key)
-        return self._slope[key]
 
     def ema(self, length: int) -> np.ndarray:
         key = int(length)
@@ -296,39 +246,6 @@ class IndicatorCache:
             run = ind.rolling_sum(self.delta(), key[0])
             self._flow[key] = (run, ind.zscore(run, key[1]))
         return self._flow[key]
-
-    def vwap(self, session_start_min: int) -> tuple[np.ndarray, np.ndarray]:
-        key = int(session_start_min)
-        if key not in self._vwap:
-            self._vwap[key] = ind.session_vwap(self.times, self.high, self.low, self.close,
-                                               self.volume, key)
-        return self._vwap[key]
-
-    def opening_range(self, session_start_min: int, minutes: int):
-        key = (int(session_start_min), int(minutes))
-        if key not in self._orb:
-            self._orb[key] = ind.opening_range(self.times, self.high, self.low, key[0], key[1])
-        return self._orb[key]
-
-    def donchian(self, length: int):
-        key = int(length)
-        if key not in self._don:
-            self._don[key] = ind.donchian(self.high, self.low, key)
-        return self._don[key]
-
-    def squeeze_rank(self, length: int, window: int = 200) -> np.ndarray:
-        """Where the current channel width sits in its own recent range, 0..1."""
-        key = (int(length), int(window))
-        if key not in self._squeeze:
-            hi, lo, _ = self.donchian(key[0])
-            self._squeeze[key] = ind.rolling_rank(hi - lo, key[1])
-        return self._squeeze[key]
-
-    def session_id(self, session_start_min: int) -> np.ndarray:
-        key = int(session_start_min)
-        if key not in self._session:
-            self._session[key] = ind.session_index(self.times, key)
-        return self._session[key]
 
     def t3(self, length: int, vf: float) -> np.ndarray:
         key = (int(length), round(float(vf), 4))
@@ -558,113 +475,6 @@ def _resolve_conflicts(buy: np.ndarray, sell: np.ndarray) -> tuple[np.ndarray, n
     return buy & ~both, sell & ~both
 
 
-def _orb(cache: IndicatorCache, p: Params) -> Signals:
-    """Opening range breakout, confirmed on the close.
-
-    Research on index futures finds the first *confirmed* break of the opening
-    range continues into the close roughly two thirds of the time, and that a
-    close outside the range beats a wick touch by a wide margin. Only the first
-    break of each session is taken.
-    """
-    close = cache.close
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    hi, lo, tradable = cache.opening_range(p.session_start_min, p.orb_minutes)
-    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
-    regime = _regime(p, adx_series, close.size)
-
-    buffer = atr_series * max(0.0, p.orb_buffer_atr)
-    valid = tradable & np.isfinite(hi) & np.isfinite(lo) & regime
-    up = valid & (close > np.nan_to_num(hi, nan=np.inf) + buffer) & allow_long
-    down = valid & (close < np.nan_to_num(lo, nan=-np.inf) - buffer) & allow_short
-
-    session = cache.session_id(p.session_start_min)
-
-    if p.orb_retest:
-        # Wait for price to break out, then pull back and reclaim the level
-        # before entering - trades the retest instead of chasing the break.
-        hi_level = np.nan_to_num(hi, nan=np.inf) + buffer
-        lo_level = np.nan_to_num(lo, nan=-np.inf) - buffer
-        broke_up_before = ind.any_before_in_group(up, session)
-        broke_down_before = ind.any_before_in_group(down, session)
-        near_hi = valid & (cache.low <= hi_level + atr_series * 0.5) & (close > hi_level) & allow_long
-        near_lo = valid & (cache.high >= lo_level - atr_series * 0.5) & (close < lo_level) & allow_short
-        up = near_hi & broke_up_before & ~up
-        down = near_lo & broke_down_before & ~down
-
-    buy = ind.first_per_group(up, session)
-    sell = ind.first_per_group(down, session)
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
-def _donchian(cache: IndicatorCache, p: Params) -> Signals:
-    """Close beyond the prior N-bar channel, optionally only out of a squeeze.
-
-    Unlike ORB this is not tied to a session open, so it catches expansions at
-    any hour. Volatility compresses before it expands, so ``don_squeeze`` keeps
-    entries to breaks that leave an unusually narrow channel - which is where
-    breakout follow-through concentrates - instead of chasing an extended move.
-    """
-    close = cache.close
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    hi, lo, valid = cache.donchian(p.don_length)
-    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
-
-    ok = valid & _regime(p, adx_series, close.size)
-    if p.don_squeeze > 0:
-        ok &= cache.squeeze_rank(p.don_length) <= p.don_squeeze
-    if p.atr_pct_min > 0:
-        ok &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
-    if p.min_body_ratio > 0:
-        ok &= cache.body_ratio() >= p.min_body_ratio
-
-    buffer = atr_series * max(0.0, p.don_buffer_atr)
-    buy = ind.first_of_run(ok & (close > hi + buffer)) & allow_long
-    sell = ind.first_of_run(ok & (close < lo - buffer)) & allow_short
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
-def _vwap_rev(cache: IndicatorCache, p: Params) -> Signals:
-    """Fade stretched distance from the session VWAP.
-
-    Of the common VWAP strategies only mean reversion shows a statistically
-    robust edge; crossovers show none. The edge concentrates when price is far
-    from VWAP and is already turning back, and it evaporates on trend days,
-    which is what ``adx_max`` guards against.
-    """
-    close, open_ = cache.close, cache.open
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    vwap, sd = cache.vwap(p.session_start_min)
-    htf_up, htf_down, _, _ = _trend_gate(cache, p)
-    regime = _regime(p, adx_series, close.size)
-
-    band = sd * max(0.1, p.vwap_sd)
-    stretched_up = close > vwap + band          # too far above -> sell
-    stretched_dn = close < vwap - band          # too far below -> buy
-
-    if p.vwap_reentry:
-        # Only act once the bar itself is rolling back toward VWAP.
-        stretched_up = stretched_up & (close < open_)
-        stretched_dn = stretched_dn & (close > open_)
-
-    warm = np.zeros(close.size, dtype=bool)
-    warm[:] = sd > 0
-    buy = stretched_dn & regime & warm
-    sell = stretched_up & regime & warm
-
-    if p.min_body_ratio > 0:
-        body = cache.body_ratio()
-        buy &= body >= p.min_body_ratio
-        sell &= body >= p.min_body_ratio
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
 def _t3_stoch(cache: IndicatorCache, p: Params) -> Signals:
     """T3 trend direction gated by a Stochastic RSI %K/%D cross.
 
@@ -724,50 +534,6 @@ def _t3_stoch(cache: IndicatorCache, p: Params) -> Signals:
     buy[:warmup] = False
     sell[:warmup] = False
 
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
-def _squeeze_brk(cache: IndicatorCache, p: Params) -> Signals:
-    """Bollinger/Keltner squeeze release, taken in the direction of momentum.
-
-    The "squeeze" is on while the Bollinger Bands sit *inside* the Keltner
-    Channel: standard deviation has fallen below the ATR envelope, which is the
-    textbook signature of a compressed range. Volatility mean-reverts, so
-    compression resolves into expansion; the release bar - the first bar where
-    the bands push back outside the channel - is the trade. Direction is taken
-    from the slope of a linear regression over the run-up rather than from the
-    release bar itself, which is what separates this from chasing a candle.
-
-    This is deliberately different from ``donchian``: Donchian breaks are about
-    *price* leaving prior structure, this one is about *volatility* leaving a
-    compressed state, and the two fire on different bars.
-    """
-    close = cache.close
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    _, bb_up, bb_dn = cache.bollinger(p.sqz_length, p.sqz_bb_sd)
-    _, kc_up, kc_dn = cache.keltner(p.sqz_length, p.sqz_kc_atr)
-    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
-
-    squeeze = (bb_up < kc_up) & (bb_dn > kc_dn)
-    prev_sqz = np.roll(squeeze, 1)
-    prev_sqz[0] = False
-    fired = prev_sqz & ~squeeze                # first bar the compression lets go
-
-    momentum = cache.slope(p.sqz_momentum_len)
-    ok = fired & _regime(p, adx_series, close.size)
-    if p.atr_pct_min > 0:
-        ok &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
-    if p.min_body_ratio > 0:
-        ok &= cache.body_ratio() >= p.min_body_ratio
-
-    # The bands are meaningless until both have a full window behind them.
-    warmup = min(close.size, max(p.sqz_length * 3, p.sqz_momentum_len * 2, p.atr_period * 3))
-    ok[:warmup] = False
-
-    buy = ok & (momentum > 0) & (close > cache.open) & allow_long
-    sell = ok & (momentum < 0) & (close < cache.open) & allow_short
     buy, sell = _resolve_conflicts(buy, sell)
     return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
                    htf_up=htf_up, htf_down=htf_down)
@@ -954,8 +720,8 @@ def _micro_rev(cache: IndicatorCache, p: Params) -> Signals:
 def _burst(cache: IndicatorCache, p: Params) -> Signals:
     """Continuation off a single range-expansion bar that closed on its extreme.
 
-    The existing breakout families both key off *levels*: ORB off the session's
-    opening range, Donchian off an N-bar channel. Neither of them can fire on
+    A level-based breakout keys off a price the market has already printed -
+    a session's opening range, an N-bar channel. None of those can fire on
     the bar that actually matters to a scalper - the one where a burst of
     one-sided activity expands the range well beyond what the last hour has been
     doing and then closes hard against its own extreme, with no prior level
@@ -998,88 +764,6 @@ def _burst(cache: IndicatorCache, p: Params) -> Signals:
 
     buy = ind.first_of_run(buy)
     sell = ind.first_of_run(sell)
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
-def _t3_ribbon(cache: IndicatorCache, p: Params) -> Signals:
-    """Fast Tillson T3 crossing a slow Tillson T3 - the cross *is* the entry.
-
-    ``t3_stoch`` only ever asks T3 a yes/no question ("is it rising?") and lets
-    a Stochastic RSI pick the bar. That throws away what T3 is actually good at:
-    it is a low-lag curve, so the *relationship between two of them* carries
-    real information the way a moving-average ribbon does, but without the lag
-    that makes an EMA ribbon useless on M5. Fast above slow is the bias, the
-    crossover bar is the trigger (the classic golden/death cross read of a T3
-    pair), and because both lines are six-EMA cascades the cross is far less
-    prone to the whipsaw that kills a plain MA cross.
-
-    Two curvature-aware filters sit on top, and both are searched rather than
-    assumed. ``t3_slope_atr`` requires the slow line to already be travelling at
-    a minimum speed in ATR units, which throws away crosses that happen inside a
-    flat ribbon - where a T3 pair braids and every cross is noise. ``t3_accel_min``
-    requires the fast line to still be bending the trade's way, which is the
-    difference between joining a move and joining its exhaustion.
-    """
-    close = cache.close
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
-    regime = _regime(p, adx_series, close.size)
-
-    fast_len = max(2, int(p.t3_fast))
-    slow_len = max(fast_len + 1, int(round(fast_len * max(1.2, float(p.t3_slow_mult)))))
-    # Each line gets its own volume factor when the search asks for one. vf is a
-    # curvature knob, not a second length: a shorter line damped differently is a
-    # genuinely different curve, which is exactly what the Tillson scalping
-    # template does (8/0.7 against 5/0.618). 0 inherits and stays backward
-    # compatible with the single-vf ribbon.
-    fast_vf = float(p.t3_fast_vf) if float(p.t3_fast_vf) > 0 else float(p.t3_volume_factor)
-    fast = cache.t3(fast_len, fast_vf)
-    slow = cache.t3(slow_len, p.t3_volume_factor)
-
-    fast_prev, slow_prev = np.roll(fast, 1), np.roll(slow, 1)
-    fast_prev[0], slow_prev[0] = fast[0], slow[0]
-    cross_up = (fast_prev <= slow_prev) & (fast > slow)
-    cross_dn = (fast_prev >= slow_prev) & (fast < slow)
-
-    # Speed of the slow line per bar, in ATR - scale free across symbols.
-    slope = np.zeros(close.size, dtype=np.float64)
-    live = atr_series > 1e-12
-    np.divide(slow - slow_prev, atr_series, out=slope, where=live)
-    thr = max(0.0, float(p.t3_slope_atr))
-
-    ok = regime & live & cache.cost_ok(p.cost_rank_max)
-    if p.atr_pct_min > 0:
-        ok &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
-    if p.min_body_ratio > 0:
-        ok &= cache.body_ratio() >= p.min_body_ratio
-
-    buy = ok & cross_up & (close > fast) & allow_long
-    sell = ok & cross_dn & (close < fast) & allow_short
-    # 0 (the default) means disabled, same convention as every other
-    # optional filter in this family (t3_accel_min, st_mult, cost_rank_max,
-    # don_squeeze, adx_max - all gated behind `if p.x > 0`). This one was
-    # applied unconditionally instead: thr=0.0 still demanded slope>=0.0/
-    # -slope>=0.0, permanently vetoing a cross that fires while the slow
-    # line is momentarily flat or still pointed the other way - often the
-    # earliest, most valuable part of the move, and exactly the case the
-    # "0 disables" doc comment above promised would be let through.
-    if thr > 0:
-        buy &= slope >= thr
-        sell &= -slope >= thr
-
-    if p.t3_accel_min > 0:
-        accel = _t3_accel(fast, atr_series)
-        acc_thr = float(p.t3_accel_min)
-        buy &= accel >= acc_thr
-        sell &= accel <= -acc_thr
-
-    warmup = min(close.size, max(slow_len * 6 * max(1, p.htf_factor if p.htf_mode == "t3" else 1),
-                                 slow_len * 8, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
     buy, sell = _resolve_conflicts(buy, sell)
     return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
                    htf_up=htf_up, htf_down=htf_down)
@@ -1239,7 +923,7 @@ def _t3_flip(cache: IndicatorCache, p: Params) -> Signals:
     This is the smallest T3 rule that exists, and it is deliberately not any of
     the three T3 families already in this file. ``t3_stoch`` only asks the line a
     yes/no question ("is it rising?") and lets a Stochastic RSI pick the bar;
-    ``t3_ribbon`` and ``dual_t3`` both need a *second* line and trade the
+    ``dual_t3`` needs a *second* line and trades the
     crossover. Here there is no second line and no second indicator: the bar on
     which the single line stops falling and starts rising is the long, the bar on
     which it stops rising and starts falling is the short. That is exactly the
@@ -1547,73 +1231,15 @@ def _aroon_flip(cache: IndicatorCache, p: Params) -> Signals:
                    htf_up=flat, htf_down=flat)
 
 
-def _liq_sweep(cache: IndicatorCache, p: Params) -> Signals:
-    """Liquidity sweep reversal: a wick past recent swing structure, rejected.
-
-    A stop-hunt/liquidity-sweep entry is a pure price-action idea with no
-    indicator behind it: retail stops cluster just past the last swing
-    high/low, and a bar that wicks through that level and then closes back on
-    the other side has swept those stops and failed to hold the break - the
-    classic false-break reversal. The swing level is the same causal
-    swing_highs/swing_lows the structure-based trailing stop already uses, so
-    this reuses the existing definition of "recent structure" rather than
-    inventing a second one. ``swp_wick_atr`` keeps the sweep to a real
-    excursion (in ATR units) rather than a single point of noise, and the
-    close must fully reclaim the level - a bar that wicks *and* closes past it
-    is a breakout continuing, not a sweep.
-    """
-    close = cache.close
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    htf_up, htf_down, _, _ = _trend_gate(cache, p)
-    regime = _regime(p, adx_series, close.size)
-
-    lookback = max(3, int(p.swp_lookback))
-    swing_hi = ind.swing_highs(cache.high, lookback)
-    swing_lo = ind.swing_lows(cache.low, lookback)
-    wick = atr_series * max(0.0, p.swp_wick_atr)
-
-    # Swept the high and failed to hold above it -> sell.
-    sell = (cache.high > swing_hi + wick) & (close < swing_hi) & regime
-    # Swept the low and failed to hold below it -> buy.
-    buy = (cache.low < swing_lo - wick) & (close > swing_lo) & regime
-
-    if p.min_body_ratio > 0:
-        body = cache.body_ratio()
-        buy &= body >= p.min_body_ratio
-        sell &= body >= p.min_body_ratio
-    if p.atr_pct_min > 0:
-        lively = cache.atr_rank(p.atr_period) >= p.atr_pct_min
-        buy &= lively
-        sell &= lively
-
-    # The swing lookback needs a real window of bars behind it before its
-    # "recent high/low" means anything.
-    warmup = min(close.size, max(lookback * 4, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy = ind.first_of_run(buy)
-    sell = ind.first_of_run(sell)
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
 _FAMILIES = {
     "t3_stoch": _t3_stoch,
-    "orb": _orb,
-    "vwap_rev": _vwap_rev,
-    "donchian": _donchian,
-    "squeeze_brk": _squeeze_brk,
     "flow_rev": _flow_rev,
     "mtf_pullback": _mtf_pullback,
     "micro_rev": _micro_rev,
     "burst": _burst,
-    "t3_ribbon": _t3_ribbon,
     "dual_t3": _dual_t3,
     "st_trend": _st_trend,
     "t3_flip": _t3_flip,
-    "liq_sweep": _liq_sweep,
     "macd_flip": _macd_flip,
     "wavetrend_flip": _wavetrend_flip,
     "stoch_flip": _stoch_flip,
@@ -1628,19 +1254,16 @@ def required_bars(p: Params) -> int:
     htf = max(1, p.htf_factor if p.htf_mode == "t3" else 1)
     if p.strategy == "mtf_pullback":
         htf = max(htf, 6)            # the trend leg is mandatory for this family
-    breakout = p.don_length * 4 + (240 if p.don_squeeze > 0 else 0)
     return int(max(400, p.t3_length * 20 * htf,
                    (p.rsi_length + p.stoch_length + p.smooth_k + p.smooth_d) * 8,
-                   p.atr_period * 10, p.adx_period * 10, breakout,
-                   p.sqz_length * 6, p.sqz_momentum_len * 4,
+                   p.atr_period * 10, p.adx_period * 10,
                    p.flow_length * 6 + 240, p.pull_fast * 10,
                    # The scalping families rank cost against a 240-bar window.
                    p.mr_fast * 8 + 260, p.brst_lookback * 6 + 260,
-                   # The ribbon's slow line is a cascade over t3_fast * mult.
+                   # dual_t3's slow line is a cascade over t3_fast * mult.
                    int(p.t3_fast * max(1.2, p.t3_slow_mult)) * 20,
                    int(p.st_period) * 10
                    if (p.st_mult > 0 or p.strategy == "st_trend") else 0,
-                   p.swp_lookback * 4,
                    (p.macd_slow + p.macd_signal) * 10,
                    (p.wt_channel_len + p.wt_avg_len) * 10,
                    (p.stoch_k_period + p.stoch_k_smooth + p.stoch_d_smooth) * 8,

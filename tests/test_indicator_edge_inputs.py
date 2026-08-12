@@ -104,8 +104,16 @@ CASES = [
 
 
 def test_the_public_surface_is_what_this_file_thinks_it_is():
-    """Guard the sweep: a renamed or new indicator must not silently escape."""
-    assert len(PUBLIC) >= 35, PUBLIC
+    """Guard the sweep: a renamed or new indicator must not silently escape.
+
+    Twenty-eight since the six unsearched families were removed and took nine
+    indicators with them - bollinger, keltner, linreg_slope, donchian,
+    opening_range, session_vwap, session_index and the two group helpers had no
+    caller left once orb, vwap_rev, donchian, squeeze_brk, t3_ribbon and
+    liq_sweep were gone. rolling_rank stayed: cost_rank and the ATR rank still
+    use it.
+    """
+    assert len(PUBLIC) >= 28, PUBLIC
     for expected in ("atr", "rsi", "adx", "wilder", "true_range", "supertrend"):
         assert expected in PUBLIC
 

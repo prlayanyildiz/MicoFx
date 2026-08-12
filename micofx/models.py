@@ -75,9 +75,9 @@ class SymbolConfig:
     enabled: bool = True
     timeframe: str = "M5"
     broker_symbol: str = ""          # override when the broker renames an instrument
-    # t3_stoch | orb | vwap_rev | donchian | squeeze_brk | flow_rev
-    # | mtf_pullback | micro_rev | burst | t3_ribbon | dual_t3 | st_trend
-    # | t3_flip
+    # t3_stoch | flow_rev | mtf_pullback | micro_rev | burst | dual_t3
+    # | st_trend | t3_flip | macd_flip | wavetrend_flip | stoch_flip
+    # | parabolic_flip | trix_flip | aroon_flip   (see models.STRATEGIES)
     strategy: str = "t3_stoch"
 
     # ---- optional second, uncorrelated signal on the same symbol ----
@@ -95,10 +95,6 @@ class SymbolConfig:
     secondary_summary: dict = field(default_factory=dict)
 
     # ---- Bollinger/Keltner squeeze breakout ----
-    sqz_length: int = 20             # shared length for both bands
-    sqz_bb_sd: float = 2.0           # Bollinger standard deviations
-    sqz_kc_atr: float = 1.5          # Keltner ATR multiple
-    sqz_momentum_len: int = 12       # linear-regression slope window that picks the side
 
     # ---- order-flow-proxy exhaustion reversion ----
     flow_length: int = 20            # bars of signed-volume proxy accumulated
@@ -126,7 +122,6 @@ class SymbolConfig:
     # useless intraday. Fast above slow is the bias; the cross is the trigger.
     t3_fast: int = 5                 # fast T3 length
     t3_slow_mult: float = 3.0        # slow T3 length = fast * this
-    t3_slope_atr: float = 0.0        # 0 disables; min |slow T3 slope| per bar, in ATR
     # The two lines may run DIFFERENT volume factors. A T3's vf is its curvature
     # knob, not just a smoothing length: the widely shared Tillson scalping
     # template pairs a length-8 / vf-0.7 line with a length-5 / vf-0.618 line, so
@@ -134,7 +129,7 @@ class SymbolConfig:
     # ``t3_volume_factor`` and reproduces the old single-vf ribbon exactly.
     t3_fast_vf: float = 0.0
 
-    # ---- T3 slope quality / curvature (t3_stoch + t3_ribbon + t3_flip) ----
+    # ---- T3 slope quality / curvature (t3_stoch + t3_flip) ----
     # Second difference of the T3 line in ATR units: "rising" is a one-bar fact,
     # this asks whether the curve is still bending the trade's way instead of
     # decelerating into exhaustion. 0 disables, so the search has to earn it.
@@ -157,23 +152,12 @@ class SymbolConfig:
     cost_rank_max: float = 0.0       # 0 disables
 
     # ---- opening range breakout ----
-    orb_minutes: int = 30
-    orb_buffer_atr: float = 0.1
-    orb_retest: bool = False         # wait for a pullback + reclaim instead of chasing the break
 
-    # ---- Donchian breakout ----
-    don_length: int = 20
-    don_buffer_atr: float = 0.0
-    don_squeeze: float = 0.0         # 0 disables; only break out of a narrow channel
 
     # ---- VWAP mean reversion ----
-    vwap_sd: float = 2.0
-    vwap_reentry: bool = True
     adx_max: float = 0.0             # reversion only; 0 disables
 
     # ---- liquidity sweep / stop hunt reversal ----
-    swp_lookback: int = 20           # bars defining the swing high/low that gets swept
-    swp_wick_atr: float = 0.15       # how far past that swing the wick must reach, in ATR
 
     # ---- MACD histogram zero-cross ----
     macd_fast: int = 12
@@ -373,7 +357,7 @@ class SymbolConfig:
                     and self.secondary_timeframe)
 
     def session_start_minutes(self) -> int:
-        """Minute-of-day the trading session opens; anchors ORB and VWAP."""
+        """Minute-of-day the trading session opens."""
         windows = self.session_windows()
         return min(w[0] for w in windows) if windows else 0
 
@@ -474,31 +458,26 @@ OPT_FIELDS = [
     "sl_atr_mult", "trail_start_atr", "trail_step_atr",
     "trail_mode", "trail_lookback",
     "min_body_ratio", "atr_pct_min",
-    "orb_minutes", "orb_buffer_atr", "orb_retest", "vwap_sd",
-    "don_length", "don_buffer_atr", "don_squeeze",
-    "sqz_length", "sqz_bb_sd", "sqz_kc_atr", "sqz_momentum_len",
     "flow_length", "flow_z", "flow_divergence",
     "pull_fast", "pull_depth_atr", "pull_max_bars",
     "mr_fast", "mr_stretch_cost", "mr_confirm",
     "brst_lookback", "brst_range_z", "brst_close_pct",
-    "t3_fast", "t3_slow_mult", "t3_slope_atr", "t3_fast_vf", "t3_accel_min",
+    "t3_fast", "t3_slow_mult", "t3_fast_vf", "t3_accel_min",
     "st_period", "st_mult",
     "cost_rank_max",
     # Spread is a far larger fraction of a scalp's target than of a swing's, so
     # the search is allowed to tune the spread/ATR entry gate per symbol rather
     # than leaving it disabled at the group default.
     "max_spread_atr",
-    "swp_lookback", "swp_wick_atr",
     "macd_fast", "macd_slow", "macd_signal",
     "wt_channel_len", "wt_avg_len",
     "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
     "psar_af_step", "psar_af_max", "trix_length", "aroon_length",
 ]
 
-STRATEGIES = ["t3_stoch", "orb", "vwap_rev", "donchian",
-              "squeeze_brk", "flow_rev", "mtf_pullback",
-              "micro_rev", "burst", "t3_ribbon", "dual_t3", "st_trend",
-              "t3_flip", "liq_sweep", "macd_flip", "wavetrend_flip", "stoch_flip",
+STRATEGIES = ["t3_stoch", "flow_rev", "mtf_pullback",
+              "micro_rev", "burst", "dual_t3", "st_trend",
+              "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
               "parabolic_flip", "trix_flip", "aroon_flip"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
