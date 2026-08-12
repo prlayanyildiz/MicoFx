@@ -351,8 +351,23 @@ class Supervisor:
 
             self.risk_scale = self._drawdown_scale(day_pnl_pct, cfgs)
             if self.risk_scale < 1.0:
-                self.notes.append(
-                    f"Gunluk zarar %{abs(day_pnl_pct):.2f} -> lot carpani {self.risk_scale:.2f}")
+                # Keep computing it with the AI layer off - review() runs
+                # regardless, and the number is what would apply the moment it
+                # is switched back on. But say which of the two this is: the
+                # drawdown throttle is one of the soft layers _gate_locked
+                # waives at ``if not self.enabled``, so with AI off nothing
+                # multiplies by it and the flat "-> lot carpani 0.40" read as
+                # a portfolio that had throttled itself while it was trading
+                # at full size. Same correction the per-symbol rows already
+                # carry through effective_scale/hours_enforced; the header
+                # kept the old wording.
+                if self.enabled:
+                    self.notes.append(
+                        f"Gunluk zarar %{abs(day_pnl_pct):.2f} -> lot carpani {self.risk_scale:.2f}")
+                else:
+                    self.notes.append(
+                        f"Gunluk zarar %{abs(day_pnl_pct):.2f} -> lot carpani "
+                        f"{self.risk_scale:.2f} UYGULANMIYOR (AI kapali, tam olcekte islem var)")
 
             for cfg in list(self.store.symbols.values()):
                 trades = sorted(by_symbol.get(cfg.symbol, []), key=lambda d: d["time"])
@@ -682,6 +697,14 @@ class Supervisor:
         return {
             "enabled": self.enabled,
             "risk_scale": self.risk_scale,
+            # Whether that number is actually multiplying anything. The
+            # drawdown throttle is a soft layer, waived along with the rest at
+            # _gate_locked's ``if not self.enabled`` - so with AI off it is a
+            # standing calculation, not a live restraint, and a reader taking
+            # "risk_scale 0.40" at face value concludes the book had already
+            # cut its size when it had not. Mirrors the per-row hours_enforced
+            # flag, which exists for exactly this reason one level down.
+            "risk_scale_enforced": self.enabled,
             "last_review": self.last_review,
             "settings": self.settings,
             "notes": self.notes,
