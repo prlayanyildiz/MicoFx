@@ -10,12 +10,13 @@ from .models import SymbolConfig
 from .mt5client import MT5Client
 from .store import Store
 
-# What _pf() reports for a run with no losing trades at all. The ratio is
-# undefined there, and every threshold in this module reads it as "excellent"
-# - quarantine_pf 0.8, watch_pf 1.0, bad_hour_pf 0.7 - so any value comfortably
-# above them works. Finite rather than inf because this is serialised into
-# /api/ai and json.dumps writes Infinity, which is not valid JSON.
-PF_NO_LOSSES = 99.0
+# What a run with no losing trades at all scores. Imported rather than
+# redeclared: this exact defect has now appeared three times in three modules
+# (_pf, _judge's inline copy, Result.profit_factor), so the value and the
+# reasoning behind it live in one place. Every threshold in this module reads
+# it as "excellent" - quarantine_pf 0.8, watch_pf 1.0, bad_hour_pf 0.7 - which
+# is what a flawless record deserves.
+from .backtest import PF_NO_LOSSES  # noqa: E402  (re-exported; see above)
 
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
@@ -401,10 +402,12 @@ class Supervisor:
         v.wins = sum(1 for x in nets if x >= 0)
         v.losses = v.trades - v.wins
         v.net = round(sum(nets), 2)
-        gross_win = sum(x for x in nets if x > 0)
-        gross_loss = -sum(x for x in nets if x < 0)
-        v.profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else (
-            round(gross_win, 2) if gross_win > 0 else 0.0)
+        # Through _pf, not a second copy of its arithmetic. The inline version
+        # that used to live here returned the raw win SUM when nothing had
+        # lost, so a flawless record was scored in account currency while
+        # quarantine_pf and watch_pf below are ratios - and the fix applied to
+        # _pf never reached the path that actually classifies live symbols.
+        v.profit_factor = round(self._pf(nets), 2)
         v.expectancy = round(v.net / v.trades, 3)
         v.last_trade_at = float(trades[-1]["time"])
 

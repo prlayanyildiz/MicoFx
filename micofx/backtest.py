@@ -16,6 +16,14 @@ _DAY = 24 * 60
 
 # Out-of-sample samples thinner than this are noise, not evidence.
 MIN_TEST_TRADES = 12
+
+# Reported when nothing lost: the best a profit factor can describe. A run with
+# no losses has no denominator, and returning the win total instead silently
+# swaps a ratio for a sum - the same score then means "excellent" or "dreadful"
+# depending only on how big the wins happened to be. Finite rather than inf
+# because these numbers are serialised into /api/ai and /api/opt/history, and
+# json.dumps writes ``Infinity``, which is not valid JSON.
+PF_NO_LOSSES = 99.0
 # Same bar used by walk_forward's validated flag and the optimizer's apply gate,
 # so the UI never labels a candidate "validated" that auto-apply would reject.
 MIN_OOS_PF = 1.10
@@ -47,7 +55,7 @@ class Result:
     @property
     def profit_factor(self) -> float:
         if self.gross_loss_r <= 0:
-            return float(self.gross_win_r) if self.gross_win_r > 0 else 0.0
+            return PF_NO_LOSSES if self.gross_win_r > 0 else 0.0
         return self.gross_win_r / self.gross_loss_r
 
     def score(self, min_trades: int) -> float:
