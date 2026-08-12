@@ -1234,6 +1234,26 @@ class Optimizer:
                 # the tick spread the live gate actually enforces.
                 "spread_scale": round(self._spread_scale(symbol), 3),
             }
+        else:
+            # No evidence came with this apply, so the evidence already on the
+            # row may no longer describe what trades. Everything else here is
+            # written unconditionally - strategy, timeframe, params, score - so
+            # without this the summary quietly outlives its own configuration.
+            #
+            # It is not decoration: portfolio-gates decides measurability, the
+            # cost gate and the review layer from holdout.trades/expectancy/
+            # cost_per_trade_r, risk._edge_metric sizes from holdout.net_r over
+            # holdout_days, and _beats_incumbent compares the next candidate
+            # against holdout and spread_scale. All three would read numbers
+            # earned by different parameters as current.
+            #
+            # Only dropped when it provably disagrees. Re-applying the same
+            # numbers keeps its record; the summary is void when the config it
+            # measured is not the config that results.
+            recorded = (getattr(cfg, "opt_summary", None) or {}).get("params")
+            if isinstance(recorded, dict) and any(
+                    recorded.get(k) != v for k, v in patch.items() if k in recorded):
+                patch["opt_summary"] = {}
         # Held across the open-position check + the write so the engine's
         # own entry path (same lock; see Engine.entry_lock) cannot land a
         # fresh fill under cfg.magic in the gap between "nothing open yet"

@@ -1952,6 +1952,20 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             strategy = strategy or match.get("strategy")
         if not params:
             raise HTTPException(400, "parametre yok")
+        if detail is None:
+            # The results table applies by posting the params themselves rather
+            # than the run they came from, so the search's own record of this
+            # candidate - holdout, validation, the spread scale it was measured
+            # under - was simply dropped on the floor while the parameters went
+            # live. The row is still in opt history; match it back rather than
+            # let optimizer.apply() void a summary it could have had. Nothing is
+            # invented: an exact parameter match, on this symbol, or nothing.
+            detail = next(
+                (r for r in store.opt_history(body.symbol, 40)
+                 if (r.get("params") or {}) == params
+                 and (timeframe is None or r.get("timeframe") == timeframe)
+                 and (strategy is None or r.get("strategy") == strategy)),
+                None)
         # Covers both the hand-typed path (params come straight off the
         # request body) and the run_id path (params come from stored opt
         # history) - the same NaN-string / bad-enum bypass _validate_symbol
