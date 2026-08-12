@@ -1,4 +1,4 @@
-# MicoFX - tek kurulum. Python + sanal ortam + paketler + masaustu kisayollari.
+﻿# MicoFX - tek kurulum. Python + sanal ortam + paketler + masaustu kisayollari.
 #
 # Tek giris noktasi budur. KUR.bat sadece bu dosyayi ExecutionPolicy Bypass ile
 # cagirir; baska kurulum scripti yok. Bastan calistirmak guvenli - her adim
@@ -47,6 +47,27 @@ if (-not $python) {
 }
 Say "  Bulundu: $python" "Green"
 Say ("  " + (& python --version 2>&1))
+
+# Surum kontrolu. Bulunan Python'a kendini dogrulatiyoruz - burada bir surum
+# ayristirmak, "3.10" ile "3.9.13" gibi durumlarda kendi hatasini uretir.
+# Neden gerekli: pydantic modelleri `X | None` kullaniyor ve pydantic v2 bunu
+# sinif olusturulurken cozuyor, yani 3.9'da uygulama import aninda olur. Ama
+# venv kurulur, pip install da basarili olur (numpy 1.26 3.9'u destekler) -
+# kurulum "basarili" der, uygulama hic acilmaz. run.py ayni sayiyi kendi
+# basina da uyguluyor; ikisinin ayrismasini bir test engelliyor.
+& python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
+if ($LASTEXITCODE -ne 0) {
+    Say "  Bu Python cok eski - MicoFX 3.10 veya ustunu gerektiriyor." "Yellow"
+    Say "  PATH'teki python bu: $python" "Yellow"
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Say "  winget ile Python 3.12 kurmak icin:" "Yellow"
+        Say "    winget install -e --id Python.Python.3.12" "Yellow"
+    } else {
+        Start-Process "https://www.python.org/downloads/"
+    }
+    Say "  Kurduktan sonra bu pencereyi KAPATIP KUR.bat'i yeniden calistirin." "Yellow"
+    exit 1
+}
 
 # ---------------------------------------------------------- [2] Sanal ortam
 Step 2 "Sanal ortam hazirlaniyor..."

@@ -9,6 +9,23 @@ import threading
 import time
 import webbrowser
 
+# Checked here, above the imports below, rather than inside main(): micofx.web
+# builds pydantic models whose annotations use ``X | None``, and pydantic v2
+# resolves those at class-creation time. On 3.9 this file therefore dies with a
+# TypeError from inside pydantic before a single line of ours runs, which says
+# nothing about what is actually wrong.
+#
+# KUR.ps1 installs 3.12 when no Python is found at all, but accepts whatever it
+# finds when one is present - and a server someone is deploying onto usually has
+# one already. The install then "succeeds": the venv builds, pip install builds
+# (numpy 1.26 supports 3.9), and the app never starts.
+MIN_PYTHON = (3, 10)
+if sys.version_info < MIN_PYTHON:
+    raise SystemExit(
+        f"MicoFX Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} veya ustunu gerektiriyor; "
+        f"bulunan {sys.version.split()[0]} ({sys.executable}).\n"
+        f"  Python 3.12 kurup KUR.bat'i yeniden calistirin.")
+
 import uvicorn
 
 from micofx import APP_NAME, __version__
