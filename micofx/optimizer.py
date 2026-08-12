@@ -931,7 +931,26 @@ class Optimizer:
             if self.store is not None else 0.6
         if best.get("positive_ratio", 0) < min_positive:
             return "secim segmentleri arasinda tutarsiz"
-        if hold.get("cost_per_trade_r", 0) > self.MAX_COST_PER_TRADE_R:
+        # Same shape as min_positive_ratio above, for the same reason. The
+        # engine refuses an entry when its live cost exceeds
+        # system.max_cost_pct_of_risk, and that setting ships at 25.0 to agree
+        # with the constant here - so the two only diverge once an operator
+        # tightens the live one, and nothing noticed when they did. It sits at
+        # 18.0 live, and USDJPY carries a config whose own holdout cost is
+        # 0.1867: inside this gate, past the engine's, and four of its six
+        # signals refused with "maliyet". The search validated, applied and
+        # stamped a configuration that cannot trade at its own average cost.
+        #
+        # Tighter only. A live gate above 0.25 does not raise this ceiling -
+        # the constant carries its own reasoning - and a disabled or zeroed
+        # live gate refuses nothing, so there is nothing to align with.
+        cost_ceiling = self.MAX_COST_PER_TRADE_R
+        system = getattr(self.store, "system", None) if self.store is not None else None
+        if system is not None and getattr(system, "block_high_cost", False):
+            live_pct = float(getattr(system, "max_cost_pct_of_risk", 0.0) or 0.0)
+            if live_pct > 0:
+                cost_ceiling = min(cost_ceiling, live_pct / 100.0)
+        if hold.get("cost_per_trade_r", 0) > cost_ceiling:
             return "islem maliyeti riske gore cok yuksek"
         # ...and the same cost measured against what this candidate actually
         # earns, which the absolute ceiling above cannot see (see the constant).
