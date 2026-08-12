@@ -1826,8 +1826,18 @@ class Engine:
         state.sec_signal = ""
         state.note = "islem acildi"
         state.entry_block = "acildi"
+        # The ticket, so an entry can be matched to its own close later. The
+        # close line has carried it all along; this one did not, and matching
+        # them meant FIFO by symbol - which silently pairs the wrong two the
+        # moment a symbol holds more than one position. Every attempt at
+        # per-trade loss forensics today ran into it: realised stop distance
+        # came out at 1.29x intended, and the number was an artefact of the
+        # pairing, not of the stops. 0 means open_market could not resolve it
+        # (ambiguous multi-fill) and is written as such rather than omitted,
+        # because a missing field and an unresolved one are different facts.
+        ticket = int(result.get("position", 0) or 0)
         LOG.emit(
-            f"{side.upper()} {result['volume']:g} lot @ {result['price']:.5f} "
+            f"#{ticket} {side.upper()} {result['volume']:g} lot @ {result['price']:.5f} "
             f"SL={result['sl']:.5f} TP={result['tp']:.5f} | lot: {note}"
             f"{f' | ikincil {cfg.strategy}/{cfg.timeframe}' if secondary else ''}",
             "TRADE", cfg.symbol,
