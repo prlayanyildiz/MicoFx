@@ -268,7 +268,7 @@ def test_patch_primary_exit_field_allowed_without_scan():
     assert store.symbols["XAUUSD"].sl_atr_mult == 2.0
 
 
-# ---------------------------------------------------------------------- M1
+# ------------------------------------------------------------------- NOT-1
 
 def test_bulk_primary_exit_field_blocked_by_pending_scan():
     # bulk_patch only loaded secondary_orphan_scan when a secondary field/
@@ -407,7 +407,7 @@ def test_soft_seed_allowed_when_disconnected_without_orphan_tickets():
     assert res.status_code == 200
 
 
-# ------------------------------------------------- M-W1 mid-call disconnect
+# ----------------------------------------------- NOT-W mid-call disconnect
 
 class _FlipDisconnectClient(_FakeClient):
     """Simulates mt5client.positions(): positions_get fails → [] + connected=False."""

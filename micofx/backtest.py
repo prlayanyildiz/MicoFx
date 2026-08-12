@@ -918,7 +918,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
             "segments": detail[idx]["segments"],
             # OOS slices scored against the apply-gate sample size (12), not the
             # in-sample min_trades (often 40) - otherwise a clean 20-trade M5
-            # holdout is ranked at half weight vs a noisier 40-trade M1 run.
+            # holdout is ranked at half weight vs a noisier 40-trade M5 run.
             "validation": valid.as_dict(MIN_TEST_TRADES),
         })
     top.sort(key=lambda c: (c["validation"]["score"], c["score"]), reverse=True)

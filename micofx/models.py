@@ -602,7 +602,7 @@ class SystemConfig:
     # ---- account-level guards ----
     max_total_positions: int = 13
     # Separate sub-caps inside max_total_positions for scalp (micro_rev/burst,
-    # M1/M5) vs swing (everything else) positions, so a run of scalp fills
+    # M5) vs swing (everything else) positions, so a run of scalp fills
     # cannot use up the whole shared budget and leave no room for a swing
     # setup to open, or vice versa. 0 disables a sub-cap (falls back to being
     # limited only by max_total_positions, the old behaviour).

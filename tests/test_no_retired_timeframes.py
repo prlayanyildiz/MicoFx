@@ -94,3 +94,45 @@ def test_a_known_timeframe_says_nothing(monkeypatch):
     for tf in TIMEFRAMES:
         mt5client.timeframe_const(tf)
     assert not said, "gecerli zaman dilimi gurultu uretiyor"
+
+
+# ------------------------------------- nothing configurable names one of them
+
+def _retired_in(text: str) -> set[str]:
+    """Quoted timeframe-looking tokens that are not one of the four."""
+    named = set(re.findall(r"[\"']([A-Z]{1,2}\d{1,2})[\"']", text))
+    return named - set(TIMEFRAMES)
+
+
+def test_the_shipped_defaults_name_no_other_timeframe():
+    text = (Path(__file__).resolve().parents[1] / "config" / "defaults.json").read_text(
+        encoding="utf-8")
+    assert not _retired_in(text) & set(RETIRED), sorted(_retired_in(text) & set(RETIRED))
+
+
+def test_the_panel_offers_no_other_timeframe():
+    js = Path(__file__).resolve().parents[1] / "micofx" / "web" / "static" / "app.js"
+    if not js.exists():
+        pytest.skip("panel bulunamadi")
+    text = js.read_text(encoding="utf-8")
+    assert not _retired_in(text) & set(RETIRED), sorted(_retired_in(text) & set(RETIRED))
+
+
+def test_no_stored_symbol_names_one_of_them():
+    """The live book, asserted rather than assumed."""
+    import json
+    import sqlite3
+    db = Path(__file__).resolve().parents[1] / "data" / "micofx.db"
+    if not db.exists():
+        pytest.skip("canli veritabani yok")
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = [json.loads(r[0]) for r in con.execute("SELECT payload FROM symbols")]
+    finally:
+        con.close()
+    assert rows, "sembol yok - test bos calisiyor"
+    for cfg in rows:
+        for field in ("timeframe", "secondary_timeframe"):
+            value = cfg.get(field) or ""
+            assert value == "" or value in TIMEFRAMES, (
+                f"{cfg.get('symbol')}.{field} = {value!r}")

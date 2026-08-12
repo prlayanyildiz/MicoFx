@@ -192,7 +192,7 @@ def test_orphan_scan_block_lifts_once_scan_resolves():
 
 
 def test_orphan_scan_abandon_after_stale_timeout_keeps_entry_blocked():
-    # H2: "abandoned" only stops actively re-diffing every cycle - it does
+    # NOT-2: "abandoned" only stops actively re-diffing every cycle - it does
     # NOT reopen entry. The contradiction of "abandoned but entry still
     # open" is exactly what this is closing: the scan entry (and therefore
     # the _try_entry block) stays until it is fully dropped, never merely
@@ -590,7 +590,7 @@ def test_symbol_daily_halt_stays_clear_without_commission_push():
 
 
 def test_symbol_daily_halt_is_sticky_across_floating_bounce():
-    # M1: once tripped, must not flip back off just because floating P/L on
+    # NOT-1: once tripped, must not flip back off just because floating P/L on
     # this symbol recovers mid-cycle - only the day rollover clears it. This
     # is what manage_positions()'s flatten trigger now relies on (it just
     # calls _symbol_daily_halt(cfg) again - the stickiness lives here).

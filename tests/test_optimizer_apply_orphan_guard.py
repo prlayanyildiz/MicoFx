@@ -1,5 +1,5 @@
 """Optimizer.apply() (the PRIMARY apply path) must treat a still-open
-orphan-scan window the same way it already treats a live position (M1) - the
+orphan-scan window the same way it already treats a live position (NOT-1) - the
 zero-candidate fill is genuinely invisible to client.positions() (that is the
 entire reason the scan exists), so without this the family-swap block and the
 exit/risk holdback both silently no-op for a magic that may still turn out to

@@ -174,7 +174,7 @@ class Optimizer:
             if not targets:
                 return {"ok": False, "error": "Sembol secilmedi."}
             # One-off restriction of this run to a subset of the configured
-            # timeframes (e.g. "just scan M1 today") - None/empty means the
+            # timeframes (e.g. "just scan M5 today") - None/empty means the
             # saved opt_params selection, same as before this existed.
             tf_override = [t for t in (timeframes or []) if t in TIMEFRAMES] or None
             self._cancel.clear()
@@ -399,7 +399,7 @@ class Optimizer:
         # Timeframe and strategy family are both search dimensions; each pairing is
         # judged on its own held-out slice so they compete on equal terms.
         # Scalp families are never paired with M15+ - that search is pure noise
-        # against a cost model built for M1/M5 bars.
+        # against a cost model built for M5 bars.
         allow = tf_allow if isinstance(tf_allow, dict) else STRATEGY_TIMEFRAMES
         needed_tfs = [tf for tf in timeframes
                       if any(strategy_allows_timeframe(v["strategy"], tf, allow)
@@ -464,7 +464,7 @@ class Optimizer:
         into a single queue rather than one pool per symbol. That matters for
         wall clock in three ways: the pool is spawned once instead of once per
         symbol; sweep durations differ by two orders of magnitude (an M5 pullback
-        search against an H4 one), so draining one symbol at a time left every
+        search against an H1 one), so draining one symbol at a time left every
         worker idling on that symbol's slowest sweep while the next symbol's
         short ones waited; and bar fetching - which must stay in this thread,
         behind the MT5 lock - now overlaps the search instead of running as a
@@ -1057,9 +1057,10 @@ class Optimizer:
             # _pick_secondary only ranks already-searched attempts, and the
             # search itself is TF-gated - this should not fire - but apply()
             # enforces the same lock on the primary, so the secondary getting
-            # a free pass here would be the one place a dead pairing (e.g.
-            # micro_rev, M1/M5-only, stored against an M30 attempt) could still
-            # land, silently unusable the moment ensemble was switched on.
+            # a free pass here would be the one place a dead pairing (one
+            # stored while an operator had that family pinned to a narrower set
+            # of bars) could still land, silently unusable the moment ensemble
+            # was switched on.
             attempt = None
         if attempt is None:
             patch = {"secondary_strategy": "", "secondary_timeframe": "",

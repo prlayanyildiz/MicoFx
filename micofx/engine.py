@@ -22,7 +22,7 @@ _ACCOUNT_TTL = 1.0
 
 # A cooldown is meant to stop the same setup re-firing on the next bar or two,
 # so it belongs on the strategy's own clock. The stored seconds were written for
-# the M5-and-slower presets; left alone they would silently cost an M1 config
+# the M5-and-slower presets; left alone they would silently cost an M5 config
 # five bars of opportunity per fill. Capped, never extended - a config that asks
 # for a short pause still gets exactly what it asks for.
 _COOLDOWN_BARS = 2
@@ -1465,12 +1465,15 @@ class Engine:
             state.entry_block = "atr_yok"
             return
 
-        # Scalp families (micro_rev/burst) only belong on M1/M5. A leftover
-        # M15/H1 scalp config would burn the account on cost geometry the
-        # walk-forward never validated for that bar size. Same custom map the
-        # search/apply used, not always the shipped default - checking against
-        # the wrong table here would refuse (or wrongly allow) a pairing the
-        # optimizer itself judged by different rules.
+        # No family is restricted by default any more - every one of them may
+        # be searched on every timeframe, and the exit envelope follows the bar
+        # rather than the family name. The check stays because the mechanism
+        # does: an operator can still pin a family to a subset, and a config
+        # stored under an older, narrower map must not keep trading a pairing
+        # that is no longer permitted. Same custom map the search/apply used,
+        # not always the shipped default - checking against the wrong table
+        # here would refuse (or wrongly allow) a pairing the optimizer itself
+        # judged by different rules.
         tf_allow = self.store.opt_params().get("strategy_timeframes")
         allow = tf_allow if isinstance(tf_allow, dict) else None
         if not strategy_allows_timeframe(cfg.strategy, cfg.timeframe, allow):

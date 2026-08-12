@@ -357,7 +357,7 @@ class RiskManager:
             return Verdict(False, f"toplam pozisyon limiti ({sys_cfg.max_total_positions})")
 
         # Scalp and swing share the total budget above but are a different bet
-        # shape - many small M1/M5 fills vs a few multi-hour holds - so a run of
+        # shape - many small M5 fills vs a few multi-hour holds - so a run of
         # one should not crowd the other out of every remaining slot.
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         cap = sys_cfg.max_scalp_positions if is_scalp_strategy(cfg.strategy) else sys_cfg.max_swing_positions

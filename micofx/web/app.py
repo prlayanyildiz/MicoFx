@@ -702,7 +702,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         exists), so nothing that only checks live positions can see this risk
         on its own. Blocks regardless of whether engine.py has marked it
         "abandoned" - abandoned only means it stopped actively re-diffing
-        every cycle (H2), not that the position is confirmed gone. A magic
+        every cycle (see NOT-2), not that the position is confirmed gone. A magic
         this stale/reused ID would otherwise collide with (DELETE, seed
         overwrite, next_magic reassigning it to a brand new symbol) is the
         exact same risk class as touching identity/exit under it directly.
@@ -883,7 +883,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 if magic_changing or primary_changing:
                     open_here = _open_under_magic(current.magic)
                     # optimizer.apply() already refuses a family swap while a
-                    # pending orphan-scan sits on this magic (M1, prior round)
+                    # pending orphan-scan sits on this magic (NOT-1, prior round)
                     # - this endpoint is the other door to primary_changed,
                     # and had no equivalent: a fill genuinely invisible to
                     # client.positions() would otherwise let the swap through.
@@ -1465,7 +1465,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         commission converted to price, over ``atr * sl_atr_mult``.
 
         NOT comparable to ``opt_summary.holdout.cost_per_trade_r``, and the
-        difference is not a rounding one - on M5/M10 configs this figure runs
+        difference is not a rounding one - on M5 configs this figure runs
         5-14x the walk-forward's. Same arithmetic, different population: this
         averages EVERY bar, while the walk-forward only ever charges cost on
         bars where a signal actually fired. Signals fire on movement, so entry
@@ -1640,7 +1640,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             watch_tickets = tagged | orphan_tickets
             watch_magics = ({p["magic"] for p in all_pos if p["ticket"] in watch_tickets}
                             if secondary_guarded and watch_tickets else set())
-            # M1: patch_symbol()'s primary guard already treats a pending
+            # NOT-1: patch_symbol()'s primary guard already treats a pending
             # secondary_orphan_scan window the same as a visible open position
             # (_pending_orphan_scan) - bulk only ever loaded this dict when a
             # secondary field/param was in the patch, so a primary-only bulk
