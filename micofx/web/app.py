@@ -1143,6 +1143,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             cost_r = float(hold.get("cost_per_trade_r") or 0.0)
 
             state = engine.states.get(cfg.symbol)
+            # Raw parts rather than state.spread_atr: that field is built from
+            # the PRIMARY's ATR, and the ceiling below may belong to the
+            # secondary leg running a different timeframe. The ratio is
+            # rebuilt against the owning leg's own ATR once that leg is known.
+            spread_raw = float(getattr(state, "spread", 0.0) or 0.0) if state else 0.0
+            primary_atr = float(getattr(state, "atr", 0.0) or 0.0) if state else 0.0
+            secondary_atr = float(getattr(state, "sec_atr", 0.0) or 0.0) if state else 0.0
             spread_atr = float(getattr(state, "spread_atr", 0.0) or 0.0) if state else 0.0
             # ``state.spread_atr`` is rewritten every cycle from the last tick,
             # with no session gate in front of it, so outside a symbol's own
@@ -1167,6 +1174,21 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     sec_ceiling = 0.0
                 if sec_ceiling > 0 and (ceiling <= 0 or sec_ceiling < ceiling):
                     ceiling, ceiling_leg = sec_ceiling, "secondary"
+
+            # Now the owning leg is known, measure the spread against ITS atr.
+            # _try_entry already gates each leg on its own (state.sec_atr for
+            # the secondary); this is the analysis view catching up. The two
+            # legs routinely run different timeframes - five of the ten live
+            # symbols do - and the error runs both ways: a secondary on the
+            # higher timeframe has the larger ATR, so its true ratio is smaller
+            # than the primary-based number and the breach was overstated,
+            # which is how FRA40 was reported as failing "tavan" all day. A
+            # secondary on the lower one (SpotBrent: M5 against an H1 primary)
+            # was understated instead.
+            leg_atr = (secondary_atr if (ceiling_leg == "secondary" and secondary_atr > 0)
+                       else primary_atr)
+            if spread_raw > 0 and leg_atr > 0:
+                spread_atr = spread_raw / leg_atr
 
             hold_days = float(summary.get("holdout_days") or 0.0)
             expected = (n / hold_days * window_days) if (n and hold_days > 0) else None
