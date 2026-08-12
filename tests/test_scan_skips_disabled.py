@@ -14,6 +14,18 @@ fault every time someone reads the log.
 Naming a symbol explicitly still searches it. "Optimise EURUSD before I turn it
 on" is a real thing to want, and asking for it by name is unambiguous; asking
 for "everything" is not a request for the symbols you have already excluded.
+
+Refined later, from a VDS install: that last sentence needs something to have
+been excluded FROM. With nothing enabled at all there is no such intent to
+respect, and the rule closed a loop instead of expressing one - seed_symbols
+forces every seeded symbol disabled, _require_optimised_before_enabling refuses
+to switch one on until it has been searched, and "everything" resolved to the
+enabled ones, of which there were none. Naming all ten by hand was the only way
+in. So an all-disabled book now searches the whole book; the exclusion below
+still holds the moment anything is enabled, which is the case the rule was
+written for. Nothing is granted by it either: naming the same symbols already
+ran exactly that, and auto-reopt never reaches this path (it queues by name and
+skips disabled symbols before it gets there).
 """
 from __future__ import annotations
 
@@ -94,13 +106,25 @@ def test_a_named_mix_keeps_everything_named():
     assert set(res["job"]["symbols"]) == {"GER40", "EURUSD"}
 
 
-def test_a_book_with_nothing_enabled_reports_it_rather_than_running_empty():
+def test_a_book_with_nothing_enabled_searches_the_whole_book():
+    """The bootstrap case: nothing is enabled, so nothing was excluded either,
+    and refusing here is a closed loop rather than a policy."""
     opt = _opt()
     for cfg in opt.store.symbols.values():
         cfg.enabled = False
     res = _targets(opt)
-    assert res["ok"] is False
-    assert "sembol" in res["error"].lower()
+    assert res["ok"] is True
+    assert set(res["job"]["symbols"]) == {"GER40", "US30", "EURUSD"}
+
+
+def test_one_enabled_symbol_is_enough_to_restore_the_exclusion():
+    """The boundary: the moment anything is on, an off symbol is a deliberate
+    exclusion again and a full scan leaves it alone."""
+    opt = _opt()
+    for cfg in opt.store.symbols.values():
+        cfg.enabled = False
+    opt.store.symbols["GER40"].enabled = True
+    assert _targets(opt)["job"]["symbols"] == ["GER40"]
 
 
 def test_an_unknown_name_is_still_dropped():

@@ -189,6 +189,29 @@ class Optimizer:
                 targets = [s for s in symbols if s in self.store.symbols]
             else:
                 targets = [s for s, c in self.store.symbols.items() if c.enabled]
+                if not targets and self.store.symbols:
+                    # Bootstrap. A fresh install is a closed loop otherwise:
+                    # seed_symbols forces every seeded symbol disabled (a
+                    # seeded config is the dataclass default, not one the
+                    # search chose), _require_optimised_before_enabling then
+                    # refuses to switch any of them on until it has been
+                    # searched - and "optimise everything" resolved to the
+                    # enabled ones, of which there are none. Naming all ten by
+                    # hand was the only way through, which is what the VDS
+                    # install had to do.
+                    #
+                    # The exclusion above is still right whenever something IS
+                    # enabled: an off symbol is then a deliberate exclusion and
+                    # a full scan should not spend itself on it. With nothing
+                    # enabled there is no such intent to respect, and this
+                    # grants nothing new - naming the same symbols already runs
+                    # exactly this, and a search applies a config without
+                    # trading anything.
+                    targets = list(self.store.symbols)
+                    LOG.emit(f"Etkin sembol yok - kurulum taramasi: kitabin "
+                             f"tamami ({len(targets)}) aranacak. Aramanin sectigi "
+                             f"konfigi alan sembol acilabilir hale gelir.",
+                             "INFO")
             if not targets:
                 # "Sembol secilmedi" was the answer to three different
                 # situations, and it was the wrong answer to two of them.
@@ -207,10 +230,6 @@ class Optimizer:
                         f"Kitapta olmayan sembol: {', '.join(unknown)}. "
                         f"Secim listesi eskimis olabilir - sayfayi yenileyin "
                         f"veya 'Tumu' secip tekrar deneyin.")}
-                if self.store.symbols:
-                    return {"ok": False, "error": (
-                        "Etkin sembol yok - hepsi kapali. Once bir sembolu "
-                        "acin ya da adiyla secerek arayin.")}
                 return {"ok": False, "error": "Sembol secilmedi."}
             # One-off restriction of this run to a subset of the configured
             # timeframes (e.g. "just scan M5 today") - None/empty means the

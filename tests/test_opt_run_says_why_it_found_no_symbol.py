@@ -102,11 +102,23 @@ def test_it_points_at_the_stale_selection():
     assert "eskimis" in err.lower() or "yenileyin" in err.lower()
 
 
-def test_a_book_with_everything_switched_off_says_so():
-    res = _opt([_cfg("GER40", enabled=False), _cfg("NAS100", enabled=False)]).start()
-    assert res["ok"] is False
-    assert "kapali" in res["error"].lower()
-    assert "secilmedi" not in res["error"].lower()
+def test_a_book_with_everything_switched_off_searches_all_of_it():
+    """The bootstrap. A fresh install seeds every symbol disabled and refuses
+    to enable one until it has been searched, so "optimise everything" has to
+    mean the book here or there is no way in at all."""
+    opt = _opt([_cfg("GER40", enabled=False), _cfg("NAS100", enabled=False)])
+    opt._run = lambda *a, **k: None
+    res = opt.start()
+    assert res["ok"] is True
+    assert res["job"]["symbols"] == ["GER40", "NAS100"]
+
+
+def test_the_exclusion_still_holds_once_anything_is_enabled():
+    """An off symbol beside an on one is a deliberate exclusion, not a fresh
+    install - the full scan must not spend itself on it."""
+    opt = _opt([_cfg("GER40"), _cfg("NAS100", enabled=False)])
+    opt._run = lambda *a, **k: None
+    assert opt.start()["job"]["symbols"] == ["GER40"]
 
 
 # --------------------------------------------------- what must keep working
