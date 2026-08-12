@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -439,8 +440,33 @@ class Supervisor:
         elif v.quarantine_until > now:
             v.state = "quarantine"
             v.reason = previous.reason if previous else "karantina"
-        elif (v.trades >= int(cfgs.get("watch_min_trades", cfgs["min_trades"]))
-                and v.profit_factor < float(cfgs["watch_pf"])):
+        # Two ways in, because a record can be too short to average and still
+        # be long enough to read.
+        #
+        # The trade-count bar is right for an AVERAGE: profit factor over a
+        # handful of trades is noise. It is the wrong bar for a COUNT. One win
+        # in eleven is not a noisy average, it is an unlikely sequence - under a
+        # coin-flip win rate the odds of one or fewer wins in eleven are about
+        # six in a thousand. Between quarantine_losses, which is
+        # count-independent but wants the losses consecutive, and this bar,
+        # which wants twenty-five trades, "few trades and overwhelmingly bad"
+        # fell through: USDCHF sat at one win in eleven, PF 0.35, -16.09, four
+        # consecutive, trading at full scale, and would not have reached
+        # twenty-five trades for another thirty-eight days.
+        #
+        # So the win count is read against its own sampling noise, the way
+        # portfolio-gates already reads expectancy against 2*1.2/sqrt(n). Under
+        # a break-even record the win count's standard deviation is sqrt(n)/2,
+        # so two sigma below even is n/2 - sqrt(n). Under that, the record is
+        # not thin - it is damning.
+        #
+        # profit_factor still has to be under watch_pf either way: a symbol
+        # whose few wins are large enough to carry it is not losing money, and
+        # a symbol losing on SIZE rather than frequency (FRA40: six wins, six
+        # losses) is what the trade-count bar is there to judge.
+        elif (v.profit_factor < float(cfgs["watch_pf"])
+                and (v.trades >= int(cfgs.get("watch_min_trades", cfgs["min_trades"]))
+                     or v.wins < v.trades / 2.0 - math.sqrt(v.trades))):
             v.state = "watch"
             v.risk_scale = float(cfgs["watch_risk_scale"])
             # Same PF gate as watch; richer reason when backtest still promised edge
