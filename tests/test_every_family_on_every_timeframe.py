@@ -1,0 +1,142 @@
+"""Every strategy family, on every timeframe the book runs, checked as a set.
+
+Families were only ever exercised one at a time, by whichever test needed the
+one it was about. That leaves the properties EVERY family has to hold no matter
+which one it is - and those are the ones that go wrong quietly, because no
+single family's test is the place to notice them.
+
+Five invariants, run over all twenty families against M5/M15/M30/H1:
+
+  * it computes at all, on ordinary bars;
+  * every series it hands back is the length of the input and free of NaN and
+    infinity - a NaN reaching state.atr sizes a position off garbage, which is
+    why _try_entry and backtest.simulate both carry an explicit isfinite gate;
+  * no look-ahead. Truncating the series must not change any earlier bar's
+    signal: bar 300's verdict cannot depend on bar 400 existing. The recursive
+    indicators (ema/wilder/T3) seed from src[0], so cutting the END leaves
+    their earlier values identical and any difference is the family reading
+    forward;
+  * a bar never fires buy and sell at once. backtest.simulate refuses that bar
+    outright ("a bar that fired both ways trades neither"), so a family
+    producing it is silently losing entries rather than erroring;
+  * degenerate input does not raise. A flat series - every OHLC identical -
+    zeroes ranges, standard deviations and true ranges, which is where the
+    divisions live.
+
+The timeframe axis matters because it is not cosmetic here: uses_swing_exits()
+switches the exit grid at 900s, htf_t3_trend buckets by wall-clock seconds, and
+the scalping families size their entry threshold against per-bar cost. A family
+that is fine on M15 is not thereby fine on H1.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from micofx.strategy import _FAMILIES, IndicatorCache, Params, compute
+
+FAMILIES = sorted(_FAMILIES)
+TIMEFRAMES = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+N = 900
+
+
+def _bars(tf_seconds: int, seed: int = 11):
+    """A trending random walk with realistic OHLC nesting and a session clock."""
+    rng = np.random.default_rng(seed)
+    steps = rng.normal(0.0, 1.0, N) + np.linspace(-0.35, 0.35, N)
+    close = 20000.0 + np.cumsum(steps) * 8.0
+    open_ = np.concatenate(([close[0]], close[:-1]))
+    span = np.abs(rng.normal(0.0, 1.0, N)) * 6.0 + 1.0
+    high = np.maximum(open_, close) + span
+    low = np.minimum(open_, close) - span
+    # Anchored to a real epoch so the session/bucket maths sees ordinary days.
+    times = 1_786_000_000 + np.arange(N, dtype=np.int64) * tf_seconds
+    volume = rng.integers(50, 5000, N).astype(np.float64)
+    cost = np.full(N, 1.2)      # round-turn cost in price units
+    return high, low, close, times, open_, volume, cost
+
+
+def _cache(tf_seconds: int, seed: int = 11, flat: bool = False):
+    high, low, close, times, open_, volume, cost = _bars(tf_seconds, seed)
+    if flat:
+        close = np.full(N, 20000.0)
+        open_ = high = low = close.copy()
+        volume = np.zeros(N)
+        cost = np.zeros(N)
+    return IndicatorCache(high, low, close, times, tf_seconds, open_, volume, cost)
+
+
+def _params(family: str) -> Params:
+    # adx_min switches _common from a zeros placeholder onto the real ADX, so
+    # the finite/length checks below cover the computed series rather than a
+    # stand-in. Left at a value no family treats as a hard filter.
+    return Params(strategy=family, adx_min=1.0)
+
+
+def _series(sig):
+    return {"t3": sig.t3, "k": sig.k, "d": sig.d, "atr": sig.atr, "adx": sig.adx,
+            "buy": sig.buy, "sell": sig.sell,
+            "htf_up": sig.htf_up, "htf_down": sig.htf_down}
+
+
+CASES = [(f, tf, sec) for f in FAMILIES for tf, sec in TIMEFRAMES.items()]
+IDS = [f"{f}-{tf}" for f, tf, _ in CASES]
+
+
+def test_the_registry_is_the_whole_book():
+    """Guards the sweep from silently covering fewer families than exist."""
+    assert len(FAMILIES) == 20, f"aile sayisi degisti: {FAMILIES}"
+
+
+@pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)
+def test_it_computes_and_every_series_is_finite(family, tf, seconds):
+    sig = compute(_cache(seconds), _params(family))
+    for name, arr in _series(sig).items():
+        assert arr.size == N, f"{family}/{tf}: {name} uzunlugu {arr.size} != {N}"
+        if arr.dtype != bool:
+            assert np.all(np.isfinite(arr)), (
+                f"{family}/{tf}: {name} icinde NaN/inf var "
+                f"({int(np.sum(~np.isfinite(arr)))} bar)")
+
+
+@pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)
+def test_no_bar_fires_both_ways(family, tf, seconds):
+    sig = compute(_cache(seconds), _params(family))
+    both = np.flatnonzero(sig.buy & sig.sell)
+    assert both.size == 0, (
+        f"{family}/{tf}: {both.size} barda hem al hem sat - backtest bu bari "
+        f"tamamen atiyor, yani sessiz giris kaybi")
+
+
+@pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)
+def test_an_earlier_bar_does_not_depend_on_a_later_one(family, tf, seconds):
+    """Cut the last 120 bars; every remaining bar must decide the same way."""
+    full = compute(_cache(seconds), _params(family))
+    cut = N - 120
+    high, low, close, times, open_, volume, cost = _bars(seconds)
+    short = compute(
+        IndicatorCache(high[:cut], low[:cut], close[:cut], times[:cut], seconds,
+                       open_[:cut], volume[:cut], cost[:cut]),
+        _params(family))
+    for side in ("buy", "sell"):
+        a = getattr(full, side)[:cut]
+        b = getattr(short, side)
+        drift = np.flatnonzero(a != b)
+        assert drift.size == 0, (
+            f"{family}/{tf}: {side} sinyali gelecege bakiyor - {drift.size} bar "
+            f"degisti, ilki {int(drift[0])}")
+
+
+@pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)
+def test_a_flat_market_does_not_raise(family, tf, seconds):
+    """Every range, deviation and true range is zero here - where the divisions
+    are. Signals are allowed to be anything; crashing is not."""
+    sig = compute(_cache(seconds, flat=True), _params(family))
+    for name, arr in _series(sig).items():
+        if arr.dtype != bool:
+            assert np.all(np.isfinite(arr)), f"{family}/{tf}: duz piyasada {name} NaN/inf"
