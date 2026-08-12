@@ -1895,7 +1895,22 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.get("/api/positions")
     def positions() -> dict[str, Any]:
-        return {"ok": True, "positions": engine.positions_view()}
+        # positions_view() reads client.positions(), which returns [] both when
+        # the account is flat AND when positions_get failed mid-call. Every
+        # MUTATING path already refuses to confuse those two (_require_connected
+        # / _positions, both stating it in as many words), and /api/state carries
+        # mt5.connected beside its own copy of the list. This endpoint carried
+        # neither, so an empty answer here was indistinguishable from a clean
+        # book - and this is the endpoint the review loops read to assert "every
+        # open position has a stop". A dropped connection would have produced
+        # "no positions, nothing unprotected" rather than "cannot tell".
+        #
+        # Reported rather than refused: unlike the mutating guards there is
+        # nothing here to fail closed ON, and 503-ing a display route would
+        # blank the dashboard on a blip. The caller is told which of the two it
+        # is and can decide.
+        return {"ok": True, "connected": client.connected,
+                "positions": engine.positions_view()}
 
     @app.post("/api/positions/{ticket}/close")
     def close_ticket(ticket: int) -> dict[str, Any]:
