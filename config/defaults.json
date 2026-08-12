@@ -212,30 +212,6 @@
   },
   "symbols": [
     {
-      "symbol": "CHFJPY",
-      "group": "forex",
-      "magic": 990122,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ],
-      "enabled": true
-    },
-    {
-      "symbol": "GBPUSD",
-      "group": "forex",
-      "magic": 990114,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ],
-      "enabled": true
-    },
-    {
       "symbol": "FRA40",
       "group": "index",
       "magic": 990102,
@@ -357,18 +333,6 @@
         }
       ],
       "enabled": true
-    },
-    {
-      "symbol": "USDCHF",
-      "group": "forex",
-      "magic": 990101,
-      "enabled": true,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ]
     }
   ],
   "optimizer": {
