@@ -17,8 +17,6 @@ class Params:
 
     strategy: str = "t3_stoch"
 
-    # ---- Bollinger/Keltner squeeze breakout ----
-
     # ---- order-flow-proxy exhaustion reversion ----
     flow_length: int = 20
     flow_z: float = 2.0
@@ -39,7 +37,7 @@ class Params:
     brst_range_z: float = 1.5
     brst_close_pct: float = 0.7
 
-    # ---- Tillson T3 ribbon (fast/slow T3 cross) ----
+    # ---- fast/slow T3 pair (dual_t3; named for the ribbon family, gone) ----
     t3_fast: int = 5                 # fast T3 length
     t3_slow_mult: float = 3.0        # slow T3 length = fast * this
     t3_fast_vf: float = 0.0          # fast line's own volume factor; 0 inherits t3_volume_factor
@@ -54,13 +52,8 @@ class Params:
     # ---- adaptive cost-regime gate, shared by the scalping families ----
     cost_rank_max: float = 0.0       # 0 disables; percentile ceiling on cost/range
 
-    # ---- opening range breakout ----
-
-
-    # ---- VWAP mean reversion ----
+    # ---- reversion regime ceiling (_regime + flow_rev) ----
     adx_max: float = 0.0             # 0 disables; reversion dies in strong trends
-
-    # ---- liquidity sweep / stop hunt reversal ----
 
     # ---- MACD histogram zero-cross ----
     macd_fast: int = 12

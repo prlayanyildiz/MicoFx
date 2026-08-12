@@ -94,8 +94,6 @@ class SymbolConfig:
     secondary_updated_at: float = 0.0
     secondary_summary: dict = field(default_factory=dict)
 
-    # ---- Bollinger/Keltner squeeze breakout ----
-
     # ---- order-flow-proxy exhaustion reversion ----
     flow_length: int = 20            # bars of signed-volume proxy accumulated
     flow_z: float = 2.0              # |z| of that sum that counts as exhaustion
@@ -116,17 +114,19 @@ class SymbolConfig:
     brst_range_z: float = 1.5        # bar range must exceed mean + z * sd of that window
     brst_close_pct: float = 0.7      # close must sit this far into its own bar's extreme
 
-    # ---- Tillson T3 ribbon (fast/slow T3 crossover family) ----
-    # T3 is a low-lag curve, so a *pair* of them carries the information a plain
-    # moving-average ribbon carries without the lag that makes an EMA ribbon
-    # useless intraday. Fast above slow is the bias; the cross is the trigger.
+    # ---- fast/slow T3 pair (dual_t3) ----
+    # Named for t3_ribbon, the family these were added for; that family was
+    # removed on 12.08 and dual_t3 still reads all three. T3 is a low-lag
+    # curve, so a *pair* of them carries what a plain moving-average ribbon
+    # carries without the lag that makes an EMA ribbon useless intraday. Fast
+    # above slow is the bias; the cross is the trigger.
     t3_fast: int = 5                 # fast T3 length
     t3_slow_mult: float = 3.0        # slow T3 length = fast * this
     # The two lines may run DIFFERENT volume factors. A T3's vf is its curvature
     # knob, not just a smoothing length: the widely shared Tillson scalping
     # template pairs a length-8 / vf-0.7 line with a length-5 / vf-0.618 line, so
     # the fast curve is both shorter and differently damped. 0 inherits
-    # ``t3_volume_factor`` and reproduces the old single-vf ribbon exactly.
+    # ``t3_volume_factor`` and reproduces a single-vf pair exactly.
     t3_fast_vf: float = 0.0
 
     # ---- T3 slope quality / curvature (t3_stoch + t3_flip) ----
@@ -151,13 +151,8 @@ class SymbolConfig:
     # since the same spread is cheap at the cash open and ruinous at 23:00.
     cost_rank_max: float = 0.0       # 0 disables
 
-    # ---- opening range breakout ----
-
-
-    # ---- VWAP mean reversion ----
+    # ---- reversion regime ceiling (_regime + flow_rev) ----
     adx_max: float = 0.0             # reversion only; 0 disables
-
-    # ---- liquidity sweep / stop hunt reversal ----
 
     # ---- MACD histogram zero-cross ----
     macd_fast: int = 12
@@ -369,7 +364,6 @@ class SymbolConfig:
                 out.append((start, end))
         return out
 
-
 # Fields that engine._update_stop reads live off cfg for a position that is
 # ALREADY open - as opposed to entry-signal fields, which only shape NEW
 # entries and can't disturb a trade in flight. A "refine" apply (same
@@ -561,7 +555,6 @@ def uses_swing_exits(strategy: str, timeframe: str) -> bool:
     # describing a state of the world that no longer exists.
     seconds = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
     return int(seconds.get(timeframe, 0)) >= 900
-
 
 # Written only by ``Optimizer.apply_secondary`` and only alongside an applied
 # primary. ``ensemble_enabled`` is deliberately NOT in this list: storing a
