@@ -175,7 +175,20 @@ class Optimizer:
             # only. Instance state rather than a threaded argument because a
             # run is exclusive - the busy check above is the guarantee.
             self._force_apply = bool(force)
-            targets = [s for s in (symbols or list(self.store.symbols)) if s in self.store.symbols]
+            # "Everything" means the book, not the symbols already switched
+            # off. supervisor._maybe_reoptimize skips a disabled symbol
+            # outright; this path took list(store.symbols) and did not, so a
+            # full scan spent part of every run on them and could apply a
+            # config to a symbol that is not trading. EURUSD was searched seven
+            # times in one day while off, and read as an anomaly each time
+            # someone looked at the log.
+            #
+            # Naming a symbol still searches it: "optimise this before I turn
+            # it on" is a real thing to want, and asking by name says so.
+            if symbols:
+                targets = [s for s in symbols if s in self.store.symbols]
+            else:
+                targets = [s for s, c in self.store.symbols.items() if c.enabled]
             if not targets:
                 return {"ok": False, "error": "Sembol secilmedi."}
             # One-off restriction of this run to a subset of the configured
