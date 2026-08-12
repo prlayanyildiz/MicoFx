@@ -246,29 +246,14 @@ class RiskManager:
                 note += f" (min lot {floor:g} sabit lotu asiyor, {floor / raw:.1f}x)"
             lot = max(floor, raw)
         else:
-            money_per_unit = self.client.money_per_price_unit(cfg.symbol, 1.0)
+            raw, multiplier, note_edge_capped, money_per_unit = self._risk_raw_lot(
+                cfg, sl_distance, balance, multiplier, edge)
             if money_per_unit <= 0:
                 # Fail closed, not "size off fixed_lot instead": that fallback
                 # skipped max_lot, edge/AI scaling and the overshoot guard
                 # entirely - a missing tick value silently produced a trade
                 # with none of this function's other safety checks applied.
                 return 0.0, "tick degeri yok, islem atlandi (risk % hesaplanamadi)"
-            # When the broker's own minimum stop distance is what is actually
-            # pinning the SL (not the strategy's ATR multiple), the position is
-            # already as tight as this symbol allows - a strong edge_scale on
-            # top of that stacks two amplifiers (bigger lot from the tight SL,
-            # then bigger again from edge) that were never validated together.
-            # Clamped to 1.0 rather than dropped, so the risk% itself still
-            # applies normally - only the edge multiplier's extra push is held
-            # back for this one trade.
-            min_stop = self.client.min_stop_distance(cfg.symbol)
-            if min_stop > 0 and sl_distance <= min_stop * 1.05 and edge > 1.0:
-                multiplier /= edge
-                note_edge_capped = True
-            else:
-                note_edge_capped = False
-            risk_money = balance * float(cfg.risk_percent) / 100.0 * multiplier
-            raw = risk_money / (sl_distance * money_per_unit)
             note = f"risk %{cfg.risk_percent * multiplier:.3g} -> {raw:.3f}"
             if note_edge_capped:
                 note += " (SL broker min'e yapisik, avantaj carpani kisildi)"
@@ -299,12 +284,50 @@ class RiskManager:
         lot = min(lot, ceiling)
         return self.client.normalize_volume(cfg.symbol, lot), note
 
+    def _risk_raw_lot(self, cfg: SymbolConfig, sl_distance: float, balance: float,
+                      multiplier: float, edge: float) -> tuple[float, float, bool, float]:
+        """Pre-floor, pre-ceiling lot for a risk-mode symbol.
+
+        Extracted so ``lot_for`` and ``lot_mode_diagnostics`` cannot answer the
+        same question differently. The diagnostic carried its own copy of this
+        arithmetic - deliberately, to avoid parsing lot_for's free-form note -
+        and the copy had drifted in three ways, every one of them understating
+        the overshoot it exists to warn about, and worst on exactly the symbols
+        where the warning matters most.
+
+        Returns ``(raw, multiplier, edge_capped, money_per_unit)``;
+        ``money_per_unit <= 0`` means the symbol has no usable tick value and
+        ``raw`` is meaningless.
+        """
+        money_per_unit = self.client.money_per_price_unit(cfg.symbol, 1.0)
+        if money_per_unit <= 0 or sl_distance <= 0:
+            return 0.0, multiplier, False, money_per_unit
+        # When the broker's own minimum stop distance is what is actually
+        # pinning the SL (not the strategy's ATR multiple), the position is
+        # already as tight as this symbol allows - a strong edge_scale on top
+        # of that stacks two amplifiers (bigger lot from the tight SL, then
+        # bigger again from edge) that were never validated together. Clamped
+        # to 1.0 rather than dropped, so the risk% itself still applies
+        # normally - only the edge multiplier's extra push is held back.
+        min_stop = self.client.min_stop_distance(cfg.symbol)
+        edge_capped = min_stop > 0 and sl_distance <= min_stop * 1.05 and edge > 1.0
+        if edge_capped:
+            multiplier /= edge
+        risk_money = balance * float(cfg.risk_percent) / 100.0 * multiplier
+        return risk_money / (sl_distance * money_per_unit), multiplier, edge_capped, money_per_unit
+
     def lot_mode_diagnostics(self, balance: float) -> list[dict[str, Any]]:
         """Flag risk-mode symbols whose broker min lot chronically overshoots
-        their configured risk% - same math ``lot_for`` uses live (duplicated
-        here rather than parsed out of its note string, which is free-form
-        text, not a stable machine-readable format), run once against a fresh
-        ATR read so the panel can warn before it happens on a real order.
+        their configured risk%, run against a fresh ATR read so the panel can
+        warn before it happens on a real order.
+
+        Shares ``_risk_raw_lot`` with ``lot_for`` rather than restating it. The
+        restated copy that used to live here had drifted on all three counts
+        that separate a preview from an order - no broker minimum-stop floor on
+        the distance, no edge cap when the stop is pinned to that minimum - and
+        both errors ran the same way, reporting less overshoot than the order
+        would take, worst on precisely the symbols where the stop IS pinned and
+        the warning matters.
         """
         from . import indicators as ind
 
@@ -322,18 +345,27 @@ class RiskManager:
             atr_now = float(atr_series[-1]) if len(atr_series) else 0.0
             if atr_now <= 0:
                 continue
-            sl_distance = atr_now * max(cfg.sl_atr_mult, 0.01)
-            money_per_unit = self.client.money_per_price_unit(cfg.symbol, 1.0)
+            # _try_entry hands lot_for ``max(atr * sl_atr_mult, min_stop)``.
+            # Without that floor the preview divides by a stop the broker would
+            # not accept, so raw comes out larger and the overshoot smaller
+            # than the order will actually take.
+            sl_distance = max(atr_now * max(cfg.sl_atr_mult, 0.01),
+                              self.client.min_stop_distance(cfg.symbol))
             floor = float(info["volume_min"])
+            edge = self.edge_scale(cfg)
+            multiplier = max(0.1, float(self.store.system.lot_multiplier or 1.0)) * edge
+            raw, multiplier, edge_capped, money_per_unit = self._risk_raw_lot(
+                cfg, sl_distance, balance, multiplier, edge)
             if money_per_unit <= 0:
                 continue
-            multiplier = max(0.1, float(self.store.system.lot_multiplier or 1.0)) * self.edge_scale(cfg)
-            risk_money = balance * float(cfg.risk_percent) / 100.0 * multiplier
-            raw = risk_money / (sl_distance * money_per_unit)
             overshoot = (floor / raw) if raw > 0 else 0.0
             rows.append({
                 "symbol": cfg.symbol, "floor": floor, "raw_lot": round(raw, 4),
                 "overshoot": round(overshoot, 2), "flagged": overshoot >= 2.0,
+                # Says the preview held the edge multiplier back the way a real
+                # order would, rather than leaving the reader to wonder why the
+                # number moved.
+                "edge_capped": edge_capped,
             })
         rows.sort(key=lambda r: -r["overshoot"])
         return rows
