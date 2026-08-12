@@ -369,30 +369,6 @@
           "end": "23:55"
         }
       ]
-    },
-    {
-      "symbol": "AUDUSD",
-      "group": "forex",
-      "magic": 990104,
-      "enabled": true,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ]
-    },
-    {
-      "symbol": "CA60",
-      "group": "index",
-      "magic": 990113,
-      "enabled": true,
-      "sessions": [
-        {
-          "start": "16:30",
-          "end": "23:10"
-        }
-      ]
     }
   ],
   "optimizer": {
