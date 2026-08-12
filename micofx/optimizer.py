@@ -166,10 +166,15 @@ class Optimizer:
 
     def start(self, symbols: list[str] | None = None, apply_best: bool = True,
               bars: int | None = None, source: str = "manual",
-              timeframes: list[str] | None = None) -> dict[str, Any]:
+              timeframes: list[str] | None = None,
+              force: bool = False) -> dict[str, Any]:
         with self._lock:
             if self.busy:
                 return {"ok": False, "error": "Optimizasyon zaten calisiyor."}
+            # Waives the settling-time hold in reject_reason() for this run
+            # only. Instance state rather than a threaded argument because a
+            # run is exclusive - the busy check above is the guarantee.
+            self._force_apply = bool(force)
             targets = [s for s in (symbols or list(self.store.symbols)) if s in self.store.symbols]
             if not targets:
                 return {"ok": False, "error": "Sembol secilmedi."}
@@ -182,6 +187,7 @@ class Optimizer:
                 "state": "running", "started_at": time.time(), "finished_at": 0.0,
                 "symbols": targets, "apply_best": bool(apply_best),
                 "source": str(source or "manual"), "timeframes": tf_override or [],
+                "force": bool(force),
                 "done": 0, "total": len(targets), "current": "",
                 "combo_done": 0, "combo_total": 0, "best_score": None,
                 "results": [], "error": "",
@@ -931,6 +937,42 @@ class Optimizer:
             if self.store is not None else 0.6
         if best.get("positive_ratio", 0) < min_positive:
             return "secim segmentleri arasinda tutarsiz"
+        # A configuration gets the settling time the system already says it
+        # should get. ``reopt_min_age_hours`` states the policy and
+        # supervisor._maybe_reoptimize enforces it - a symbol younger than that
+        # is never queued, decay path included. This route never checked it, so
+        # a full scan replaced configurations the auto route would have left
+        # alone, and that is where the churn came from: across 495 applies, the
+        # symbols that made money had settled on one config (SpotBrent's last
+        # three applies all mtf_pullback/H1, US30's all dual_t3/M15) while the
+        # ones losing money never stopped moving - USDCHF through 12 distinct
+        # configs in 23 applies, USDJPY 10 in 15. Every family swap discards
+        # that symbol's live record, so it never reaches watch_min_trades and
+        # the supervisor never gets to throttle a config that is losing: it is
+        # replaced before it can be judged.
+        #
+        # The search still runs and still reports - the report costs nothing
+        # and is information. Only the apply is held back, because the apply is
+        # what discards the evidence. ``force`` is the way past it, and it was
+        # needed today: two full runs twenty-five minutes apart, because the
+        # first searched a grid that turned out to be broken.
+        if cfg is not None and not getattr(self, "_force_apply", False):
+            applied_at = float(getattr(cfg, "opt_updated_at", 0.0) or 0.0)
+            if applied_at > 0:
+                # Read from the store rather than hardcoded: the operator's own
+                # number, same as min_positive_ratio below. 48.0 is the shipped
+                # default and only stands in when the row is absent entirely.
+                sup = {}
+                if self.store is not None:
+                    sup = self.store.get_setting("supervisor", {}) or {}
+                try:
+                    min_age_h = float(sup.get("reopt_min_age_hours", 48.0))
+                except (TypeError, ValueError):
+                    min_age_h = 48.0
+                age_h = (time.time() - applied_at) / 3600.0
+                if min_age_h > 0 and age_h < min_age_h:
+                    return (f"mevcut ayar {age_h:.0f} saatlik, en az "
+                            f"{min_age_h:.0f} saat calismali")
         # Same shape as min_positive_ratio above, for the same reason. The
         # engine refuses an entry when its live cost exceeds
         # system.max_cost_pct_of_risk, and that setting ships at 25.0 to agree

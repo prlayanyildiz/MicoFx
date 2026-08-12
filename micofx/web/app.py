@@ -60,6 +60,9 @@ class OptRun(BaseModel):
     apply_best: bool = True
     bars: int | None = None
     timeframes: list[str] | None = None
+    # Waives the settling-time hold: a config normally has to run for
+    # reopt_min_age_hours before a scan may replace it.
+    force: bool = False
 
 
 class OptApply(BaseModel):
@@ -1913,7 +1916,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/opt/run")
     def opt_run(body: OptRun) -> dict[str, Any]:
         result = optimizer.start(body.symbols, body.apply_best, body.bars,
-                                 timeframes=body.timeframes)
+                                 timeframes=body.timeframes, force=body.force)
         if not result.get("ok"):
             raise HTTPException(409, result.get("error", "optimizasyon baslatilamadi"))
         return result
