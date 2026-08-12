@@ -15,6 +15,7 @@ wrong calls on which symbols are worth trading.
 from __future__ import annotations
 
 import sys
+import time
 import threading
 from pathlib import Path
 
@@ -105,6 +106,12 @@ def _cfg(symbol, *, trades, edge, cost_r, ceiling, hold_days=30.0,
          enabled=True, magic=1):
     c = SymbolConfig(symbol=symbol, magic=magic, enabled=enabled)
     c.max_spread_atr = ceiling
+    # These cases all read a fill rate, which only means anything once the
+    # config has been live for the whole review window - see
+    # test_fill_rate_needs_a_config_old_enough_to_measure.py. That was the
+    # unstated assumption here; stating it keeps these testing the frequency
+    # gate rather than the age guard in front of it.
+    c.opt_updated_at = time.time() - 60 * 86400.0
     c.opt_summary = {
         "holdout_days": hold_days,
         "holdout": {"trades": trades, "expectancy": edge,

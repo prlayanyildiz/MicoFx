@@ -1193,7 +1193,30 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             hold_days = float(summary.get("holdout_days") or 0.0)
             expected = (n / hold_days * window_days) if (n and hold_days > 0) else None
             actual = int((live.get(cfg.symbol) or {}).get("trades") or 0)
-            fill = (actual / expected) if expected else None
+
+            # ``expected`` projects THIS config's holdout rate across the whole
+            # review window; ``actual`` counts every trade in that window, most
+            # of them made by whatever configs ran before this one. The two only
+            # describe the same population once the config has been live for the
+            # full window, and nine of the ten live configs are younger than
+            # forty-eight hours - so that is the normal state here, not an edge
+            # case. US2000's config was three and a half hours old while the
+            # ratio was being read as "5% of the promised trades" and flagged;
+            # scaled to the age it had actually run, the same numbers say it
+            # traded ten times faster than the holdout rate, not twenty times
+            # slower. Neither figure is trustworthy, because ``actual`` is not
+            # restricted to the config's lifetime either, and the supervisor
+            # hands over an aggregate count with no per-trade times to restrict
+            # it with. So the reading is withheld rather than repaired.
+            #
+            # thin_sample, the settling hold in optimizer.reject_reason and the
+            # supervisor's watch_min_trades all already refuse to judge a config
+            # on evidence it did not produce. This is that same rule on the one
+            # path still missing it.
+            cfg_age_days = ((time.time() - cfg.opt_updated_at) / 86400.0
+                            if cfg.opt_updated_at else None)
+            fill_measurable = cfg_age_days is not None and cfg_age_days >= window_days
+            fill = (actual / expected) if (expected and fill_measurable) else None
 
             # Which review layer this symbol falls in. Classification only -
             # nothing here switches anything off. Capital allocation is a
@@ -1259,6 +1282,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 "expected_trades": round(expected, 1) if expected else None,
                 "actual_trades": actual,
                 "fill_rate": round(fill, 3) if fill is not None else None,
+                # Says why fill_rate is missing: too young to compare, not
+                # "nothing traded". Without this the blank reads as a zero.
+                "config_age_days": round(cfg_age_days, 2) if cfg_age_days is not None else None,
+                "fill_measurable": fill_measurable,
                 "fails": fails,
                 "clean": not fails,
                 "layer": layer,
