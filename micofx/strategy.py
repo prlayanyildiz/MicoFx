@@ -450,6 +450,12 @@ class Signals:
     sell: np.ndarray
     htf_up: np.ndarray
     htf_down: np.ndarray
+    # What ``t3`` carries. Most families put the T3 level itself there; the
+    # two trend-flag families put a -1/0/+1 direction in the same field, and
+    # the flip families do not populate it at all. Nothing downstream trades
+    # on any of it - it is the live status view - but the view was reading
+    # all three as one number. See ``last()``.
+    t3_kind: str = "level"
 
     def last(self) -> dict[str, Any]:
         if self.t3.size < 2:
@@ -457,11 +463,34 @@ class Signals:
         i = -1
         buy = bool(self.buy[i]) and not bool(self.sell[i])
         sell = bool(self.sell[i]) and not bool(self.buy[i])
+
+        # A family that does not compute one of these passes an all-zero
+        # series (the ``zeros`` argument at the flip-family return sites).
+        # Reporting that as 0.0 is indistinguishable from a real reading of
+        # zero: the live panel showed ADX 0.0 and "t3 falling" for strategies
+        # that compute neither, which reads as a bot buying against its own
+        # trend filter. None says "this family does not measure it".
+        #
+        # An all-zero series that a family DID compute is possible in
+        # principle and reported the same way; a genuinely flat ADX over the
+        # whole warmup says nothing worth distinguishing from "not measured".
+        def _reading(series: np.ndarray) -> float | None:
+            return float(series[i]) if series.any() else None
+
+        t3_now = _reading(self.t3)
+        # Only a level can rise. For the direction families the same
+        # comparison would report a -1 -> +1 flip as "t3 rising", which is a
+        # different statement in the same words; the flag itself is in ``t3``.
+        rising: bool | None = None
+        if t3_now is not None and self.t3_kind == "level":
+            rising = bool(self.t3[i] > self.t3[i - 1])
+
         return {
-            "t3": float(self.t3[i]),
-            "t3_rising": bool(self.t3[i] > self.t3[i - 1]),
-            "k": float(self.k[i]), "d": float(self.d[i]),
-            "atr": float(self.atr[i]), "adx": float(self.adx[i]),
+            "t3": t3_now,
+            "t3_kind": self.t3_kind if t3_now is not None else None,
+            "t3_rising": rising,
+            "k": _reading(self.k), "d": _reading(self.d),
+            "atr": float(self.atr[i]), "adx": _reading(self.adx),
             "buy": buy,
             "sell": sell,
             "htf": 1 if self.htf_up[i] else (-1 if self.htf_down[i] else 0),
@@ -1200,7 +1229,8 @@ def _st_trend(cache: IndicatorCache, p: Params) -> Signals:
     # SuperTrend line's own direction is reported instead of a series it never
     # looked at.
     return Signals(t3=direction.astype(np.float64), k=zeros, d=zeros, atr=atr_series,
-                   adx=adx_series, buy=buy, sell=sell, htf_up=flat, htf_down=flat)
+                   adx=adx_series, buy=buy, sell=sell, htf_up=flat, htf_down=flat,
+                   t3_kind="direction")
 
 
 def _t3_flip(cache: IndicatorCache, p: Params) -> Signals:
@@ -1442,7 +1472,8 @@ def _parabolic_flip(cache: IndicatorCache, p: Params) -> Signals:
 
     buy, sell = _resolve_conflicts(buy, sell)
     return Signals(t3=direction.astype(np.float64), k=zeros, d=zeros, atr=atr_series, adx=zeros,
-                   buy=buy, sell=sell, htf_up=flat, htf_down=flat)
+                   buy=buy, sell=sell, htf_up=flat, htf_down=flat,
+                   t3_kind="direction")
 
 
 def _trix_flip(cache: IndicatorCache, p: Params) -> Signals:

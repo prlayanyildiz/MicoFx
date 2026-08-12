@@ -30,6 +30,11 @@ _COOLDOWN_BARS = 2
 # post-fill silence is enough. Two H1 bars would idle the symbol for two hours.
 _COOLDOWN_BARS_SWING = 1
 
+
+def _round_or_none(value: float | None, digits: int) -> float | None:
+    """round() that carries a "not measured" through instead of raising."""
+    return None if value is None else round(value, digits)
+
 # Live-tick-spread / bar-spread histogram: buckets of 0.1 from 0.0 to 5.0,
 # plus a final overflow bucket for anything above.
 SPREAD_RATIO_STEP = 0.1
@@ -125,7 +130,7 @@ class SymbolState:
                  "note", "session", "spread", "spread_atr", "last_signal_at", "htf", "bars",
                  "primary_signal", "sec_signal", "sec_atr", "sec_last_bar",
                  "sec_next_bar_at", "sec_last_fetch", "sec_bars", "signal_source",
-                 "pending_bar_key", "entry_block")
+                 "pending_bar_key", "entry_block", "t3_kind")
 
     def __init__(self, symbol: str) -> None:
         self.symbol = symbol
@@ -142,12 +147,15 @@ class SymbolState:
         self.sec_next_bar_at = 0.0
         self.sec_last_fetch = 0.0
         self.sec_bars = None
-        self.adx = 0.0
-        self.t3 = 0.0
-        self.t3_rising = False
+        # None until a bar is computed, and None thereafter for a family that
+        # does not measure it - 0.0/False would read as a real flat reading.
+        self.adx = None
+        self.t3 = None
+        self.t3_rising = None
+        self.t3_kind = None
         self.htf = 0
-        self.k = 0.0
-        self.d = 0.0
+        self.k = None
+        self.d = None
         self.signal = ""
         self.bars_ready = 0
         self.cooldown_until = 0.0
@@ -169,9 +177,15 @@ class SymbolState:
     def as_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol, "last_bar": self.last_bar, "atr": round(self.atr, 6),
-            "adx": round(self.adx, 1), "t3": round(self.t3, 6), "t3_rising": self.t3_rising,
+            # None where the family does not measure it - see Signals.last().
+            # Rounding None would raise, and defaulting it back to 0.0 here
+            # would undo the whole point.
+            "adx": _round_or_none(self.adx, 1),
+            "t3": _round_or_none(self.t3, 6), "t3_rising": self.t3_rising,
+            "t3_kind": self.t3_kind,
             "htf": self.htf,
-            "k": round(self.k, 1), "d": round(self.d, 1), "signal": self.signal,
+            "k": _round_or_none(self.k, 1), "d": _round_or_none(self.d, 1),
+            "signal": self.signal,
             "signal_source": self.signal_source,
             "primary_signal": self.primary_signal, "secondary_signal": self.sec_signal,
             "bars_ready": self.bars_ready, "note": self.note, "session": self.session,
@@ -1286,12 +1300,13 @@ class Engine:
                                bars.open, bars.volume, self._cost_series(cfg, bars))
         sig: Signals = compute(cache, params)
         snap = sig.last()
-        state.t3 = snap.get("t3", 0.0)
-        state.t3_rising = snap.get("t3_rising", False)
-        state.k = snap.get("k", 0.0)
-        state.d = snap.get("d", 0.0)
+        state.t3 = snap.get("t3")
+        state.t3_rising = snap.get("t3_rising")
+        state.t3_kind = snap.get("t3_kind")
+        state.k = snap.get("k")
+        state.d = snap.get("d")
         state.atr = snap.get("atr", 0.0)
-        state.adx = snap.get("adx", 0.0)
+        state.adx = snap.get("adx")
         state.htf = int(snap.get("htf", 0))
         if snap.get("buy"):
             state.primary_signal = "buy"
@@ -1301,9 +1316,17 @@ class Engine:
             state.primary_signal = ""
         if state.primary_signal:
             state.last_signal_at = time.time()
-            LOG.emit(f"Sinyal {state.primary_signal.upper()} | K={state.k:.1f} D={state.d:.1f} "
-                     f"ATR={state.atr:.5f} ADX={state.adx:.0f} HTF={state.htf:+d}",
-                     "SIGNAL", cfg.symbol)
+            # Only the readings this family actually measures. The fixed
+            # layout printed "K=0.0 D=0.0 ADX=0" for every flip family, which
+            # is the same falsehood the status panel carried - and it is this
+            # line the loss reviews read back afterwards.
+            parts = [f"Sinyal {state.primary_signal.upper()}"]
+            for name, value, fmt in (("K", state.k, ".1f"), ("D", state.d, ".1f"),
+                                     ("ATR", state.atr, ".5f"), ("ADX", state.adx, ".0f")):
+                if value is not None:
+                    parts.append(f"{name}={value:{fmt}}")
+            parts.append(f"HTF={state.htf:+d}")
+            LOG.emit(" | ".join(parts), "SIGNAL", cfg.symbol)
         return True
 
     # ------------------------------------------------------- second signal

@@ -570,11 +570,17 @@ function renderLive() {
       <td class="dim" title="${esc(STRATEGY_LABEL[cfg.strategy] || cfg.strategy)}">${esc(cfg.strategy)}</td>
       <td class="dim">${esc(cfg.timeframe)}</td>
       <td>${sessionCell}</td>
-      <td class="${st.t3_rising ? "pos" : "neg"}">${st.bars_ready ? (st.t3_rising ? "yukari" : "asagi") : '<span class="dim">-</span>'}</td>
+      <!-- null = this family does not compute a T3 level (flip families), or
+           t3 carries a -1/+1 direction rather than a level. The old ternary
+           sent both to "asagi", so a strategy with no T3 at all read as one
+           whose trend had turned down - beside a BUY signal. -->
+      <td class="${st.t3_rising == null ? "" : (st.t3_rising ? "pos" : "neg")}">${(!st.bars_ready || st.t3_rising == null) ? '<span class="dim">-</span>' : (st.t3_rising ? "yukari" : "asagi")}</td>
       <td>${htf}</td>
       <td class="num">${st.k != null ? num(st.k, 1) : "-"}</td>
       <td class="num">${st.d != null ? num(st.d, 1) : "-"}</td>
-      <td class="num ${st.adx >= (cfg.adx_min || 0) ? "" : "dim"}">${st.adx != null ? num(st.adx, 0) : "-"}</td>
+      <!-- null adx would coerce to 0 in the >= below and read as "meets the
+           minimum"; an unmeasured reading meets nothing. -->
+      <td class="num ${st.adx != null && st.adx >= (cfg.adx_min || 0) ? "" : "dim"}">${st.adx != null ? num(st.adx, 0) : "-"}</td>
       <td class="num dim">${st.atr ? st.atr.toFixed(cfg.digits ?? 5) : "-"}</td>
       <td class="num ${st.spread_atr > cfg.max_spread_atr ? "neg" : "dim"}">${st.spread_atr ? num(st.spread_atr, 2) + "x" : "-"}</td>
       <td>${cfg.enabled ? sig : '<span class="pill off">kapali</span>'}</td>
@@ -1110,7 +1116,7 @@ function updateSymbolCards() {
       <span><b>strateji</b> ${esc(STRATEGY_LABEL[cfg.strategy] || cfg.strategy)} <span class="dim">${esc(cfg.timeframe)}</span></span>
       <span><b>seans</b> ${sess.open ? '<span class="pos">acik</span>' : '<span class="dim">kapali</span>'} ${esc(cfg.session_text)}</span>
       <span><b>lot</b> ${num(cfg.lot_mode === "risk" ? cfg.max_lot : cfg.fixed_lot, 2)}${cfg.lot_mode === "risk" ? " (risk)" : ""}</span>
-      <span><b>T3</b> ${st.bars_ready ? (st.t3_rising ? '<span class="pos">yukari</span>' : '<span class="neg">asagi</span>') : "-"}</span>
+      <span><b>T3</b> ${(!st.bars_ready || st.t3_rising == null) ? "-" : (st.t3_rising ? '<span class="pos">yukari</span>' : '<span class="neg">asagi</span>')}</span>
       <span><b>K/D</b> ${st.k != null ? num(st.k, 0) + "/" + num(st.d, 0) : "-"}</span>
       <span><b>opt</b> <span class="opt-badge ${cfg.opt_score > 0 ? "pos" : "dim"}">${num(cfg.opt_score, 1)}</span> <span class="dim">${optAge}</span></span>
       ${sig}
