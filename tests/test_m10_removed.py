@@ -36,19 +36,34 @@ def test_m10_is_not_a_valid_timeframe():
     assert "M10" not in TIMEFRAMES
 
 
-def test_no_strategy_family_still_lists_it():
+def test_the_family_timeframe_table_is_empty_or_clean():
+    """Both loops that used to live here iterated STRATEGY_TIMEFRAMES, which is
+    now ``{}`` - so they ran zero times and asserted nothing while still
+    reporting green. The family->TF restriction was lifted deliberately
+    (DECISIONS #2), and an empty table means "every family may use every
+    TIMEFRAMES entry".
+
+    Stated as an either/or rather than deleted: if the table is ever populated
+    again, both things those loops existed for still have to hold.
+    """
+    if not STRATEGY_TIMEFRAMES:
+        return
     for family, allowed in STRATEGY_TIMEFRAMES.items():
         assert "M10" not in allowed, family
-
-
-def test_every_family_still_has_somewhere_to_run():
-    """Removing a timeframe must not strand a family with no legal pairing."""
-    for family, allowed in STRATEGY_TIMEFRAMES.items():
         assert set(allowed) & set(TIMEFRAMES), f"{family} hicbir TF'de calisamaz"
 
 
-@pytest.mark.parametrize("family", ["micro_rev", "burst", "t3_ribbon"])
-def test_the_scalp_families_keep_m5(family):
+@pytest.mark.parametrize("family", ["micro_rev", "burst"])
+def test_a_scalp_family_may_use_m5_and_not_m10(family):
+    """The scalp families are the ones M5 exists for.
+
+    With STRATEGY_TIMEFRAMES empty this resolves through the "not configured ->
+    allow every TIMEFRAMES entry" branch, so what it really asserts is that M5
+    is offered and M10 is not - the point either way. It used to parametrize
+    over ``t3_ribbon`` as well, one of the six families removed on 12.08; the
+    name outlived the family because the assertion never depended on it, which
+    is the kind of residue this sweep was looking for.
+    """
     assert strategy_allows_timeframe(family, "M5")
     assert not strategy_allows_timeframe(family, "M10")
 

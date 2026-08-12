@@ -148,7 +148,7 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
     logbus.py       ring + rotating file
     mt5client.py    locked MT5 bridge
     sessions.py     broker-time windows
-    indicators.py   T3, StochRSI, ATR, ADX, VWAP, ORB, Donchian, helpers
+    indicators.py   T3, StochRSI, ATR, ADX, SuperTrend, WaveTrend, Aroon, TRIX, helpers
     strategy.py     Params, IndicatorCache, 4 families → Signals
     backtest.py     bar replay + walk_forward
     optimizer.py    background TF×strategy search + apply gates
@@ -240,8 +240,16 @@ Bars where both `buy` and `sell` are True must be **dropped** (neither side). Do
 
 ## 7. Strategy families (shared)
 
-`STRATEGIES = ["t3_stoch", "orb", "vwap_rev", "donchian", "squeeze_brk", "flow_rev",
-"mtf_pullback", "micro_rev", "burst", "t3_ribbon", "dual_t3"]`
+`STRATEGIES = ["t3_stoch", "flow_rev", "mtf_pullback", "micro_rev", "burst",
+"dual_t3", "st_trend", "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
+"parabolic_flip", "trix_flip", "aroon_flip"]` — 14 aile.
+
+> `orb`, `vwap_rev`, `donchian`, `squeeze_brk`, `t3_ribbon` ve `liq_sweep`
+> **kaldirildi** (12.08): optimizer'in `strategies` listesi zaten 14'tu, arama
+> bunlari hicbir zaman onermiyordu. Asagidaki aile bolumleri **tam liste
+> degildir** — kaynak `models.STRATEGIES`, ve
+> `test_the_strategy_lists_cannot_drift_apart.py` ikisinin ayrismasini
+> engelliyor.
 
 Optimizer does **not** guess which family fits a symbol: it searches **all enabled families × timeframes** and picks by validation score.
 
@@ -254,15 +262,6 @@ Optimizer does **not** guess which family fits a symbol: it searches **all enabl
 ### `t3_stoch`
 Long: T3 rising ∧ %K crosses above %D ∧ `K < 50+stoch_band` ∧ `D < stoch_extreme` ∧ regime ∧ HTF long.  
 Short: mirror. Optional body-ratio and ATR-percentile filters. Warmup bars suppressed.
-
-### `orb`
-Opening range = first `orb_minutes` after session start. Trade only after range complete. Close beyond hi/lo ± `orb_buffer_atr * ATR`. **First break per session** only (`first_per_group`).
-
-### `vwap_rev`
-Session VWAP ± `vwap_sd * σ`. Far above → sell; far below → buy. With `vwap_reentry`, bar must turn toward VWAP (close vs open). `adx_max` kills strong-trend days. **Only mean reversion** (no VWAP crossover family — measured as dead).
-
-### `donchian`
-Close beyond prior N-bar channel ± buffer; `first_of_run`. Optional `don_squeeze`: only when channel-width percentile ≤ threshold (break from compression, not chase extension).
 
 ### `micro_rev` (M5-native scalp)
 Micro mean reversion whose entry threshold is measured in **round-turn cost multiples**,

@@ -5,7 +5,7 @@ Başlatma: `start.bat` veya `python run.py`
 
 Uygulama açılınca bot **sadece izler**. Emir için üstteki **Bot Başlat** gerekir.
 
-Güncel portföy (10 sembol): SpotBrent, XAUUSD, GER40, JPN225, NAS100, US500, AUDUSD, EURUSD, USDCHF, USDJPY.
+Güncel portföy (10 sembol): FRA40, GER40, JPN225, NAS100, SpotBrent, UK100, US2000, US30, US500, XAUUSD. (Kaynak: `config/defaults.json`.)
 
 ## Son güncellemeler (bu belgeyi okuduğun tarihte geçerli olanlar)
 
