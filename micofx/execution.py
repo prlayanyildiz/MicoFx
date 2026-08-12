@@ -45,17 +45,39 @@ from typing import Any
 
 from .logbus import LOG
 
-# MT5 deal reason codes for a position closed by the server itself rather than
-# by an order this engine sent. SO is the broker's margin stop-out.
+# MT5 deal reason codes for a close this engine did not order. The first three
+# are the server acting on its own (SO is the broker's margin stop-out); the
+# rest are a human closing the position by hand, from the terminal, the phone
+# or the web client.
+#
+# Those three used to be absent from the filter below, so a hand-closed
+# position produced no report and therefore no log line at all - it simply
+# stopped being tracked. The count is what surfaced it: thirty-four closes on
+# the panel against twenty-nine in the log for the same day, and the five were
+# closes made by hand. Every loss attribution built off that log was quietly
+# short by them.
+#
+# EXPERT (3) stays out on purpose: that is this engine's own close_all/panel
+# routes, which already report, and a foreign EA's deals are dropped by the
+# magic filter in _log_broker_exit anyway.
+DEAL_REASON_CLIENT = 0
+DEAL_REASON_MOBILE = 1
+DEAL_REASON_WEB = 2
 DEAL_REASON_SL = 4
 DEAL_REASON_TP = 5
 DEAL_REASON_SO = 6
+
+_CLOSED_ELSEWHERE = (DEAL_REASON_SL, DEAL_REASON_TP, DEAL_REASON_SO,
+                     DEAL_REASON_CLIENT, DEAL_REASON_MOBILE, DEAL_REASON_WEB)
 
 # Human labels for the exit reports below.
 _REASON_LABEL = {
     DEAL_REASON_SL: "stop",
     DEAL_REASON_TP: "hedef",
     DEAL_REASON_SO: "broker marj kapatmasi",
+    DEAL_REASON_CLIENT: "elle (terminal)",
+    DEAL_REASON_MOBILE: "elle (mobil)",
+    DEAL_REASON_WEB: "elle (web)",
 }
 
 # Per-symbol rolling sample window. Long enough for the symmetry read below to
@@ -247,8 +269,7 @@ class ExecutionMonitor:
         # price is volume-weighted across the chunks.
         closers: dict[int, list[dict[str, Any]]] = {}
         for deal in deals:
-            if int(deal.get("reason", -1)) in (DEAL_REASON_SL, DEAL_REASON_TP,
-                                               DEAL_REASON_SO):
+            if int(deal.get("reason", -1)) in _CLOSED_ELSEWHERE:
                 closers.setdefault(int(deal["position"]), []).append(deal)
         # Net realised P/L is the whole round trip, not the closing deals'
         # ``profit`` alone - commission (which some brokers charge on the entry
