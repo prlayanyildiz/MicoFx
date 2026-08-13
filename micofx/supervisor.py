@@ -118,6 +118,9 @@ class SymbolVerdict:
     # by an operator "Serbest birak" (see clear()); the config's own apply
     # timestamp does the same job without being stored here.
     history_cleared_at: float = 0.0
+    # Released early (config replaced, or cleared by hand) but not yet judged
+    # on its own record. Trades at watch size until it has one - see _judge().
+    probation: bool = False
     risk_scale: float = 1.0
     blocked_hours: list = field(default_factory=list)
     hour_risk_scales: dict = field(default_factory=dict)  # hour -> soft multiplier (PF-based, not a hard block)
@@ -264,6 +267,7 @@ class Supervisor:
                 v.quarantined_at = 0.0
                 v.risk_scale = 1.0
                 v.history_cleared_at = now
+                v.probation = True
             if not symbol:
                 self.risk_scale = 1.0
             self._persist()
@@ -438,6 +442,7 @@ class Supervisor:
             v.quarantine_until = previous.quarantine_until
             v.quarantined_at = previous.quarantined_at
             v.history_cleared_at = previous.history_cleared_at
+            v.probation = previous.probation
             v.blocked_hours = list(previous.blocked_hours or [])
             v.last_reopt_attempt = previous.last_reopt_attempt
 
@@ -552,6 +557,7 @@ class Supervisor:
             # by the same review that owns every other state transition.
             v.quarantine_until = 0.0
             v.quarantined_at = 0.0
+            v.probation = True
             LOG.emit(f"Karantina kaldirildi: konfig yenilendi "
                      f"({time.strftime('%H:%M', time.localtime(since_cfg))} apply), "
                      f"yeni ayar kendi kaydiyla yargilanacak.", "AI", cfg.symbol)
@@ -599,6 +605,27 @@ class Supervisor:
                 v.reason = f"PF {v.profit_factor:.2f}"
                 if v.edge_health > 0:
                     v.reason += f" | saglik %{v.edge_health * 100:.0f}"
+
+        # Probation: released early - the config was replaced, or an operator
+        # cleared the record - but nothing has been proved yet. The evidence
+        # epoch means the suspension bar now reads only this config's own
+        # trades, so between the release and its 25th trade there is a window
+        # where only the streak breaker is watching. Letting a symbol walk out
+        # of a suspension straight back to full size is the wrong shape for
+        # that window: it goes back at watch size and earns the rest.
+        #
+        # Ends by itself once the record exists - no clock, no second decision.
+        # Does not override watch/quarantine picked above, and never applies to
+        # a symbol that was simply re-optimised while healthy: probation is set
+        # only where a suspension was lifted.
+        if v.probation:
+            if judged_n >= int(cfgs["min_trades"]):
+                v.probation = False
+            elif v.state == "ok":
+                v.state = "watch"
+                v.risk_scale = float(cfgs["watch_risk_scale"])
+                v.reason = (f"deneme suresi - yeni ayar {judged_n}/"
+                            f"{int(cfgs['min_trades'])} islem, lot kisildi")
 
         # Live PF edge-decay: only meaningful once a symbol was otherwise "ok" -
         # never upgrades out of quarantine and never overwrites the watch/quarantine

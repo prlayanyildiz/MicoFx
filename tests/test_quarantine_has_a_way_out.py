@@ -186,3 +186,60 @@ def test_a_symbol_with_no_epoch_is_judged_on_its_whole_record():
     v = sup._judge(cfg, trades, _cfgs())
 
     assert v.state == "quarantine"
+
+
+class TestProbation:
+    """Released early is not the same as proved.
+
+    The evidence epoch means the suspension bar reads only the current config's
+    own trades, so between a release and its 25th trade only the streak breaker
+    is watching. A symbol walking out of a suspension goes back at watch size
+    and earns the rest - the graduated response ``watch`` exists for.
+    """
+
+    def test_a_released_symbol_goes_back_at_watch_size(self):
+        sup = _sup()
+        cfg = SymbolConfig(symbol="NAS100", opt_updated_at=0.0)
+        sup.verdicts["NAS100"] = SymbolVerdict(symbol="NAS100", state="quarantine")
+        sup.clear("NAS100")
+        cleared = sup.verdicts["NAS100"].history_cleared_at
+
+        # A short, perfectly good record under the new epoch - not enough of it.
+        v = sup._judge(cfg, _wins(cleared + 60, 4), _cfgs())
+
+        assert v.state == "watch"
+        assert v.risk_scale == DEFAULTS["watch_risk_scale"]
+        assert "deneme suresi" in v.reason
+
+    def test_probation_ends_on_its_own_once_the_record_exists(self):
+        sup = _sup()
+        cfg = SymbolConfig(symbol="NAS100", opt_updated_at=0.0)
+        sup.verdicts["NAS100"] = SymbolVerdict(symbol="NAS100", state="quarantine")
+        sup.clear("NAS100")
+        cleared = sup.verdicts["NAS100"].history_cleared_at
+
+        v = sup._judge(cfg, _wins(cleared + 60, 30), _cfgs())
+
+        assert v.probation is False
+        assert v.state == "ok"
+
+    def test_probation_does_not_rescue_a_genuinely_bad_config(self):
+        """It softens the way back up, it must not soften the way down."""
+        sup = _sup()
+        cfg = SymbolConfig(symbol="NAS100", opt_updated_at=0.0)
+        sup.verdicts["NAS100"] = SymbolVerdict(symbol="NAS100", state="quarantine")
+        sup.clear("NAS100")
+        cleared = sup.verdicts["NAS100"].history_cleared_at
+
+        v = sup._judge(cfg, _losses(cleared + 60, 30), _cfgs())
+
+        assert v.state == "quarantine"
+
+    def test_a_healthy_symbol_that_was_never_suspended_is_untouched(self):
+        """Probation is only for symbols coming out of a suspension."""
+        sup = _sup()
+        cfg = SymbolConfig(symbol="GER40", opt_updated_at=NOW - 30 * 60)
+        v = sup._judge(cfg, _wins(NOW - 25 * 60, 5), _cfgs())
+
+        assert v.probation is False
+        assert v.state == "ok"

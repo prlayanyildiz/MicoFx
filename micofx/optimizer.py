@@ -1054,7 +1054,9 @@ class Optimizer:
                 age_h = (time.time() - applied_at) / 3600.0
                 if min_age_h > 0 and age_h < min_age_h:
                     return (f"mevcut ayar {age_h:.0f} saatlik, en az "
-                            f"{min_age_h:.0f} saat calismali")
+                            f"{min_age_h:.0f} saat calismali "
+                            f"(churn freni - gecmek icin 'zorla uygula', "
+                            f"veya Sistem > reopt_min_age_hours)")
         # Same shape as min_positive_ratio above, for the same reason. The
         # engine refuses an entry when its live cost exceeds
         # system.max_cost_pct_of_risk, and that setting ships at 25.0 to agree
