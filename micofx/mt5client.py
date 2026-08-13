@@ -905,6 +905,44 @@ class MT5Client:
             })
         return out
 
+    def cash_flow_since(self, ts: float) -> float | None:
+        """Net external (non-trading) balance movement since ``ts``.
+
+        Deposits, withdrawals, credit and broker corrections move ``balance``
+        - and therefore ``equity`` - without any trade having produced them.
+        DailyGuard anchors its daily loss breaker on equity drift from the
+        day's opening balance, so an untracked deposit reads as profit and
+        silently disarms the breaker (measured 13.08: +499.96 deposited while
+        trading was -304.62, panel showing +20.11% against a -17.68% real
+        loss - a 37.8-point error, wider than the whole 33% loss band).
+
+        Only genuinely external types count. Charges, commissions and
+        interest are trading costs and belong *inside* the day's P/L, so
+        subtracting them here would double-count them.
+
+        Returns ``None`` - not 0.0 - when the history call fails, so callers
+        can hold the last known good value instead of silently reverting to
+        an uncorrected (breaker-disarming) anchor on a transient disconnect.
+        """
+        from datetime import datetime, timezone
+
+        external = (mt5.DEAL_TYPE_BALANCE, mt5.DEAL_TYPE_CREDIT,
+                    mt5.DEAL_TYPE_BONUS, mt5.DEAL_TYPE_CORRECTION)
+        end_ts = max(float(ts), self.server_now()) + 86400.0
+        with self._lock:
+            if not self.connected:
+                return None
+            raw = mt5.history_deals_get(
+                datetime.fromtimestamp(float(ts), tz=timezone.utc),
+                datetime.fromtimestamp(end_ts, tz=timezone.utc),
+            )
+            if raw is None:
+                self.connected = False
+                LOG.emit(f"history_deals_get basarisiz oldu ({mt5.last_error()}) - "
+                         "baglanti koptu olarak isaretlendi.", "WARN")
+                return None
+        return sum(float(d.profit) for d in raw if int(d.type) in external)
+
     @staticmethod
     def merge_round_trips(deals: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Collapse per-deal OUT/partial fills into one net trade per position.

@@ -94,6 +94,11 @@ class _Client:
     def server_now(self):
         return 1_786_000_000.0
 
+    def cash_flow_since(self, ts):
+        # No deposits/withdrawals in these scenarios, so the guard's equity
+        # anchor is uncorrected and these cases read exactly as before.
+        return 0.0
+
     def account(self):
         return {"balance": START_BALANCE, "equity": self._equity}
 
@@ -128,6 +133,10 @@ def _engine(equity, positions, flatten=True, profit_pct=0.0, remaining=0, closed
     guard.halt_reason = ""
     guard.loss_halted = False
     guard._zero_balance_warned = False
+    # No external cash movement in these scenarios; 0.0 leaves the equity
+    # anchor uncorrected, so every case below reads exactly as it did before
+    # the deposit correction landed.
+    guard.cash_flow = 0.0
     eng.risk = SimpleNamespace(daily=guard)
 
     # Everything _cycle touches on the way to the branch under test, and

@@ -47,6 +47,13 @@ class DailyGuard:
         # once per episode, and a restart re-reporting a still-zero balance is
         # useful rather than noise.
         self._zero_balance_warned: bool = False
+        # Net external cash movement (deposit/withdrawal/credit/correction)
+        # booked since the day's anchor. Subtracted from equity in pnl_pct()
+        # so the breaker measures TRADING result, not the operator funding
+        # the account. Persisted for the same reason the anchor itself is: a
+        # restart must not hand check() an uncorrected equity for the cycles
+        # before the first successful history read lands.
+        self.cash_flow: float = as_number(store.get_setting("day_cash_flow"), 0.0, "day_cash_flow")
 
     def rollover(self, server_epoch: float, balance: float) -> bool:
         key = time.strftime("%Y-%m-%d", time.localtime(server_epoch))
@@ -75,6 +82,9 @@ class DailyGuard:
         self.halted = False
         self.halt_reason = ""
         self.loss_halted = False
+        # New anchor, so yesterday's cash flow is no longer relative to it.
+        self.cash_flow = 0.0
+        self.store.set_setting("day_cash_flow", 0.0)
         self.store.set_setting("day_key", key)
         self.store.set_setting("day_start_balance", self.start_balance)
         self.store.set_setting("day_halted", False)
@@ -102,10 +112,31 @@ class DailyGuard:
         self.store.set_setting("day_halt_reason", "")
         self.store.set_setting("day_loss_halted", False)
 
+    def set_cash_flow(self, amount: float | None) -> None:
+        """Record external cash movement since the anchor.
+
+        ``None`` means the read failed (disconnect) - hold the last known
+        value rather than reverting to 0.0, which would re-disarm the breaker
+        by exactly the amount that was deposited.
+        """
+        if amount is None:
+            return
+        amount = float(amount)
+        if amount == self.cash_flow:
+            return
+        self.cash_flow = amount
+        self.store.set_setting("day_cash_flow", amount)
+        LOG.emit(f"Gun ici hesap hareketi (yatirim/cekim) {amount:+.2f} - "
+                 f"gunluk limit bunu kâr saymayacak.", "INFO")
+
     def pnl_pct(self, equity: float) -> float:
         if self.start_balance <= 0:
             return 0.0
-        return (equity - self.start_balance) / self.start_balance * 100.0
+        # equity - cash_flow: a deposit raises equity without any trade
+        # producing it, so counting it as profit let the daily loss breaker
+        # sit green through a losing day (and, via Supervisor.review, skipped
+        # the drawdown lot damper too).
+        return (equity - self.cash_flow - self.start_balance) / self.start_balance * 100.0
 
     def check(self, equity: float, sys_cfg: SystemConfig) -> Verdict:
         if self.halted:

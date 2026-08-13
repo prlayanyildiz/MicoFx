@@ -567,6 +567,9 @@ class Engine:
 
         server_now = self.client.server_now()
         self._handle_daily_rollover(server_now, account.get("balance", 0.0))
+        # Must follow the rollover (which resets the figure) and precede the
+        # guard.check() below, so the breaker never sees a deposit as profit.
+        self._refresh_cash_flow()
 
         self._positions = self.client.positions()
         if not self.client.connected:
@@ -2642,6 +2645,27 @@ class Engine:
     def _save_symbol_halted(self) -> None:
         self.store.set_setting("symbol_daily_halted", self._symbol_halted)
 
+    def _day_start_epoch(self) -> float:
+        """Epoch the current trading day's deal history starts at.
+
+        Raw MT5 deal timestamps are naive epochs encoding the broker's own
+        wall-clock reading (not true UTC) - the same naive-epoch encoding
+        calendar.timegm() produces from day_key's local calendar date, so the
+        two line up as long as the broker's clock and this machine's local
+        clock read the same wall-clock time (true for this setup).
+        """
+        guard = self.risk.daily
+        if guard.day_key:
+            try:
+                return float(calendar.timegm(time.strptime(guard.day_key, "%Y-%m-%d")))
+            except (ValueError, OverflowError):
+                pass
+        return self.client.server_now() - 86400
+
+    def _refresh_cash_flow(self) -> None:
+        self.risk.daily.set_cash_flow(
+            self.client.cash_flow_since(self._day_start_epoch()))
+
     def _handle_daily_rollover(self, server_now: float, balance: float) -> None:
         if self.risk.daily.rollover(server_now, balance):
             # New broker day - every symbol-level sticky halt from yesterday
@@ -2655,17 +2679,7 @@ class Engine:
         if self._day_cache and time.time() - self._day_cache_at < max_age:
             return self._day_cache
         guard = self.risk.daily
-        # Raw MT5 deal timestamps are naive epochs encoding the broker's own
-        # wall-clock reading (not true UTC) - the same naive-epoch encoding
-        # calendar.timegm() below produces from day_key's local calendar date,
-        # so the two line up as long as the broker's clock and this machine's
-        # local clock read the same wall-clock time (true for this setup).
-        day_start = self.client.server_now() - 86400
-        if guard.day_key:
-            try:
-                day_start = calendar.timegm(time.strptime(guard.day_key, "%Y-%m-%d"))
-            except (ValueError, OverflowError):
-                pass
+        day_start = self._day_start_epoch()
 
         by_magic = {c.magic: c.symbol for c in list(self.store.symbols.values())}
         per_symbol: dict[str, dict[str, Any]] = {}
@@ -2740,6 +2754,10 @@ class Engine:
                 **self.day_stats(),
                 "pnl_pct": round(self.risk.daily.pnl_pct(equity), 2),
                 "floating": round(float(account.get("profit", 0.0)), 2),
+                # Surfaced so a pnl_pct that no longer matches naive
+                # (equity-start_balance) arithmetic is explainable from the
+                # panel alone, instead of looking like a reporting bug.
+                "cash_flow": round(self.risk.daily.cash_flow, 2),
             },
             "capacity": capacity,
             "reopt": self.reopt_status(),
