@@ -27,13 +27,17 @@ if sys.version_info < MIN_PYTHON:
     # Plain stdlib rather than startup_fail(): this deliberately runs above the
     # micofx imports, and on an interpreter this old some of them cannot import
     # at all. Same file, so there is only one place to look either way.
-    try:
-        _d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-        os.makedirs(_d, exist_ok=True)
-        with open(os.path.join(_d, "baslatilamadi.log"), "a", encoding="utf-8") as _fh:
-            _fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + _msg + "\n")
-    except Exception:
-        pass
+    # Skipped under pytest for the same reason startup_fail skips it: the file
+    # is what an operator reads after an unexplained non-start, and test noise
+    # in it defeats that.
+    if "pytest" not in sys.modules:
+        try:
+            _d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+            os.makedirs(_d, exist_ok=True)
+            with open(os.path.join(_d, "baslatilamadi.log"), "a", encoding="utf-8") as _fh:
+                _fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + _msg + "\n")
+        except Exception:
+            pass
     raise SystemExit(_msg)
 
 import uvicorn
@@ -87,6 +91,19 @@ def startup_fail(message: str) -> int:
     differently because the report could not be written.
     """
     print(message)
+    if "pytest" in sys.modules:
+        # The suite drives main() to prove this very contract, and it did so
+        # into the real file: every line in logs/baslatilamadi.log was fixture
+        # text - "x", "klasor yok", defaults.json paths under a scratch
+        # basetemp. A diagnostic an operator reaches for after an unexplained
+        # non-start is worthless if it is full of test noise, which is the one
+        # thing it exists to not be.
+        #
+        # Guarded here rather than by asking each test to patch LOG_DIR: that
+        # works only for tests that remember, and the two that exist today did
+        # not. The check is on the module being loaded at all, so it cannot be
+        # true in the shipped app.
+        return 1
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         path = LOG_DIR / "baslatilamadi.log"

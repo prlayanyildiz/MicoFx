@@ -34,6 +34,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import run as run_module
 
 
+def _unguard(monkeypatch):
+    """startup_fail refuses to write while pytest is loaded - deliberately, so
+    the suite cannot pollute the file an operator reads after a real non-start.
+    These cases are about the write itself, so they lift that one guard."""
+    import sys as _sys
+    mods = dict(_sys.modules)
+    mods.pop("pytest", None)
+    monkeypatch.setattr(run_module.sys, "modules", mods)
+
+
 def _log(tmp_path: Path) -> str:
     f = tmp_path / "baslatilamadi.log"
     return f.read_text(encoding="utf-8") if f.exists() else ""
@@ -42,6 +52,7 @@ def _log(tmp_path: Path) -> str:
 # ------------------------------------------------------------- the defect
 
 def test_a_fatal_startup_message_is_written_to_disk(monkeypatch, tmp_path):
+    _unguard(monkeypatch)
     monkeypatch.setattr(run_module, "LOG_DIR", tmp_path)
     run_module.startup_fail("[MicoFX] Ayar sablonu bozuk: config/defaults.json")
     assert "Ayar sablonu bozuk" in _log(tmp_path), (
@@ -51,6 +62,7 @@ def test_a_fatal_startup_message_is_written_to_disk(monkeypatch, tmp_path):
 def test_it_carries_a_timestamp(monkeypatch, tmp_path):
     """Several failed starts in a row is the normal shape of this; without a
     time they cannot be told apart."""
+    _unguard(monkeypatch)
     monkeypatch.setattr(run_module, "LOG_DIR", tmp_path)
     run_module.startup_fail("ilk")
     run_module.startup_fail("ikinci")
@@ -60,6 +72,7 @@ def test_it_carries_a_timestamp(monkeypatch, tmp_path):
 
 
 def test_it_returns_one_so_the_caller_can_just_return_it():
+    """Also the shape of the pytest guard: it returns 1 without writing."""
     assert run_module.startup_fail.__doc__
     assert run_module.startup_fail("x") == 1
 
@@ -72,6 +85,7 @@ def test_an_unwritable_log_dir_does_not_break_the_report(monkeypatch, tmp_path):
     def _denied(self, *a, **k):
         raise PermissionError(13, "Erisim reddedildi", str(self))
 
+    _unguard(monkeypatch)
     monkeypatch.setattr(run_module, "LOG_DIR", tmp_path / "yok")
     monkeypatch.setattr(Path, "mkdir", _denied)
     assert run_module.startup_fail("hala calisir") == 1
@@ -79,6 +93,7 @@ def test_an_unwritable_log_dir_does_not_break_the_report(monkeypatch, tmp_path):
 
 def test_the_file_is_capped(monkeypatch, tmp_path):
     """A restart loop must not fill the disk with the same line."""
+    _unguard(monkeypatch)
     monkeypatch.setattr(run_module, "LOG_DIR", tmp_path)
     big = tmp_path / "baslatilamadi.log"
     big.write_text("x" * (300 * 1024), encoding="utf-8")
@@ -89,6 +104,7 @@ def test_the_file_is_capped(monkeypatch, tmp_path):
 
 def test_it_still_prints_for_a_console_launch(monkeypatch, tmp_path, capsys):
     """The console path is unchanged - this adds a sink, it does not move one."""
+    _unguard(monkeypatch)
     monkeypatch.setattr(run_module, "LOG_DIR", tmp_path)
     run_module.startup_fail("gorunur")
     assert "gorunur" in capsys.readouterr().out
@@ -104,3 +120,14 @@ def test_the_version_guard_writes_to_the_same_file():
     assert "baslatilamadi.log" in guard
     assert "makedirs" in guard, "logs/ yoksa yazamaz"
     assert "except Exception" in guard, "rapor yazilamazsa acilis farkli sekilde olmemeli"
+
+
+def test_the_suite_cannot_pollute_the_operators_file(monkeypatch, tmp_path):
+    """Found by the fix itself: every line in the real logs/baslatilamadi.log
+    was fixture text - "x", "klasor yok", defaults.json under a scratch
+    basetemp - because two tests drive main() and neither patched LOG_DIR. A
+    diagnostic full of test noise is worse than no diagnostic, since it is read
+    exactly when something inexplicable has happened."""
+    monkeypatch.setattr(run_module, "LOG_DIR", tmp_path)
+    assert run_module.startup_fail("bu yazilmamali") == 1
+    assert _log(tmp_path) == "", "test paketi operatorun dosyasina yaziyor"
