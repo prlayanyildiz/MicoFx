@@ -1199,6 +1199,20 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _sl = float(getattr(cfg, "sl_atr_mult", 0.0) or 0.0)
             _ts = float(getattr(cfg, "trail_start_atr", 0.0) or 0.0)
             _st = float(getattr(cfg, "trail_step_atr", 0.0) or 0.0)
+            # Two different thresholds, and conflating them is easy - I did.
+            #
+            # The trail places ``close - trail_step * ATR`` and only writes it
+            # when it beats the CURRENT stop, which starts at ``entry -
+            # sl_atr_mult * ATR``. So the stop begins improving once the gain
+            # clears ``trail_step - sl_atr_mult`` - still a losing stop, just a
+            # smaller loss. That is the number that cuts losers.
+            #
+            # It sits ABOVE entry, i.e. actually protects profit, only once the
+            # gain clears ``trail_step`` outright. That is the number that
+            # keeps winners.
+            #
+            # Both are floored by trail_start_atr, which gates the block at all.
+            trail_improves = (max(_ts, _st - _sl) / _sl) if (_sl > 0 and (_ts or _st)) else None
             trail_arms = (max(_ts, _st) / _sl) if (_sl > 0 and (_ts or _st)) else None
             cost_r = float(hold.get("cost_per_trade_r") or 0.0)
 
@@ -1343,6 +1357,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 # symbols could never protect a typical winner - and the single
                 # trail move on 13.08 landed on UK100, the lowest at 0.40.
                 "trail_arms_at_r": round(trail_arms, 2) if trail_arms else None,
+                # Where the stop first moves at all - a reduced loss, not yet a
+                # profit. Lower than trail_arms_at_r whenever the step exceeds
+                # the stop width.
+                "trail_improves_at_r": round(trail_improves, 2) if trail_improves else None,
                 "cost_ceiling_r": ceiling_r,
                 "spread_atr_now": round(spread_atr, 4) if spread_atr else None,
                 # The reading stays visible either way; this says whether it was

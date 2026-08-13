@@ -35,14 +35,37 @@ ENGINE_SRC = (Path(__file__).resolve().parents[1] / "micofx" / "engine.py").read
 
 
 def _arms_at(sl, start, step):
+    """Where PROFIT can first be locked: the stop sits above entry."""
     return max(start, step) / sl if sl > 0 and (start or step) else None
+
+
+def _improves_at(sl, start, step):
+    """Where the stop first MOVES at all - still a losing stop, smaller loss.
+    It only has to beat the original stop, which is sl below entry."""
+    return max(start, step - sl) / sl if sl > 0 and (start or step) else None
 
 
 # ------------------------------------------------------------- the reading
 
-def test_the_panel_reports_it():
+def test_the_panel_reports_both_thresholds():
     assert '"trail_arms_at_r"' in APP_SRC
+    assert '"trail_improves_at_r"' in APP_SRC
     assert "max(_ts, _st) / _sl" in APP_SRC
+    assert "max(_ts, _st - _sl) / _sl" in APP_SRC
+
+
+def test_the_two_are_not_the_same_number():
+    """Conflating them is the mistake this file exists to stop repeating:
+    SpotBrent starts cutting its loss at 1.2 R and only protects profit at 2.2."""
+    assert abs(_improves_at(1.0, 0.5, 2.2) - 1.2) < 1e-9
+    assert abs(_arms_at(1.0, 0.5, 2.2) - 2.2) < 1e-9
+
+
+def test_a_low_start_is_therefore_not_inert():
+    """Measured, not argued: start 0.3 / step 2.2 produced 10 trail exits
+    against 8 for start 2.2 / step 2.2 on identical bars. The low start does
+    real work - it just cuts losses rather than locking gains."""
+    assert _improves_at(1.0, 0.3, 2.2) < _arms_at(1.0, 0.3, 2.2)
 
 
 def test_it_is_the_step_that_decides_when_the_start_is_lower():
