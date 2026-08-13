@@ -2166,8 +2166,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         def _restart() -> None:
             time.sleep(0.3)
             try:
-                # restart.bat waits for this process to release the port before
+                # restart.bat polls until the port is actually free before
                 # relaunching, so it must be spawned before this process exits.
+                # It used to sleep a flat two seconds while this comment claimed
+                # it waited - and a shutdown slower than that left the new
+                # instance refused on port_busy, with no retry behind it.
                 subprocess.Popen(
                     ["cmd", "/c", str(ROOT / "restart.bat")],
                     cwd=str(ROOT),
