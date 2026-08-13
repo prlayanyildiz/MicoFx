@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import deque
@@ -125,7 +126,20 @@ class LogBus:
         note = (f"{stamp} WARN   [SISTEM] Log dosyasi {_MAX_FILE_BYTES // 1024} KB "
                 f"sinirini asti; en eski {dropped // 1024} KB dusuruldu. "
                 f"Daha eski kayitlar gece yedegindeki arsivlerde.\n")
-        self._file.write_bytes(note.encode("utf-8") + keep)
+        # Written beside the log and moved into place, not written over it.
+        # ``write_bytes`` opens for truncate first, so between that and the end
+        # of a two-megabyte write the log is a partial file - and a process
+        # killed in that window loses the WHOLE history, not the old half this
+        # is meant to drop. Rotation is rare (roughly every five weeks at the
+        # current rate), which is exactly why the failure would be unexplainable
+        # when it happened.
+        #
+        # backup.py already does this for the same reason, with a .part it
+        # promotes only once the archive is complete. os.replace is atomic
+        # within a volume on Windows as well as POSIX.
+        tmp = self._file.with_suffix(self._file.suffix + ".part")
+        tmp.write_bytes(note.encode("utf-8") + keep)
+        os.replace(tmp, self._file)
 
     def recent(self, after_id: int = 0, limit: int = 400, levels: list[str] | None = None) -> list[dict[str, Any]]:
         with self._lock:
