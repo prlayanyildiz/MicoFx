@@ -7,7 +7,7 @@ const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 const GROUP_LABEL = { forex: "Forex", index: "Endeks", commodity: "Emtia", crypto: "Kripto" };
 const DAY_LABEL = ["Pzt", "Sal", "Car", "Per", "Cum", "Cmt", "Paz"];
-const LOG_LEVELS = ["TRADE", "SIGNAL", "OPT", "AI", "INFO", "WARN", "ERROR"];
+const LOG_LEVELS = ["TRADE", "SIGNAL", "OPT", "AI", "CFG", "INFO", "WARN", "ERROR"];
 const AI_STATE = {
   ok: ["on", "Saglikli"], watch: ["warn", "Izlemede"],
   quarantine: ["bad", "Karantina"], idle: ["off", "Veri yok"],

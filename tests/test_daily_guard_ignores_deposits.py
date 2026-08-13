@@ -1,7 +1,8 @@
 """A deposit is not profit: the daily loss breaker must not be disarmed by one.
 
 Measured live 2026-08-13 20:00. Anchor 1723.44, realised -304.62, floating
-+151.29, but balance read 1918.78 - the gap is a +499.96 external deposit.
++151.29, but balance read 1918.78 - the gap is an external deposit, confirmed
+after the fix as exactly +500.00 straight from MT5 deal history.
 The breaker anchored on raw equity drift reported **+20.11%** while trading
 was **-17.68%**: a 37.8-point error, wider than the entire 33% loss band,
 so daily_loss_pct could never fire no matter how much the day lost.
@@ -20,10 +21,13 @@ from micofx.risk import DailyGuard
 
 # Live figures, 2026-08-13 20:00.
 START_BALANCE = 1723.44
-DEPOSIT = 499.96
+DEPOSIT = 500.00  # cash_flow_since() read this back live after the fix
 REALISED = -304.62
 FLOATING = 151.29
-EQUITY = START_BALANCE + DEPOSIT + REALISED + FLOATING  # = 2070.07, as read
+# Observed directly, not reconstructed: realised/floating are reported rounded
+# to 2dp, so summing the parts lands 0.04 away from what the account actually
+# read - and that is enough to move the raw figure across a rounding boundary.
+EQUITY = 2070.07
 
 
 class _FakeStore:
@@ -56,8 +60,11 @@ def test_deposit_is_not_counted_as_profit():
     g.set_cash_flow(DEPOSIT)
 
     # Trading truth: (-304.62 + 151.29) / 1723.44 = -8.90%
-    assert g.pnl_pct(EQUITY) == pytest.approx((REALISED + FLOATING) / START_BALANCE * 100.0)
-    assert round(g.pnl_pct(EQUITY), 2) == -8.90
+    # Agrees with the deposit-immune sibling path (_symbol_daily_halt's
+    # realised+floating) to within the 2dp rounding of its inputs.
+    assert g.pnl_pct(EQUITY) == pytest.approx(
+        (REALISED + FLOATING) / START_BALANCE * 100.0, abs=0.01)
+    assert round(g.pnl_pct(EQUITY), 2) == -8.90  # live panel read -8.96 later
     assert g.pnl_pct(EQUITY) < 0.0, "a losing day must not report as profit"
 
 

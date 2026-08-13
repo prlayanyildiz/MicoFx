@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from .paths import LOG_DIR
 
-Level = Literal["DEBUG", "INFO", "WARN", "ERROR", "TRADE", "SIGNAL", "OPT", "AI"]
+Level = Literal["DEBUG", "INFO", "WARN", "ERROR", "TRADE", "SIGNAL", "OPT", "AI", "CFG"]
 
 # SIGNAL is here because it is bar-gated, not poll-gated. All three emission
 # sites sit behind a "this bar already handled" return (primary and secondary
@@ -24,7 +24,14 @@ Level = Literal["DEBUG", "INFO", "WARN", "ERROR", "TRADE", "SIGNAL", "OPT", "AI"
 # that a trade opened and nothing about what the strategy was looking at. The
 # comment beside the emission in engine.py even claimed the loss reviews read
 # it back, which they could not: it never reached disk.
-_PERSIST: set[str] = {"WARN", "ERROR", "TRADE", "OPT", "AI", "SIGNAL"}
+# CFG persists for the same reason TRADE does: a symbol's risk settings are
+# changed from several doors (panel patch, bulk, optimizer apply) and there was
+# no record of any of them. That gap is not academic - max_positions was found
+# live at 5 across all ten symbols on 13.08 with a rollback file saying 10 and
+# both the dataclass default and defaults.json saying 1, and the log could not
+# say who wrote it or when. A settings change is not a warning, so it gets its
+# own level rather than being filed under one.
+_PERSIST: set[str] = {"WARN", "ERROR", "TRADE", "OPT", "AI", "SIGNAL", "CFG"}
 _MAX_FILE_BYTES = 4 * 1024 * 1024
 _RING = 1500
 
