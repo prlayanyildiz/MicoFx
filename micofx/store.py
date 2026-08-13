@@ -621,8 +621,14 @@ class Store:
                 payload = json.loads(row["payload"])
             except json.JSONDecodeError:
                 payload = {}
+            # Columns last. They are the authoritative copy - the retention
+            # sweep keeps the newest 40 by created_at and the ordering above
+            # uses it - so a payload key of the same name must not be able to
+            # report a different number than the one the database ranks by.
+            # The blob still supplies everything the columns do not.
             out.append({
+                **payload,
                 "id": row["id"], "symbol": row["symbol"], "created_at": row["created_at"],
-                "score": row["score"], "applied": bool(row["applied"]), **payload,
+                "score": row["score"], "applied": bool(row["applied"]),
             })
         return out
