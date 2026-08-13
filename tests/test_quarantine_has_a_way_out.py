@@ -243,3 +243,40 @@ class TestProbation:
 
         assert v.probation is False
         assert v.state == "ok"
+
+
+class TestClearingDoesNotThrottleHealthySymbols:
+    """A reset is the operator wiping the slate, not a portfolio-wide throttle.
+
+    Stamping probation on every verdict demoted the whole book: GER40 went to
+    watch size at PF 2.17 - the best profit factor in the portfolio - reading
+    "deneme suresi 0/50 islem". Probation is the way back up from a suspension,
+    so only a symbol that was actually suspended gets it.
+    """
+
+    def test_a_healthy_symbol_is_not_put_on_probation_by_a_reset(self):
+        sup = _sup()
+        sup.verdicts["GER40"] = SymbolVerdict(symbol="GER40", state="ok",
+                                              profit_factor=2.17)
+        sup.clear()
+        assert sup.verdicts["GER40"].probation is False
+
+        cfg = SymbolConfig(symbol="GER40", opt_updated_at=0.0)
+        cleared = sup.verdicts["GER40"].history_cleared_at
+        v = sup._judge(cfg, _wins(cleared + 60, 3), _cfgs())
+
+        assert v.state == "ok", "a reset must not cut a healthy symbol's size"
+        assert v.risk_scale == 1.0
+
+    def test_a_suspended_symbol_still_gets_probation_from_a_reset(self):
+        sup = _sup()
+        sup.verdicts["NAS100"] = SymbolVerdict(symbol="NAS100", state="quarantine")
+        sup.clear()
+        assert sup.verdicts["NAS100"].probation is True
+
+    def test_a_watched_symbol_is_not_promoted_to_probation(self):
+        """watch is a soft cut it already earned - clearing re-judges it."""
+        sup = _sup()
+        sup.verdicts["JPN225"] = SymbolVerdict(symbol="JPN225", state="watch")
+        sup.clear()
+        assert sup.verdicts["JPN225"].probation is False

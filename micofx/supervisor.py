@@ -261,13 +261,21 @@ class Supervisor:
                     continue
                 # Kept (not popped) so the epoch survives; every other field is
                 # rebuilt by the next review anyway.
+                was_suspended = v.state == "quarantine"
                 v.state = "ok"
                 v.reason = "elle serbest birakildi"
                 v.quarantine_until = 0.0
                 v.quarantined_at = 0.0
                 v.risk_scale = 1.0
                 v.history_cleared_at = now
-                v.probation = True
+                # Probation is the way back up from a SUSPENSION, not a
+                # consequence of clearing the record. Stamping it on every
+                # verdict meant "reset all decisions" demoted the whole book to
+                # watch size - GER40 was put on probation at PF 2.17, the best
+                # profit factor in the portfolio, reading "0/50 islem". A reset
+                # is the operator saying the slate is clean; it must not read
+                # as a portfolio-wide throttle.
+                v.probation = was_suspended
             if not symbol:
                 self.risk_scale = 1.0
             self._persist()
