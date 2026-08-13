@@ -2538,7 +2538,14 @@ class Engine:
             return settled
 
         if self.client.modify_position(pos["ticket"], target, pos["tp"], cfg.symbol):
-            LOG.emit(f"SL guncellendi -> {target:.5f} (kar {profit_dist / atr:.2f}xATR)",
+            # The ticket, for the same reason the entry line carries one:
+            # JPN225 held five positions today and logged two trail moves in
+            # the same second. Without it a trail move cannot be paired with
+            # the close it produced, and "Stop ile kapandi" is emitted for a
+            # trailed exit and a stopped-out one alike - so the sign of the
+            # profit was the only thing separating them.
+            LOG.emit(f"#{pos['ticket']} SL guncellendi -> {target:.5f} "
+                     f"(kar {profit_dist / atr:.2f}xATR)",
                      "TRADE", cfg.symbol)
             return True
         # A rejected modify (requote, momentary "invalid stops", a blip in the
