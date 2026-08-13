@@ -53,13 +53,20 @@ Function FindPythonw(fso, shell, root)
   Dim candidates, path, i
   ' KURULUM.bat ile ayni yer: proje klasorunun disinda, sabit, senkron
   ' araclarinin (OneDrive vs.) hicbir zaman dokunamayacagi bir konum.
+  ' Yalnizca kurulumun kurdugu venv. Proje ici ".venv"/"venv" adaylari burada
+  ' duruyordu ve KUR.ps1 onlari acikca olu ilan ediyor: "proje icinde eski bir
+  ' .venv duruyor, artik kullanilmiyor". Sebebini de yaziyor - bir venv
+  ' kuruldugu makinenin python.exe yoluna mutlak referans tutar, ve OneDrive
+  ' proje klasorunu baska bir makineye senkronlarsa oradaki ".venv" bozuk
+  ' cikar ("No Python at ...").
+  '
+  ' Yani bu liste, kurulumun BOZUK oldugunu soyledigi secenegi PATH'teki
+  ' calisan yorumlayicidan ONCE tercih ediyordu. start_console.bat ayni soruyu
+  ' zaten dogru cevapliyor (yalnizca C:\MicoFX-venv, sonra PATH); ayrisan bu
+  ' dosyaydi. Daraltma: aday sayisi azaliyor, artmiyor.
   candidates = Array( _
     "C:\MicoFX-venv\Scripts\pythonw.exe", _
-    "C:\MicoFX-venv\Scripts\python.exe", _
-    root & "\.venv\Scripts\pythonw.exe", _
-    root & "\venv\Scripts\pythonw.exe", _
-    root & "\.venv\Scripts\python.exe", _
-    root & "\venv\Scripts\python.exe")
+    "C:\MicoFX-venv\Scripts\python.exe")
 
   For i = 0 To UBound(candidates)
     If fso.FileExists(candidates(i)) Then
