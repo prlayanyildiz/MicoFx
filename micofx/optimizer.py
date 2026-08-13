@@ -48,6 +48,7 @@ def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
             day_end_flatten_min=int(payload.get("day_end_flatten_min") or 0),
             max_cost_share=float(payload.get("max_cost_share") or 0.0),
             spread_scale=float(payload.get("spread_scale") or 1.0),
+            charge_costs=bool(payload.get("charge_costs", True)),
         )
     except Exception as exc:                      # keep one bad sweep from killing the run
         outcome = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -487,6 +488,11 @@ class Optimizer:
         max_cost_share = (float(sys_cfg.max_cost_pct_of_risk) / 100.0
                           if (sys_cfg.block_high_cost and sys_cfg.max_cost_pct_of_risk > 0)
                           else 0.0)
+        # Off means the sweep fills at the printed price and charges nothing,
+        # matching an account whose live cost gate and spread ceilings are
+        # switched off. See SystemConfig.charge_costs for why the default is
+        # the other way.
+        charge_costs = bool(getattr(sys_cfg, "charge_costs", True))
 
         # Timeframe and strategy family are both search dimensions; each pairing is
         # judged on its own held-out slice so they compete on equal terms.
@@ -526,6 +532,7 @@ class Optimizer:
                                           "spread", "volume")},
                     "point": float(info["point"]), "tf_seconds": timeframe_seconds(tf),
                     "spread_scale": spread_scale,
+                    "charge_costs": charge_costs,
                     "grid": grid, "min_trades": min_trades, "segments": segments,
                     "max_combos": max_combos, "min_positive": min_positive,
                     "plateau": plateau, "commission": commission, "min_stop": min_stop,

@@ -654,6 +654,20 @@ class SystemConfig:
     # Optional live cost gate (default off — cost is already modelled in the optimizer).
     block_high_cost: bool = False
     max_cost_pct_of_risk: float = 25.0
+    # Whether the walk-forward charges spread and commission at all.
+    #
+    # Off means the simulation fills at the printed price - buy the open, sell
+    # the close - instead of paying the ask on the way in and the bid on the
+    # way out. Operator decision (13.08): the live cost gate and every
+    # per-symbol max_spread_atr ceiling were switched off first, and this is
+    # the other half, so the search is scored on the same terms the account
+    # now trades on.
+    #
+    # Defaults True. A book selected with costs charged cannot be compared
+    # against candidates scored without them, so turning this off makes every
+    # existing holdout number incomparable and the whole book needs
+    # re-searching - which is a decision, not a default.
+    charge_costs: bool = True
     # Optimizer parallel process cap: 0 = auto (CPU core count - 2, memory
     # permitting). A weaker/shared cloud VM can set this lower so a walk-forward
     # sweep does not starve the live trading loop and MT5 terminal of CPU.

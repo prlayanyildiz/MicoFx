@@ -607,7 +607,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                  min_stop: float | None = None, all_hours: bool = False,
                  day_end_flatten_min: int = 0,
                  max_cost_share: float = 0.0,
-                 spread_scale: float = 1.0) -> dict[str, Any]:
+                 spread_scale: float = 1.0,
+                 charge_costs: bool = True) -> dict[str, Any]:
     """Segmented walk-forward search over a three-way split of history.
 
     History is cut into equal segments and used for three separate jobs, because
@@ -673,6 +674,14 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     # backtest has ever been, on no evidence that it should be.
     scale = float(spread_scale) if spread_scale and spread_scale > 0 else 1.0
     spread_price = bars.spread * point * scale
+    if not charge_costs:
+        # Fill at the printed price: buy the open, sell the close. The spread
+        # is not only an accounting drag here - it moves the fills themselves
+        # (entry pays it on a buy, the exit and the stop check pay it on a
+        # sell), so zeroing the series is what actually removes it, and
+        # cost_r then accumulates nothing on its own.
+        spread_price = np.zeros_like(spread_price)
+        commission_price = 0.0
     # The round-turn cost the simulation will actually charge this trade. The
     # scalping families size their entry threshold against it, so it has to be
     # this exact series and not an approximation of it.
