@@ -90,6 +90,11 @@ class _FakeClient:
             out = [p for p in out if p["magic"] == magic]
         return out
 
+    def deals_since(self, ts):
+        # Closed-deal history. Settable per test; empty means "no magic in
+        # this window has traded today", which is the ordinary case.
+        return list(getattr(self, "deals", []))
+
     def set_overrides(self, mapping):
         pass
 
@@ -126,6 +131,11 @@ class _FakeEngine:
         self.execution = _FakeExecution()
         self.entry_lock = threading.Lock()
         self._sec_cfgs = {}
+
+    def _day_start_epoch(self):
+        # Real Engine derives this from the day anchor; the magic guard only
+        # needs a window start, and these tests carry no deal history.
+        return 0.0
 
 
 def _client(symbols, positions, settings=None):
@@ -804,3 +814,45 @@ def test_other_api_routes_still_accept_header_token():
 
     res = tc.get("/api/system", headers={"X-Mico-Token": "secret123"})
     assert res.status_code == 200
+
+
+# --------------------------------------------------------------- stale magic
+
+def _app_with_deals(symbols, deals):
+    store = _FakeStore(symbols)
+    client = _FakeClient([])
+    client.deals = deals
+    app = create_app(store, client, _FakeEngine(), optimizer=None)
+    return TestClient(app)
+
+
+def test_a_magic_that_traded_today_cannot_be_handed_to_another_symbol():
+    """Deleting a symbol frees its magic but not its closed deals.
+
+    engine.day_stats() and supervisor.review() both attribute a deal to a
+    symbol through its magic, so reassigning a number that already traded
+    today books the deleted symbol's wins and losses against the new one - it
+    starts the day carrying a P/L and a profit factor it never earned, and the
+    supervisor can suspend it on them.
+    """
+    tc = _app_with_deals(
+        {"GER40": _cfg("GER40", magic=990011)},
+        deals=[{"magic": 990099, "time": 1786600000, "symbol": "EURUSD",
+                "profit": -12.0, "commission": 0.0, "swap": 0.0}])
+
+    r = tc.post("/api/symbols/GER40", json={"magic": 990099})
+
+    assert r.status_code == 409
+    assert "990099" in r.json()["detail"]
+
+
+def test_a_magic_with_no_deals_today_is_still_assignable():
+    """The guard is about today's window, not about the number ever existing."""
+    tc = _app_with_deals(
+        {"GER40": _cfg("GER40", magic=990011)},
+        deals=[{"magic": 990077, "time": 1786600000, "symbol": "EURUSD",
+                "profit": -12.0, "commission": 0.0, "swap": 0.0}])
+
+    r = tc.post("/api/symbols/GER40", json={"magic": 990099})
+
+    assert r.status_code == 200, r.json()

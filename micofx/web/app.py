@@ -811,6 +811,23 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if int(new_magic) in _orphan_ticket_magics():
             return (f"magic {new_magic} hala acik orphan ticket uzerinde - "
                     f"once kapanmasini bekleyin")
+        # A magic freed by deleting a symbol still owns that symbol's CLOSED
+        # deals in broker history. engine.day_stats() and supervisor.review()
+        # both attribute a deal to a symbol through its magic, so handing the
+        # number straight to a new symbol books the deleted one's wins and
+        # losses against it - the new symbol starts the day carrying a P/L and
+        # a profit factor it never earned, and the supervisor can suspend it
+        # on them. Only today's deals matter: day_stats reads from the day
+        # anchor, and the supervisor's window is measured in days, so anything
+        # older can no longer be misread.
+        day_start = engine._day_start_epoch()
+        for deal in client.deals_since(day_start):
+            if int(deal.get("magic", 0)) == int(new_magic):
+                when = time.strftime("%H:%M", time.localtime(deal.get("time", 0)))
+                return (f"magic {new_magic} bugun {when}'de kapanmis bir isleme ait "
+                        f"(silinmis bir sembolden kalmis olabilir) - bu numara "
+                        f"verilirse o islemin kâr/zarari yeni sembole yazilir; "
+                        f"yarin serbest kalir")
         return None
 
     def _reject_magic_assignment_if_disconnected_orphans() -> None:
