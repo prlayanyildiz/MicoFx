@@ -1139,7 +1139,16 @@ class Optimizer:
         # which would otherwise look like a material move and drop the guard
         # for every unrecorded incumbent whose live median sits on 1.05
         # (NZDUSD's window is exactly that). Same bucket = same assumption.
-        if round(abs(new_scale - old_scale), 2) > 0.05:
+        # ...and only while costs are actually charged. charge_costs=False
+        # zeroes the spread series before anything is scored, so the scale
+        # multiplies nothing and both numbers were measured on identical
+        # terms. The premise above is then simply false, and waiving on it
+        # drops the one guard standing between a weaker candidate and a live
+        # symbol. XAUUSD reached exactly that state - stamp 1.25, measured
+        # 1.15 - and the escape fired at 13:20 with costs already off.
+        system = getattr(self.store, "system", None) if self.store is not None else None
+        charging = bool(getattr(system, "charge_costs", True)) if system is not None else True
+        if charging and round(abs(new_scale - old_scale), 2) > 0.05:
             LOG.emit(f"{cfg.symbol}: mevcut ayar farkli spread olcegiyle olculmus "
                      f"({old_scale or 'kayitsiz'} -> {new_scale:.2f}), skor kiyasi "
                      f"atlandi - aday kendi kapilariyla degerlendirildi.",
