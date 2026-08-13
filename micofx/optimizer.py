@@ -1148,6 +1148,28 @@ class Optimizer:
         # 1.15 - and the escape fired at 13:20 with costs already off.
         system = getattr(self.store, "system", None) if self.store is not None else None
         charging = bool(getattr(system, "charge_costs", True)) if system is not None else True
+        # The cost assumption itself moving is the same class of break, and a
+        # sharper one: a cost-free score is strictly the larger number, so an
+        # incumbent stamped under one can never be beaten by a candidate priced
+        # honestly. Unstamped means it predates the switch, which means costs
+        # were charged - the switch shipped defaulting to True.
+        # One direction only, because the risk is not symmetric. A cost-free
+        # score is the larger one, so:
+        #   incumbent cost-free, now charging -> the INCUMBENT is inflated and
+        #     nothing honest can pass it. Skip, or the symbol freezes.
+        #   incumbent charged, now cost-free -> the CANDIDATE is inflated, and
+        #     the incumbent's honest score is the stricter bar. Keep comparing;
+        #     skipping here would wave the inflated one through.
+        was_charging = bool(summary.get("charge_costs", True))
+        if was_charging and not charging:
+            pass
+        elif was_charging != charging:
+            LOG.emit(f"{cfg.symbol}: mevcut ayar farkli maliyet varsayimiyla olculmus "
+                     f"({'maliyetli' if was_charging else 'maliyetsiz'} -> "
+                     f"{'maliyetli' if charging else 'maliyetsiz'}), skor kiyasi "
+                     f"atlandi - aday kendi kapilariyla degerlendirildi.",
+                     "OPT", cfg.symbol)
+            return True
         if charging and round(abs(new_scale - old_scale), 2) > 0.05:
             LOG.emit(f"{cfg.symbol}: mevcut ayar farkli spread olcegiyle olculmus "
                      f"({old_scale or 'kayitsiz'} -> {new_scale:.2f}), skor kiyasi "
@@ -1392,6 +1414,16 @@ class Optimizer:
                 # compared, as though like for like, against one measured at
                 # the tick spread the live gate actually enforces.
                 "spread_scale": round(self._spread_scale(symbol), 3),
+                # Same argument, one assumption over. charge_costs=False makes
+                # the sweep fill at the printed price and charge nothing, so a
+                # score earned that way is not comparable with one earned while
+                # costs were charged - and it is the LARGER of the two, so
+                # without this stamp a cost-free incumbent can never be beaten
+                # and the symbol freezes on it. SpotBrent reached exactly that
+                # state: applied 13.08 12:36 inside the cost-free window with
+                # cost_per_trade_r 0.0, while the other nine carry 0.011-0.105.
+                "charge_costs": bool(getattr(
+                    getattr(self.store, "system", None), "charge_costs", True)),
             }
         else:
             # No evidence came with this apply, so the evidence already on the
