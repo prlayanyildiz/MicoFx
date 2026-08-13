@@ -162,7 +162,7 @@ izin ver" kapali olabilir (bkz. adim 3).
 ## Yedek gorevi
 
 `KUR.bat` kurulum sirasinda **"MicoFX Aksam Yedegi"** adinda bir Gorev
-Zamanlayici gorevi olusturur; her aksam 23:30'da `backup.py` calisir ve projeyi
+Zamanlayici gorevi olusturur; her aksam 22:00'de `backup.py` calisir ve projeyi
 zaman damgali bir zip'e alir.
 
 Bunun onemi: `data/micofx.db` **Git'e girmez**. Her sembol ayari, her

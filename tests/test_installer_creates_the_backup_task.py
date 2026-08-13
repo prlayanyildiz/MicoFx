@@ -88,7 +88,7 @@ def test_a_failure_warns_instead_of_failing_the_install():
 
 
 def test_it_launches_without_a_console_window():
-    """A console popping up at 23:30 every night on a trading machine."""
+    """A console popping up at 22:00 every night on a trading machine."""
     block = KUR[KUR.index("$TaskName"):]
     assert "pythonw.exe" in block
 
@@ -97,3 +97,21 @@ def test_it_has_a_daily_schedule_and_a_time():
     block = KUR[KUR.index("$TaskName"):]
     assert "/sc daily" in block
     assert re.search(r"/st\s+\d\d:\d\d", block)
+
+
+def test_the_hour_it_schedules_is_the_hour_the_guide_promises():
+    """The time is written down in three places and drifted on the first try.
+
+    KUR.ps1 registered 23:30 while the machine every document was written
+    against runs at 22:00 - so the guide told an operator to expect a backup at
+    an hour their machine would never fire. Nothing here picks which hour is
+    right; it only refuses to let the three copies disagree, which is the way
+    this went wrong.
+    """
+    scheduled = re.search(r"/st\s+(\d\d:\d\d)", KUR[KUR.index("$TaskName"):]).group(1)
+    hh, mm = scheduled.split(":")
+    # KURULUM.md writes it the Turkish way: "22:00'de", "23:30'da".
+    assert re.search(rf"{hh}:{mm}'[dt]", KURULUM), (
+        f"KUR.ps1 {scheduled}'da kuruyor, kurulum kilavuzu baska saat soyluyor")
+    # The installer echoes the hour back to whoever is watching it install.
+    assert scheduled in KUR[KUR.index("Kuruldu"):KUR.index("Kuruldu") + 60]

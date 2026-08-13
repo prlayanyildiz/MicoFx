@@ -227,9 +227,9 @@ if ($LASTEXITCODE -eq 0) {
     $backupExe = Join-Path $Venv "Scripts\pythonw.exe"
     if (-not (Test-Path -LiteralPath $backupExe)) { $backupExe = $VenvPy }
     $action = '"' + $backupExe + '" "' + (Join-Path $Root "backup.py") + '"'
-    schtasks /create /tn "$TaskName" /tr $action /sc daily /st 23:30 /f 2>&1 | Out-Null
+    schtasks /create /tn "$TaskName" /tr $action /sc daily /st 22:00 /f 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Say "  Kuruldu - her aksam 23:30." "Green"
+        Say "  Kuruldu - her aksam 22:00." "Green"
         Say "  Hedef klasor ve ana anahtar panelden (Sistem sekmesi) degistirilir."
     } else {
         # Kurulumu dusurmez: yedek olmadan da uygulama calisir, ama bunu
