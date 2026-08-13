@@ -111,9 +111,12 @@ def test_a_small_file_is_not_rotated(bus):
 
 
 def test_non_persisted_levels_never_reach_disk(bus):
+    """INFO and DEBUG only. SIGNAL used to be listed here too, on the same
+    flood argument - and that argument is about per-poll emission, which these
+    two are and SIGNAL is not: it fires behind a bar gate, about 132 lines a
+    day. See test_signal_lines_reach_the_log_file.py."""
     bus.emit("gorunmez", "INFO")
     bus.emit("gorunmez", "DEBUG")
-    bus.emit("gorunmez", "SIGNAL")
 
     assert not bus._file.exists() or bus._file.read_text(encoding="utf-8") == ""
 

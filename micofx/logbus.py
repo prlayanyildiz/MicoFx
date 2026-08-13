@@ -9,7 +9,21 @@ from .paths import LOG_DIR
 
 Level = Literal["DEBUG", "INFO", "WARN", "ERROR", "TRADE", "SIGNAL", "OPT", "AI"]
 
-_PERSIST: set[str] = {"WARN", "ERROR", "TRADE", "OPT", "AI"}
+# SIGNAL is here because it is bar-gated, not poll-gated. All three emission
+# sites sit behind a "this bar already handled" return (primary and secondary
+# signal refresh) or fire once on a state transition (the cross-signal skip),
+# so the level produces about 132 lines a day across ten symbols - measured
+# from the entry-block counters over a 38.7 hour window - which is 11 KB
+# against a 4 MB rotation limit, three tenths of one percent.
+#
+# It was grouped with INFO/DEBUG under one flood argument that only ever
+# applied to them. The cost of that grouping is specific: a SIGNAL line is the
+# only record of WHY an entry fired - K, D, ATR, ADX and the higher-timeframe
+# bias at the moment the bar closed - and every loss review today could say
+# that a trade opened and nothing about what the strategy was looking at. The
+# comment beside the emission in engine.py even claimed the loss reviews read
+# it back, which they could not: it never reached disk.
+_PERSIST: set[str] = {"WARN", "ERROR", "TRADE", "OPT", "AI", "SIGNAL"}
 _MAX_FILE_BYTES = 4 * 1024 * 1024
 _RING = 1500
 
@@ -17,8 +31,10 @@ _RING = 1500
 class LogBus:
     """In-memory ring buffer for the web terminal, with a rotating file sink.
 
-    Only levels in ``_PERSIST`` reach disk; INFO/DEBUG/SIGNAL stay in memory so a
-    1-2 second poll loop cannot flood the log file.
+    Only levels in ``_PERSIST`` reach disk; INFO and DEBUG stay in memory so a
+    1-2 second poll loop cannot flood the log file. That argument is about
+    per-poll emission and does not reach SIGNAL, which is bar-gated - see the
+    note on ``_PERSIST``.
     """
 
     def __init__(self) -> None:
