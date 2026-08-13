@@ -31,7 +31,7 @@ class _FakeStore:
     def opt_params(self):
         return {}
 
-    def update_system(self, patch):
+    def update_system(self, patch, source=""):
         current = self.system.to_dict()
         for key, value in patch.items():
             if value is not None:

@@ -46,7 +46,14 @@ DEFAULTS: dict[str, Any] = {
     "quarantine_losses": 10,
     "quarantine_pf": 0.80,           # profit factor below this is broken, not unlucky
     "watch_pf": 1.00,                # between watch_pf and quarantine_pf: keep trading, smaller
-    "quarantine_hours": 12,
+    # A suspension is meant to stop the bleeding while the symbol gets a new
+    # config, not to bench it for half a day. The way out is the re-search the
+    # quarantine itself queues (see _queue_reoptimization), which finishes in
+    # minutes - so the clock only has to cover that, and anything longer just
+    # idles a symbol that has already been fixed. Operator-set 12 -> 1 (14.08)
+    # after NAS100 and XAUUSD sat the full twelve hours holding freshly
+    # validated configs.
+    "quarantine_hours": 1,
     "watch_risk_scale": 0.6,
     "bad_hour_min_trades": 6,
     "bad_hour_pf": 0.7,
@@ -107,6 +114,10 @@ class SymbolVerdict:
     # running at that moment, so this is what tells a later review whether the
     # config has since been replaced - see _judge().
     quarantined_at: float = 0.0
+    # Trades before this are not evidence against the config running now. Set
+    # by an operator "Serbest birak" (see clear()); the config's own apply
+    # timestamp does the same job without being stored here.
+    history_cleared_at: float = 0.0
     risk_scale: float = 1.0
     blocked_hours: list = field(default_factory=list)
     hour_risk_scales: dict = field(default_factory=dict)  # hour -> soft multiplier (PF-based, not a hard block)
@@ -228,11 +239,32 @@ class Supervisor:
         })
 
     def clear(self, symbol: str | None = None) -> None:
+        """Operator "Serbest birak": release, and stop holding the old record.
+
+        Dropping the verdict alone did not survive one review cycle - the next
+        one rebuilt it from the same 30-day history and re-quarantined the
+        symbol within two minutes. That made the button look broken and, worse,
+        made an operator override impossible: the only thing that actually
+        decided was history the operator had explicitly said to disregard.
+        Stamping the epoch is what makes the release mean something - trades
+        before it stop counting as evidence against the config running now.
+        """
         with self._lock:
-            if symbol:
-                self.verdicts.pop(symbol, None)
-            else:
-                self.verdicts.clear()
+            now = time.time()
+            targets = [symbol] if symbol else list(self.verdicts)
+            for name in targets:
+                v = self.verdicts.get(name)
+                if v is None:
+                    continue
+                # Kept (not popped) so the epoch survives; every other field is
+                # rebuilt by the next review anyway.
+                v.state = "ok"
+                v.reason = "elle serbest birakildi"
+                v.quarantine_until = 0.0
+                v.quarantined_at = 0.0
+                v.risk_scale = 1.0
+                v.history_cleared_at = now
+            if not symbol:
                 self.risk_scale = 1.0
             self._persist()
         LOG.emit(f"AI denetleyici sifirlandi{f' ({symbol})' if symbol else ''}.", "AI")
@@ -405,6 +437,7 @@ class Supervisor:
         if previous:
             v.quarantine_until = previous.quarantine_until
             v.quarantined_at = previous.quarantined_at
+            v.history_cleared_at = previous.history_cleared_at
             v.blocked_hours = list(previous.blocked_hours or [])
             v.last_reopt_attempt = previous.last_reopt_attempt
 
@@ -447,7 +480,13 @@ class Supervisor:
         # are averages that need the history (see the watch_min_trades note in
         # DECISIONS) - and because a symbol that keeps being re-optimised must
         # not be able to launder a bad record by churning configs.
-        since_cfg = float(getattr(cfg, "opt_updated_at", 0.0) or 0.0)
+        # Evidence epoch: nothing before this is a statement about what is
+        # running now. Two things move it - the config being replaced, and the
+        # operator clearing the record by hand ("Serbest birak"). Both mean the
+        # same thing: the losses on the other side of it belong to a setup that
+        # no longer exists.
+        since_cfg = max(float(getattr(cfg, "opt_updated_at", 0.0) or 0.0),
+                        float(v.history_cleared_at or 0.0))
         streak = 0
         for deal, x in zip(reversed(trades), reversed(nets)):
             if float(deal.get("time", 0.0)) < since_cfg:
@@ -471,10 +510,33 @@ class Supervisor:
         except (TypeError, ValueError):
             quarantine_secs = float(DEFAULTS["quarantine_hours"]) * 3600.0
 
+        # The suspension decision reads only trades inside the evidence epoch.
+        # The full-window numbers stay in v.profit_factor / v.trades for the
+        # panel and for the watch bar - a soft 0.6x sizing cut is allowed to
+        # remember a long record, a hard stop is not. Without this the loop the
+        # breaker exists to drive could not close: quarantine queues a
+        # re-search, the new config lands, the streak resets - and the 30-day
+        # profit factor, earned by the config that was just thrown away,
+        # re-suspends it on the very next review. NAS100 and XAUUSD sat the
+        # full twelve hours that way on 13-14.08 holding fresh configs, and an
+        # operator "Serbest birak" could not release them either: the same
+        # history re-quarantined them within one review cycle.
+        #
+        # The bar itself is unchanged (min_trades). A replacement is judged on
+        # its own record at the same price - deliberately not a cheaper one, so
+        # a healthy config is not suspended on a handful of noisy trades.
+        if since_cfg > 0:
+            own = [x for d, x in zip(trades, nets)
+                   if float(d.get("time", 0.0)) >= since_cfg]
+            judged_pf, judged_n = self._pf(own), len(own)
+        else:
+            judged_pf, judged_n = v.profit_factor, v.trades
+
         if streak >= int(cfgs["quarantine_losses"]):
             self._quarantine(v, f"{streak} ust uste zarar", quarantine_secs, now)
-        elif v.trades >= int(cfgs["min_trades"]) and v.profit_factor < float(cfgs["quarantine_pf"]):
-            self._quarantine(v, f"PF {v.profit_factor:.2f} cok dusuk", quarantine_secs, now)
+        elif judged_n >= int(cfgs["min_trades"]) and judged_pf < float(cfgs["quarantine_pf"]):
+            self._quarantine(v, f"PF {judged_pf:.2f} cok dusuk ({judged_n} islem)",
+                             quarantine_secs, now)
         elif v.quarantine_until > now and since_cfg <= v.quarantined_at:
             v.state = "quarantine"
             v.reason = previous.reason if previous else "karantina"

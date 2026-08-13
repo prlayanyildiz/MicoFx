@@ -1941,7 +1941,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     raise HTTPException(
                         400, f"{field} UNC ({path!r}) - once backup_dir_allow_unc:true "
                              f"gonderin (agdaki bir paylasima proje + veritabani kopyalanacak)")
-        updated = store.update_system(patch)
+        updated = store.update_system(patch, source="panel sistem")
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}
         if "mt5_terminal_path" in patch:
             client.set_terminal_path(updated.mt5_terminal_path)

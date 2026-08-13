@@ -458,7 +458,7 @@ class Engine:
                         "message": self.client.last_error or "MT5 baglantisi yok"}
             self.start_watch()
             self._trading = True
-            self.store.update_system({"running": True})
+            self.store.update_system({"running": True}, source="bot baslatma")
         LOG.emit("Bot baslatildi - islem acmaya hazir.", "INFO")
         return {"ok": True, "running": True, "message": "Bot baslatildi."}
 
@@ -466,7 +466,7 @@ class Engine:
         with self._lock:
             was_trading = self._trading
             self._trading = False
-            self.store.update_system({"running": False})
+            self.store.update_system({"running": False}, source="bot durdurma")
             closed = 0
             remaining = 0
             if close_positions if close_positions is not None else self.store.system.close_on_stop:

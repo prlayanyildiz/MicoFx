@@ -162,7 +162,32 @@ class Store:
     def save_system(self) -> None:
         self.set_setting("system", self.system.to_dict())
 
-    def update_system(self, patch: dict[str, Any]) -> SystemConfig:
+    # ``running`` flips on every bot start/stop - several times a day under
+    # this project's own restart-after-commit habit - and engine.start()/
+    # stop() already emit their own "Bot baslatildi"/"Bot durduruldu" INFO
+    # line for it. Diffing it here would not add information, only noise
+    # that buries the field a human is actually auditing for.
+    _SYSTEM_CHANGE_LOG_SKIP = ("running",)
+
+    def _log_system_change(self, before: dict[str, Any], after: dict[str, Any],
+                           source: str) -> None:
+        """Record which system settings changed, and through which door.
+
+        Same reasoning as ``_log_symbol_change``: ``daily_loss_pct``,
+        ``block_high_cost`` and ``charge_costs`` have all been flipped live
+        today (13.08 - #21/#25/#29) with nothing but a chat message saying so.
+        Unlike the symbol config, ``update_system`` had no audit call at all -
+        not even the two-panel-door version ``_log_symbol_change`` started
+        from - so every one of those flips was as unattributable as
+        ``max_positions`` was before dcd3bb4.
+        """
+        diff = [f"{k} {before.get(k)!r} -> {after.get(k)!r}"
+                for k in sorted(after)
+                if k not in self._SYSTEM_CHANGE_LOG_SKIP and before.get(k) != after.get(k)]
+        if diff:
+            LOG.emit(f"sistem ayari degisti ({source}): {'; '.join(diff)}", "CFG")
+
+    def update_system(self, patch: dict[str, Any], source: str = "bilinmeyen") -> SystemConfig:
         """Merge ``patch`` onto the *persisted* system config, not the in-memory copy.
 
         Two ``Store`` instances (the live app process and any one-off script or
@@ -183,12 +208,17 @@ class Store:
         # the first one just wrote. RLock is reentrant, so the get_setting()/
         # set_setting() calls inside _load_system()/save_system() nest fine.
         with self._lock:
-            current = self._load_system().to_dict()
+            before = self._load_system().to_dict()
+            current = dict(before)
             for key, value in patch.items():
                 if key in current and value is not None:
                     current[key] = value
             self.system = SystemConfig.from_dict(current)
             self.save_system()
+            # Diffed against what actually landed, same as update_symbol():
+            # a field submitted at its existing value is not a change, and
+            # from_dict()'s own coercion is what should be reported.
+            self._log_system_change(before, self.system.to_dict(), source)
         return self.system
 
     # --------------------------------------------------------------- symbols
@@ -395,7 +425,8 @@ class Store:
         cfg = SymbolConfig.from_dict(payload)
         self.save_symbol(cfg, position=len(self.symbols))
         if self.system.max_total_positions < len(self.symbols):
-            self.update_system({"max_total_positions": len(self.symbols)})
+            self.update_system({"max_total_positions": len(self.symbols)},
+                               source="sembol ekleme (otomatik buyutme)")
         self.sort_symbols_by_group()
         cfg = self.symbols[name]
         LOG.emit(f"{name} portfoye eklendi.", "INFO", name)
