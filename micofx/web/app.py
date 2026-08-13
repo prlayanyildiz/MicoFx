@@ -315,6 +315,28 @@ def _require_current_cost_basis_before_enabling(patch: dict[str, Any], cfg,
         f"hale gelir.")
 
 
+def _enforced_cost_ceiling(optimizer: Any, store: Any) -> float:
+    """The cost ceiling entries are actually refused at, in R.
+
+    Optimizer.MAX_COST_PER_TRADE_R is the search's own absolute bound. The
+    engine refuses on system.max_cost_pct_of_risk, which ships at 25.0 to agree
+    with it and sits lower once an operator tightens it. Optimizer.reject_reason
+    already takes the minimum of the two for exactly this reason; the panel used
+    the constant alone, so it reported - and judged "maliyet" against - a
+    ceiling nothing enforces.
+
+    Tighter only. A live gate above the constant does not raise it, and a
+    disabled or zeroed gate refuses nothing, so there is nothing to align with.
+    """
+    ceiling = float(getattr(optimizer, "MAX_COST_PER_TRADE_R", 0.25) or 0.25)
+    system = getattr(store, "system", None) if store is not None else None
+    if system is not None and getattr(system, "block_high_cost", False):
+        live_pct = float(getattr(system, "max_cost_pct_of_risk", 0.0) or 0.0)
+        if live_pct > 0:
+            ceiling = min(ceiling, live_pct / 100.0)
+    return ceiling
+
+
 def _exit_axes(body: dict[str, Any], names: Any = None):
     """Yield (axis_name, values) for every exit-model axis in an opt-params body.
 
@@ -1153,7 +1175,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         """
         sample_floor = max(1, int(min_sample))
         fill_floor = max(0.0, float(min_fill_rate))
-        ceiling_r = float(getattr(optimizer, "MAX_COST_PER_TRADE_R", 0.25) or 0.25)
+        ceiling_r = _enforced_cost_ceiling(optimizer, store)
         window_days = 14
         try:
             window_days = max(1, int(engine.supervisor.settings.get("lookback_days", 14)))
