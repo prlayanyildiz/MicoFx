@@ -201,6 +201,45 @@ $cleaned = 0
 foreach ($d in $stale) { $cleaned += Remove-StaleShortcuts $d $Desktop }
 if ($cleaned -gt 0) { Say "  $cleaned eski/cift kisayol temizlendi." "Green" }
 
+# --------------------------------------------------- [5] Gece yedegi gorevi
+Step 5 "Aksam yedegi gorevi kuruluyor..."
+# README yedegi calisan bir sey gibi anlatiyor ("backup.py her aksam Windows
+# Gorev Zamanlayici ile calisir"), panel `backup_enabled` ile ana anahtarini
+# gosteriyor, models.py "The Windows task still fires" diyor - ve hicbir sey
+# o gorevi kurmuyordu. docs/KURULUM.md, sifirdan kurulum klavuzu, yedekten hic
+# soz etmiyor. Yani kilavuzu bastan sona uygulayan bir makinede yedek YOKTU ve
+# her belge oldugunu soyluyordu.
+#
+# Bedeli en agir yerde: data/micofx.db Git'e girmez. Her sembol ayari, her
+# optimizasyon sonucu ve denetleyicinin ogrendigi her sey yalnizca orada
+# durur - README'nin kendi ifadesiyle "GitHub kodu tutar, bunlarin hicbirini
+# tutmaz".
+#
+# Interactive olarak kurulur (README bunu boyle tarif ediyor): yonetici hakki
+# istemez, kilit ekraninda calisir, oturum tamamen kapaliysa o gece atlar.
+$TaskName = "MicoFX Aksam Yedegi"
+$existing = schtasks /query /tn "$TaskName" 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Say "  Zaten var, atlaniyor." "Green"
+} else {
+    # Ayni yorumlayici, ayni gerekce: konsolsuz olan, ki gece bir pencere
+    # acilmasin. Tirnaklar schtasks'in kendi ayristiricisi icin.
+    $backupExe = Join-Path $Venv "Scripts\pythonw.exe"
+    if (-not (Test-Path -LiteralPath $backupExe)) { $backupExe = $VenvPy }
+    $action = '"' + $backupExe + '" "' + (Join-Path $Root "backup.py") + '"'
+    schtasks /create /tn "$TaskName" /tr $action /sc daily /st 23:30 /f 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Say "  Kuruldu - her aksam 23:30." "Green"
+        Say "  Hedef klasor ve ana anahtar panelden (Sistem sekmesi) degistirilir."
+    } else {
+        # Kurulumu dusurmez: yedek olmadan da uygulama calisir, ama bunu
+        # sessizce gecmek README'nin verdigi sozu tekrar bosa cikarir.
+        Say "  Gorev kurulamadi - yedek OTOMATIK ALINMAYACAK." "Yellow"
+        Say "  Gorev Zamanlayici'da elle olusturun:" "Yellow"
+        Say "    $action" "Yellow"
+    }
+}
+
 # ------------------------------------------------------------------- bitti
 Write-Host ""
 Say "============================================" "Green"

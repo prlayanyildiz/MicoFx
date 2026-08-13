@@ -156,3 +156,28 @@ ya da `MICO_PORT` ortam degiskeniyle farkli bir port secin.
 **Emirler "reddedildi" donuyor**
 MT5'te Araclar > Secenekler > Uzman Danismanlar > "Algoritmik alim satima
 izin ver" kapali olabilir (bkz. adim 3).
+
+---
+
+## Yedek gorevi
+
+`KUR.bat` kurulum sirasinda **"MicoFX Aksam Yedegi"** adinda bir Gorev
+Zamanlayici gorevi olusturur; her aksam 23:30'da `backup.py` calisir ve projeyi
+zaman damgali bir zip'e alir.
+
+Bunun onemi: `data/micofx.db` **Git'e girmez**. Her sembol ayari, her
+optimizasyon sonucu ve AI denetleyicinin ogrendigi her sey yalnizca o dosyada
+durur - GitHub kodu tutar, bunlarin hicbirini tutmaz.
+
+Kontrol edin (kurulumdan sonra bir kez):
+
+```
+schtasks /query /tn "MicoFX Aksam Yedegi"
+```
+
+Gorunmuyorsa kurulum onu olusturamamistir - KUR.bat ciktisinda sari renkli bir
+uyari ve elle olusturmak icin gereken komut satiri yazar.
+
+Hedef klasor (`backup_dir`), ikinci hedef ve ana anahtar (`backup_enabled`)
+panelin **Sistem** sekmesinden ayarlanir; gorevin kendisine dokunmak gerekmez.
+Ayrintilar icin [README](../README.md#yedek).
