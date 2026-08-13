@@ -293,6 +293,19 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     # where the broker's own minimum exceeds ten points.
     if min_stop is None:
         min_stop = point * 10.0
+    # Per-bar, when the caller supplies a series. mt5client.min_stop_distance is
+    # max(stops_level, spread * 1.5, point * 10), so the floor MOVES with the
+    # spread - and the optimizer was passing one snapshot taken at plan time,
+    # used for months of bars. A sweep planned in a quiet minute therefore let
+    # the trail hug price in a way live could not, and every trailed exit gave
+    # back less here than it does there. That is one-directional: it inflates
+    # exactly the winners the reward ratio is built from.
+    #
+    # This is not a cost being charged - charge_costs governs that, and the
+    # spread series it zeroes is a different one. This is where the broker will
+    # let the stop sit.
+    min_stop_at = (min_stop if isinstance(min_stop, np.ndarray)
+                   else np.full(open_.size, float(min_stop), dtype=np.float64))
 
     # Structure trail: precompute once so the loop below stays O(1) per bar.
     # swing_lows/highs are causal (rolling window excludes the current bar).
@@ -339,7 +352,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         if not is_buy and not bool(sell_flags[i]):
             ptr += 1
             continue
-        sl_dist = max(atr_entry * p.sl_atr_mult, min_stop)
+        sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
         entry = float(open_[j0] + s) if is_buy else float(open_[j0])
         sl = entry - sl_dist if is_buy else entry + sl_dist
         # No take-profit level exists in this model, so the only way out is the
@@ -421,15 +434,16 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                     # one-directional optimism in every number the apply gates
                     # read, and net_r is what risk._edge_metric turns into a
                     # live lot multiplier.
-                    step = trail_min_step(min_stop, a, p.trail_step_atr)
+                    ms = float(min_stop_at[j])
+                    step = trail_min_step(ms, a, p.trail_step_atr)
                     if is_buy and target > sl:
-                        new_sl = min(target, c - min_stop)
+                        new_sl = min(target, c - ms)
                         if (new_sl - sl >= step
                                 and not (breakeven_locked and new_sl < entry)):
                             sl = new_sl
                             trailing = True
                     elif not is_buy and target < sl:
-                        new_sl = max(target, c + min_stop)
+                        new_sl = max(target, c + ms)
                         if (sl - new_sl >= step
                                 and not (breakeven_locked and new_sl > entry)):
                             sl = new_sl
@@ -674,6 +688,19 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     # backtest has ever been, on no evidence that it should be.
     scale = float(spread_scale) if spread_scale and spread_scale > 0 else 1.0
     spread_price = bars.spread * point * scale
+    # The broker's own floor under any stop, per bar. mt5client.min_stop_distance
+    # is max(stops_level, spread * 1.5, point * 10) and the caller passes the
+    # value it read once at plan time; only the stops_level part of that is
+    # actually constant. Rebuilding the spread-driven part from each bar's own
+    # recorded spread makes the trail as constrained here as it is live.
+    #
+    # Deliberately built from the RAW bar spread, not from ``spread_price`` -
+    # that series is zeroed when costs are switched off, and this is not a cost.
+    # A stop cannot sit inside the spread whatever the accounting says.
+    raw_spread_price = bars.spread * point
+    floor_const = float(min_stop) if min_stop else (point * 10.0)
+    min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
+
     if not charge_costs:
         # Fill at the printed price: buy the open, sell the close. The spread
         # is not only an accounting drag here - it moves the fills themselves
@@ -723,7 +750,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
             sig, entries = signals_for(p)
         return simulate(cache, sig, bars.open, bars.spread, point, p, tradable,
                         window[0], window[1], commission_price,
-                        entries=entries, spread_price=spread_price, min_stop=min_stop,
+                        entries=entries, spread_price=spread_price,
+                        min_stop=min_stop_series,
                         flatten=flatten)
 
     def evaluate(p: Params, sig=None, entries: np.ndarray | None = None,
