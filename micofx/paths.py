@@ -19,12 +19,43 @@ _LEGACY = [(DATA_DIR / "micoai.db", DB_PATH),
 
 
 def ensure_dirs() -> None:
-    for d in (CONFIG_DIR, DATA_DIR, LOG_DIR):
-        d.mkdir(parents=True, exist_ok=True)
+    """Create the working directories, or fail with something readable.
+
+    Same contract as ``load_defaults`` below and ``Store.__init__``: a startup
+    problem must end as a line an operator can act on, not as a traceback.
+    Under ``pythonw.exe`` - which ``start_silent.vbs`` uses - that traceback
+    goes to a stream nobody sees and the app simply never appears.
+
+    This was the one step between those two that did not hold it. Both things
+    it does can raise OSError: ``mkdir`` on a read-only volume, a denied path
+    or a file already sitting where the directory should go; ``rename`` when
+    the source is locked, which antivirus and file sync both do. Neither was
+    reproduced here - the legacy files do not exist on this install and the
+    directories are writable - so this closes the gap rather than fixes an
+    observed failure. The gap is the point: install somewhere restricted and
+    the app stops with nothing to read.
+    """
+    try:
+        for d in (CONFIG_DIR, DATA_DIR, LOG_DIR):
+            d.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Calisma klasoru olusturulamadi: {exc.filename or ROOT}\n{exc}\n"
+            f"Kurulum klasorune yazma izni var mi, ya da ayni isimde bir dosya "
+            f"mi duruyor - kontrol edin."
+        ) from exc
     # Carry history over from the pre-rename files instead of starting fresh.
     for old, new in _LEGACY:
-        if old.exists() and not new.exists():
-            old.rename(new)
+        try:
+            if old.exists() and not new.exists():
+                old.rename(new)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Eski dosya tasinamadi: {old} -> {new}\n{exc}\n"
+                f"Dosya baska bir surec tarafindan kilitli olabilir "
+                f"(antivirus, dosya senkronu, acik kalmis bir MicoFX). "
+                f"Elle tasiyip yeniden deneyin."
+            ) from exc
 
 
 def load_defaults() -> dict[str, Any]:

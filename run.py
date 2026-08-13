@@ -109,8 +109,11 @@ def port_busy(host: str, port: int) -> bool:
 def main() -> int:
     ensure_streams()
     cleanup_orphan_workers()
-    ensure_dirs()
     try:
+        # Inside the same guard as load_defaults: ensure_dirs raises
+        # RuntimeError for the same reason and must not be the one step that
+        # still ends as a traceback.
+        ensure_dirs()
         defaults = load_defaults()
     except RuntimeError as exc:
         # Same contract as the Store() guard below: a broken config must end
