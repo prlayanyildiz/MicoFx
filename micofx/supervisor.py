@@ -121,6 +121,15 @@ class SymbolVerdict:
     # Released early (config replaced, or cleared by hand) but not yet judged
     # on its own record. Trades at watch size until it has one - see _judge().
     probation: bool = False
+    # What the SUSPENSION decision actually read: trades inside the evidence
+    # epoch, and their profit factor. Distinct from ``trades``/``profit_factor``
+    # above, which stay on the full window for the panel and the watch bar.
+    # Surfaced because the suspension is decided on these and nothing exposed
+    # them - "can the profit-factor breaker even fire at this config churn
+    # rate" was unanswerable from the API, which is exactly the question the
+    # evidence epoch created.
+    judged_trades: int = 0
+    judged_pf: float = 0.0
     risk_scale: float = 1.0
     blocked_hours: list = field(default_factory=list)
     hour_risk_scales: dict = field(default_factory=dict)  # hour -> soft multiplier (PF-based, not a hard block)
@@ -548,6 +557,7 @@ class Supervisor:
             judged_pf, judged_n = self._pf(own), len(own)
         else:
             judged_pf, judged_n = v.profit_factor, v.trades
+        v.judged_trades, v.judged_pf = judged_n, round(judged_pf, 2)
 
         if streak >= int(cfgs["quarantine_losses"]):
             self._quarantine(v, f"{streak} ust uste zarar", quarantine_secs, now)

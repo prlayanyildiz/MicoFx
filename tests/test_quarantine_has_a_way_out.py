@@ -280,3 +280,25 @@ class TestClearingDoesNotThrottleHealthySymbols:
         sup.verdicts["JPN225"] = SymbolVerdict(symbol="JPN225", state="watch")
         sup.clear()
         assert sup.verdicts["JPN225"].probation is False
+
+
+def test_the_number_the_suspension_is_decided_on_is_visible():
+    """The evidence epoch created a question the API could not answer.
+
+    The suspension reads trades inside the epoch, not the full window, so
+    "can the profit-factor breaker even fire at this config churn rate"
+    depends on a count nothing exposed. Cursor #071 reported it as
+    "judged_n yok" - the decision was being made on an invisible number.
+    """
+    sup = _sup()
+    applied = NOW - 3 * HOUR
+    cfg = SymbolConfig(symbol="NAS100", opt_updated_at=applied)
+    # 20 trades before the config landed, 4 after it.
+    trades = _losses(applied - 5 * HOUR, 20) + _wins(applied + 60, 4)
+
+    v = sup._judge(cfg, trades, _cfgs())
+
+    assert v.trades == 24, "the full window is still reported"
+    assert v.judged_trades == 4, "the epoch count must be visible"
+    assert v.judged_pf > 1.0, "and it must be the epoch's own profit factor"
+    assert v.profit_factor < 1.0, "distinct from the full-window figure"
