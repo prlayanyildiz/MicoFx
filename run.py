@@ -21,10 +21,20 @@ import webbrowser
 # (numpy 1.26 supports 3.9), and the app never starts.
 MIN_PYTHON = (3, 10)
 if sys.version_info < MIN_PYTHON:
-    raise SystemExit(
-        f"MicoFX Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} veya ustunu gerektiriyor; "
-        f"bulunan {sys.version.split()[0]} ({sys.executable}).\n"
-        f"  Python 3.12 kurup KUR.bat'i yeniden calistirin.")
+    _msg = (f"MicoFX Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} veya ustunu gerektiriyor; "
+            f"bulunan {sys.version.split()[0]} ({sys.executable}). "
+            f"Python 3.12 kurup KUR.bat'i yeniden calistirin.")
+    # Plain stdlib rather than startup_fail(): this deliberately runs above the
+    # micofx imports, and on an interpreter this old some of them cannot import
+    # at all. Same file, so there is only one place to look either way.
+    try:
+        _d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        os.makedirs(_d, exist_ok=True)
+        with open(os.path.join(_d, "baslatilamadi.log"), "a", encoding="utf-8") as _fh:
+            _fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + _msg + "\n")
+    except Exception:
+        pass
+    raise SystemExit(_msg)
 
 import uvicorn
 
@@ -33,7 +43,7 @@ from micofx.engine import Engine
 from micofx.logbus import LOG
 from micofx.mt5client import MT5Client
 from micofx.optimizer import Optimizer
-from micofx.paths import ensure_dirs, load_defaults
+from micofx.paths import LOG_DIR, ensure_dirs, load_defaults
 from micofx.store import Store
 from micofx.web import create_app
 
@@ -53,6 +63,41 @@ def ensure_streams() -> None:
             setattr(sys, name, stream)
             if getattr(sys, f"__{name}__", None) is None:
                 setattr(sys, f"__{name}__", stream)
+
+
+def startup_fail(message: str) -> int:
+    """Report a fatal startup problem somewhere it can actually be read.
+
+    ensure_streams above points stdout/stderr at os.devnull when there is no
+    console, which is correct for its own purpose - a print() must not take the
+    app down - but it also means every readable line the startup guards produce
+    goes nowhere. paths.load_defaults, paths.ensure_dirs and Store.__init__ each
+    raise RuntimeError specifically so a failure ends as a line an operator can
+    act on; the port check and the interpreter-version guard do the same. Under
+    start_silent.vbs - the normal way this runs on a server - all of it was
+    written to the void, and the app simply did not appear. Which is the exact
+    outcome those guards exist to prevent.
+
+    Redirecting the streams themselves to a file was the obvious fix and is the
+    wrong one: uvicorn's access logging goes to stderr too, and the panel polls
+    every second or two, so that file would be thousands of lines an hour. Only
+    the fatal messages come here.
+
+    Appends, capped, and never raises: a startup already failing must not fail
+    differently because the report could not be written.
+    """
+    print(message)
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        path = LOG_DIR / "baslatilamadi.log"
+        if path.exists() and path.stat().st_size > 256 * 1024:
+            path.unlink()
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{stamp} {message}" + "\n")
+    except Exception:
+        pass
+    return 1
 
 
 def cleanup_orphan_workers() -> None:
@@ -119,15 +164,14 @@ def main() -> int:
         # Same contract as the Store() guard below: a broken config must end
         # as a readable line and exit 1, not as a traceback into pythonw.exe's
         # void where the app just fails to appear.
-        print(f"[{APP_NAME}] {exc}")
-        return 1
+        return startup_fail(f"[{APP_NAME}] {exc}")
     host = os.getenv("MICO_HOST", defaults.get("web_host", "127.0.0.1"))
     port = int(os.getenv("MICO_PORT", defaults.get("web_port", 8900)))
 
     if port_busy(host, port):
-        print(f"[{APP_NAME}] {host}:{port} zaten kullanimda. Acik olan terminali kullanin "
-              f"veya MICO_PORT ile baska bir port secin.")
-        return 1
+        return startup_fail(
+            f"[{APP_NAME}] {host}:{port} zaten kullanimda. Acik olan terminali "
+            f"kullanin veya MICO_PORT ile baska bir port secin.")
 
     try:
         store = Store()
@@ -135,8 +179,7 @@ def main() -> int:
         # Store() already logged the sqlite detail to logs/micofx.log; this
         # path exists so a broken settings DB ends as a readable message and
         # exit code 1 instead of a traceback into pythonw.exe's void.
-        print(f"[{APP_NAME}] {exc}")
-        return 1
+        return startup_fail(f"[{APP_NAME}] {exc}")
     client = MT5Client(store.system.mt5_terminal_path)
 
     if store.system.autostart_mt5:
