@@ -507,7 +507,24 @@ class Optimizer:
             # Same calendar window for every timeframe, otherwise a slow timeframe
             # gets judged on years of history while a fast one gets days.
             want = min(bar_cap, int(lookback_days * 86400 / timeframe_seconds(tf)))
-            cached_bars[tf] = self.client.bars(cfg.symbol, tf, want)
+            got = self.client.bars(cfg.symbol, tf, want)
+            # A terminal that does not hold this much history for this
+            # timeframe answers with nothing at all rather than with fewer
+            # bars, and the caller below then files the timeframe as "veri
+            # yetersiz (0 bar)" and drops it. M5 was never once searched in
+            # this book's 104 recorded runs for exactly that reason: the same
+            # 365-day window asks for 45000 M5 bars, the terminal serves none,
+            # and a whole timeframe disappeared without anyone choosing to
+            # exclude it. At 8000 bars the same request returns data and the
+            # sweep runs normally.
+            #
+            # Halving keeps the window as long as the terminal can actually
+            # serve. The floor is the 600-bar minimum the caller already
+            # enforces, so this never manufactures a sample too thin to judge.
+            while (got is None or len(got) < 600) and want > 1200:
+                want //= 2
+                got = self.client.bars(cfg.symbol, tf, want)
+            cached_bars[tf] = got
 
         for tf in timeframes:
             bars = cached_bars.get(tf)
