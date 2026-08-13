@@ -103,6 +103,10 @@ class SymbolVerdict:
     edge_health: float = 0.0         # live / expected; 1.0 = on plan, <0.35 = decayed
     consecutive_losses: int = 0
     quarantine_until: float = 0.0
+    # When the breaker fired. A quarantine is a verdict on the config that was
+    # running at that moment, so this is what tells a later review whether the
+    # config has since been replaced - see _judge().
+    quarantined_at: float = 0.0
     risk_scale: float = 1.0
     blocked_hours: list = field(default_factory=list)
     hour_risk_scales: dict = field(default_factory=dict)  # hour -> soft multiplier (PF-based, not a hard block)
@@ -400,6 +404,7 @@ class Supervisor:
         v = SymbolVerdict(symbol=cfg.symbol)
         if previous:
             v.quarantine_until = previous.quarantine_until
+            v.quarantined_at = previous.quarantined_at
             v.blocked_hours = list(previous.blocked_hours or [])
             v.last_reopt_attempt = previous.last_reopt_attempt
 
@@ -427,8 +432,26 @@ class Supervisor:
         v.expectancy = round(v.net / v.trades, 3)
         v.last_trade_at = float(trades[-1]["time"])
 
+        # Counted only over trades this symbol made under the config it is
+        # running NOW. The losing streak is the trigger for a hard circuit
+        # breaker, and a streak is a statement about a strategy - holding a
+        # freshly searched config hostage to the losses of the one it replaced
+        # judges config B by config A's record. It also makes the breaker
+        # unescapable in exactly the case it is supposed to resolve: quarantine
+        # queues a re-optimisation, the new config lands, and the old streak
+        # re-quarantines it on the very next review before a single trade has
+        # tested it.
+        #
+        # Deliberately narrow: only the streak resets. profit_factor, the trade
+        # count and the watch bar keep their full 30-day window, because those
+        # are averages that need the history (see the watch_min_trades note in
+        # DECISIONS) - and because a symbol that keeps being re-optimised must
+        # not be able to launder a bad record by churning configs.
+        since_cfg = float(getattr(cfg, "opt_updated_at", 0.0) or 0.0)
         streak = 0
-        for x in reversed(nets):
+        for deal, x in zip(reversed(trades), reversed(nets)):
+            if float(deal.get("time", 0.0)) < since_cfg:
+                break
             if x < 0:
                 streak += 1
             else:
@@ -452,9 +475,24 @@ class Supervisor:
             self._quarantine(v, f"{streak} ust uste zarar", quarantine_secs, now)
         elif v.trades >= int(cfgs["min_trades"]) and v.profit_factor < float(cfgs["quarantine_pf"]):
             self._quarantine(v, f"PF {v.profit_factor:.2f} cok dusuk", quarantine_secs, now)
-        elif v.quarantine_until > now:
+        elif v.quarantine_until > now and since_cfg <= v.quarantined_at:
             v.state = "quarantine"
             v.reason = previous.reason if previous else "karantina"
+        elif v.quarantine_until > now:
+            # The config that earned this quarantine has been replaced since -
+            # the re-optimisation the quarantine itself queued has landed a
+            # different, freshly validated one. Holding the clock against it
+            # judges the new config by the old one's record, and leaves the
+            # breaker with no exit but the wall-clock: the streak above already
+            # reads zero (no trades under the new config yet), so without this
+            # the symbol would sit out the full quarantine_hours having already
+            # been fixed. Cleared here rather than in apply() so it is decided
+            # by the same review that owns every other state transition.
+            v.quarantine_until = 0.0
+            v.quarantined_at = 0.0
+            LOG.emit(f"Karantina kaldirildi: konfig yenilendi "
+                     f"({time.strftime('%H:%M', time.localtime(since_cfg))} apply), "
+                     f"yeni ayar kendi kaydiyla yargilanacak.", "AI", cfg.symbol)
         # Two ways in, because a record can be too short to average and still
         # be long enough to read.
         #
@@ -591,6 +629,7 @@ class Supervisor:
         v.risk_scale = 0.0
         if not already:
             v.quarantine_until = now + seconds
+            v.quarantined_at = now
             hours = seconds / 3600.0
             LOG.emit(f"AI karantina: {reason} -> {hours:.0f} saat islem yok", "AI", v.symbol)
             self.notes.append(f"{v.symbol}: karantina ({reason})")
@@ -625,15 +664,23 @@ class Supervisor:
             cfg = self.store.symbols.get(v.symbol)
             if cfg is None or not cfg.enabled:
                 continue
+            broken = v.state == "quarantine"
+            # The age bar is about not churning a config that is merely OLD.
+            # A quarantine is not a staleness signal - it is the breaker having
+            # already fired on realised results, and re-searching is the only
+            # way out of it. Applying the age bar there meant a symbol that
+            # broke a day after its last apply sat quarantined with no attempt
+            # to fix it until the config happened to turn ``reopt_min_age_hours``
+            # old. The retry cooldown below still stops it from re-searching in
+            # a tight loop.
             age = now - (cfg.opt_updated_at or 0)
-            if age < min_age:
+            if age < min_age and not broken:
                 continue
             # A prior attempt that found nothing better never touches
             # opt_updated_at, so age alone would re-queue this symbol every
             # review cycle - wait out the cooldown before trying again.
             if now - v.last_reopt_attempt < retry_cooldown:
                 continue
-            broken = v.state == "quarantine"
             decayed = (cfgs.get("reopt_on_decay") and v.state == "watch"
                        and v.expected_r >= 0.12)
             if broken or decayed:
