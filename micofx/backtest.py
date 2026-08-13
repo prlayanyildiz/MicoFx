@@ -613,6 +613,21 @@ def commission_in_price(commission_per_lot: float, tick_value: float, tick_size:
     return float(commission_per_lot) / (float(tick_value) / float(tick_size))
 
 
+def sweep_budget(max_combos: int, refine_rounds: int) -> int:
+    """Backtests one sweep actually runs: the coarse pass plus each refine round.
+
+    The refine rounds are not free extra work on top of a 'max_combos' sweep -
+    each one gets its own full budget, so a sweep costs 4x max_combos at the
+    shipped refine_rounds=3. The optimizer's progress counter used to report
+    plain max_combos per sweep, which made the panel state a total four times
+    smaller than the work being done (1.12M against a real 4.48M). The ratio -
+    and so the percentage - was right, because both sides used the same wrong
+    unit; the absolute number a human reads was not. One formula, used by the
+    code that spends the budget and by the code that reports it.
+    """
+    return int(max_combos) * (1 + max(0, int(refine_rounds)))
+
+
 def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: dict[str, list],
                  min_trades: int, segments: int, max_combos: int,
                  min_positive_ratio: float = 0.6, plateau_weight: float = 0.4,
@@ -877,7 +892,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                     on_progress(offset + i, budget, max(raw.values(), default=None))
         return True
 
-    total_budget = max_combos * (1 + max(0, refine_rounds))
+    total_budget = sweep_budget(max_combos, refine_rounds)
     if not sweep(combos, 0, total_budget, screen=True):
         return {"ok": False, "error": "iptal edildi", "cancelled": True}
 

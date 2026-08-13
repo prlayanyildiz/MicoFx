@@ -609,8 +609,13 @@ class Optimizer:
             best = max((a["best"]["score"] for p in plans.values()
                         for a in p["attempts"] if a.get("ok")), default=None)
             active = sorted(s for s, p in plans.items() if p["outstanding"] > 0)
-            self._set(combo_done=done_sweeps * max_combos,
-                      combo_total=max(total_sweeps, done_sweeps) * max_combos,
+            # Per-sweep cost is the coarse pass PLUS each refine round, not
+            # max_combos alone - see backtest.sweep_budget(). Reporting the
+            # bare max_combos understated the panel's combo total fourfold at
+            # the shipped refine_rounds=3.
+            per_sweep = backtest.sweep_budget(max_combos, refine_rounds)
+            self._set(combo_done=done_sweeps * per_sweep,
+                      combo_total=max(total_sweeps, done_sweeps) * per_sweep,
                       best_score=best, current=", ".join(active[:3]))
             if plan["outstanding"] <= 0:
                 close_out(plan)
