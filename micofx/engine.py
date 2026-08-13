@@ -680,12 +680,22 @@ class Engine:
                 if not state.signal:
                     continue
                 try:
+                    # Read the leg BEFORE the entry, not after. _try_entry
+                    # decides which leg it is acting on from exactly this value
+                    # on the way in, and its successful-fill path then clears
+                    # the signal it consumed - so reading it afterwards gave
+                    # "" for every fill and filed all of them under primary.
+                    # Twenty-five secondary fills were lost that way over one
+                    # counter window while primary read 65 against 66 in the
+                    # log. Refusals return long before the clearing, which is
+                    # why only the fills were mis-attributed.
+                    entry_leg = state.signal_source
                     # An entry triggered by the secondary signal is executed with
                     # the parameters it was validated under, not the primary's.
                     self._try_entry(cfg, state, account)
                     self._tally_entry(cfg.symbol, state.entry_block,
                                       bar_key=state.pending_bar_key,
-                                      source=state.signal_source)
+                                      source=entry_leg)
                     # account was a single snapshot taken at the top of this
                     # cycle - if that entry just filled, every later symbol in
                     # this same ready list would otherwise size/margin-check
