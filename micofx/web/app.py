@@ -1196,6 +1196,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             n = int(hold.get("trades") or 0)
             edge = float(hold.get("expectancy") or 0.0)
             se2 = (2 * 1.2 / (n ** 0.5)) if n > 0 else None
+            _sl = float(getattr(cfg, "sl_atr_mult", 0.0) or 0.0)
+            _ts = float(getattr(cfg, "trail_start_atr", 0.0) or 0.0)
+            _st = float(getattr(cfg, "trail_step_atr", 0.0) or 0.0)
+            trail_arms = (max(_ts, _st) / _sl) if (_sl > 0 and (_ts or _st)) else None
             cost_r = float(hold.get("cost_per_trade_r") or 0.0)
 
             state = engine.states.get(cfg.symbol)
@@ -1327,6 +1331,18 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 "sigma": round(abs(edge) / (se2 / 2), 2) if se2 else None,
                 "thin_sample": n < sample_floor,
                 "cost_per_trade_r": round(cost_r, 3),
+                # Where the trail can FIRST lock anything, in R. Not
+                # trail_start_atr, which is what everyone reads and is not the
+                # answer: the level the trail places is ``close - trail_step *
+                # ATR``, and that only beats the original stop once the gain
+                # exceeds trail_step. So the effective point is
+                # max(trail_start, trail_step) / sl_atr_mult.
+                #
+                # SpotBrent advertises trail_start 0.5 and cannot lock anything
+                # before 2.2 R. Live winners average 1.08 R, so six of ten
+                # symbols could never protect a typical winner - and the single
+                # trail move on 13.08 landed on UK100, the lowest at 0.40.
+                "trail_arms_at_r": round(trail_arms, 2) if trail_arms else None,
                 "cost_ceiling_r": ceiling_r,
                 "spread_atr_now": round(spread_atr, 4) if spread_atr else None,
                 # The reading stays visible either way; this says whether it was
