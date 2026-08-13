@@ -123,6 +123,30 @@ _SYMBOL_RISK_BOUNDS = {
     "commission_per_lot": (0.0, 10000.0, True),
 }
 
+# Indicator lengths. Separate from the table above because that one guards
+# money - a bad sl_atr_mult sizes a live trade - while these guard the config
+# telling the truth about itself. indicators.py clamps every length with
+# ``max(1, int(length))``, so nothing here crashes or diverges from the
+# backtest; what a negative period produces is a symbol trading a T3 of length
+# 1 while the panel, the stored config and the opt grid all say -5.
+#
+# Integer periods only. The float axes beside them use zero as a switch -
+# st_mult "0 disables the confirmation entirely", adx_max and cost_rank_max
+# carry "0 disables" in models.py - and bounding those at 1 would refuse the
+# live US500 config. A length has no such reading: an average over no bars is
+# a mistake, not a disabled filter.
+_INDICATOR_PERIOD_BOUNDS = {
+    key: (1, 10000, True) for key in (
+        "t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length",
+        "macd_fast", "macd_slow", "macd_signal",
+        "wt_channel_len", "wt_avg_len",
+        "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
+        "trix_length", "aroon_length", "adx_length", "atr_length",
+        "trail_lookback",
+    )
+}
+
+
 _SYSTEM_RISK_BOUNDS = {
     "lot_multiplier": (0.0, 50.0, False),
     "max_margin_usage_pct": (0.0, 100.0, True),   # 0 = uncapped (falls back to free margin), valid
@@ -291,7 +315,7 @@ def _require_current_cost_basis_before_enabling(patch: dict[str, Any], cfg,
         f"hale gelir.")
 
 
-def _exit_axes(body: dict[str, Any]):
+def _exit_axes(body: dict[str, Any], names: Any = None):
     """Yield (axis_name, values) for every exit-model axis in an opt-params body.
 
     The search grid comes in two shapes: a flat shared ``grid`` of
@@ -299,14 +323,21 @@ def _exit_axes(body: dict[str, Any]):
     that overrides it per family. Both can carry the exit axes, so both are
     walked - checking only the flat one would leave the per-strategy override
     as an open door to the same value.
+
+    ``names`` selects which axes to yield, so the same two-shape walk serves
+    the exit bounds and the indicator-period bounds rather than being written
+    twice - the per-strategy override is exactly the door a second copy would
+    forget to close.
     """
     def _axes(container: Any):
         if not isinstance(container, dict):
             return
         for axis, values in container.items():
-            if axis in EXIT_PARAM_BOUNDS and isinstance(values, (list, tuple)):
+            if axis in names and isinstance(values, (list, tuple)):
                 yield axis, values
 
+    if names is None:
+        names = EXIT_PARAM_BOUNDS
     yield from _axes(body.get("grid"))
     per_strategy = body.get("strategy_grids")
     if isinstance(per_strategy, dict):
@@ -805,8 +836,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # 0/negative/absurd values refused at the top level landed here
             # unchecked and drove the secondary position's real stop.
             _validate_risk_bounds(patch["secondary_params"], label="secondary_params")
+            _validate_risk_bounds(patch["secondary_params"], _INDICATOR_PERIOD_BOUNDS,
+                                  label="secondary_params")
         _validate_enum_fields(patch)
         _validate_risk_bounds(patch)
+        _validate_risk_bounds(patch, _INDICATOR_PERIOD_BOUNDS)
         _validate_sessions(patch)
         current = store.symbols.get(symbol)
         _require_optimised_before_enabling(patch, current)
@@ -1971,6 +2005,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 bad = invalid_exit_param({axis: value})
                 if bad:
                     raise HTTPException(400, f"optimizer grid: {bad}")
+        # Same argument one axis over. An indicator length of 0 or below is
+        # clamped to 1 by indicators.py, so the search would quietly evaluate
+        # a point that is not the point the grid names - and if it wins, the
+        # applied config records the value nobody ran.
+        for axis, values in _exit_axes(body, _INDICATOR_PERIOD_BOUNDS):
+            for value in values:
+                _validate_risk_bounds({axis: value}, _INDICATOR_PERIOD_BOUNDS,
+                                      label="optimizer grid")
         return {"ok": True, "params": store.save_opt_params(body)}
 
     @app.post("/api/opt/params/reset")
