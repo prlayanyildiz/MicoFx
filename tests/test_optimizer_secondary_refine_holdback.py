@@ -39,7 +39,7 @@ class _Store:
     def opt_params(self):
         return {}
 
-    def update_symbol(self, symbol, patch):
+    def update_symbol(self, symbol, patch, source=""):
         self.updated_with = patch
         current = self._cfg.to_dict()
         for k, v in patch.items():

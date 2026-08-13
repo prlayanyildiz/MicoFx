@@ -545,7 +545,7 @@ class _SecStore:
     def opt_params(self):
         return {}
 
-    def update_symbol(self, symbol, patch):
+    def update_symbol(self, symbol, patch, source=""):
         self.updated_with = patch
         for k, v in patch.items():
             setattr(self._cfg, k, v)

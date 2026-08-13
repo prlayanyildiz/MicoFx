@@ -662,7 +662,7 @@ def _pending_exits_engine(cfg, positions):
     updates = []
     eng.store = SimpleNamespace(
         symbols=SimpleNamespace(values=lambda: [cfg]),
-        update_symbol=lambda symbol, patch: updates.append((symbol, patch)) or cfg,
+        update_symbol=lambda symbol, patch, source="": updates.append((symbol, patch)) or cfg,
     )
     return eng, updates
 

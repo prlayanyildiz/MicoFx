@@ -244,7 +244,34 @@ class Store:
             # costs nothing.
             self.symbols = {**self.symbols, cfg.symbol: cfg}
 
-    def update_symbol(self, symbol: str, patch: dict[str, Any]) -> SymbolConfig | None:
+    # Bulk blobs and their timestamps: they change on every optimizer apply and
+    # say nothing a human is auditing for. The fields that actually decide what
+    # gets traded - strategy, timeframe, the exit/risk numbers, max_positions,
+    # risk_percent - are all outside this set and always reported.
+    _CHANGE_LOG_SKIP = ("opt_summary", "secondary_summary",
+                        "opt_updated_at", "secondary_updated_at")
+
+    def _log_symbol_change(self, symbol: str, before: dict[str, Any],
+                           after: dict[str, Any], source: str) -> None:
+        """Record which symbol settings changed, and through which door.
+
+        Lives here rather than in the web layer because this method is the one
+        choke point every door goes through: the panel patch, the bulk patch,
+        ``Optimizer.apply``/``apply_secondary`` and the engine's own pending
+        exit writes. Logging it in web/app.py covered only the two panel doors,
+        so the optimizer rewrote strategy, timeframe and the exit numbers on
+        four symbols with CFG silent - the audit trail read "nothing changed"
+        while the live book was being replaced. One choke point, so a future
+        caller cannot get in without leaving a record.
+        """
+        diff = [f"{k} {before.get(k)!r} -> {after.get(k)!r}"
+                for k in sorted(after)
+                if k not in self._CHANGE_LOG_SKIP and before.get(k) != after.get(k)]
+        if diff:
+            LOG.emit(f"{symbol} ayar degisti ({source}): {'; '.join(diff)}", "CFG", symbol)
+
+    def update_symbol(self, symbol: str, patch: dict[str, Any],
+                      source: str = "bilinmeyen") -> SymbolConfig | None:
         # The whole read-modify-write is one critical section, for the same
         # reason update_system() already is: two threads patching DIFFERENT
         # fields of the same symbol both start from the config they read here,
@@ -258,13 +285,20 @@ class Store:
             cfg = self.symbols.get(symbol)
             if cfg is None:
                 return None
-            current = cfg.to_dict()
+            before = cfg.to_dict()
+            current = dict(before)
             for key, value in patch.items():
                 if key in current and value is not None:
                     current[key] = value
             current["symbol"] = symbol
             updated = SymbolConfig.from_dict(current)
             self.save_symbol(updated)
+            # Diffed against what actually landed, not against the patch: a
+            # field submitted at its existing value is not a change, and a
+            # field the coercion in from_dict() rewrote reads as what was
+            # really stored. A trail that reports writes which never happened
+            # is worse than no trail.
+            self._log_symbol_change(symbol, before, updated.to_dict(), source)
             return updated
 
     def delete_symbol(self, symbol: str) -> bool:

@@ -57,7 +57,7 @@ class _Store:
     def opt_history(self, s, n):
         return []
 
-    def update_symbol(self, symbol, patch):
+    def update_symbol(self, symbol, patch, source=""):
         cfg = self.symbols.get(symbol)
         cur = cfg.to_dict()
         for k, v in patch.items():

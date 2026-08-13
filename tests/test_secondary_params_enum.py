@@ -41,7 +41,7 @@ class _FakeStore:
     def opt_params(self):
         return {}
 
-    def update_symbol(self, symbol, patch):
+    def update_symbol(self, symbol, patch, source=""):
         cfg = self.symbols.get(symbol)
         if cfg is None:
             return None

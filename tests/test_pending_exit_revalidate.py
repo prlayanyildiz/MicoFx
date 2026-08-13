@@ -31,7 +31,7 @@ class _Store:
         self.symbols = {cfg.symbol: cfg}
         self.writes: list[dict] = []
 
-    def update_symbol(self, symbol, patch):
+    def update_symbol(self, symbol, patch, source=""):
         cfg = self.symbols.get(symbol)
         if cfg is None:
             return None

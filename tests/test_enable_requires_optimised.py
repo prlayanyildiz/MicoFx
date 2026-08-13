@@ -47,7 +47,7 @@ class _Store:
     def opt_params(self): return {}
     def opt_history(self, s, n): return []
 
-    def update_symbol(self, symbol, patch):
+    def update_symbol(self, symbol, patch, source=""):
         cur = self.symbols[symbol].to_dict()
         for k, v in patch.items():
             if k in cur and v is not None:

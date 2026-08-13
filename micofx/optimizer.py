@@ -1375,7 +1375,7 @@ class Optimizer:
                          f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)
         # update_symbol drops None values, so an empty candidate has to be
         # written as empty strings/dicts rather than None to actually clear.
-        updated = self.store.update_symbol(symbol, patch)
+        updated = self.store.update_symbol(symbol, patch, source="opt ikincil")
         return {"ok": updated is not None, "symbol": symbol}
 
     def apply(self, symbol: str, params: dict[str, Any], score: float,
@@ -1575,5 +1575,5 @@ class Optimizer:
                                 f"{symbol}: eski ikincil sinyal temizlenemedi - "
                                 f"aile degisikligi reddedildi"),
                             "symbol": symbol, "config": None}
-            updated = self.store.update_symbol(symbol, patch)
+            updated = self.store.update_symbol(symbol, patch, source="opt apply")
         return {"ok": updated is not None, "symbol": symbol, "config": updated.to_dict() if updated else None}

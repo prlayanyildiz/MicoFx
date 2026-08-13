@@ -47,7 +47,7 @@ class _FakeStore:
     def opt_history(self, symbol, limit):
         return []
 
-    def update_symbol(self, symbol, patch):
+    def update_symbol(self, symbol, patch, source=""):
         cfg = self.symbols.get(symbol)
         if cfg is None:
             return None

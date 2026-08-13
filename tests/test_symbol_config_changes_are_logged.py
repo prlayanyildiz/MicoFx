@@ -1,15 +1,20 @@
 """A symbol's risk settings must not change without leaving a record.
 
-Found 13.08 20:00: ``max_positions`` was 5 on all ten symbols, while the
-dataclass default (models.py) and config/defaults.json both say 1 and
-claude/GERI_ALMA_max_positions.json records the previous value as 10. Nothing
-in micofx/ writes the field - risk.py only reads it, the optimizer never
-touches it - so it can only have arrived through the panel. The log could not
-confirm that, because symbol edits emitted nothing at all: AI settings changes
-log, symbol config changes did not.
+Found 13.08 20:00: ``max_positions`` was 5 on all ten symbols while the
+dataclass default and config/defaults.json both say 1, and the log could not
+say who wrote it - symbol edits emitted nothing at all.
 
-Without this record, rule 11 (catch a silent write-back in the same round)
-cannot be applied to symbol settings at all - there is nothing to look at.
+The first fix logged it in web/app.py, which covered only the two panel doors.
+Cursor's #065 caught that immediately: at 20:45 the optimizer rewrote strategy,
+timeframe and the exit numbers on four symbols (NAS100/XAUUSD/GER40/US500 all
+moved to M5) and CFG stayed **empty** - ``Optimizer.apply`` goes straight to
+``store.update_symbol``. The audit trail read "nothing changed" while the live
+book was being replaced.
+
+So the record now lives on ``Store.update_symbol``: the one choke point every
+door goes through - panel patch, bulk patch, optimizer apply/apply_secondary,
+and the engine's own pending-exit writes. A new caller cannot get in without
+leaving a record.
 """
 from __future__ import annotations
 
@@ -22,7 +27,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.logbus import LOG, _PERSIST
 from micofx.models import SymbolConfig
-from micofx.web.app import _log_symbol_change
+from micofx.store import Store
+
+
+class _FakeStore:
+    """Just enough Store to exercise update_symbol's real body."""
+
+    def __init__(self, cfg: SymbolConfig) -> None:
+        self.symbols = {cfg.symbol: cfg}
+        self.saved: list[SymbolConfig] = []
+        import threading
+        self._lock = threading.RLock()
+
+    def save_symbol(self, cfg: SymbolConfig) -> None:
+        self.saved.append(cfg)
+        self.symbols[cfg.symbol] = cfg
+
+    # The methods under test, bound off the real class.
+    update_symbol = Store.update_symbol
+    _log_symbol_change = Store._log_symbol_change
+    _CHANGE_LOG_SKIP = Store._CHANGE_LOG_SKIP
 
 
 @pytest.fixture
@@ -34,20 +58,8 @@ def captured(monkeypatch):
     return out
 
 
-def _cfg(**kw) -> SymbolConfig:
-    return SymbolConfig(symbol="SpotBrent", **kw)
-
-
-def test_a_max_positions_change_is_recorded(captured):
-    """The exact field whose provenance could not be established."""
-    _log_symbol_change("SpotBrent", _cfg(max_positions=1), _cfg(max_positions=5), "panel")
-
-    assert len(captured) == 1
-    entry = captured[0]
-    assert "max_positions" in entry["message"]
-    assert "1" in entry["message"] and "5" in entry["message"]
-    assert entry["symbol"] == "SpotBrent"
-    assert "panel" in entry["message"], "the door used must be named"
+def _store(**kw) -> _FakeStore:
+    return _FakeStore(SymbolConfig(symbol="NAS100", **kw))
 
 
 def test_the_record_reaches_disk():
@@ -55,39 +67,94 @@ def test_the_record_reaches_disk():
     assert "CFG" in _PERSIST
 
 
-def test_the_source_distinguishes_the_doors(captured):
-    _log_symbol_change("SpotBrent", _cfg(max_positions=1), _cfg(max_positions=5), "toplu")
-    assert "toplu" in captured[0]["message"]
+def test_max_positions_change_is_recorded(captured):
+    """The field whose provenance could not be established."""
+    s = _store(max_positions=1)
+    s.update_symbol("NAS100", {"max_positions": 5}, source="panel")
+
+    assert len(captured) == 1
+    msg = captured[0]["message"]
+    assert "max_positions" in msg and "1" in msg and "5" in msg
+    assert captured[0]["level"] == "CFG"
+    assert captured[0]["symbol"] == "NAS100"
+    assert "panel" in msg
+
+
+def test_the_optimizer_door_is_recorded(captured):
+    """The exact gap Cursor #065 found: the book changed, CFG was silent."""
+    s = _store(strategy="st_trend", timeframe="M15")
+    s.update_symbol("NAS100", {"strategy": "t3_stoch", "timeframe": "M5"},
+                    source="opt apply")
+
+    assert len(captured) == 1
+    msg = captured[0]["message"]
+    assert "opt apply" in msg, "the door that changed the book must be named"
+    assert "strategy" in msg and "timeframe" in msg
+    assert "M15" in msg and "M5" in msg
+
+
+def test_an_unnamed_caller_still_leaves_a_record(captured):
+    """A future call site that forgets `source` must not become invisible."""
+    s = _store(max_positions=1)
+    s.update_symbol("NAS100", {"max_positions": 5})
+    assert len(captured) == 1
+    assert "bilinmeyen" in captured[0]["message"]
+
+
+def test_exit_risk_numbers_are_reported(captured):
+    s = _store(sl_atr_mult=1.0, trail_start_atr=0.5, trail_step_atr=2.2)
+    s.update_symbol("NAS100", {"sl_atr_mult": 0.9, "trail_step_atr": 0.8},
+                    source="opt apply")
+
+    msg = captured[0]["message"]
+    assert "sl_atr_mult" in msg and "trail_step_atr" in msg
+    assert "trail_start_atr" not in msg, "unchanged field must not be reported"
 
 
 def test_an_unchanged_field_is_not_reported(captured):
-    """Submitting a field at its existing value is not a change."""
-    _log_symbol_change("SpotBrent", _cfg(max_positions=5), _cfg(max_positions=5), "panel")
+    s = _store(max_positions=5)
+    s.update_symbol("NAS100", {"max_positions": 5}, source="panel")
     assert captured == []
 
 
-def test_several_changed_fields_are_all_named(captured):
-    _log_symbol_change("SpotBrent",
-                       _cfg(max_positions=1, risk_percent=0.5),
-                       _cfg(max_positions=5, risk_percent=1.25), "panel")
+def test_summary_blobs_and_their_timestamps_are_not_reported(captured):
+    """These change on every apply and drown the fields being audited."""
+    s = _store(max_positions=1)
+    s.update_symbol("NAS100", {
+        "max_positions": 5,
+        "opt_summary": {"anything": 1},
+        "secondary_summary": {"anything": 2},
+        "opt_updated_at": 12345.0,
+        "secondary_updated_at": 6789.0,
+    }, source="opt apply")
 
-    assert len(captured) == 1
-    assert "max_positions" in captured[0]["message"]
-    assert "risk_percent" in captured[0]["message"]
+    msg = captured[0]["message"]
+    assert "max_positions" in msg
+    for noisy in ("opt_summary", "secondary_summary",
+                  "opt_updated_at", "secondary_updated_at"):
+        assert noisy not in msg
 
 
-def test_it_diffs_what_landed_not_what_was_asked_for(captured):
-    """A field the store coerced or ignored must read as what actually landed.
-
-    Echoing the request would have reported a write that never happened - the
-    precise failure mode that makes an audit trail worse than none.
-    """
-    _log_symbol_change("SpotBrent", _cfg(max_positions=1), _cfg(max_positions=1), "panel")
+def test_a_missing_symbol_makes_no_record(captured):
+    s = _store()
+    assert s.update_symbol("YOKSA", {"max_positions": 5}, source="panel") is None
     assert captured == []
 
 
-def test_a_missing_side_is_not_reported_as_a_change(captured):
-    """404 / not-found paths must not manufacture a phantom record."""
-    _log_symbol_change("SpotBrent", None, _cfg(max_positions=5), "panel")
-    _log_symbol_change("SpotBrent", _cfg(max_positions=5), None, "panel")
-    assert captured == []
+def test_every_caller_names_its_door():
+    """The point of the choke point: no unnamed writer in the codebase."""
+    import re
+
+    root = Path(__file__).resolve().parents[1] / "micofx"
+    unnamed = []
+    for path in root.rglob("*.py"):
+        if path.name == "store.py":
+            continue
+        # Comments name the method too ("... goes through store.update_symbol(),
+        # unvalidated") - strip them so prose is not read as a call site.
+        text = "\n".join(re.sub(r"#.*$", "", line) for line in
+                         path.read_text(encoding="utf-8").splitlines())
+        for m in re.finditer(r"update_symbol\((?:[^()]|\([^()]*\))+\)", text, re.S):
+            if "source=" not in m.group(0):
+                unnamed.append(f"{path.name}: {m.group(0)[:70]}")
+    assert not unnamed, "these writers leave an unattributable record: " + "; ".join(unnamed)

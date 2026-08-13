@@ -2337,7 +2337,8 @@ class Engine:
                         # values it already validated, which is the safe side.
                         # Only the bad patch is cleared - the secondary block
                         # below still gets its turn this cycle.
-                        updated = self.store.update_symbol(cfg.symbol, {"pending_exit_patch": {}})
+                        updated = self.store.update_symbol(cfg.symbol, {"pending_exit_patch": {}},
+                                                             source="motor bekleyen-cikis")
                         # WARN, not ERROR: dropping a stale/poisoned pending
                         # patch is the gate working as designed. ERROR made
                         # fault scans treat a successful refuse as a live
@@ -2347,7 +2348,8 @@ class Engine:
                                  "WARN", cfg.symbol)
                     else:
                         updated = self.store.update_symbol(cfg.symbol,
-                                                           {**pending, "pending_exit_patch": {}})
+                                                           {**pending, "pending_exit_patch": {}},
+                                                           source="motor bekleyen-cikis")
                         if updated is not None:
                             LOG.emit(f"{cfg.symbol}: bekletilen cikis/risk parametreleri "
                                      f"({', '.join(sorted(pending))}) artik acik pozisyon yok, "
@@ -2365,14 +2367,15 @@ class Engine:
                     bad_sec = invalid_exit_param(merged_params)
                     if bad_sec:
                         self.store.update_symbol(cfg.symbol,
-                                                 {"pending_secondary_exit_patch": {}})
+                                                 {"pending_secondary_exit_patch": {}},
+                                                 source="motor bekleyen-ikincil")
                         LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis parametresi gecersiz "
                                  f"({bad_sec}) - uygulanmadi, mevcut ayar korundu.",
                                  "WARN", cfg.symbol)
                     else:
                         self.store.update_symbol(cfg.symbol, {
                             "secondary_params": merged_params, "pending_secondary_exit_patch": {},
-                        })
+                        }, source="motor bekleyen-ikincil")
                         LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis/risk parametreleri "
                                  f"({', '.join(sorted(pending_sec))}) artik acik ikincil pozisyon "
                                  f"yok, uygulandi.", "OPT", cfg.symbol)

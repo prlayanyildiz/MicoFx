@@ -508,32 +508,6 @@ def _reject_internal_fields(patch: dict[str, Any]) -> None:
         raise HTTPException(400, f"{', '.join(found)} disaridan yazilamaz (motor ici alan)")
 
 
-def _log_symbol_change(symbol: str, before: Any, after: Any, source: str) -> None:
-    """Record which symbol settings actually changed, and by which door.
-
-    Every mutation of a symbol's risk settings used to return 200 and leave no
-    trace: unlike AI settings (which do log), a panel patch or bulk write was
-    invisible the moment it completed. So a value found live that disagrees
-    with both the dataclass default and the rollback file - max_positions at 5
-    on 13.08 - could not be attributed to an operator edit, an apply, or a
-    silent write-back, and "who changed this" had no answer anywhere.
-
-    Diffed against the stored config rather than echoing the request, so a
-    field submitted at its existing value is not reported as a change, and a
-    field the store coerced or ignored is reported as what actually landed.
-    """
-    if before is None or after is None:
-        return
-    try:
-        old, new = before.to_dict(), after.to_dict()
-    except AttributeError:
-        return
-    diff = [f"{k} {old.get(k)!r} -> {new.get(k)!r}"
-            for k in sorted(new) if old.get(k) != new.get(k)]
-    if diff:
-        LOG.emit(f"{symbol} ayar degisti ({source}): {'; '.join(diff)}", "CFG", symbol)
-
-
 def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optimizer,
                 api_token: str = "") -> FastAPI:
     """``api_token``: optional shared secret (``MICO_API_TOKEN`` env var, see run.py).
@@ -1018,16 +992,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                         400, f"{next_strat}/{next_tf} eslesmesi yasak "
                              f"(scalp yalnizca M5; uzun TF swing ailelerine ait) - "
                              f"motor bu kombinasyonda hicbir zaman giris denemez")
-            updated = store.update_symbol(symbol, patch)
+            updated = store.update_symbol(symbol, patch, source="panel")
         finally:
             if guarded:
                 engine.entry_lock.release()
         if updated is None:
             raise HTTPException(404, f"{symbol} bulunamadi")
-        # ``current`` is the pre-edit object: update_symbol() builds a new
-        # SymbolConfig and save_symbol() swaps it in (copy-on-write), so this
-        # is a genuine before/after pair rather than the same mutated dict.
-        _log_symbol_change(symbol, current, updated, "panel")
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
         # Every other mutation endpoint forces the cache fresh; this one didn't,
         # so a poll landing inside the old 1.5s window could hand the rest of
@@ -1862,14 +1832,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     if sec_exit_changing and (current.magic in watch_magics or pending_scan):
                         rejected.append(symbol)
                         continue
-                before = store.symbols.get(symbol)
-                updated = store.update_symbol(symbol, body.patch)
+                updated = store.update_symbol(symbol, body.patch, source="panel toplu")
                 if updated is not None:
                     changed += 1
-                    # Bulk is the door that writes the whole book at once, so
-                    # it is the one most able to move a risk setting across
-                    # every symbol with nothing in the log to show for it.
-                    _log_symbol_change(symbol, before, updated, "toplu")
         finally:
             if guarded:
                 engine.entry_lock.release()
