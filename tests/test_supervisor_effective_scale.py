@@ -81,15 +81,26 @@ def test_disabled_supervisor_reports_no_throttle():
     assert rows["XAUUSD"]["gate_allowed"] is True
 
 
-def test_quarantine_still_reports_zero_when_disabled():
-    """Quarantine is a hard breaker enforced even with the AI layer off."""
+def test_quarantine_reports_nothing_applied_when_disabled():
+    """Off means off - and the panel has to say so.
+
+    Quarantine used to be enforced with the layer disabled, on the reasoning
+    that a breaker earned by realised results is not a discretionary opinion.
+    Operator decision 14.08: that is not what the switch says. A control that
+    still refuses entries after being turned off cannot be told apart from a
+    bug somewhere else.
+
+    The verdict itself is unchanged - the panel still shows the symbol as
+    quarantined, because reviews keep running so the operator can see what the
+    supervisor WOULD do. What must read as inert is the part that acts.
+    """
     sup = _sup(enabled=False)
     sup.verdicts = {"NAS100": _verdict("NAS100", "quarantine", risk_scale=0.0,
                                        quarantine_until=time.time() + 3600)}
     row = _rows(sup)["NAS100"]
-    assert row["effective_scale"] == 0.0
-    assert row["gate_allowed"] is False
-    assert "karantina" in row["gate_reason"]
+    assert row["effective_scale"] == 1.0,         "a disabled gate multiplies by nothing - the row must not claim a throttle"
+    assert row["gate_allowed"] is True,         "a disabled layer must not refuse an entry"
+    assert row["state"] == "quarantine",         "the verdict still shows what it would do"
 
 
 def test_enabled_supervisor_reports_the_real_throttle():

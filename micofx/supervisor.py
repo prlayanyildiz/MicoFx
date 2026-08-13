@@ -291,13 +291,16 @@ class Supervisor:
     def _gate_locked(self, cfg: SymbolConfig, server_now: float) -> tuple[bool, str, float]:
         verdict = self.verdicts.get(cfg.symbol)
         now = time.time()
-        # Quarantine is a hard circuit breaker earned by realised results (a
-        # losing streak or a collapsed profit factor), not a discretionary AI
-        # opinion - it stays enforced even with the AI advisory layer turned
-        # off. review() also keeps running regardless of ``enabled`` (see
-        # ``due()``) so this state is never a stale snapshot from before AI
-        # was disabled. Turning AI off only waives the *soft* layers below
-        # (blocked hours, drawdown throttling, per-hour scaling).
+        # Off means off. Quarantine used to be enforced here even with the
+        # layer disabled, on the reasoning that a breaker earned by realised
+        # results is not a discretionary opinion. That reasoning is sound but
+        # it is not what the switch says: an operator who turns the supervisor
+        # off and still finds symbols refused by it has a control that does
+        # not control anything, and no way to tell that from a bug elsewhere.
+        # Reviews still run (see due()) so the panel keeps showing what the
+        # supervisor WOULD do - it just does not do it.
+        if not self.enabled:
+            return True, "", 1.0
         if verdict is not None and verdict.state == "quarantine":
             # Gate on the *state*, not the clock. quarantine_until firing does
             # not itself lift a quarantine - review() does, by reclassifying
@@ -309,8 +312,6 @@ class Supervisor:
             left = max(0, int((verdict.quarantine_until - now) / 60))
             return False, f"AI karantina {left}dk ({verdict.reason})", 0.0
 
-        if not self.enabled:
-            return True, "", 1.0
         if verdict is None:
             return True, "", self.risk_scale
 
@@ -362,9 +363,12 @@ class Supervisor:
     # ---------------------------------------------------------------- review
 
     def due(self) -> bool:
-        # Reviews keep running - quarantine is a hard circuit breaker enforced
-        # regardless of ``enabled`` (see ``gate()``), so its state must stay
-        # live rather than freezing at whatever it was when AI was turned off.
+        # Reviews keep running while the layer is disabled, but only to keep
+        # the panel honest: gate() and _queue_reoptimization() both refuse to
+        # act when disabled, so this is observation with no effect. Freezing
+        # the verdicts instead would show a stale picture from whenever AI was
+        # last on, which is harder to read than a live "this is what it would
+        # do".
         # Called directly from engine._cycle(), OUTSIDE the try/except that
         # wraps review() - web/app.py's /api/ai/settings now type-checks
         # against DEFAULTS before this can be reached, but a value that
@@ -751,6 +755,12 @@ class Supervisor:
         return sorted(blocked)
 
     def _queue_reoptimization(self, cfgs: dict[str, Any]) -> None:
+        # Same "off means off" rule as gate(). This is the supervisor's other
+        # way of acting on the account, and the louder one: it starts a search
+        # and REPLACES a live config. A disabled layer quietly rewriting the
+        # book is worse than a disabled layer quietly blocking an entry.
+        if not self.enabled:
+            return
         if not cfgs["auto_reoptimize"] or self.optimizer is None:
             return
         min_age = float(cfgs["reopt_min_age_hours"]) * 3600.0

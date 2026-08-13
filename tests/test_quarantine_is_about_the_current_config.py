@@ -168,7 +168,7 @@ class TestTheBreakerCanReachAReoptimisation:
             def start(self, symbols, apply_best=True):
                 type(self).started = list(symbols)
 
-        sup.store = type("S", (), {"symbols": {cfg.symbol: cfg}})()
+        sup.store.symbols = {cfg.symbol: cfg}
         sup.optimizer = _Opt()
         sup.verdicts = {cfg.symbol: verdict}
         sup._queue_reoptimization(cfgs)
