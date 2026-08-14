@@ -1426,10 +1426,6 @@ class MT5Client:
             return False
         return True
 
-    def close_partial(self, ticket: int, volume: float, slippage: int = 20,
-                      comment: str = "MicoFX partial", fill: dict | None = None) -> bool:
-        return self.close_position(ticket, slippage, comment, volume=volume, fill=fill)
-
     def close_position(self, ticket: int, slippage: int = 20, comment: str = "MicoFX close",
                        volume: float | None = None, fill: dict | None = None) -> bool:
         """Close (or partially close) a position.

@@ -374,17 +374,6 @@ def _exit_axes(body: dict[str, Any], names: Any = None):
 _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
 
 
-def _reject_bad_dict_fields(patch: dict[str, Any], keys: tuple) -> None:
-    # SymbolConfig.from_dict() silently coerces a non-dict value for these
-    # fields to {} (see models.py) - a client sending a string/list/number
-    # instead of an object wiped the field to empty with a 200, completely
-    # bypassing the exit-field-changing guards above, which only look at the
-    # patch when it IS a dict.
-    for key in keys:
-        if key in patch and patch[key] is not None and not isinstance(patch[key], dict):
-            raise HTTPException(400, f"{key} bir nesne (object) olmali, {type(patch[key]).__name__} degil")
-
-
 # strategy_allows_timeframe() falls back to "allow every timeframe" for a
 # strategy name it does not recognise (see its own docstring) - it was never
 # meant to double as an enum check, so an arbitrary/garbage strategy string

@@ -326,11 +326,6 @@ class SymbolConfig:
         cfg.pending_exit_patch = pending if isinstance(pending, dict) else {}
         return cfg
 
-    def session_start_minutes(self) -> int:
-        """Minute-of-day the trading session opens."""
-        windows = self.session_windows()
-        return min(w[0] for w in windows) if windows else 0
-
     def session_windows(self) -> list[tuple[int, int]]:
         out: list[tuple[int, int]] = []
         for s in self.sessions:
