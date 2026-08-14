@@ -2005,7 +2005,18 @@ class Engine:
             gone = self.execution.track(self._positions)
             if not gone:
                 return
-            deals = self.client.deals_since(time.time() - 7200)
+            # Off the broker's clock, not this machine's. Deal timestamps are
+            # naive epochs holding the broker's wall-clock reading, so a true
+            # epoch handed to deals_since() lands the window three hours out on
+            # this GMT+3 server: measured 15.08, asking for two hours returned a
+            # 3.2-hour span. Wider is not free here - reap() matches a closed
+            # position against these deals, and the extra hours are candidates
+            # it has to discriminate. broker_now() is the same clock the deals
+            # are stamped on, so the subtraction cancels the offset; 0.0 means
+            # no tick has been read yet and the old behaviour stands.
+            broker_now = self.client.broker_now()
+            since = (broker_now if broker_now > 0.0 else time.time()) - 7200
+            deals = self.client.deals_since(since)
             for report in self.execution.reap(gone, deals, self.client):
                 self._log_broker_exit(report)
             self.execution.forget(gone)

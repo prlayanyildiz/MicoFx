@@ -73,3 +73,34 @@ def test_market_open_still_uses_the_same_yardstick():
     """The rule this fix follows is stated there; it must not drift apart."""
     src = inspect.getsource(MT5Client.market_open)
     assert "self._broker_now" in src
+
+
+def test_the_execution_deal_window_uses_the_broker_clock_too():
+    """The second place a true epoch was handed to a broker-stamped query.
+
+    ``_measure_broker_exits`` asked deals_since() for the last two hours off
+    time.time(); measured 15.08, that returned a 3.2-hour span. Wider is not
+    free - reap() matches a closed position against these deals, so the extra
+    hours are candidates it has to discriminate between.
+
+    ``_day_start_epoch`` was checked at the same time and is correct: it builds
+    the boundary with calendar.timegm() from the local calendar date, which
+    produces the same naive encoding the broker stamps, so the two line up.
+    """
+    src = inspect.getsource(Engine)
+    calls = [line.strip() for line in src.splitlines() if "deals_since(" in line
+             and not line.strip().startswith("#")]
+    assert calls, "no deals_since call found - has it been renamed?"
+    bad = [c for c in calls if "time.time()" in c]
+    assert not bad, ("deals_since takes a broker-stamped bound, not a true epoch: "
+                     + "; ".join(bad))
+    assert any("since" in c or "broker_now" in c for c in calls)
+
+
+def test_the_day_boundary_still_uses_the_naive_encoding():
+    """Correct already - pinned so a 'tidy-up' does not turn it into mktime."""
+    src = inspect.getsource(Engine._day_start_epoch)
+    assert "calendar.timegm" in src
+    assert "mktime" not in src, (
+        "mktime returns a true epoch and would shift the trading day by the "
+        "broker's whole UTC offset")
