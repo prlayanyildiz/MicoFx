@@ -855,6 +855,17 @@ class Engine:
         except Exception:
             pass
 
+    def forget_entry_blocks(self, symbol: str) -> None:
+        """Drop one symbol's entry tally now, rather than at the next flush.
+
+        The flush prunes against the live book, so a symbol deleted and re-added
+        under the same name before the next flush keeps counters that belong to
+        the instrument that left.
+        """
+        if self._entry_blocks.pop(str(symbol), None) is not None:
+            self._entry_blocks_dirty = True
+            self._flush_entry_blocks()
+
     def _flush_entry_blocks(self) -> None:
         """Persist the tally. Diagnostics must never interrupt a cycle."""
         if not self._entry_blocks_dirty:

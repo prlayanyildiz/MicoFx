@@ -807,6 +807,16 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if not client.connected:
             return (f"magic {new_magic} dogrulanamadi - MT5 baglantisi yok, "
                     f"bugun islem gormus olabilir (baglanti gelince tekrar deneyin)")
+        # The same window auto-assignment uses. These two drifted apart: the
+        # automatic path avoids anything traded inside the supervisor's
+        # lookback, while this one only looked at today - so a magic freed four
+        # days ago passed the hand-typed check and failed the automatic one.
+        # The supervisor reads thirty days; a number it can still misattribute
+        # is not free to reuse whoever typed it.
+        if int(new_magic) in _recent_deal_magics():
+            return (f"magic {new_magic} son 30 gunde kapanmis bir isleme ait "
+                    f"(silinmis bir sembolden kalmis olabilir) - bu numara "
+                    f"verilirse o islemlerin kâr/zarari yeni sembole yazilir")
         day_start = engine._day_start_epoch()
         for deal in client.deals_since(day_start):
             if int(deal.get("magic", 0)) == int(new_magic):
@@ -992,8 +1002,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                          f"devam ediyor (magic {cfg.magic}) - taramanin bitmesini bekleyin")
             store.delete_symbol(symbol)
         engine.states.pop(symbol, None)
-        engine.supervisor.clear(symbol)
+        # forget(), not clear(): clear() keeps the row so a release epoch
+        # survives a review, which is right for an operator releasing a symbol
+        # and wrong for one leaving the book. Left in place, the verdict, its
+        # epoch and its probation flag are inherited whole by the next symbol
+        # added under the same name.
+        engine.supervisor.forget(symbol)
         engine.execution.drop_symbol(symbol)
+        # The tally is pruned against the live book on flush, which drops these
+        # only while the name is absent - re-add before the next flush and the
+        # deleted symbol's block counts come back as the new one's.
+        engine.forget_entry_blocks(symbol)
         LOG.emit(f"{symbol} portfoyden silindi.", "WARN", symbol)
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
         return {"ok": True, "symbols": symbol_payload(force=True), "system": store.system.to_dict()}

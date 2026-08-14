@@ -250,6 +250,20 @@ class Supervisor:
             "saved_at": time.time(),
         })
 
+    def forget(self, symbol: str) -> None:
+        """Drop a symbol's verdict outright - for deletion, not for release.
+
+        ``clear()`` deliberately keeps the row so the release epoch survives.
+        That is right for an operator releasing a symbol and wrong for one
+        leaving the book: the verdict, its epoch and its probation flag would
+        sit in memory and be inherited whole by the next symbol added under the
+        same name - a fresh instrument opening on a deleted one's suspension,
+        which is the "judge B by A's record" failure this file spends most of
+        its length avoiding.
+        """
+        with self._lock:
+            self.verdicts.pop(symbol, None)
+
     def clear(self, symbol: str | None = None) -> None:
         """Operator "Serbest birak": release, and stop holding the old record.
 

@@ -130,6 +130,9 @@ class _FakeClient:
 
 
 class _FakeSupervisor:
+    def forget(self, symbol):
+        self.cleared.append(symbol) if hasattr(self, 'cleared') else None
+
     def clear(self, symbol):
         pass
 
@@ -140,6 +143,9 @@ class _FakeExecution:
 
 
 class _FakeEngine:
+    def forget_entry_blocks(self, symbol):
+        pass
+
     def __init__(self):
         self.states = {}
         self.supervisor = _FakeSupervisor()
