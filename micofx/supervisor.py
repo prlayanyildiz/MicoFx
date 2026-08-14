@@ -363,9 +363,17 @@ class Supervisor:
                 and verdict.state in blocked_states
                 and (verdict.state != "watch" or verdict.judged_trades > 0)):
             return False, "AI: gunluk kayipta zayif/ispatlanmamis sembol bekliyor", 0.0
+        # Same argument as the branch above, and this is the one that was left
+        # holding the door after it: trades/expectancy are the full 30-day
+        # window, so six symbols re-optimised an hour earlier and released by
+        # hand were still refused on the record of the configs they no longer
+        # run - NAS100 at E -1.699 over 72 trades, none of them made by the
+        # config that would have taken the entry. Read the evidence epoch
+        # instead, at the bar the quarantine decision already uses; judged_pf
+        # under 1.0 is the same statement about the same trades.
         if (self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
-                and verdict.trades >= int(self.settings["min_trades"])
-                and verdict.expectancy < 0):
+                and verdict.judged_trades >= int(self.settings["min_trades"])
+                and verdict.judged_pf < 1.0):
             return False, "AI: gunluk kayipta negatif sembol bekliyor", 0.0
 
         # Soft per-hour PF scaling: unlike blocked_hours this never refuses the

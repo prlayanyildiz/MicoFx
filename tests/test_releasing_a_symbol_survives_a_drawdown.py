@@ -109,3 +109,27 @@ def test_a_config_that_has_proven_weak_is_still_shut():
     allowed, reason, _ = _gate(_sup(), v)
     assert allowed is False
     assert "ispatlanmamis" in reason
+
+
+def test_the_negative_rule_also_reads_the_config_running_now():
+    """The rule left holding the door after the watch branch was fixed.
+
+    ``trades``/``expectancy`` are the full 30-day window. Six symbols
+    re-optimised an hour earlier and released by hand were still refused on the
+    record of configs they no longer run - NAS100 at E -1.699 over 72 trades,
+    none of them taken by the config that would have opened the entry.
+    """
+    v = _verdict("ok")
+    v.trades, v.expectancy = 72, -1.699      # the old configs' record
+    v.judged_trades, v.judged_pf = 0, 0.0    # nothing under this one yet
+    allowed, _, _ = _gate(_sup(), v)
+    assert allowed is True
+
+
+def test_a_config_that_has_proven_negative_is_refused():
+    """Once its own record is long enough and losing, the refusal stands."""
+    v = _verdict("ok")
+    v.judged_trades, v.judged_pf = 30, 0.72
+    allowed, reason, _ = _gate(_sup(), v)
+    assert allowed is False
+    assert "negatif" in reason
