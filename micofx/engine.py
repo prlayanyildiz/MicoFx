@@ -1096,46 +1096,20 @@ class Engine:
             state.spread_atr = tick["spread"] / state.atr if state.atr > 0 else 0.0
 
         primary_fresh = self._refresh_signals(cfg, state, params)
-        if cfg.has_secondary():
-            sec_fresh = self._refresh_secondary(cfg, state)
-        elif self._has_open_secondary_ticket(cfg):
-            # ensemble_enabled/secondary_strategy can be toggled off (a plain
-            # PATCH {"ensemble_enabled": false} - patch_symbol()'s guard only
-            # tracks secondary_strategy/secondary_timeframe, not this flag)
-            # while a secondary-opened ticket is still live. Fully stopping
-            # the refresh below (old behaviour) freezes state.sec_last_bar/
-            # sec_atr at whatever they were the instant this flipped -
-            # manage_positions()'s per-bar throttle (self._stop_bar vs
-            # sec_last_bar) then never advances again, silently freezing that
-            # ticket's trail/BE/partial-TP for good. Keep refreshing instead;
-            # _merge_signals() below already ignores state.sec_signal
-            # whenever has_secondary() is False, so this can never arm a NEW
-            # secondary entry - it only keeps the already-open one managed.
-            sec_fresh = self._refresh_secondary(cfg, state)
-        else:
-            sec_fresh = False
-            if state.sec_signal or state.sec_last_bar or state.sec_atr:
-                state.sec_signal = ""
-                state.sec_last_bar = 0
-                state.sec_bars = None
-                state.sec_atr = 0.0
-        self._merge_signals(cfg, state, primary_fresh, sec_fresh)
-        fresh = primary_fresh or sec_fresh
-        # Keyed on the leg actually driving state.signal, not the combined
-        # (primary_bar, sec_bar) pair. With the combined key, a secondary
-        # signal sitting stale (unchanged for several of its own bars) got
-        # re-armed for a fresh retry window every time the *primary* leg
-        # closed an unrelated new bar - primary_fresh alone made ``fresh``
-        # true, and the pair's primary half changing was enough to look like
-        # a new bar_key. That let one real secondary signal get retried
-        # indefinitely across many primary bars instead of the single live
-        # bar the backtest gives it. Each leg now only rearms/matches off its
-        # own bar timestamp.
-        bar_key = (state.last_bar if state.signal_source == "primary" else state.sec_last_bar)
-        driving_fresh = (
-            (state.signal_source == "primary" and primary_fresh)
-            or (state.signal_source == "secondary" and sec_fresh)
-        )
+        # Secondary signal production was removed 14.08 (operator). ATR/bars
+        # still refresh when a leftover tagged ticket is open, so trail/BE
+        # does not freeze; they never arm a new entry (merge is primary-only).
+        if self._has_open_secondary_ticket(cfg):
+            self._refresh_secondary(cfg, state)
+        elif state.sec_signal or state.sec_last_bar or state.sec_atr:
+            state.sec_signal = ""
+            state.sec_last_bar = 0
+            state.sec_bars = None
+            state.sec_atr = 0.0
+        self._merge_signals(cfg, state)
+        fresh = primary_fresh
+        bar_key = state.last_bar
+        driving_fresh = primary_fresh
         if driving_fresh and state.signal:
             state.pending_bar_key = (state.signal_source, bar_key)
         elif not state.signal:
@@ -1402,60 +1376,20 @@ class Engine:
                                bars.open, bars.volume, self._cost_series(sec, bars))
         snap = compute(cache, params).last()
         state.sec_atr = snap.get("atr", 0.0)
-        if snap.get("buy"):
-            state.sec_signal = "buy"
-        elif snap.get("sell"):
-            state.sec_signal = "sell"
-        else:
-            state.sec_signal = ""
-        if state.sec_signal:
-            state.last_signal_at = time.time()
-            LOG.emit(f"Ikincil sinyal {state.sec_signal.upper()} "
-                     f"({sec.strategy}/{sec.timeframe}) ATR={state.sec_atr:.5f}",
-                     "SIGNAL", cfg.symbol)
+        # Do not arm sec_signal. Leftover tickets need ATR/bars; new entries
+        # must not come from this leg.
         return True
 
-    def _merge_signals(self, cfg: SymbolConfig, state: SymbolState,
-                       primary_fresh: bool = False, sec_fresh: bool = False) -> None:
-        """Combine both signals; disagreement cancels the bar for both of them.
+    def _merge_signals(self, cfg: SymbolConfig, state: SymbolState) -> None:
+        """Primary signal is the only entry source.
 
-        Invariant: a symbol never holds a buy and a sell view at once. Inside one
-        family that is enforced bar-by-bar in ``strategy``; across the two
-        ensemble signals it is enforced here, so an ensemble symbol can never do
-        something a single-strategy symbol would refuse to do.
-
-        When both legs hold a signal in the same direction, the one that just
-        closed a bar on its own timeframe wins - a stale leg (holding a value
-        from several of its own bars ago, only still sitting there because
-        nothing has invalidated it yet) must not keep out-voting a leg that
-        genuinely just fired. If neither refreshed this cycle (both are mid-bar
-        retries, e.g. blocked earlier by spread/cooldown) the existing
-        primary-first preference holds, matching prior behaviour.
+        Secondary production was removed 14.08 (operator). Disagreement skip
+        and secondary-wins-on-fresh-bar are gone; a primary BUY stays a BUY
+        even if a leftover sec_signal string is sitting on state.
         """
-        primary, second = state.primary_signal, state.sec_signal
-        if not cfg.has_secondary():
-            state.signal = primary
-            state.signal_source = "primary" if primary else ""
-            return
-        if primary and second and primary != second:
-            if state.signal_source != "conflict":
-                LOG.emit(f"Capraz sinyal (birincil {primary.upper()} / "
-                         f"ikincil {second.upper()}) - islem atlandi.", "SIGNAL", cfg.symbol)
-            state.signal = ""
-            state.signal_source = "conflict"
-            state.note = "capraz sinyal - atlandi"
-            return
-        if primary and second:
-            if sec_fresh and not primary_fresh:
-                state.signal, state.signal_source = second, "secondary"
-            else:
-                state.signal, state.signal_source = primary, "primary"
-        elif primary:
-            state.signal, state.signal_source = primary, "primary"
-        elif second:
-            state.signal, state.signal_source = second, "secondary"
-        else:
-            state.signal, state.signal_source = "", ""
+        primary = state.primary_signal
+        state.signal = primary
+        state.signal_source = "primary" if primary else ""
 
     def _try_entry(self, base: SymbolConfig, state: SymbolState,
                    account: dict[str, Any]) -> None:

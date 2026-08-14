@@ -240,3 +240,38 @@ def test_evaluate_resets_secondary_state_when_no_open_ticket_and_ensemble_off(mo
     assert state.sec_signal == ""
     assert state.sec_last_bar == 0
     assert state.sec_bars is None
+
+
+def test_evaluate_does_not_refresh_secondary_just_because_ensemble_is_on(monkeypatch):
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok.
+
+    has_secondary() used to fetch a second bar stream every cycle to arm
+    entries. With no leftover tagged ticket that refresh is production, not
+    management, and must not run.
+    """
+    from micofx import sessions as sessions_mod
+
+    cfg = _cfg(enabled=True, ensemble_enabled=True,
+              secondary_strategy="micro_rev", secondary_timeframe="M5")
+    assert cfg.has_secondary() is True
+    eng = _make_engine(cfg)
+    eng.client.resolve = lambda symbol: symbol
+    eng.client.tick = lambda symbol: None
+    eng.client.market_open = lambda symbol: True
+    eng.store.system = SimpleNamespace(trade_all_hours=True)
+    eng._sec_tickets = set()
+    eng._positions = []
+
+    open_session = SimpleNamespace(open=True, reason="", minutes_to_close=None,
+                                   minutes_to_open=None, window="24/7")
+    monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: open_session)
+    eng._refresh_signals = lambda cfg_arg, state_arg, params: False
+
+    def _should_not_be_called(cfg_arg, state_arg):
+        raise AssertionError("_refresh_secondary must not run with no open ticket")
+
+    eng._refresh_secondary = _should_not_be_called
+
+    state = SymbolState(cfg.symbol)
+    eng._evaluate(cfg, state, server_now=1000.0, account={"equity": 100.0}, allow_entry=False)
+
