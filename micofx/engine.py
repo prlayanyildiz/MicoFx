@@ -1335,7 +1335,6 @@ class Engine:
         side = state.signal
         cfg = base
         atr = state.atr
-        secondary = state.signal_source == "secondary"
         # ``atr <= 0`` alone is not fail-closed for NaN: NaN compares False to
         # everything, so ``NaN <= 0`` is False and a NaN'd indicator (a bad bar,
         # a broker glitch) would sail straight through and size sl_dist/tp_dist
@@ -1463,13 +1462,40 @@ class Engine:
                 if not self._reload_positions():
                     # Fill reported ok but the book cannot be verified - do
                     # not treat [] as "no new ticket" (would open a ghost
-                    # orphan-scan or skip tagging). Secondary without a
-                    # broker ticket → scan window with pre-fill known set;
-                    # with a ticket → tag it from the result alone.
-                    if secondary:
-                        if result.get("position"):
-                            self._tag_secondary({int(result["position"])})
-                        else:
+                    # orphan-scan). Without a broker ticket start a scan
+                    # window with the pre-fill known set.
+                    if not result.get("position"):
+                        unresolved_ticket = True
+                        self._orphan_scan[cfg.symbol] = {
+                            "magic": base.magic,
+                            "known": sorted(before_tickets),
+                            "since": time.time(),
+                        }
+                        self._save_orphan_scan()
+                        LOG.emit("Islem acildi ama pozisyon listesi "
+                                 "dogrulanamadi - orphan tarama baslatildi.",
+                                 "ERROR", cfg.symbol)
+                elif not result.get("position"):
+                    # open_market() itself could not resolve which broker
+                    # ticket this fill became. Diff same-magic tickets
+                    # against the snapshot taken before this entry even
+                    # started - retried a few times inside this same lock,
+                    # since positions() can lag the fill by a beat on a
+                    # slow broker. A single clean candidate is the fill;
+                    # ambiguity (0 or >1 candidates) is the safety-close
+                    # / scan path below.
+                    new_tickets: set[int] = set()
+                    after_tickets: set[int] = set()
+                    for attempt in range(3):
+                        after_tickets = {p["ticket"] for p in self._positions
+                                        if p["magic"] == base.magic}
+                        new_tickets = after_tickets - before_tickets
+                        if new_tickets or attempt == 2:
+                            break
+                        time.sleep(0.2)
+                        if not self._reload_positions():
+                            # Mid-retry disconnect: do not conclude
+                            # "zero candidates" from a failed list.
                             unresolved_ticket = True
                             self._orphan_scan[cfg.symbol] = {
                                 "magic": base.magic,
@@ -1477,108 +1503,60 @@ class Engine:
                                 "since": time.time(),
                             }
                             self._save_orphan_scan()
-                            LOG.emit("Ikincil sinyal islemi acildi ama pozisyon listesi "
-                                     "dogrulanamadi - orphan tarama baslatildi.",
-                                     "ERROR", cfg.symbol)
-                elif secondary:
-                    if result.get("position"):
-                        # Tagged inside the same lock as the fill itself -
-                        # moved here from after the lock's release because
-                        # apply_secondary() also takes entry_lock and reads
-                        # self._sec_tickets to decide whether a secondary
-                        # position is open. With the tag written only after
-                        # the lock released, a family-changing
-                        # apply_secondary() call landing in that gap saw this
-                        # brand new ticket as untagged and let the
-                        # identity/exit rewrite through.
-                        self._tag_secondary({int(result["position"])})
+                            LOG.emit("Ticket cozumlemesi yarida kaldi - "
+                                     "pozisyon listesi dogrulanamadi, orphan tarama "
+                                     "baslatildi.", "ERROR", cfg.symbol)
+                            new_tickets = set()
+                            break
+                    if unresolved_ticket:
+                        pass
+                    elif len(new_tickets) == 1:
+                        result["position"] = int(next(iter(new_tickets)))
+                    elif not new_tickets:
+                        unresolved_ticket = True
+                        self._orphan_scan[cfg.symbol] = {
+                            "magic": base.magic,
+                            "known": sorted(after_tickets),
+                            "since": time.time(),
+                        }
+                        self._save_orphan_scan()
+                        LOG.emit("Islem acildi ama pozisyon ticket'i "
+                                 "cozulemedi (yeni ticket bulunamadi) - her dongude "
+                                 "tekrar taranacak.",
+                                 "ERROR", cfg.symbol)
                     else:
-                        # open_market() itself could not resolve which broker
-                        # ticket this fill became. Diff same-magic tickets
-                        # against the snapshot taken before this entry even
-                        # started - retried a few times inside this same lock,
-                        # since positions() can lag the fill by a beat on a
-                        # slow broker. A single clean candidate confirmed this
-                        # way is trustworthy enough to tag normally; ambiguity
-                        # (0 or >1 candidates) is what actually needs the
-                        # safety-close path below.
-                        new_tickets: set[int] = set()
-                        for attempt in range(3):
-                            after_tickets = {p["ticket"] for p in self._positions
-                                            if p["magic"] == base.magic}
-                            new_tickets = after_tickets - before_tickets
-                            if new_tickets or attempt == 2:
-                                break
-                            time.sleep(0.2)
-                            if not self._reload_positions():
-                                # Mid-retry disconnect: do not conclude
-                                # "zero candidates" from a failed list.
-                                unresolved_ticket = True
-                                self._orphan_scan[cfg.symbol] = {
-                                    "magic": base.magic,
-                                    "known": sorted(before_tickets),
-                                    "since": time.time(),
-                                }
-                                self._save_orphan_scan()
-                                LOG.emit("Ikincil ticket cozumlemesi yarida kaldi - "
-                                         "pozisyon listesi dogrulanamadi, orphan tarama "
-                                         "baslatildi.", "ERROR", cfg.symbol)
-                                new_tickets = set()
-                                break
-                        if unresolved_ticket:
-                            pass
-                        elif len(new_tickets) == 1:
-                            self._tag_secondary(new_tickets)
-                        elif not new_tickets:
-                            unresolved_ticket = True
-                            self._orphan_scan[cfg.symbol] = {
-                                "magic": base.magic,
-                                "known": sorted(after_tickets),
-                                "since": time.time(),
-                            }
-                            self._save_orphan_scan()
-                            LOG.emit("Ikincil sinyal islemi acildi ama pozisyon ticket'i "
-                                     "cozulemedi (yeni ticket bulunamadi) - her dongude "
-                                     "tekrar taranacak, primer parametreyle yonetilmeyecek.",
-                                     "ERROR", cfg.symbol)
+                        # More than one same-magic ticket appeared since the fill -
+                        # we cannot tell which one is ours, so close all of them
+                        # rather than guess.
+                        gone, still = self._close_orphan_tickets(
+                            new_tickets, "MicoFX cozulemeyen ticket")
+                        if gone == new_tickets:
+                            orphan_closed = True
+                            LOG.emit(f"Islem acildi ama ticket'i "
+                                     f"cozulemedi - pozisyon(lar) {sorted(gone)} "
+                                     f"guvenlik icin hemen kapatildi, sinyal tekrar "
+                                     f"denenecek.", "ERROR", cfg.symbol)
                         else:
-                            # More than one same-magic ticket appeared since the fill -
-                            # a second signal firing on this same lock, or a stale
-                            # snapshot - we cannot tell which one is ours, so the safe
-                            # move is closing all of them rather than guessing and
-                            # leaving an untracked position running under the wrong
-                            # strategy's exits.
-                            gone, still = self._close_orphan_tickets(
-                                new_tickets, "MicoFX cozulemeyen ikincil ticket")
-                            if gone == new_tickets:
-                                orphan_closed = True
-                                LOG.emit(f"Ikincil sinyal islemi acildi ama ticket'i "
-                                         f"cozulemedi - pozisyon(lar) {sorted(gone)} "
-                                         f"guvenlik icin hemen kapatildi, sinyal tekrar "
-                                         f"denenecek.", "ERROR", cfg.symbol)
+                            unresolved_ticket = True
+                            self._orphan_tickets |= still
+                            self._save_orphan_tickets()
+                            if gone:
+                                LOG.emit(f"Islem acildi, ticket'i "
+                                         f"cozulemedi - {sorted(gone)} kapatildi ama "
+                                         f"{sorted(still)} KAPATILAMADI/KISMI - her "
+                                         f"dongude tekrar kapatma denenecek.",
+                                         "ERROR", cfg.symbol)
                             else:
-                                unresolved_ticket = True
-                                self._orphan_tickets |= still
-                                self._save_orphan_tickets()
-                                if gone:
-                                    LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
-                                             f"cozulemedi - {sorted(gone)} kapatildi ama "
-                                             f"{sorted(still)} KAPATILAMADI/KISMI - her "
-                                             f"dongude tekrar kapatma denenecek, primer "
-                                             f"parametreyle yonetilmeyecek.",
-                                             "ERROR", cfg.symbol)
-                                else:
-                                    LOG.emit(f"Ikincil sinyal islemi acildi, ticket'i "
-                                             f"cozulemedi VE {sorted(still)} "
-                                             f"kapatilamadi/kismi - her dongude tekrar "
-                                             f"kapatma denenecek, primer parametreyle "
-                                             f"yonetilmeyecek.", "ERROR", cfg.symbol)
+                                LOG.emit(f"Islem acildi, ticket'i "
+                                         f"cozulemedi VE {sorted(still)} "
+                                         f"kapatilamadi/kismi - her dongude tekrar "
+                                         f"kapatma denenecek.", "ERROR", cfg.symbol)
         if orphan_closed:
             # Treat exactly like a failed entry (the position is flat again,
             # closed a moment after opening) - not the normal successful-fill
             # path below, which would record execution/cooldown/state.signal
             # bookkeeping for a "trade" that no longer exists.
-            state.note = "ikincil ticket cozulemedi - guvenlik icin kapatildi"
+            state.note = "ticket cozulemedi - guvenlik icin kapatildi"
             state.entry_block = "ikincil_cozulemedi_kapatildi"
             state.signal = ""
             state.signal_source = ""
@@ -1597,7 +1575,7 @@ class Engine:
             # poll from firing another order_send at this same symbol.
             # _scan_orphan_candidates()/manage_positions() retry the close
             # every cycle from here on.
-            state.note = ("ikincil ticket cozulemedi - pozisyon acik kaldi, "
+            state.note = ("ticket cozulemedi - pozisyon acik kaldi, "
                           "otomatik tekrar denenecek")
             state.entry_block = "ikincil_cozulemedi_acik"
             return
@@ -1690,16 +1668,9 @@ class Engine:
         ticket = int(result.get("position", 0) or 0)
         LOG.emit(
             f"#{ticket} {side.upper()} {result['volume']:g} lot @ {result['price']:.5f} "
-            f"SL={result['sl']:.5f} TP={result['tp']:.5f} | lot: {note}"
-            f"{f' | ikincil {cfg.strategy}/{cfg.timeframe}' if secondary else ''}",
+            f"SL={result['sl']:.5f} TP={result['tp']:.5f} | lot: {note}",
             "TRADE", cfg.symbol,
         )
-
-    def _tag_secondary(self, tickets: set[int]) -> None:
-        if not tickets:
-            return
-        self._sec_tickets |= {int(t) for t in tickets}
-        self.store.set_setting("secondary_tickets", sorted(self._sec_tickets))
 
     def _save_orphan_tickets(self) -> None:
         self.store.set_setting("secondary_orphan_tickets", sorted(self._orphan_tickets))

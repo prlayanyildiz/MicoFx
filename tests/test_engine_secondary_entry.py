@@ -1,10 +1,9 @@
-"""_try_entry: secondary fill whose broker ticket cannot be resolved.
+"""_try_entry: fill whose broker ticket cannot be resolved.
 
-open_market() can report ok=True with position=None (the fill's ticket could
-not be read back). engine._try_entry then diffs same-magic positions before/
-after the fill to find the new ticket. This covers the two ambiguous cases:
-zero new tickets, and more than one - neither is the ordinary "exactly one
-candidate" path that closes it and retries cleanly.
+open_market() can report ok=True with position=None. engine._try_entry then
+diffs same-magic positions before/after the fill. Zero or >1 new tickets
+are not a successful fill. A3 runs this machine for primary fills too;
+new fills are not written into leftover secondary_tickets.
 """
 from __future__ import annotations
 
@@ -136,7 +135,7 @@ def _cfg():
 def _state():
     st = SymbolState("EURUSD")
     st.signal = "buy"
-    st.signal_source = "secondary"
+    st.signal_source = "primary"
     st.atr = 0.001
     return st
 
@@ -313,11 +312,11 @@ def test_orphan_scan_fully_dropped_after_abandon_grace_expires():
     assert "EURUSD" not in eng._orphan_scan
 
 
-def test_secondary_single_candidate_found_via_retry_is_tagged_not_closed():
+def test_unresolved_single_candidate_is_kept_not_tagged_secondary():
     cfg = _cfg()
     # Exactly one same-magic ticket appears - even though open_market()
-    # couldn't resolve it directly, a clean single-candidate diff is now
-    # trusted enough to tag rather than close.
+    # couldn't resolve it directly, a clean single-candidate diff is the fill.
+    # A3: it is NOT written into leftover secondary_tickets.
     eng, client, store = _make_engine(cfg, positions_after=[
         {"ticket": 301, "magic": 1},
     ])
@@ -326,11 +325,38 @@ def test_secondary_single_candidate_found_via_retry_is_tagged_not_closed():
     eng._try_entry(cfg, state, account={"balance": 1000.0})
 
     assert client.closed == []
-    assert 301 in eng._sec_tickets
+    assert 301 not in eng._sec_tickets
+    assert not hasattr(eng, "_tag_secondary")
     # Normal successful-fill bookkeeping applies.
     assert state.cooldown_until > 0.0
     assert state.signal == ""
     assert state.note == "islem acildi"
+
+
+def test_close_all_still_closes_a_leftover_tagged_ticket():
+    """Panic / gun-sonu flatten leftover ikincil ticket'i magic ile kapatir."""
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+
+    class _Values:
+        def values(self):
+            return [cfg]
+
+        def get(self, symbol):
+            return cfg
+
+    eng.store.symbols = _Values()
+    seen = {}
+
+    def _close_all(magics=None, symbol=None):
+        seen["magics"] = magics
+        return (1, 0)
+
+    client.close_all = _close_all
+    eng._sec_tickets = {601}
+    closed, remaining = eng.close_all()
+    assert (closed, remaining) == (1, 0)
+    assert cfg.magic in seen["magics"]
 
 
 def test_secondary_unresolved_ticket_multiple_candidates_closes_all():
