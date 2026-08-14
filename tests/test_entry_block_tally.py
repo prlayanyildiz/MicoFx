@@ -86,11 +86,15 @@ def test_a_refusal_is_counted_against_its_own_gate():
 
 
 def test_a_retried_signal_counts_once_however_many_polls_it_takes():
-    """The whole point: one refused EURJPY sell produced 339 attempts."""
+    """The whole point: one refused EURJPY sell produced 339 attempts.
+
+    ``source="secondary"`` is a retired name; it still must not inflate
+    the signal count, and it lands on the only remaining leg.
+    """
     eng = _engine()
     for _ in range(339):
         eng._tally_entry("EURJPY", "spread", bar_key=(7, 0), source="secondary")
-    row = _row(eng, "EURJPY", "secondary")
+    row = _row(eng, "EURJPY", "primary")
     assert row["signals"] == 1, "tekrar denemeler sinyal sayisini sisirdi"
     assert row["attempts"] == 339
     assert row["blocks"] == {"spread": 1}
@@ -116,13 +120,18 @@ def test_a_new_reason_on_the_same_bar_is_its_own_episode():
     assert row["blocks"] == {"spread": 1, "risk_limiti": 1}
 
 
-def test_the_two_legs_are_counted_separately():
-    """Six of thirteen symbols carry a tighter ceiling on the secondary."""
+def test_a_retired_source_name_does_not_mint_a_second_leg():
+    """The second leg is gone. A leftover source string shares the primary bucket."""
     eng = _engine()
     eng._tally_entry("EURJPY", "acildi", bar_key=(1, 0), source="primary")
     eng._tally_entry("EURJPY", "spread", bar_key=(1, 0), source="secondary")
     assert _row(eng, "EURJPY", "primary")["opened"] == 1
-    assert _row(eng, "EURJPY", "secondary")["blocks"] == {"spread": 1}
+    assert _row(eng, "EURJPY", "primary")["blocks"] == {"spread": 1}
+    try:
+        _row(eng, "EURJPY", "secondary")
+    except StopIteration:
+        return
+    raise AssertionError("retired source minted a secondary tally row")
 
 
 def test_opened_is_not_listed_as_a_block():

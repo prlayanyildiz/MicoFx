@@ -138,7 +138,7 @@ class SymbolState:
         self.last_fetch = 0.0
         self.atr = 0.0
         self.primary_signal = ""
-        self.signal_source = ""      # "" | "primary" | "secondary" (legacy tag on fills)
+        self.signal_source = ""      # "" | "primary"  (filled-bar / pending-bar key; the second leg is gone)
         # None until a bar is computed, and None thereafter for a family that
         # does not measure it - 0.0/False would read as a real flat reading.
         self.adx = None
@@ -178,7 +178,7 @@ class SymbolState:
             "k": _round_or_none(self.k, 1), "d": _round_or_none(self.d, 1),
             "signal": self.signal,
             "signal_source": self.signal_source,
-            "primary_signal": self.primary_signal, "secondary_signal": "",
+            "primary_signal": self.primary_signal,
             "bars_ready": self.bars_ready, "note": self.note, "session": self.session,
             "spread": round(self.spread, 6), "spread_atr": round(self.spread_atr, 3),
             "cooldown_left": max(0, int(self.cooldown_until - time.time())),
@@ -269,9 +269,17 @@ class Engine:
             store.set_setting("partial_state", {})
         # Leftover tagged tickets from the retired secondary leg (persisted
         # because positions outlive the process). Nothing mints new tags.
+        # The set is still loaded so a non-empty row is visible; it does not
+        # gate entries (that wait is ``_orphan_scan``, which serves primary
+        # fills whose ticket never resolved).
         self._sec_tickets: set[int] = {
             int(t) for t in (as_list(store.get_setting("secondary_tickets"), "secondary_tickets")) if str(t).isdigit()
         }
+        if self._sec_tickets:
+            LOG.emit(
+                f"Kalinti secondary_tickets satiri dolu: {sorted(self._sec_tickets)} "
+                f"- ikincil bacak uretmiyor, bu anahtar yok sayilacak.",
+                "WARN")
         # Unresolved fills whose broker ticket could not be identified/closed
         # at entry. The settings keys keep the historical ``secondary_orphan_*``
         # names so old rows stay readable; the machine itself is for any fill
@@ -826,7 +834,10 @@ class Engine:
         """
         try:
             key = str(reason or "isaretsiz")
-            leg = "secondary" if source == "secondary" else "primary"
+            # The second leg no longer produces a source. A stale
+            # ``source=="secondary"`` argument must not mint a bucket the
+            # panel would read as a live config that does not exist.
+            leg = "primary"
             legs = self._entry_blocks.setdefault(str(symbol), {})
             counts = legs.setdefault(leg, {"attempts": {}, "signals": {}})
             attempts, signals = counts["attempts"], counts["signals"]
@@ -1293,6 +1304,8 @@ class Engine:
 
         Secondary production was removed 14.08 (operator). Overlay config,
         sec_* state and the disagreement skip are gone with it.
+        ``signal_source`` is therefore two-valued: ``"primary"`` or empty.
+        It still keys filled-bar / pending-bar tracking.
         """
         primary = state.primary_signal
         state.signal = primary

@@ -114,13 +114,14 @@ def test_the_successful_path_still_clears_the_consumed_signal():
 
 # --------------------------------------------------- the tally's own behaviour
 
-def test_a_secondary_fill_lands_on_the_secondary_leg():
+def test_a_retired_source_fill_lands_on_primary():
+    """Nothing mints a secondary source any more; the tally must not invent one."""
     eng = _engine()
     eng._tally_entry("GER40", "acildi", bar_key=(1, 0), source="secondary")
 
     sec = _row(eng, "GER40", "secondary")
-    assert sec is not None and sec["opened"] == 1
-    assert _row(eng, "GER40", "primary") is None, "birincilin fill_rate'i sisiyor"
+    assert sec is None
+    assert _row(eng, "GER40", "primary")["opened"] == 1
 
 
 def test_a_leg_reports_its_own_fill_rate():
@@ -128,11 +129,11 @@ def test_a_leg_reports_its_own_fill_rate():
     eng._tally_entry("US500", "spread", bar_key=(1, 0), source="secondary")
     eng._tally_entry("US500", "acildi", bar_key=(2, 0), source="secondary")
 
-    sec = _row(eng, "US500", "secondary")
-    assert sec["signals"] == 2
-    assert sec["opened"] == 1
-    assert sec["fill_rate"] == 0.5
-    assert sec["blocks"] == {"spread": 1}
+    row = _row(eng, "US500", "primary")
+    assert row["signals"] == 2
+    assert row["opened"] == 1
+    assert row["fill_rate"] == 0.5
+    assert row["blocks"] == {"spread": 1}
 
 
 def test_an_empty_source_is_still_primary():
@@ -148,5 +149,5 @@ def test_the_balance_identity_holds_per_leg():
     for bar, reason in ((1, "spread"), (2, "acildi"), (3, "ai_gate")):
         eng._tally_entry("US500", reason, bar_key=(bar, 0), source="secondary")
 
-    sec = _row(eng, "US500", "secondary")
-    assert sec["opened"] + sum(sec["blocks"].values()) == sec["signals"]
+    row = _row(eng, "US500", "primary")
+    assert row["opened"] + sum(row["blocks"].values()) == row["signals"]

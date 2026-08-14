@@ -984,8 +984,8 @@ function updateSymbolCards() {
       ? new Date(cfg.opt_updated_at * 1000).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" })
       : "-";
     const sig = st.signal
-      ? `<span class="pill ${sideClass(st.signal)}">${st.signal === "buy" ? "AL" : "SAT"}${st.signal_source === "secondary" ? " (2)" : ""}</span>`
-      : (st.signal_source === "conflict" ? '<span class="pill">CAPRAZ</span>' : "");
+      ? `<span class="pill ${sideClass(st.signal)}">${st.signal === "buy" ? "AL" : "SAT"}</span>`
+      : "";
     $(".scard-live", card).innerHTML = `
       <span><b>strateji</b> ${esc(STRATEGY_LABEL[cfg.strategy] || cfg.strategy)} <span class="dim">${esc(cfg.timeframe)}</span></span>
       <span><b>seans</b> ${sess.open ? '<span class="pos">acik</span>' : '<span class="dim">kapali</span>'} ${esc(cfg.session_text)}</span>
