@@ -8,9 +8,10 @@ figure derived from bar length (lookback sizing, hold time in bars, when the
 next bar closes) is quietly M5's while the config, the panel and the holdout
 all name something else.
 
-Found 14.08 while testing whether M1 could be searched. M1 is wired nowhere -
+Found 14.08 while testing whether M1 could be searched. M1 was wired nowhere -
 not in the MT5 map, not in this table - so adding it to TIMEFRAMES would have
-produced M5 data measured as M1 and reported as a genuine M1 result.
+produced M5 data measured as M1 and reported as a genuine M1 result. M1 was
+then wired properly; the guard here uses a name that still is not.
 """
 from __future__ import annotations
 
@@ -43,7 +44,7 @@ def test_every_offered_timeframe_has_a_real_length():
     finally:
         m.LOG.emit = orig
     assert seen == [], f"an offered timeframe is not wired: {seen}"
-    assert lengths == [300, 900, 1800, 3600]
+    assert lengths == [60, 300, 900, 1800, 3600]
 
 
 def test_an_unwired_name_says_so(monkeypatch):
@@ -51,12 +52,12 @@ def test_an_unwired_name_says_so(monkeypatch):
     monkeypatch.setattr(mt5client.LOG, "emit",
                         lambda msg, level="INFO", symbol="": seen.append((msg, level)))
 
-    assert mt5client.timeframe_seconds("M1") == 300
+    assert mt5client.timeframe_seconds("M3") == 300
 
     assert seen, "the fallback must not be silent"
     msg, level = seen[0]
     assert level == "WARN"
-    assert "M1" in msg
+    assert "M3" in msg
 
 
 def test_it_warns_once_per_name(monkeypatch):
@@ -65,14 +66,15 @@ def test_it_warns_once_per_name(monkeypatch):
                         lambda msg, level="INFO", symbol="": seen.append(msg))
 
     for _ in range(5):
-        mt5client.timeframe_seconds("M1")
+        mt5client.timeframe_seconds("M3")
 
     assert len(seen) == 1, "a poll loop must not flood the log"
 
 
-def test_m1_is_not_quietly_supported():
-    """The specific case: M1 must not look like a wired timeframe."""
-    assert "M1" not in TIMEFRAMES
+def test_m1_is_wired_now_that_it_is_offered():
+    """The middle state was the fault: offered but unwired, or neither."""
+    assert "M1" in TIMEFRAMES
+    assert mt5client.timeframe_seconds("M1") == 60
 
 
 @pytest.mark.parametrize("name,secs", [("m5", 300), ("M15", 900), ("h1", 3600)])

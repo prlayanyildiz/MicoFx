@@ -543,7 +543,8 @@ def test_patch_refuses_invalid_timeframe():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
-    res = tc.post("/api/symbols/XAUUSD", json={"timeframe": "M1"})
+    # M1 is a real timeframe since 14.08; use one that is genuinely not offered.
+    res = tc.post("/api/symbols/XAUUSD", json={"timeframe": "M3"})
     assert res.status_code == 400
 
 

@@ -4,7 +4,11 @@ import math
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
-TIMEFRAMES = ["M5", "M15", "M30", "H1"]
+# M1 added 14.08 at the operator's request, after finding it was half-wired:
+# the MT5 map and the seconds table both lacked it, so anything naming M1 was
+# quietly served M5 bars and measured on M5 arithmetic. Either wire it or keep
+# it out - the one thing that could not stand was the middle state.
+TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1"]
 GROUPS = ["forex", "index", "commodity", "crypto"]
 
 

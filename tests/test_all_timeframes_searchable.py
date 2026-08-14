@@ -111,5 +111,11 @@ def test_an_unrecognised_bar_never_claims_the_swing_envelope():
     assert uses_swing_exits("t3_stoch", "") is False
 
 
-def test_the_searchable_timeframes_are_exactly_the_four():
-    assert TIMEFRAMES == ["M5", "M15", "M30", "H1"]
+def test_the_searchable_timeframes_are_exactly_the_five():
+    """M1 joined 14.08 at the operator's request.
+
+    It was previously half-wired - named nowhere in the MT5 map or the seconds
+    table - so anything asking for M1 was served M5 bars and measured on M5
+    arithmetic. The middle state was the unsafe one; this pins the wired set.
+    """
+    assert TIMEFRAMES == ["M1", "M5", "M15", "M30", "H1"]

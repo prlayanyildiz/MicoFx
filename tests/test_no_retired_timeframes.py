@@ -29,7 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx import mt5client
 from micofx.models import TIMEFRAMES, uses_swing_exits
 
-RETIRED = ("M1", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
+# M1 left this list 14.08 - it is now wired and offered (see models.TIMEFRAMES).
+RETIRED = ("M3", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
 
 
 # ------------------------------------------------------ nothing resolves them
@@ -46,9 +47,11 @@ def test_a_retired_timeframe_has_no_second_count(name):
 
 
 def test_the_offered_timeframes_still_translate():
-    assert [mt5client.timeframe_seconds(t) for t in TIMEFRAMES] == [300, 900, 1800, 3600]
+    assert [mt5client.timeframe_seconds(t) for t in TIMEFRAMES] == [60, 300, 900, 1800, 3600]
+    # The wider exit envelope is decided by the bar, not the family: the two
+    # scalp lengths (M1 since 14.08, M5) keep the tight grid, M15+ get swing.
     for tf in TIMEFRAMES:
-        assert uses_swing_exits("t3_stoch", tf) is (tf != "M5")
+        assert uses_swing_exits("t3_stoch", tf) is (tf not in ("M1", "M5"))
 
 
 # ------------------------------------- the tables themselves carry no leftovers
