@@ -1673,6 +1673,8 @@ const SYS_FIELDS_ADVANCED = [
   { k: "max_swing_positions", label: "Maks swing pozisyon (M15+, 0=ayri limit yok)", t: "int", min: 0, max: 50 },
   { k: "block_high_cost", label: "Yuksek maliyetli girisi engelle (opsiyonel)", t: "bool" },
   { k: "max_cost_pct_of_risk", label: "Maks maliyet / risk % (engel acikken)", t: "num", step: 1, min: 5, max: 80 },
+  { k: "charge_costs", label: "Aramada spread/komisyonu tahsil et", t: "bool",
+    hint: "Kapaliyken arama maliyeti hic odemez, bu yuzden spread'inden kucuk kenarli konfigleri de secebilir. 14.08 olcumu: beklenen kenar 0.058-0.212 R/islem iken canli spread 0.02-0.27 R/islem - dort sembol kendi spread'ini odeyemiyordu (panelde 'ortu' sutunu). Acmak bunu duzeltir ama arama daha az, daha secici konfig bulur: kitap kucululur. Acinca yeniden arama gerekir, yoksa mevcut ayarlar degismez." },
   { k: "max_margin_usage_pct", label: "Maks marj kullanimi %", t: "num", step: 1, min: 1, max: 100 },
   { k: "min_free_margin", label: "Min serbest marj", t: "num", step: 10, min: 0 },
   { k: "slippage_points", label: "Slippage (point)", t: "int", min: 0, max: 500 },
