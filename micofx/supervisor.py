@@ -582,6 +582,20 @@ class Supervisor:
             judged_pf, judged_n = v.profit_factor, v.trades
         v.judged_trades, v.judged_pf = judged_n, round(judged_pf, 2)
 
+        # What the watch bar below reads. Normally the full 30-day window; after
+        # an operator release, only the trades made since it - see the note on
+        # the watch branch for why a release is treated differently from a
+        # config change.
+        released_at = float(v.history_cleared_at or 0.0)
+        if released_at > 0.0:
+            since_release = [x for d, x in zip(trades, nets)
+                             if float(d.get("time", 0.0)) >= released_at]
+            watch_n = len(since_release)
+            watch_pf_val = self._pf(since_release)
+            watch_wins = sum(1 for x in since_release if x > 0)
+        else:
+            watch_n, watch_pf_val, watch_wins = v.trades, v.profit_factor, v.wins
+
         if streak >= int(cfgs["quarantine_losses"]):
             self._quarantine(v, f"{streak} ust uste zarar", quarantine_secs, now)
         elif judged_n >= int(cfgs["min_trades"]) and judged_pf < float(cfgs["quarantine_pf"]):
@@ -630,9 +644,20 @@ class Supervisor:
         # whose few wins are large enough to carry it is not losing money, and
         # a symbol losing on SIZE rather than frequency (FRA40: six wins, six
         # losses) is what the trade-count bar is there to judge.
-        elif (v.profit_factor < float(cfgs["watch_pf"])
-                and (v.trades >= int(cfgs.get("watch_min_trades", cfgs["min_trades"]))
-                     or v.wins < v.trades / 2.0 - math.sqrt(v.trades))):
+        #
+        # One exception to "a soft cut may remember a long record": an operator
+        # release. A config change is the system's own opinion that the past is
+        # stale, and against that opinion the 30-day memory is a useful check.
+        # "Serbest birak" is not an opinion, it is an instruction - clear()
+        # exists precisely to say that the record before it describes a setup
+        # the operator has ruled out. Reading the full window here ignored that
+        # instruction and rebuilt "watch" on the next review, two minutes later,
+        # every time; reported three times on 14.08 ("sifirlasam da degismiyor").
+        # So after a release the same two bars are read against the trades made
+        # since it - which is usually none, and none is not a record.
+        elif (watch_n > 0 and watch_pf_val < float(cfgs["watch_pf"])
+                and (watch_n >= int(cfgs.get("watch_min_trades", cfgs["min_trades"]))
+                     or watch_wins < watch_n / 2.0 - math.sqrt(watch_n))):
             v.state = "watch"
             v.risk_scale = float(cfgs["watch_risk_scale"])
             # Same PF gate as watch; richer reason when backtest still promised edge
