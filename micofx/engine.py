@@ -267,20 +267,21 @@ class Engine:
         # reader for a feature that no longer exists.
         if store.get_setting("partial_state"):
             store.set_setting("partial_state", {})
-        # Ensemble bookkeeping: which open tickets came from the secondary
-        # signal (persisted, because positions outlive the process). Overlay
-        # config cache is gone with A2; leftover tickets trail on the primary.
+        # Leftover tagged tickets from the retired secondary leg (persisted
+        # because positions outlive the process). Nothing mints new tags.
         self._sec_tickets: set[int] = {
             int(t) for t in (as_list(store.get_setting("secondary_tickets"), "secondary_tickets")) if str(t).isdigit()
         }
-        # Secondary fills whose broker ticket could not be identified/closed at
-        # entry time. Two persisted forms, same goal (never let one silently run
-        # under the primary's exit params): ``_orphan_tickets`` is a known ticket
-        # still needing a retried close; ``_orphan_scan`` is a symbol whose fill
-        # produced zero same-magic candidates yet, so every cycle re-diffs
-        # against the snapshot taken at failure time until one appears (broker
-        # replication lag) or the scan goes stale. Persisted like
-        # weekend_pending_tickets - a restart mid-retry must not forget either.
+        # Unresolved fills whose broker ticket could not be identified/closed
+        # at entry. The settings keys keep the historical ``secondary_orphan_*``
+        # names so old rows stay readable; the machine itself is for any fill
+        # (primary included) that came back ok without a ticket.
+        # ``_orphan_tickets`` is a known ticket still needing a retried close;
+        # ``_orphan_scan`` is a symbol whose fill produced zero same-magic
+        # candidates yet, so every cycle re-diffs against the snapshot taken
+        # at failure time until one appears (broker replication lag) or the
+        # scan goes stale. Persisted like weekend_pending_tickets - a restart
+        # mid-retry must not forget either.
         self._orphan_tickets: set[int] = {
             int(t) for t in (as_list(store.get_setting("secondary_orphan_tickets"), "secondary_orphan_tickets")) if str(t).isdigit()
         }
@@ -1014,10 +1015,6 @@ class Engine:
 
     # ------------------------------------------------------------ evaluation
 
-    def _has_open_secondary_ticket(self, cfg: SymbolConfig) -> bool:
-        return any(p["magic"] == cfg.magic and p["ticket"] in self._sec_tickets
-                  for p in self._positions)
-
     def _evaluate_disabled(self, cfg: SymbolConfig, state: SymbolState,
                            server_now: float, account: dict[str, Any]) -> None:
         """Handle one ``cfg.enabled == False`` symbol for this cycle.
@@ -1672,9 +1669,12 @@ class Engine:
         )
 
     def _save_orphan_tickets(self) -> None:
+        # Historical key name; the scan is for any unresolved fill, not a
+        # retired secondary leg. Renaming would drop old rows on restart.
         self.store.set_setting("secondary_orphan_tickets", sorted(self._orphan_tickets))
 
     def _save_orphan_scan(self) -> None:
+        # Historical key name; see _save_orphan_tickets.
         self.store.set_setting("secondary_orphan_scan", self._orphan_scan)
 
     def _close_orphan_tickets(self, tickets: set[int], comment: str) -> tuple[set[int], set[int]]:
@@ -2078,33 +2078,30 @@ class Engine:
     def _apply_pending_exits(self) -> None:
         """Land exit/risk params an optimizer apply() held back while a position was open.
 
-        ``Optimizer.apply()``/``_apply_secondary_locked()`` store the held-back
-        fields in ``cfg.pending_exit_patch``/``cfg.pending_secondary_exit_patch``
-        instead of applying them immediately. This is the other half of that
-        promise: once the relevant position is no longer open, write them for
-        real. Runs every cycle - cheap (in-memory dict lookups against
-        ``self._positions``, already refreshed this cycle) and self-correcting
-        if a cycle is missed.
+        ``Optimizer.apply()`` stores the held-back fields in
+        ``cfg.pending_exit_patch`` instead of applying them immediately. This
+        is the other half of that promise: once the relevant position is no
+        longer open, write them for real. Runs every cycle - cheap
+        (in-memory dict lookups against ``self._positions``, already
+        refreshed this cycle) and self-correcting if a cycle is missed.
+        Leftover ``pending_secondary_exit_patch`` is ignored (A3.3); the
+        field stays on the model until A4.
         """
         if not self._positions:
             open_magics: set[int] = set()
-            sec_open_magics: set[int] = set()
         else:
             open_magics = {p["magic"] for p in self._positions}
-            sec_open_magics = {p["magic"] for p in self._positions
-                               if p["ticket"] in self._sec_tickets or p["ticket"] in self._orphan_tickets}
         # A zero-candidate orphan-scan window (H1) is genuinely invisible to
         # self._positions - that is the entire reason it exists - so without
         # this, this magic reads as flat here even though a fill may still
-        # turn up, and both the primary and secondary held-back exit/risk
-        # patches would land on a position that was never actually confirmed
-        # closed. Same risk class Optimizer.apply()/apply_secondary() already
-        # guard for on the write side; this is the corresponding read-side
-        # gap on the "did it ever actually go flat" check.
+        # turn up, and the held-back exit/risk patch would land on a position
+        # that was never actually confirmed closed. Same risk class
+        # Optimizer.apply() already guards for on the write side; this is the
+        # corresponding read-side gap on the "did it ever actually go flat"
+        # check.
         for entry in self._orphan_scan.values():
             magic = int(entry.get("magic", -1))
             open_magics.add(magic)
-            sec_open_magics.add(magic)
         # Same lock optimizer.apply()/web PATCH hold across their own
         # open-position check + write - without it, a concurrent apply() on
         # the web thread could land a fresh patch (correctly clearing
@@ -2129,8 +2126,6 @@ class Engine:
                         # changes between cycles, so keeping it would re-log
                         # and re-refuse forever. The live config keeps the
                         # values it already validated, which is the safe side.
-                        # Only the bad patch is cleared - the secondary block
-                        # below still gets its turn this cycle.
                         updated = self.store.update_symbol(cfg.symbol, {"pending_exit_patch": {}},
                                                              source="motor bekleyen-cikis")
                         # WARN, not ERROR: dropping a stale/poisoned pending
@@ -2148,31 +2143,6 @@ class Engine:
                             LOG.emit(f"{cfg.symbol}: bekletilen cikis/risk parametreleri "
                                      f"({', '.join(sorted(pending))}) artik acik pozisyon yok, "
                                      f"uygulandi.", "OPT", cfg.symbol)
-                    if updated is not None:
-                        cfg = updated
-                if cfg.pending_secondary_exit_patch and cfg.magic not in sec_open_magics:
-                    pending_sec = dict(cfg.pending_secondary_exit_patch)
-                    merged_params = {**cfg.secondary_params, **pending_sec}
-                    # Validated on the MERGED result, not on the patch alone:
-                    # the patch is applied over the existing secondary_params,
-                    # so what has to be usable is what the merge produces -
-                    # that is the dict engine.py builds the secondary signal's
-                    # exit payload from.
-                    bad_sec = invalid_exit_param(merged_params)
-                    if bad_sec:
-                        self.store.update_symbol(cfg.symbol,
-                                                 {"pending_secondary_exit_patch": {}},
-                                                 source="motor bekleyen-ikincil")
-                        LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis parametresi gecersiz "
-                                 f"({bad_sec}) - uygulanmadi, mevcut ayar korundu.",
-                                 "WARN", cfg.symbol)
-                    else:
-                        self.store.update_symbol(cfg.symbol, {
-                            "secondary_params": merged_params, "pending_secondary_exit_patch": {},
-                        }, source="motor bekleyen-ikincil")
-                        LOG.emit(f"{cfg.symbol}: bekletilen ikincil cikis/risk parametreleri "
-                                 f"({', '.join(sorted(pending_sec))}) artik acik ikincil pozisyon "
-                                 f"yok, uygulandi.", "OPT", cfg.symbol)
 
     def _close_tracked(self, pos: dict[str, Any], comment: str, leg: str,
                        volume: float | None = None, fill: dict[str, Any] | None = None) -> bool:

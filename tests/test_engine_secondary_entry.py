@@ -722,9 +722,7 @@ def test_apply_pending_exits_lands_once_orphan_scan_clears():
 
 
 def test_apply_pending_exits_holds_back_secondary_while_orphan_ticket_open():
-    # An orphan ticket is a real MT5 position (untagged, being retried for
-    # close) - not in _sec_tickets, so the old sec_open_magics computation
-    # missed it entirely.
+    """A3.3: secondary land path is gone, so an orphan ticket cannot apply it."""
     cfg = SymbolConfig(symbol="EURUSD", magic=1,
                        pending_secondary_exit_patch={"trail_start_atr": 1.5})
     eng, updates = _pending_exits_engine(cfg, positions=[{"ticket": 401, "magic": 1}])
@@ -735,15 +733,15 @@ def test_apply_pending_exits_holds_back_secondary_while_orphan_ticket_open():
     assert updates == []
 
 
-def test_apply_pending_exits_secondary_lands_when_no_orphan_risk():
+def test_apply_pending_exits_does_not_land_secondary_when_flat():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
     cfg = SymbolConfig(symbol="EURUSD", magic=1,
                        pending_secondary_exit_patch={"trail_start_atr": 1.5})
     eng, updates = _pending_exits_engine(cfg, positions=[])
 
     eng._apply_pending_exits()
 
-    assert len(updates) == 1
-    assert updates[0][1]["secondary_params"]["trail_start_atr"] == 1.5
+    assert updates == []
 
 
 def test_orphan_close_done_partial_keeps_ticket_in_orphan_tracking():

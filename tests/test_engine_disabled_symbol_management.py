@@ -118,44 +118,15 @@ def test_evaluate_disabled_swallows_evaluate_exception():
     assert state.note == "kapali"
 
 
-# --------------------------------------------------- _has_open_secondary_ticket
-
-def test_has_open_secondary_ticket_true_for_matching_magic_and_tagged_ticket():
-    cfg = _cfg(enabled=True)
-    eng = _make_engine(cfg)
-    eng._sec_tickets = {42}
-    eng._positions = [{"ticket": 42, "magic": cfg.magic, "side": "buy", "volume": 0.1,
-                       "time": 0, "profit": 0, "swap": 0}]
-    assert eng._has_open_secondary_ticket(cfg) is True
-
-
-def test_has_open_secondary_ticket_false_when_ticket_untagged():
-    cfg = _cfg(enabled=True)
-    eng = _make_engine(cfg)
-    eng._sec_tickets = set()
-    eng._positions = [{"ticket": 42, "magic": cfg.magic, "side": "buy", "volume": 0.1,
-                       "time": 0, "profit": 0, "swap": 0}]
-    assert eng._has_open_secondary_ticket(cfg) is False
-
-
-def test_has_open_secondary_ticket_false_when_no_position_open():
-    cfg = _cfg(enabled=True)
-    eng = _make_engine(cfg)
-    eng._sec_tickets = {42}
-    eng._positions = []
-    assert eng._has_open_secondary_ticket(cfg) is False
-
-
-def test_has_open_secondary_ticket_ignores_other_magics():
-    cfg = _cfg(enabled=True, magic=1)
-    eng = _make_engine(cfg)
-    eng._sec_tickets = {42}
-    eng._positions = [{"ticket": 42, "magic": 999, "side": "buy", "volume": 0.1,
-                       "time": 0, "profit": 0, "swap": 0}]
-    assert eng._has_open_secondary_ticket(cfg) is False
-
-
 # ------------------------------------------ _evaluate(): leftover ticket, A2
+
+def test_has_open_secondary_ticket_helper_is_gone():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok.
+
+    The helper had no remaining callers after A2; leftover tags still live in
+    ``_sec_tickets`` for prune/web guards (A3.3 readers stay).
+    """
+    assert not hasattr(Engine, "_has_open_secondary_ticket")
 
 def test_evaluate_still_refreshes_primary_when_leftover_ticket_is_open(monkeypatch):
     """A tagged leftover ticket must keep primary last_bar/atr advancing so

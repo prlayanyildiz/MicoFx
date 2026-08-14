@@ -100,8 +100,12 @@ def test_a_valid_pending_patch_still_lands():
     assert live.pending_exit_patch == {}
 
 
-def test_a_bad_primary_patch_does_not_starve_the_secondary_one():
-    """Dropping the primary must not skip the secondary block for that cycle."""
+def test_a_bad_primary_patch_still_clears_without_a_secondary_land():
+    """A3.3: pending_secondary_exit_patch is no longer applied.
+
+    Dropping a poisoned primary patch must still happen; the leftover
+    secondary field stays on the model until A4 and is not written.
+    """
     cfg = _cfg(pending_exit_patch={"trail_start_atr": 0.0},
                secondary_params={"sl_atr_mult": 1.0},
                pending_secondary_exit_patch={"trail_step_atr": 1.8})
@@ -110,51 +114,23 @@ def test_a_bad_primary_patch_does_not_starve_the_secondary_one():
 
     live = store.symbols["XAUUSD"]
     assert live.pending_exit_patch == {}
-    assert live.pending_secondary_exit_patch == {}
-    assert live.secondary_params["trail_step_atr"] == 1.8
+    assert live.secondary_params == {"sl_atr_mult": 1.0}
+    assert live.pending_secondary_exit_patch == {"trail_step_atr": 1.8}
 
 
-# ---------------------------------------------------------------- secondary
+# ---------------------------------------------------------------- secondary (A3.3: land path gone)
 
-def test_a_poisoned_secondary_pending_patch_is_dropped():
-    cfg = _cfg(secondary_params={"sl_atr_mult": 1.5, "trail_start_atr": 0.5},
-               pending_secondary_exit_patch={"trail_start_atr": 0.0})
-    eng, store = _engine(cfg)
-    eng._apply_pending_exits()
-
-    live = store.symbols["XAUUSD"]
-    assert live.pending_secondary_exit_patch == {}
-    assert live.secondary_params["trail_start_atr"] == 0.5, "poison landed"
-
-
-def test_the_secondary_check_runs_on_the_merged_result():
-    """A patch that is fine alone can still merge into an unusable dict.
-
-    The patch itself carries no exit field at all here, so checking the patch
-    in isolation would pass it - what has to be usable is what the merge
-    produces, since that is the dict the secondary signal's exits come from.
-    """
-    cfg = _cfg(secondary_params={"trail_start_atr": 0.0},   # already broken
-               pending_secondary_exit_patch={"trail_lookback": 8})
-    eng, store = _engine(cfg)
-    eng._apply_pending_exits()
-
-    live = store.symbols["XAUUSD"]
-    assert live.pending_secondary_exit_patch == {}
-    assert "trail_lookback" not in live.secondary_params, \
-        "merged into a secondary_params whose trail can never arm"
-
-
-def test_a_valid_secondary_pending_patch_lands_merged():
+def test_pending_secondary_exit_patch_is_not_applied():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
     cfg = _cfg(secondary_params={"sl_atr_mult": 1.5, "trail_start_atr": 0.5},
                pending_secondary_exit_patch={"trail_step_atr": 1.2})
     eng, store = _engine(cfg)
     eng._apply_pending_exits()
 
     live = store.symbols["XAUUSD"]
-    assert live.secondary_params == {"sl_atr_mult": 1.5, "trail_start_atr": 0.5,
-                                     "trail_step_atr": 1.2}
-    assert live.pending_secondary_exit_patch == {}
+    assert live.secondary_params == {"sl_atr_mult": 1.5, "trail_start_atr": 0.5}
+    assert live.pending_secondary_exit_patch == {"trail_step_atr": 1.2}
+    assert store.writes == []
 
 
 # ------------------------------------------- Optimizer.apply, for real
