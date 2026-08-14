@@ -1,19 +1,20 @@
-"""Can a symbol pay its own spread?
+"""Can a symbol pay its own costs?
 
-``expected_r`` (the holdout's edge per trade) lived on the supervisor verdict
-and the live spread lived on the symbol state, so the one comparison that
-answers this needed a manual three-way join. Measured that way on 14.08:
+The cost figure has to be the holdout's ``cost_per_trade_r`` - the same one the
+cost gate is measured against, charged only where a signal fired.
 
-    expected edge  0.058-0.212 R/trade   vs   spread  0.02-0.18 R/trade
+The first version of this divided the LIVE instantaneous spread/ATR by
+expected_r and read four to five symbols as structurally negative. That was
+wrong. web/app.py's portfolio-gates docstring already warned why: an
+instantaneous spread/ATR averages every bar while the walk-forward charges only
+signal bars, so it runs 5-14x high on short timeframes - and half this book is
+M5. It was also sampled at 07:00 with three symbols out of session, the exact
+reading #14b calls not-evidence. Measured properly, cost is 17-20% of the edge
+on the two symbols that carry a real number, not several times it.
 
-Five of ten symbols carried a spread at or above their entire expected edge -
-structurally negative before a tick moves - and nothing surfaced it.
-
-The existing cost gate does not catch this by construction: it measures cost
-against R, and R is 5-20x the edge here, so a trade costing 17% of R clears an
-18% gate while spending more than twice what it expects to make.
-
-Reported, not enforced: what to do about it is a book decision (#30).
+Where the search ran with charge_costs off the holdout figure is 0.0, which
+means "never measured", not "free" - so it reports None rather than a
+flattering zero.
 """
 from __future__ import annotations
 
@@ -27,53 +28,51 @@ from micofx.engine import Engine
 from micofx.models import SymbolConfig
 
 
-def _engine(atr, spread, sl_mult, expected_r):
+def _engine(cost_per_trade_r, expected_r):
     eng = object.__new__(Engine)
-    cfg = SymbolConfig(symbol="UK100", sl_atr_mult=sl_mult)
-    eng.store = SimpleNamespace(symbols={"UK100": cfg})
-    eng.states = {"UK100": SimpleNamespace(
-        atr=atr, spread=spread,
-        as_dict=lambda: {"symbol": "UK100", "atr": atr, "spread": spread})}
+    cfg = SymbolConfig(symbol="SpotBrent")
+    cfg.opt_summary = {"holdout": {"cost_per_trade_r": cost_per_trade_r}}
+    eng.store = SimpleNamespace(symbols={"SpotBrent": cfg})
+    eng.states = {"SpotBrent": SimpleNamespace(
+        as_dict=lambda: {"symbol": "SpotBrent", "atr": 0.4})}
     eng.supervisor = SimpleNamespace(
-        verdicts={"UK100": SimpleNamespace(expected_r=expected_r)})
+        verdicts={"SpotBrent": SimpleNamespace(expected_r=expected_r)})
     return eng
 
 
-def test_a_symbol_whose_spread_exceeds_its_edge_reads_over_one():
-    """UK100 as measured: edge 0.108 R, spread 0.181 R."""
-    row = _engine(atr=10.0, spread=1.81, sl_mult=1.0, expected_r=0.108)._states_view()["UK100"]
+def test_it_uses_the_holdout_cost_not_the_live_spread():
+    """SpotBrent as measured: cost 0.0277 R, edge 0.162 R -> 17% of the edge."""
+    row = _engine(0.0277, 0.162)._states_view()["SpotBrent"]
 
-    assert row["cost_r"] == 0.181
-    assert row["edge_cover"] > 1.0, "spread above the whole edge must read as short"
-    assert row["edge_cover"] == 1.68
-
-
-def test_a_symbol_that_covers_its_costs_reads_below_one():
-    """XAUUSD as measured: edge 0.093 R, spread 0.020 R."""
-    row = _engine(atr=10.0, spread=0.20, sl_mult=1.0, expected_r=0.093)._states_view()["UK100"]
-
-    assert row["edge_cover"] < 1.0
-    assert row["edge_cover"] == 0.22
+    assert row["cost_r"] == 0.0277
+    assert row["edge_cover"] == 0.17, "cost is a fifth of the edge, not several times it"
 
 
-def test_no_expected_edge_yet_reports_none_rather_than_a_fake_ratio():
-    """A symbol with no holdout must not read as infinitely healthy or broken."""
-    row = _engine(atr=10.0, spread=1.0, sl_mult=1.0, expected_r=0.0)._states_view()["UK100"]
+def test_an_uncharged_search_reports_nothing_rather_than_zero():
+    """charge_costs off makes the holdout read 0.0 - that is unmeasured, not free."""
+    row = _engine(0.0, 0.162)._states_view()["SpotBrent"]
 
-    assert row["cost_r"] == 0.1
+    assert row["cost_r"] is None
     assert row["edge_cover"] is None
 
 
-def test_a_missing_atr_does_not_divide_by_zero():
-    row = _engine(atr=0.0, spread=1.0, sl_mult=1.0, expected_r=0.1)._states_view()["UK100"]
+def test_a_cost_above_the_edge_still_reads_over_one():
+    """The metric must still be able to say a symbol cannot pay its way."""
+    row = _engine(0.20, 0.10)._states_view()["SpotBrent"]
 
-    assert row["cost_r"] == 0.0
-    assert row["edge_cover"] == 0.0
+    assert row["edge_cover"] == 2.0
+
+
+def test_no_expected_edge_reports_none_rather_than_a_fake_ratio():
+    row = _engine(0.03, 0.0)._states_view()["SpotBrent"]
+
+    assert row["cost_r"] == 0.03
+    assert row["edge_cover"] is None
 
 
 def test_the_original_state_fields_are_preserved():
     """The view enriches, it must not replace."""
-    row = _engine(atr=10.0, spread=1.0, sl_mult=1.0, expected_r=0.1)._states_view()["UK100"]
+    row = _engine(0.0277, 0.162)._states_view()["SpotBrent"]
 
-    assert row["symbol"] == "UK100"
-    assert row["atr"] == 10.0
+    assert row["symbol"] == "SpotBrent"
+    assert row["atr"] == 0.4

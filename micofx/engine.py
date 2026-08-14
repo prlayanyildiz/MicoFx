@@ -2746,23 +2746,42 @@ class Engine:
         and R is 5-20x the edge, so a trade costing 17% of R clears an 18% gate
         while spending more than twice what it expects to make.
 
-        ``edge_cover`` is cost / expected_r: below 1.0 the edge pays for the
-        spread, at 1.0 they cancel, above 1.0 the symbol is structurally short.
-        Reported, not enforced - what to do about it is a book decision (#30,
-        already measured and put to the operator once).
+        ``edge_cover`` is cost / expected_r: below 1.0 the edge pays for its
+        costs, at 1.0 they cancel, above 1.0 the symbol is structurally short.
+
+        CORRECTION (14.08). The first version of this divided the LIVE
+        instantaneous spread/ATR by expected_r and read four to five symbols as
+        structurally negative. That was wrong, and web/app.py's portfolio-gates
+        docstring already says why: an instantaneous spread/ATR averages every
+        bar, while the walk-forward charges cost only where a signal fired, so
+        it runs 5-14x high on short timeframes - and five of ten symbols here
+        are M5. It was also sampled at 07:00, with GER40/UK100/FRA40 out of
+        session and Brent not yet open, which is exactly the reading #14b says
+        is not evidence. The operator caught it.
+
+        So the number comes from the holdout's own ``cost_per_trade_r``, the
+        same figure the cost gate is measured against. Where the search ran
+        with ``charge_costs`` off that figure is 0.0 - not "free", but "never
+        measured" - and edge_cover is reported as None rather than a flattering
+        zero. Measured properly on the two symbols that do carry it, cost is
+        17-20% of the edge, not several times it.
+
+        Reported, not enforced - what to do about it is a book decision (#30).
         """
         out: dict[str, Any] = {}
         verdicts = getattr(self.supervisor, "verdicts", {}) or {}
         for name, st in list(self.states.items()):
             row = st.as_dict()
             cfg = self.store.symbols.get(name)
-            atr = float(getattr(st, "atr", 0.0) or 0.0)
-            spread = float(getattr(st, "spread", 0.0) or 0.0)
-            stop = atr * float(cfg.sl_atr_mult) if cfg else 0.0
-            cost_r = (spread / stop) if stop > 0 else 0.0
+            summary = (cfg.opt_summary or {}) if cfg else {}
+            holdout = summary.get("holdout") or {}
+            # 0.0 means the search never charged costs, not that they are zero.
+            cost_r = float(holdout.get("cost_per_trade_r") or 0.0)
+            measured = cost_r > 0
             expected = float(getattr(verdicts.get(name), "expected_r", 0.0) or 0.0)
-            row["cost_r"] = round(cost_r, 4)
-            row["edge_cover"] = round(cost_r / expected, 2) if expected > 0 else None
+            row["cost_r"] = round(cost_r, 4) if measured else None
+            row["edge_cover"] = (round(cost_r / expected, 2)
+                                 if measured and expected > 0 else None)
             out[name] = row
         return out
 
