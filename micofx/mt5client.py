@@ -102,9 +102,34 @@ def timeframe_const(name: str) -> int:
     return table[key]
 
 
+_TF_SECONDS_WARNED: set[str] = set()
+
+
 def timeframe_seconds(name: str) -> int:
+    """Bar length in seconds, or M5's as a last resort - loudly.
+
+    The bar-fetching side already warns when it cannot translate a timeframe
+    (see above); this one fell back to 300 in silence. That asymmetry is what
+    makes the pair dangerous: a name the system does not really support gets
+    M5 bars WITH a warning, then has its bar arithmetic computed as if it were
+    M5 WITHOUT one - so every downstream figure derived from bar length (how
+    many bars a lookback needs, hold time expressed in bars, the next bar's
+    close) is silently M5's while the config, the panel and the holdout all
+    say something else.
+
+    Found 14.08 while testing whether M1 could be searched: M1 is wired
+    nowhere - not in the MT5 map, not here - so adding it to TIMEFRAMES would
+    have produced M5 data measured as M1 and reported as a real M1 result.
+    """
     table = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
-    return table.get(str(name).upper(), 300)
+    key = str(name).upper()
+    if key not in table:
+        if key not in _TF_SECONDS_WARNED:
+            _TF_SECONDS_WARNED.add(key)
+            LOG.emit(f"Bilinmeyen zaman dilimi '{name}' - bar suresi M5 (300sn) "
+                     f"varsayildi. Bu isimden turetilen her bar hesabi yanlis olur.",
+                     "WARN")
+    return table.get(key, 300)
 
 
 class Bars:
