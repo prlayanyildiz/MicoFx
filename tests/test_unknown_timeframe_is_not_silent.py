@@ -12,6 +12,12 @@ Found 14.08 while testing whether M1 could be searched. M1 was wired nowhere -
 not in the MT5 map, not in this table - so adding it to TIMEFRAMES would have
 produced M5 data measured as M1 and reported as a genuine M1 result. M1 was
 then wired properly; the guard here uses a name that still is not.
+
+H1 left TIMEFRAMES (the searchable set) on 14.08 but stayed in this seconds
+table and the MT5 map. That is deliberate: history still names H1. A name in
+the table with no warning is "we can still read this bar"; a name in
+TIMEFRAMES is "we will search it". ``test_h1_is_not_searchable`` pins the
+split. This file still pins "TIMEFRAMES never hits the fallback".
 """
 from __future__ import annotations
 
@@ -44,7 +50,7 @@ def test_every_offered_timeframe_has_a_real_length():
     finally:
         m.LOG.emit = orig
     assert seen == [], f"an offered timeframe is not wired: {seen}"
-    assert lengths == [300, 900, 1800, 3600]
+    assert lengths == [300, 900, 1800]
 
 
 def test_an_unwired_name_says_so(monkeypatch):

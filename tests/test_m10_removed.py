@@ -26,8 +26,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.models import (STRATEGY_TIMEFRAMES, TIMEFRAMES, SymbolConfig,
-                           strategy_allows_timeframe)
+from micofx.models import (STRATEGY_TIMEFRAMES, TIMEFRAMES, READABLE_TIMEFRAMES,
+                           SymbolConfig, strategy_allows_timeframe)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -127,5 +127,5 @@ def test_no_stored_symbol_relies_on_the_entries_that_were_dropped():
     for cfg in rows:
         for field in ("timeframe", "secondary_timeframe"):
             value = cfg.get(field) or ""
-            assert value == "" or value in TIMEFRAMES, (
+            assert value == "" or value in READABLE_TIMEFRAMES, (
                 f"{cfg.get('symbol')}.{field} = {value!r} artik cozulemez")

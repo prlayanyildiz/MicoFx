@@ -622,6 +622,8 @@ class Store:
                 for fam, tfs in base["strategy_timeframes"].items()
                 if isinstance(tfs, list)
             }
+        if isinstance(base.get("timeframes"), list):
+            base["timeframes"] = [t for t in base["timeframes"] if t in TIMEFRAMES]
         # Same reasoning for the whole exit-style block: the optimizer no longer
         # splits a family into targeted/trail sweeps because there is only one
         # exit regime left, so a stored block is dead weight, not configuration.

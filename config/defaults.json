@@ -346,8 +346,7 @@
     "timeframes": [
       "M5",
       "M15",
-      "M30",
-      "H1"
+      "M30"
     ],
     "strategies": [
       "micro_rev",

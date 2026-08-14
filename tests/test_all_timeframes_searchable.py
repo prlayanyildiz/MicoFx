@@ -50,10 +50,11 @@ def test_every_family_may_search_every_timeframe(strategy, timeframe):
         f"{strategy}/{timeframe} aramaya giremiyor")
 
 
-def test_the_scalp_families_reach_the_hourly_chart():
-    """The pairing the old comment singled out as waste."""
+def test_the_scalp_families_still_resolve_on_a_legacy_hourly_row():
+    """H1 left the search; a stored H1 pairing must still be legal to trade."""
     for family in sorted(SCALP_STRATEGIES):
         assert strategy_allows_timeframe(family, "H1")
+    assert "H1" not in TIMEFRAMES
 
 
 def test_the_swing_families_reach_the_five_minute_chart():
@@ -127,13 +128,11 @@ def test_an_unrecognised_bar_never_claims_the_swing_envelope():
     assert uses_swing_exits("t3_stoch", "") is False
 
 
-def test_the_searchable_timeframes_are_exactly_the_four():
-    """M1 was searched on 14.08 and dropped on its own numbers.
+def test_the_searchable_timeframes_are_exactly_the_three():
+    """M1 was searched on 14.08 and dropped on its own numbers. H1 left the
+    search the same day on an operator speed call, not on a measurement.
 
-    Cost-charged it expected 0.099 R/trade against the 0.121 the live M5 config
-    already carried, and max_bars caps it at 90 days of history where every
-    other timeframe gets 365 - so its score was never comparable either. The
-    mt5client wiring stays (see models.TIMEFRAMES) because the fault was the
-    half-wired state, not M1.
+    Both stay in the translation tables (see models.READABLE_TIMEFRAMES and
+    mt5client) because history still names them. TIMEFRAMES is the menu.
     """
-    assert TIMEFRAMES == ["M5", "M15", "M30", "H1"]
+    assert TIMEFRAMES == ["M5", "M15", "M30"]

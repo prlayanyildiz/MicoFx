@@ -27,7 +27,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx import mt5client
-from micofx.models import TIMEFRAMES, uses_swing_exits
+from micofx.models import TIMEFRAMES, READABLE_TIMEFRAMES, uses_swing_exits
 
 # M1 left this list 14.08 - it is now wired and offered (see models.TIMEFRAMES).
 # M1 rejoined this list 14.08: wired and searched, then removed on its numbers.
@@ -48,11 +48,13 @@ def test_a_retired_timeframe_has_no_second_count(name):
 
 
 def test_the_offered_timeframes_still_translate():
-    assert [mt5client.timeframe_seconds(t) for t in TIMEFRAMES] == [300, 900, 1800, 3600]
+    assert [mt5client.timeframe_seconds(t) for t in TIMEFRAMES] == [300, 900, 1800]
+    assert mt5client.timeframe_seconds("H1") == 3600
     # The wider exit envelope is decided by the bar, not the family: the two
     # scalp lengths (M1 since 14.08, M5) keep the tight grid, M15+ get swing.
     for tf in TIMEFRAMES:
         assert uses_swing_exits("t3_stoch", tf) is (tf != "M5")
+    assert uses_swing_exits("t3_stoch", "H1") is True
 
 
 # ------------------------------------- the tables themselves carry no leftovers
@@ -68,7 +70,7 @@ def test_no_timeframe_table_still_lists_a_retired_bar(module):
         encoding="utf-8")
     for table in _tables(source):
         named = set(re.findall(r"\"([A-Z]+\d+)\"", table))
-        leftover = named - set(TIMEFRAMES)
+        leftover = named - set(READABLE_TIMEFRAMES)
         assert not leftover, f"{module}.py tablosunda kalinti: {sorted(leftover)}"
 
 

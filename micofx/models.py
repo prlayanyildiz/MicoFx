@@ -16,7 +16,14 @@ from typing import Any
 # on M5 arithmetic under an M1 label. Both now warn (see mt5client), so an
 # unwired name is refused loudly rather than quietly substituted - which is
 # what makes removing it safe rather than a return to the old trap.
-TIMEFRAMES = ["M5", "M15", "M30", "H1"]
+#
+# H1 left the *search* 14.08 (operator: wall-clock). It did not leave the
+# translation tables: opt_runs history, correlation, and any live row the
+# operator has not moved yet still name it. TIMEFRAMES is what may be
+# searched and newly written. READABLE_TIMEFRAMES is what may still be
+# fetched and traded until that row moves.
+TIMEFRAMES = ["M5", "M15", "M30"]
+READABLE_TIMEFRAMES = ["M5", "M15", "M30", "H1"]
 GROUPS = ["forex", "index", "commodity", "crypto"]
 
 
@@ -503,7 +510,9 @@ def strategy_allows_timeframe(strategy: str, timeframe: str,
     # both the same, so a real empty list silently meant "allow everything"
     # instead of "allow nothing".
     if permitted is None:
-        return timeframe in TIMEFRAMES
+        # Live H1 rows stay legal until the operator moves them. The search
+        # planner filters TIMEFRAMES on its own and will not mint H1 jobs.
+        return timeframe in READABLE_TIMEFRAMES
     return timeframe in permitted
 
 

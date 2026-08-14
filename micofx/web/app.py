@@ -22,6 +22,7 @@ from ..engine import Engine
 from ..logbus import LOG
 from ..models import (
     EXIT_PARAM_BOUNDS, EXIT_RISK_FIELDS, GROUPS, STRATEGIES, TIMEFRAMES,
+    READABLE_TIMEFRAMES,
     invalid_exit_param, strategy_allows_timeframe,
 )
 from ..mt5client import MT5Client
@@ -1288,7 +1289,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         number of timestamps the pair actually shared.
         """
         _require_connected()
-        tf = timeframe if timeframe in TIMEFRAMES else "H1"
+        tf = timeframe if timeframe in READABLE_TIMEFRAMES else "H1"
         count = max(200, min(int(bars), 20000))
 
         # ``extra`` is a comma-separated list of broker symbols that are not in
@@ -1491,7 +1492,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if cfg is None:
             raise HTTPException(404, f"{symbol} bulunamadi")
         _require_connected()
-        tf = timeframe if timeframe in TIMEFRAMES else cfg.timeframe
+        tf = timeframe if timeframe in READABLE_TIMEFRAMES else cfg.timeframe
         count = max(200, min(int(bars), 50000))
         data = client.bars(cfg.symbol, tf, count)
         if data is None or len(data) < cfg.atr_period + 10:

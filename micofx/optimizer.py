@@ -236,7 +236,23 @@ class Optimizer:
             # One-off restriction of this run to a subset of the configured
             # timeframes (e.g. "just scan M5 today") - None/empty means the
             # saved opt_params selection, same as before this existed.
-            tf_override = [t for t in (timeframes or []) if t in TIMEFRAMES] or None
+            requested = [str(t) for t in (timeframes or [])]
+            if requested:
+                dropped = [t for t in requested if t not in TIMEFRAMES]
+                kept = [t for t in requested if t in TIMEFRAMES]
+                if dropped:
+                    LOG.emit(
+                        f"Aranamayan zaman dilimi istekten dusuruldu: "
+                        f"{', '.join(dropped)} (aranan: {', '.join(TIMEFRAMES)})",
+                        "OPT")
+                if not kept:
+                    return {"ok": False, "error": (
+                        f"Aranabilir zaman dilimi yok (istenilen: "
+                        f"{', '.join(requested)}; aranan: "
+                        f"{', '.join(TIMEFRAMES)})")}
+                tf_override = kept
+            else:
+                tf_override = None
             self._cancel.clear()
             self.job = {
                 "state": "running", "started_at": time.time(), "finished_at": 0.0,
