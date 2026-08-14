@@ -980,23 +980,6 @@ class Optimizer:
                  "OPT", symbol)
         return False
 
-    def _is_improvement(self, cfg, best: dict[str, Any]) -> bool:
-        """Only overwrite a live config when both out-of-sample slices pay, and
-        when the replacement is not measurably worse than what is already live.
-
-        The OOS gates below are unchanged - they are the floor every candidate
-        has to clear. The incumbent check on top of them is a *tightening*: a
-        wider search finds a higher validation score more often, and the winner
-        it promotes can hold out worse than the config it would overwrite (seen
-        directly on NAS100/UK100/GBPUSD when the search budget was raised). A
-        scheduled re-opt should not be able to trade a measured, still-current
-        edge for a weaker one just because it searched harder.
-
-        ``cfg`` is the config being replaced; secondary-candidate checks pass
-        ``None`` and skip the incumbent comparison.
-        """
-        return not self.reject_reason(cfg, best)
-
     def reject_reason(self, cfg, best: dict[str, Any]) -> str:
         """Why this candidate may not replace the live config; "" means it may.
 

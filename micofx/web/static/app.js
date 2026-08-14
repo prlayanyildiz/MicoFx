@@ -671,14 +671,6 @@ const SECTIONS = [
     ],
   },
   {
-    title: "Emir Akisi Tukenme Donusu",
-    fields: [
-      { k: "flow_length", t: "int", label: "Akis penceresi (bar)", min: 3, max: 120 },
-      { k: "flow_z", t: "num", label: "Tukenme esigi (z skor)", step: 0.1, min: 0.5, max: 5 },
-      { k: "flow_divergence", t: "bool", label: "Fiyat/akis uyumsuzlugu da sart" },
-    ],
-  },
-  {
     title: "Ust TF Trend Geri Cekilmesi",
     fields: [
       { k: "pull_fast", t: "int", label: "Hizli EMA uzunlugu", min: 2, max: 60 },

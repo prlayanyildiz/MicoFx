@@ -99,11 +99,6 @@ class SymbolConfig:
     # | parabolic_flip | aroon_flip   (see models.STRATEGIES)
     strategy: str = "t3_stoch"
 
-    # ---- order-flow-proxy exhaustion reversion ----
-    flow_length: int = 20            # bars of signed-volume proxy accumulated
-    flow_z: float = 2.0              # |z| of that sum that counts as exhaustion
-    flow_divergence: bool = True     # also require price/flow disagreement
-
     # ---- higher-timeframe trend pullback ----
     pull_fast: int = 8               # fast EMA the pullback must reach
     pull_depth_atr: float = 0.5      # how deep the pullback must run, in ATR
@@ -429,7 +424,6 @@ OPT_FIELDS = [
     "sl_atr_mult", "trail_start_atr", "trail_step_atr",
     "trail_mode", "trail_lookback",
     "min_body_ratio", "atr_pct_min",
-    "flow_length", "flow_z", "flow_divergence",
     "pull_fast", "pull_depth_atr", "pull_max_bars",
     "mr_fast", "mr_stretch_cost", "mr_confirm",
     "brst_lookback", "brst_range_z", "brst_close_pct",

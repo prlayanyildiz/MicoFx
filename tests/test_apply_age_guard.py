@@ -124,9 +124,14 @@ def test_a_symbol_never_optimised_is_not_blocked():
     assert _opt().reject_reason(cfg, _best()) == ""
 
 
-def test_the_secondary_path_is_untouched():
-    """_is_improvement passes cfg=None; there is no incumbent to settle."""
-    assert _opt()._is_improvement(None, _best()) is True
+def test_cfg_none_is_not_blocked_by_settling_time():
+    """No incumbent to protect - same fact the old _is_improvement(None) wrapper stated."""
+    assert _opt().reject_reason(None, _best()) == ""
+
+
+def test_the_improvement_wrapper_is_gone():
+    """It was `return not self.reject_reason(cfg, best)` with no production caller."""
+    assert not hasattr(Optimizer, "_is_improvement")
 
 
 def test_a_genuinely_bad_candidate_is_still_refused_on_its_own_merits():

@@ -18,11 +18,6 @@ class Params:
 
     strategy: str = "t3_stoch"
 
-    # ---- order-flow-proxy exhaustion reversion ----
-    flow_length: int = 20
-    flow_z: float = 2.0
-    flow_divergence: bool = True
-
     # ---- higher-timeframe trend pullback ----
     pull_fast: int = 8
     pull_depth_atr: float = 0.5
@@ -125,7 +120,6 @@ class Params:
                 self.stoch_extreme, self.atr_period, self.adx_period, self.adx_min,
                 self.adx_max, self.htf_factor, self.htf_mode, self.min_body_ratio,
                 self.atr_pct_min,
-                self.flow_length, self.flow_z, self.flow_divergence,
                 self.pull_fast, self.pull_depth_atr, self.pull_max_bars,
                 self.mr_fast, self.mr_stretch_cost, self.mr_confirm,
                 self.brst_lookback, self.brst_range_z, self.brst_close_pct,
@@ -1195,7 +1189,7 @@ def required_bars(p: Params) -> int:
     return int(max(400, p.t3_length * 20 * htf,
                    (p.rsi_length + p.stoch_length + p.smooth_k + p.smooth_d) * 8,
                    p.atr_period * 10, p.adx_period * 10,
-                   p.flow_length * 6 + 240, p.pull_fast * 10,
+                   p.pull_fast * 10,
                    # The scalping families rank cost against a 240-bar window.
                    p.mr_fast * 8 + 260, p.brst_lookback * 6 + 260,
                    # dual_t3's slow line is a cascade over t3_fast * mult.
