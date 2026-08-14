@@ -44,7 +44,7 @@ def test_every_offered_timeframe_has_a_real_length():
     finally:
         m.LOG.emit = orig
     assert seen == [], f"an offered timeframe is not wired: {seen}"
-    assert lengths == [60, 300, 900, 1800, 3600]
+    assert lengths == [300, 900, 1800, 3600]
 
 
 def test_an_unwired_name_says_so(monkeypatch):
@@ -71,9 +71,14 @@ def test_it_warns_once_per_name(monkeypatch):
     assert len(seen) == 1, "a poll loop must not flood the log"
 
 
-def test_m1_is_wired_now_that_it_is_offered():
-    """The middle state was the fault: offered but unwired, or neither."""
-    assert "M1" in TIMEFRAMES
+def test_m1_stays_wired_even_though_it_is_no_longer_offered():
+    """The fault was the middle state, not M1.
+
+    M1 was searched on 14.08 and dropped on its numbers, but the wiring stayed:
+    a name that is fully wired and simply not offered is safe, while one that
+    is askable and unwired silently returns M5 bars under another label.
+    """
+    assert "M1" not in TIMEFRAMES
     assert mt5client.timeframe_seconds("M1") == 60
 
 

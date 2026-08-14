@@ -47,11 +47,11 @@ def test_a_retired_timeframe_has_no_second_count(name):
 
 
 def test_the_offered_timeframes_still_translate():
-    assert [mt5client.timeframe_seconds(t) for t in TIMEFRAMES] == [60, 300, 900, 1800, 3600]
+    assert [mt5client.timeframe_seconds(t) for t in TIMEFRAMES] == [300, 900, 1800, 3600]
     # The wider exit envelope is decided by the bar, not the family: the two
     # scalp lengths (M1 since 14.08, M5) keep the tight grid, M15+ get swing.
     for tf in TIMEFRAMES:
-        assert uses_swing_exits("t3_stoch", tf) is (tf not in ("M1", "M5"))
+        assert uses_swing_exits("t3_stoch", tf) is (tf != "M5")
 
 
 # ------------------------------------- the tables themselves carry no leftovers
@@ -67,7 +67,11 @@ def test_no_timeframe_table_still_lists_a_retired_bar(module):
         encoding="utf-8")
     for table in _tables(source):
         named = set(re.findall(r"\"([A-Z]+\d+)\"", table))
-        leftover = named - set(TIMEFRAMES)
+        # M1 is wired but not offered: it was searched, measured and dropped
+        # on 14.08, and the wiring deliberately stayed so a future attempt
+        # cannot land back in the half-wired state that served M5 bars under
+        # an M1 label. Wired-but-unoffered is safe; the reverse was not.
+        leftover = named - set(TIMEFRAMES) - {"M1"}
         assert not leftover, f"{module}.py tablosunda kalinti: {sorted(leftover)}"
 
 

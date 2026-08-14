@@ -594,7 +594,6 @@ function renderLive() {
 
 const STRATEGY_LABEL = {
   t3_stoch: "T3 + Stochastic RSI",
-  flow_rev: "Emir Akisi Tukenme Donusu",
   mtf_pullback: "Ust TF Trend Geri Cekilmesi",
   micro_rev: "Mikro Ortalamaya Donus (maliyet olcekli)",
   burst: "Momentum Patlamasi Devami",
@@ -608,7 +607,6 @@ const STRATEGY_LABEL = {
   wavetrend_flip: "WaveTrend Yon Donusu",
   stoch_flip: "Stochastic Yon Donusu",
   parabolic_flip: "Parabolic SAR Yon Donusu",
-  trix_flip: "TRIX Yon Donusu",
   aroon_flip: "Aroon Yon Donusu",
 };
 

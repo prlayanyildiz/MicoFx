@@ -1261,7 +1261,6 @@ def _aroon_flip(cache: IndicatorCache, p: Params) -> Signals:
 
 _FAMILIES = {
     "t3_stoch": _t3_stoch,
-    "flow_rev": _flow_rev,
     "mtf_pullback": _mtf_pullback,
     "micro_rev": _micro_rev,
     "burst": _burst,
@@ -1272,7 +1271,6 @@ _FAMILIES = {
     "wavetrend_flip": _wavetrend_flip,
     "stoch_flip": _stoch_flip,
     "parabolic_flip": _parabolic_flip,
-    "trix_flip": _trix_flip,
     "aroon_flip": _aroon_flip,
 }
 

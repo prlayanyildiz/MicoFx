@@ -4,11 +4,18 @@ import math
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
-# M1 added 14.08 at the operator's request, after finding it was half-wired:
-# the MT5 map and the seconds table both lacked it, so anything naming M1 was
-# quietly served M5 bars and measured on M5 arithmetic. Either wire it or keep
-# it out - the one thing that could not stand was the middle state.
-TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1"]
+# M1 was wired and searched on 14.08, then dropped on its own numbers: with
+# costs charged its best XAUUSD candidate expected 0.099 R/trade against the
+# 0.121 the live M5 config already carries, and it pays 0.043 R/trade in cost
+# against M5's 0.024. It also cannot be compared fairly - max_bars caps M1 at
+# 90 days of history while every other timeframe gets the full 365, so an M1
+# candidate is scored on a quarter of the evidence.
+#
+# The mt5client wiring (map entry + 60s) is deliberately LEFT IN PLACE. The
+# defect was never M1 itself, it was the half-wired state: named nowhere, yet
+# askable, so a request for it silently returned M5 bars measured as M5. Fully
+# wired but not offered is safe; offered but unwired was not.
+TIMEFRAMES = ["M5", "M15", "M30", "H1"]
 GROUPS = ["forex", "index", "commodity", "crypto"]
 
 
@@ -79,9 +86,9 @@ class SymbolConfig:
     enabled: bool = True
     timeframe: str = "M5"
     broker_symbol: str = ""          # override when the broker renames an instrument
-    # t3_stoch | flow_rev | mtf_pullback | micro_rev | burst | dual_t3
+    # t3_stoch | mtf_pullback | micro_rev | burst | dual_t3
     # | st_trend | t3_flip | macd_flip | wavetrend_flip | stoch_flip
-    # | parabolic_flip | trix_flip | aroon_flip   (see models.STRATEGIES)
+    # | parabolic_flip | aroon_flip   (see models.STRATEGIES)
     strategy: str = "t3_stoch"
 
     # ---- optional second, uncorrelated signal on the same symbol ----
@@ -473,10 +480,14 @@ OPT_FIELDS = [
     "psar_af_step", "psar_af_max", "trix_length", "aroon_length",
 ]
 
-STRATEGIES = ["t3_stoch", "flow_rev", "mtf_pullback",
+# flow_rev and trix_flip retired 14.08 on their own record: across 162 searched
+# candidates neither was ever applied to a symbol, neither is live, and their
+# best holdout score ever was 2.7 and 5.0 against a field whose next-worst is
+# 23.2 - not a marginal call. Dropping them is 2/14 of every sweep's work.
+STRATEGIES = ["t3_stoch", "mtf_pullback",
               "micro_rev", "burst", "dual_t3", "st_trend",
               "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
-              "parabolic_flip", "trix_flip", "aroon_flip"]
+              "parabolic_flip", "aroon_flip"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
 # Longer TFs turn them into slow mean-reversion with the wrong cost geometry.
