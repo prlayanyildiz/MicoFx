@@ -57,8 +57,24 @@ def test_the_scalp_families_reach_the_hourly_chart():
 
 
 def test_the_swing_families_reach_the_five_minute_chart():
-    for family in ("t3_flip", "st_trend", "parabolic_flip", "trix_flip"):
+    # Drawn from STRATEGIES rather than hardcoded: this list still named
+    # trix_flip after it was retired on 14.08, and strategy_allows_timeframe
+    # answers True for any name it does not know - so the assertion passed
+    # while testing a family that no longer exists. A test that cannot fail
+    # is worse than no test. Cursor's scan #080 found it.
+    swing = [f for f in STRATEGIES if f not in SCALP_STRATEGIES]
+    assert swing, "no swing family left to test"
+    for family in swing:
         assert strategy_allows_timeframe(family, "M5")
+
+
+def test_a_retired_family_is_not_quietly_accepted():
+    """The reason the leftover above went unnoticed for a whole release."""
+    from micofx.strategy import _FAMILIES
+
+    for retired in ("trix_flip", "flow_rev"):
+        assert retired not in _FAMILIES
+        assert retired not in STRATEGIES
 
 
 # ------------------------------------------- the exit envelope follows the bar
