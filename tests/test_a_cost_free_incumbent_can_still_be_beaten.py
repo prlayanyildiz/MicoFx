@@ -95,11 +95,17 @@ def test_an_unstamped_incumbent_reads_as_charging():
 
 
 def test_apply_stamps_the_assumption_it_measured_under():
-    assert '"charge_costs": bool(getattr(' in OPTIMIZER_SRC, (
+    # The stamp used to be read off store.system at write time, which answers
+    # the wrong question when the flag is flipped mid-run - see
+    # test_cost_regime_stamp_describes_the_sweep. It now comes off the sweep's
+    # own report, with the store only as a fallback for older results.
+    assert '"charge_costs": bool(detail["charge_costs"])' in OPTIMIZER_SRC, (
         "ozete damga yazilmiyor - kiyas bir sonraki turda yine kor kalir")
-    stamp = OPTIMIZER_SRC.index('"charge_costs": bool(getattr(')
+    stamp = OPTIMIZER_SRC.index('"charge_costs": bool(detail["charge_costs"])')
     scale = OPTIMIZER_SRC.index('"spread_scale": round(self._spread_scale')
-    assert abs(stamp - scale) < 900, "damga spread_scale ile ayni blokta olmali"
+    # Both stamps carry long comments explaining why they exist, so this bound
+    # is about them sharing one summary block, not about line count.
+    assert abs(stamp - scale) < 1600, "damga spread_scale ile ayni blokta olmali"
 
 
 def test_the_spread_scale_escape_is_still_there():

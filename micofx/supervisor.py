@@ -337,8 +337,20 @@ class Supervisor:
 
         # Soft drawdown: keep watching every symbol, but only let the stronger
         # ones open new risk while the day is bleeding.
+        # "idle" here means two different things and only one of them is a
+        # reason to refuse. A symbol nobody has judged yet is unproven. A symbol
+        # the operator has just released is unproven *because they said to
+        # disregard its history* - clear() stamps the epoch, the next review
+        # finds no trades after it, and the symbol lands back on "idle". Under
+        # drawdown that made "Serbest birak" a permanent no-op: releasing a
+        # symbol destroyed the very evidence it would need to reach "ok", so it
+        # could never leave this branch. Reported 14.08 20:30 ("AI kararlarini
+        # sifirlasam da degismiyor") with eight of ten symbols held here.
+        # The release stands; the proven-weak cases below still do not.
+        released = float(getattr(verdict, "history_cleared_at", 0.0) or 0.0) > 0.0
+        blocked_states = ("watch",) if released else ("watch", "idle")
         if (self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
-                and verdict.state in ("watch", "idle")):
+                and verdict.state in blocked_states):
             return False, "AI: gunluk kayipta zayif/ispatlanmamis sembol bekliyor", 0.0
         if (self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
                 and verdict.trades >= int(self.settings["min_trades"])
