@@ -857,3 +857,26 @@ def test_a_magic_with_no_deals_today_is_still_assignable():
     r = tc.post("/api/symbols/GER40", json={"magic": 990099})
 
     assert r.status_code == 200, r.json()
+
+
+def test_a_magic_is_not_cleared_while_disconnected():
+    """A magic change while disconnected is refused, not guessed at.
+
+    deals_since() answers with an empty list on a dropped connection exactly as
+    it does for a genuinely quiet day, so reading it while disconnected could
+    hand out a magic that already owns today's trades. Cursor's #075 flagged
+    that as an open fail-open; measured, it is not - _require_connected()
+    already refuses the whole request upstream with 503, because changing a
+    magic is a guarded operation. The check inside the guard stays as a second
+    belt for any future caller that does not pass through that gate, but this
+    pins the behaviour that actually protects the account today.
+    """
+    store = _FakeStore({"GER40": _cfg("GER40", magic=990011)})
+    client = _FakeClient([])
+    client.connected = False
+    client.deals = []
+    tc = TestClient(create_app(store, client, _FakeEngine(), optimizer=None))
+
+    r = tc.post("/api/symbols/GER40", json={"magic": 990099})
+
+    assert r.status_code == 503, "a magic change must not proceed on unverifiable state"

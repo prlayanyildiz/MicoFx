@@ -820,6 +820,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # on them. Only today's deals matter: day_stats reads from the day
         # anchor, and the supervisor's window is measured in days, so anything
         # older can no longer be misread.
+        # Fail closed. deals_since() answers [] on a dropped connection exactly
+        # as it does for "nothing traded today", so checking it while
+        # disconnected would clear a magic that may well have traded - the one
+        # direction this guard must never be wrong in. Cursor's #075 flagged
+        # this as still open after the guard landed.
+        if not client.connected:
+            return (f"magic {new_magic} dogrulanamadi - MT5 baglantisi yok, "
+                    f"bugun islem gormus olabilir (baglanti gelince tekrar deneyin)")
         day_start = engine._day_start_epoch()
         for deal in client.deals_since(day_start):
             if int(deal.get("magic", 0)) == int(new_magic):
