@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from . import indicators as ind
+from .logbus import LOG
 from .models import SymbolConfig
 
 STOCH_MID = 50.0
@@ -407,10 +408,44 @@ class Signals:
         }
 
 
+# Names already reported as unknown, so the warning below is emitted once per
+# (symbol-less) family name rather than on every bar of every cycle.
+_UNKNOWN_FAMILIES: set[str] = set()
+
+
 def compute(cache: IndicatorCache, p: Params) -> Signals:
-    """Route to the configured strategy family."""
-    builder = _FAMILIES.get(p.strategy, _t3_stoch)
+    """Route to the configured strategy family.
+
+    An unrecognised name used to fall back to ``_t3_stoch`` silently: the
+    symbol went on trading, but a DIFFERENT strategy from the one its config
+    named, with no error and no log line. Nothing downstream could tell -
+    the panel, the optimizer's holdout and the supervisor's judgement all
+    still read the configured name, so a stale row naming a renamed or
+    retired family would have been measured, scored and suspended as if it
+    were running what it said.
+
+    Refusing to signal is the safe direction: trading nothing costs an
+    opportunity, trading something else costs money against a record that
+    cannot explain it. The warning is persisted (WARN) and emitted once per
+    name, because this can only come from a config that needs fixing.
+    """
+    builder = _FAMILIES.get(p.strategy)
+    if builder is None:
+        if p.strategy not in _UNKNOWN_FAMILIES:
+            _UNKNOWN_FAMILIES.add(p.strategy)
+            LOG.emit(f"Bilinmeyen strateji ailesi {p.strategy!r} - sinyal "
+                     f"uretilmeyecek. Taninanlar: {', '.join(sorted(_FAMILIES))}",
+                     "WARN")
+        return _no_signal(cache, p)
     return builder(cache, p)
+
+
+def _no_signal(cache: IndicatorCache, p: Params) -> Signals:
+    """Live status series with both entry sides held flat."""
+    t3, k, d, atr_series, adx_series = _common(cache, p)
+    flat = np.zeros(atr_series.shape, dtype=bool)
+    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series,
+                   buy=flat, sell=flat, htf_up=flat, htf_down=flat)
 
 
 def _common(cache: IndicatorCache, p: Params):
