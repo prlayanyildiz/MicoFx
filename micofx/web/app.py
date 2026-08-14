@@ -158,10 +158,8 @@ _SYSTEM_RISK_BOUNDS = {
 
 def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYMBOL_RISK_BOUNDS,
                           label: str = "") -> None:
-    """``label`` names the enclosing blob when checking a nested dict, so the
-    400 says which copy of the field was bad - ``secondary_params`` carries
-    its own sl_atr_mult/trail_start_atr/trail_step_atr and the message is
-    otherwise identical to the top-level one.
+    """Range-check named numeric fields. ``label`` names a nested blob when
+    one is being checked, so the 400 says which copy of the field was bad.
     """
     for key, (lo, hi, lo_inclusive) in bounds.items():
         if key not in patch or patch[key] is None:
@@ -367,19 +365,12 @@ def _exit_axes(body: dict[str, Any], names: Any = None):
             yield from _axes(sub)
 
 
-# Engine-internal bookkeeping: Optimizer.apply()/_apply_secondary_locked()
-# write these to defer exit/risk fields until a position is flat (see
-# Engine._apply_pending_exits). They carry no schema of their own, so a
-# client PATCHing this field directly could stage ANY symbol field - not
-# just exit/risk ones - to land later, bypassing every guard above. Never a
-# legitimate thing for a human or external API caller to set.
-#
-# _apply_pending_exits does now re-check the exit bounds at the moment a
-# pending patch lands, so that specific class no longer rides through. That
-# is a backstop for stored state (a patch predating the check, a restored
-# backup, a hand-edited row), not a reason to open this door: it covers the
-# three exit numbers only, and every other field staged here would still
-# land without ever meeting the validation on this endpoint.
+# Engine-internal bookkeeping: Optimizer.apply() writes pending_exit_patch
+# to defer exit/risk fields until a position is flat (see
+# Engine._apply_pending_exits). pending_secondary_exit_patch is a leftover
+# key from the retired second leg - still rejected so an old client cannot
+# stage it. They carry no schema of their own, so a client PATCHing this
+# field directly could stage ANY symbol field to land later.
 _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
 
 
@@ -402,8 +393,7 @@ def _reject_bad_dict_fields(patch: dict[str, Any], keys: tuple) -> None:
 # fragments (Semboller cards, pill badges), so a bogus value here is not
 # just a data-integrity problem - it is another XSS entry point.
 _ENUM_FIELDS = {"group": (GROUPS, False), "strategy": (STRATEGIES, False),
-                "secondary_strategy": (STRATEGIES, True),
-                "timeframe": (TIMEFRAMES, False), "secondary_timeframe": (TIMEFRAMES, True),
+                "timeframe": (TIMEFRAMES, False),
                 "lot_mode": (("fixed", "risk"), False),
                 "trail_mode": (("atr", "structure", "hybrid"), False)}
 
@@ -412,19 +402,9 @@ _NON_FINITE_TOKENS = {"nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-i
 
 
 def _reject_non_finite_values(d: dict[str, Any], label: str = "") -> None:
-    # Both the top-level patch and the nested secondary_params blob carry
-    # plenty of numeric fields (sl_atr_mult, trail_start_atr, adx_min, ...)
-    # with no per-field bounds table of their own (unlike the small, named
-    # _SYMBOL_RISK_BOUNDS set _validate_risk_bounds checks) - this closes the
-    # NaN/Infinity class of bug for all of them, since a NaN reaching
-    # engine.py's live trailing/breakeven math corrupts comparisons silently
-    # (NaN >= x and NaN <= x are both always False). The raw-float case
-    # (json={"x": float("nan")}) never even reaches here in practice -
-    # httpx's own encoder refuses to serialise it - but the JSON STRING
-    # "NaN"/"Infinity" serialises just fine, and models.py's _coerce() does
-    # ``float(value)`` on it for any float-typed field, which happily turns
-    # the string right back into a real NaN. Checking only isinstance(...,
-    # (int, float)) missed exactly that path.
+    # Numeric leaves with no per-field bounds table of their own (unlike the
+    # small named _SYMBOL_RISK_BOUNDS set). NaN reaching engine.py's live
+    # trailing math corrupts comparisons silently.
     for key, value in d.items():
         bad = ((isinstance(value, (int, float)) and not math.isfinite(value))
               or (isinstance(value, str) and value.strip().lower() in _NON_FINITE_TOKENS))
@@ -745,40 +725,16 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def _open_under_magic(magic: int) -> list[dict[str, Any]]:
         return [p for p in _positions() if p["magic"] == magic]
 
-    def _open_tagged_secondary(magic: int) -> list[dict[str, Any]]:
-        tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
-        if not tagged:
-            return []
-        return [p for p in _positions(magic=magic) if p["ticket"] in tagged]
-
     def _pending_orphan_scan(magic: int, symbol: str) -> bool:
-        """True while engine.py (H1) is still watching this symbol/magic for
-        a secondary fill whose ticket was never identified - genuinely
-        invisible to client.positions() (that is the entire reason the scan
-        exists), so nothing that only checks live positions can see this risk
-        on its own. Blocks regardless of whether engine.py has marked it
-        "abandoned" - abandoned only means it stopped actively re-diffing
-        every cycle (see NOT-2), not that the position is confirmed gone. A magic
-        this stale/reused ID would otherwise collide with (DELETE, seed
-        overwrite, next_magic reassigning it to a brand new symbol) is the
-        exact same risk class as touching identity/exit under it directly.
+        """True while engine.py is still watching this symbol/magic for a
+        fill whose ticket was never identified - genuinely invisible to
+        client.positions() (that is the entire reason the scan exists).
+
+        Settings key is the historical ``secondary_orphan_scan`` name; the
+        machine is for any unresolved fill, primary included.
         """
         scan = store.get_setting("secondary_orphan_scan", {}) or {}
         return symbol in scan and int(scan[symbol].get("magic", -1)) == magic
-
-    def _secondary_risk(magic: int, symbol: str) -> tuple[list[dict[str, Any]], bool]:
-        """Everything that counts as "cannot safely touch secondary identity/
-        exit right now" - live-tagged secondary tickets, PLUS the same
-        untracked-fill risk optimizer.apply_secondary() already guards for
-        (see engine.py's H1 orphan tracking): a closed-but-still-unresolved
-        orphan ticket, or a still-open orphan-scan window where the fill's
-        ticket was never even identified.
-        """
-        tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
-        orphan_tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
-        watch = tagged | orphan_tickets
-        live = [p for p in _positions(magic=magic) if p["ticket"] in watch] if watch else []
-        return live, _pending_orphan_scan(magic, symbol)
 
     def _orphan_ticket_magics() -> set[int]:
         """Live magics of still-open orphan_tickets (H1) - Store.next_magic()
@@ -806,7 +762,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if isinstance(scan, dict):
             for sym, meta in scan.items():
                 if isinstance(meta, dict) and int(meta.get("magic", -1)) == int(new_magic):
-                    return (f"magic {new_magic} tanimlanamayan ikincil ticket taramasinda "
+                    return (f"magic {new_magic} tanimlanamayan ticket taramasinda "
                             f"({sym}) - tarama bitmeden atanamaz")
         if int(new_magic) in _orphan_ticket_magics():
             return (f"magic {new_magic} hala acik orphan ticket uzerinde - "
@@ -854,37 +810,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if tickets:
             raise HTTPException(
                 409, "MT5 baglantisi yokken yeni magic atanamiyor: tanimlanamayan "
-                     "ikincil ticket listesi dolu (magic cakisma riski) - MT5'e "
+                     "ticket listesi dolu (magic cakisma riski) - MT5'e "
                      "baglanin veya orphan ticket listesinin temizlenmesini bekleyin")
 
     @app.post("/api/symbols/{symbol}")
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
         patch = body.model_dump()
         _reject_internal_fields(patch)
-        _reject_bad_dict_fields(patch, ("secondary_params",))
-        # _validate_risk_bounds only range-checks the small named set in
-        # _SYMBOL_RISK_BOUNDS - sl_atr_mult, trail_start_atr, adx_min and
-        # every other numeric field outside that set had no NaN/Infinity
-        # check at all, top-level, same class of gap the nested
-        # secondary_params check below closes for the secondary blob.
         _reject_non_finite_values(patch)
-        if isinstance(patch.get("secondary_params"), dict):
-            _reject_non_finite_values(patch["secondary_params"], "secondary_params")
-            # trail_mode is the one OPT_FIELD enum value the search can also
-            # write here - top-level _validate_enum_fields below never looks
-            # inside this nested dict, so a garbage trail_mode landed straight
-            # in cfg.secondary_params unchecked.
-            _validate_enum_fields(patch["secondary_params"], "secondary_params")
-            # Third check the nested blob needs in its own right, for the same
-            # reason as the two above: _validate_risk_bounds below only ever
-            # looked at top-level keys, and secondary_params carries its own
-            # sl_atr_mult/trail_start_atr/trail_step_atr - engine.py builds the
-            # secondary signal's exit payload straight from this dict. So the
-            # 0/negative/absurd values refused at the top level landed here
-            # unchecked and drove the secondary position's real stop.
-            _validate_risk_bounds(patch["secondary_params"], label="secondary_params")
-            _validate_risk_bounds(patch["secondary_params"], _INDICATOR_PERIOD_BOUNDS,
-                                  label="secondary_params")
         _validate_enum_fields(patch)
         _validate_risk_bounds(patch)
         _validate_risk_bounds(patch, _INDICATOR_PERIOD_BOUNDS)
@@ -909,14 +842,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         next_tf = patch.get("timeframe", current.timeframe) if current is not None else None
         primary_changing = (current is not None
                             and (next_strat != current.strategy or next_tf != current.timeframe))
-        next_sec_strat = (patch.get("secondary_strategy", current.secondary_strategy)
-                          if current is not None else None)
-        next_sec_tf = (patch.get("secondary_timeframe", current.secondary_timeframe)
-                       if current is not None else None)
-        secondary_changing = (current is not None and (
-            ("secondary_strategy" in patch and next_sec_strat != current.secondary_strategy)
-            or ("secondary_timeframe" in patch and next_sec_tf != current.secondary_timeframe)
-        ))
         # optimizer.apply() holds back exit/risk fields while a position is
         # open (see EXIT_RISK_FIELDS there) because manage_positions()/
         # _update_stop() re-read cfg live every cycle, not a
@@ -927,27 +852,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # replicate optimizer's hold-and-defer machinery a second time here.
         exit_fields_changing = current is not None and any(
             key in patch and patch[key] != getattr(current, key) for key in EXIT_RISK_FIELDS)
-        # secondary_params is a nested blob, not individual top-level fields -
-        # the check above only ever looked at top-level keys, so patching
-        # {"secondary_params": {"trail_step_atr": ...}} directly bypassed the
-        # guard entirely even though engine.py's _secondary_config() overlays
-        # this same dict onto live position management every cycle, exactly
-        # like the top-level fields do for the primary.
-        next_sec_params = patch.get("secondary_params")
-        # secondary_params is written as a full replacement, not a merge - a
-        # new dict that simply OMITS a previously-set exit key (most
-        # obviously {} to wipe it, but any dict missing e.g. trail_step_atr)
-        # silently drops that key too, and _secondary_config() then falls
-        # back to the PRIMARY's value for it. Only diffing keys present in
-        # the new dict missed exactly this "changed by omission" case -
-        # compare the union of both dicts' keys instead.
-        secondary_exit_changing = (
-            current is not None and isinstance(next_sec_params, dict)
-            and any(next_sec_params.get(k) != current.secondary_params.get(k)
-                    for k in (set(next_sec_params) | set(current.secondary_params)) & EXIT_RISK_FIELDS)
-        )
-        guarded = (magic_changing or primary_changing or secondary_changing
-                  or exit_fields_changing or secondary_exit_changing)
+        guarded = (magic_changing or primary_changing or exit_fields_changing)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -978,14 +883,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                         raise HTTPException(
                             409, f"{symbol}: {what} degistirilemedi, {len(open_here)} acik pozisyon var{note} "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
-                if secondary_changing:
-                    live_tagged, pending_scan = _secondary_risk(current.magic, symbol)
-                    if live_tagged or pending_scan:
-                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
-                        raise HTTPException(
-                            409, f"{symbol}: ikincil strateji degistirilemedi, "
-                                 f"{len(live_tagged)} acik ikincil-sinyal pozisyonu var{note} "
-                                 f"(once kapanmasini bekleyin)")
                 if exit_fields_changing and not (magic_changing or primary_changing):
                     open_here = _open_under_magic(current.magic)
                     pending_scan = _pending_orphan_scan(current.magic, symbol)
@@ -997,18 +894,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                             409, f"{symbol}: cikis/risk parametreleri ({', '.join(changed_fields)}) "
                                  f"degistirilemedi, {len(open_here)} acik pozisyon var{note} "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
-                if secondary_exit_changing and not secondary_changing:
-                    live_tagged, pending_scan = _secondary_risk(current.magic, symbol)
-                    if live_tagged or pending_scan:
-                        changed_fields = sorted(
-                            k for k in (set(next_sec_params) | set(current.secondary_params)) & EXIT_RISK_FIELDS
-                            if next_sec_params.get(k) != current.secondary_params.get(k))
-                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
-                        raise HTTPException(
-                            409, f"{symbol}: ikincil cikis/risk parametreleri "
-                                 f"({', '.join(changed_fields)}) degistirilemedi, "
-                                 f"{len(live_tagged)} acik ikincil-sinyal pozisyonu var{note} "
-                                 f"(once kapanmasini bekleyin)")
             if primary_changing:
                 tf_allow = store.opt_params().get("strategy_timeframes")
                 allow = tf_allow if isinstance(tf_allow, dict) else None
@@ -1080,7 +965,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 # (see Store.next_magic) while that fill may still turn up,
                 # letting a brand new symbol collide with it.
                 raise HTTPException(
-                    409, f"{symbol} silinemedi: tanimlanamayan bir ikincil ticket taramasi "
+                    409, f"{symbol} silinemedi: tanimlanamayan bir ticket taramasi "
                          f"devam ediyor (magic {cfg.magic}) - taramanin bitmesini bekleyin")
             store.delete_symbol(symbol)
         engine.states.pop(symbol, None)
@@ -1241,13 +1126,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             cost_r = float(hold.get("cost_per_trade_r") or 0.0)
 
             state = engine.states.get(cfg.symbol)
-            # Raw parts rather than state.spread_atr: that field is built from
-            # the PRIMARY's ATR, and the ceiling below may belong to the
-            # secondary leg running a different timeframe. The ratio is
-            # rebuilt against the owning leg's own ATR once that leg is known.
             spread_raw = float(getattr(state, "spread", 0.0) or 0.0) if state else 0.0
             primary_atr = float(getattr(state, "atr", 0.0) or 0.0) if state else 0.0
-            secondary_atr = float(getattr(state, "sec_atr", 0.0) or 0.0) if state else 0.0
             spread_atr = float(getattr(state, "spread_atr", 0.0) or 0.0) if state else 0.0
             # ``state.spread_atr`` is rewritten every cycle from the last tick,
             # with no session gate in front of it, so outside a symbol's own
@@ -1255,38 +1135,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # will ever pay.
             session = getattr(state, "session", None) if state else None
             session_open = session.get("open") if isinstance(session, dict) else None
-            # The ensemble's second leg carries its own max_spread_atr, and it
-            # is routinely the TIGHTER of the two - six of thirteen live
-            # symbols, up to 3.6x on EURJPY (primary 0.18, secondary 0.05).
-            # _try_entry gates whichever leg produced the signal, so reading
-            # only the primary reported EURJPY as clear at 0.074/0.18 while
-            # its secondary sell was being refused on every poll. Judge
-            # against the binding ceiling, and name which leg owns it.
             ceiling = float(cfg.max_spread_atr or 0.0)
             ceiling_leg = "primary"
-            if cfg.has_secondary():
-                sec_ceiling = (cfg.secondary_params or {}).get("max_spread_atr")
-                try:
-                    sec_ceiling = float(sec_ceiling) if sec_ceiling is not None else 0.0
-                except (TypeError, ValueError):
-                    sec_ceiling = 0.0
-                if sec_ceiling > 0 and (ceiling <= 0 or sec_ceiling < ceiling):
-                    ceiling, ceiling_leg = sec_ceiling, "secondary"
-
-            # Now the owning leg is known, measure the spread against ITS atr.
-            # _try_entry already gates each leg on its own (state.sec_atr for
-            # the secondary); this is the analysis view catching up. The two
-            # legs routinely run different timeframes - five of the ten live
-            # symbols do - and the error runs both ways: a secondary on the
-            # higher timeframe has the larger ATR, so its true ratio is smaller
-            # than the primary-based number and the breach was overstated,
-            # which is how FRA40 was reported as failing "tavan" all day. A
-            # secondary on the lower one (SpotBrent: M5 against an H1 primary)
-            # was understated instead.
-            leg_atr = (secondary_atr if (ceiling_leg == "secondary" and secondary_atr > 0)
-                       else primary_atr)
-            if spread_raw > 0 and leg_atr > 0:
-                spread_atr = spread_raw / leg_atr
+            if spread_raw > 0 and primary_atr > 0:
+                spread_atr = spread_raw / primary_atr
 
             hold_days = float(summary.get("holdout_days") or 0.0)
             expected = (n / hold_days * window_days) if (n and hold_days > 0) else None
@@ -1595,7 +1447,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                              f"(once kapatin veya pozisyon kapanmasini bekleyin)")
                 if _pending_orphan_scan(cfg.magic, symbol):
                     raise HTTPException(
-                        409, f"{symbol}: varsayilana donulemedi, tanimlanamayan bir ikincil "
+                        409, f"{symbol}: varsayilana donulemedi, tanimlanamayan bir "
                              f"ticket taramasi devam ediyor - taramanin bitmesini bekleyin")
                 updated = store.reset_symbol_to_preset(symbol)
         else:
@@ -1715,14 +1567,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/symbols-bulk")
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
         _reject_internal_fields(body.patch)
-        _reject_bad_dict_fields(body.patch, ("secondary_params",))
         _reject_non_finite_values(body.patch)
-        if isinstance(body.patch.get("secondary_params"), dict):
-            _reject_non_finite_values(body.patch["secondary_params"], "secondary_params")
-            _validate_enum_fields(body.patch["secondary_params"], "secondary_params")
-            # Same nested gap patch_symbol closes - bulk is the other door to
-            # the identical write, across every targeted symbol at once.
-            _validate_risk_bounds(body.patch["secondary_params"], label="secondary_params")
         _validate_enum_fields(body.patch)
         _validate_risk_bounds(body.patch)
         # Bulk is the other door to the same write, and the one that would
@@ -1731,8 +1576,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         targets = body.symbols or list(store.symbols)
         needs_tf_check = "strategy" in body.patch or "timeframe" in body.patch
         magic_changing = "magic" in body.patch
-        secondary_fields = ("secondary_strategy" in body.patch
-                            or "secondary_timeframe" in body.patch)
         tf_allow = store.opt_params().get("strategy_timeframes") if needs_tf_check else None
         allow = tf_allow if isinstance(tf_allow, dict) else None
         if magic_changing:
@@ -1758,14 +1601,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # Same gap patch_symbol() closes per-symbol: bulk went through
         # update_symbol directly with no exit/risk-field holdback at all.
         exit_fields = [k for k in EXIT_RISK_FIELDS if k in body.patch]
-        next_sec_params = body.patch.get("secondary_params")
-        secondary_params_present = isinstance(next_sec_params, dict)
-        # secondary_params is a full replacement, not a merge, and its exit
-        # fields to check depend on each target symbol's OWN current dict
-        # (which key omissions matter varies per symbol) - so unlike
-        # exit_fields above, this can't be reduced to one static key list
-        # up front. Any presence of secondary_params in the patch has to be
-        # treated as guard-worthy; the precise per-symbol diff happens below.
         # Bulk is the other door to enabling a symbol - "Tumunu Ac" walks the
         # whole book - so it has to refuse an unsearched config exactly as the
         # per-symbol route does. Checked before the lock: nothing is written
@@ -1774,8 +1609,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _require_optimised_before_enabling(body.patch, store.symbols.get(target))
             _require_current_cost_basis_before_enabling(
                 body.patch, store.symbols.get(target), optimizer)
-        guarded = (needs_tf_check or magic_changing or secondary_fields
-                  or bool(exit_fields) or secondary_params_present)
+        guarded = (needs_tf_check or magic_changing or bool(exit_fields))
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -1793,25 +1627,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # watch_magics look empty while a second raw call might disagree.
             all_pos = _positions() if guarded else []
             open_magics = {p["magic"] for p in all_pos} if guarded else set()
-            secondary_guarded = secondary_fields or secondary_params_present
-            # Same untracked-fill risk class optimizer.apply_secondary() and
-            # patch_symbol()'s _secondary_risk() guard for (see engine.py's
-            # H1 orphan tracking) - a live-tagged ticket alone missed a
-            # closed-but-still-unresolved orphan ticket, and missed a
-            # still-open orphan-scan window entirely (that one has no ticket
-            # number at all yet, so it cannot be found via client.positions()
-            # - it is keyed by symbol, checked separately below).
-            tagged = {int(t) for t in (store.get_setting("secondary_tickets", []) or [])}
-            orphan_tickets = {int(t) for t in (store.get_setting("secondary_orphan_tickets", []) or [])}
-            watch_tickets = tagged | orphan_tickets
-            watch_magics = ({p["magic"] for p in all_pos if p["ticket"] in watch_tickets}
-                            if secondary_guarded and watch_tickets else set())
-            # NOT-1: patch_symbol()'s primary guard already treats a pending
-            # secondary_orphan_scan window the same as a visible open position
-            # (_pending_orphan_scan) - bulk only ever loaded this dict when a
-            # secondary field/param was in the patch, so a primary-only bulk
-            # (family/magic/EXIT_RISK) never saw a scan that was watching the
-            # very magic it was about to reassign or mutate exits under.
+            # Historical settings key; the scan is for any unresolved fill.
             orphan_scan = store.get_setting("secondary_orphan_scan", {}) or {} if guarded else {}
             for symbol in targets:
                 current = store.symbols.get(symbol) if guarded else None
@@ -1836,24 +1652,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 if symbol_changing and (current.magic in open_magics or pending_scan):
                     rejected.append(symbol)
                     continue
-                if secondary_fields and current is not None:
-                    next_sec = body.patch.get("secondary_strategy", current.secondary_strategy)
-                    next_stf = body.patch.get("secondary_timeframe", current.secondary_timeframe)
-                    sec_changing = (next_sec != current.secondary_strategy
-                                    or next_stf != current.secondary_timeframe)
-                    if sec_changing and (current.magic in watch_magics or pending_scan):
-                        rejected.append(symbol)
-                        continue
                 if exit_fields and current is not None:
                     exit_changing = any(body.patch[k] != getattr(current, k) for k in exit_fields)
                     if exit_changing and (current.magic in open_magics or pending_scan):
-                        rejected.append(symbol)
-                        continue
-                if secondary_params_present and current is not None:
-                    sec_keys = (set(next_sec_params) | set(current.secondary_params)) & EXIT_RISK_FIELDS
-                    sec_exit_changing = any(next_sec_params.get(k) != current.secondary_params.get(k)
-                                            for k in sec_keys)
-                    if sec_exit_changing and (current.magic in watch_magics or pending_scan):
                         rejected.append(symbol)
                         continue
                 updated = store.update_symbol(symbol, body.patch, source="panel toplu")
@@ -1891,7 +1692,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                                   if _pending_orphan_scan(c.magic, c.symbol))
                 if scanning:
                     raise HTTPException(
-                        409, f"portfoy sifirlanamadi: tanimlanamayan ikincil ticket taramasi "
+                        409, f"portfoy sifirlanamadi: tanimlanamayan ticket taramasi "
                              f"devam eden semboller var: {', '.join(scanning)} - taramalarin "
                              f"bitmesini bekleyin")
                 count = store.replace_with_defaults()

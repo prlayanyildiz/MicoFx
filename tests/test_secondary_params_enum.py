@@ -81,28 +81,20 @@ def _client():
     return TestClient(app), store
 
 
-def test_patch_symbol_rejects_bad_trail_mode_in_secondary_params():
+def test_patch_symbol_ignores_retired_secondary_params_enum():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
     tc, store = _client()
     res = tc.post("/api/symbols/XAUUSD", json={
         "secondary_params": {"trail_mode": "<script>alert(1)</script>", "sl_atr_mult": 1.5},
     })
-    assert res.status_code == 400
-    assert store.symbols["XAUUSD"].secondary_params == {}
-
-
-def test_patch_symbol_accepts_valid_trail_mode_in_secondary_params():
-    tc, store = _client()
-    res = tc.post("/api/symbols/XAUUSD", json={
-        "secondary_params": {"trail_mode": "structure", "sl_atr_mult": 1.5},
-    })
     assert res.status_code == 200
-    assert store.symbols["XAUUSD"].secondary_params.get("trail_mode") == "structure"
+    assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
-def test_bulk_patch_rejects_bad_trail_mode_in_secondary_params():
+def test_bulk_patch_ignores_retired_secondary_params_enum():
     tc, store = _client()
     res = tc.post("/api/symbols-bulk", json={
         "patch": {"secondary_params": {"trail_mode": "garbage"}},
     })
-    assert res.status_code == 400
-    assert store.symbols["XAUUSD"].secondary_params == {}
+    assert res.status_code == 200
+    assert not hasattr(store.symbols["XAUUSD"], "secondary_params")

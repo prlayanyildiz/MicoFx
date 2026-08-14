@@ -123,15 +123,12 @@ def test_summary_blobs_and_their_timestamps_are_not_reported(captured):
     s.update_symbol("NAS100", {
         "max_positions": 5,
         "opt_summary": {"anything": 1},
-        "secondary_summary": {"anything": 2},
         "opt_updated_at": 12345.0,
-        "secondary_updated_at": 6789.0,
     }, source="opt apply")
 
     msg = captured[0]["message"]
     assert "max_positions" in msg
-    for noisy in ("opt_summary", "secondary_summary",
-                  "opt_updated_at", "secondary_updated_at"):
+    for noisy in ("opt_summary", "opt_updated_at"):
         assert noisy not in msg
 
 

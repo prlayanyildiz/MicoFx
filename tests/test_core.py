@@ -326,8 +326,7 @@ def test_can_open_symbol_limit_counts_every_ticket():
     """
     store = _FakeStore()
     store.system = _FakeSystem()
-    cfg = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend",
-               secondary_strategy="micro_rev", max_positions=1)
+    cfg = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=1)
     store.symbols = {"XAUUSD": cfg}
     store.system.max_scalp_positions = 10
     store.system.max_swing_positions = 10
@@ -356,8 +355,7 @@ def test_can_open_bucket_uses_primary_strategy_only():
     """
     store = _FakeStore()
     store.system = _FakeSystem()
-    primary = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend",
-                   secondary_strategy="micro_rev", max_positions=5)
+    primary = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=5)
     store.symbols = {"XAUUSD": primary}
     store.system.max_scalp_positions = 1
     store.system.max_swing_positions = 1
@@ -381,8 +379,7 @@ def test_can_open_bucket_uses_primary_strategy_only():
 
 def test_can_open_allows_when_bucket_not_full():
     store = _FakeStore()
-    primary = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend",
-                   secondary_strategy="micro_rev", max_positions=5)
+    primary = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=5)
     store.symbols = {"XAUUSD": primary}
     store.system.max_scalp_positions = 2
     store.system.max_swing_positions = 5

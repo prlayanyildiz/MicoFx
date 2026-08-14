@@ -263,14 +263,6 @@ select#group-filter { width: 150px; }
 .scard-title { display: flex; align-items: center; gap: 9px; min-width: 230px; }
 .scard-title .name { font-size: 14px; font-weight: 700; letter-spacing: .02em; }
 .scard-title .desc { font-size: 10.5px; color: var(--dim); }
-/* Second-signal shortcut in the card head - same ensemble_enabled field the
-   advanced block edits, reachable without opening the card. Muted while off so
-   a row of them does not read as a row of warnings. */
-.sec-toggle { padding: 3px 8px; font-size: 10px; white-space: nowrap; opacity: .65; }
-.sec-toggle:hover { opacity: 1; }
-.sec-toggle.on {
-  background: var(--green-dim); border-color: #1d8455; color: #79ffbe; opacity: 1;
-}
 .scard-live { display: flex; gap: 14px; flex: 1; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; }
 .scard-live b { color: var(--dim); font-weight: 500; }
 .caret { color: var(--dim); font-size: 11px; transition: transform .18s; }

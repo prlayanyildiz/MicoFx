@@ -156,46 +156,18 @@ def test_patch_symbol_still_accepts_a_small_positive_trail_start():
 
 # --------------------------------------------------------------- nested blob
 
-def test_patch_symbol_enforces_the_bounds_inside_secondary_params():
-    """secondary_params carries its own copy of the exit model.
-
-    The nested blob already had its own non-finite and enum checks (a
-    top-level check never looks inside it); the bounds check was the third
-    one that had to be repeated and was not. engine.py builds the secondary
-    signal's exit payload straight from this dict, so a 0/negative here drove
-    a real position's stop while the identical top-level value was refused.
-    """
-    for field, bad in (("trail_start_atr", 0.0),   # trail never arms at all
-                       ("trail_step_atr", 0.0),
-                       ("sl_atr_mult", 0.0),
-                       ("sl_atr_mult", -5.0),      # no ATR stop left
-                       ("trail_step_atr", -3.0),   # trail target on the wrong side
-                       ("sl_atr_mult", 9999.0)):   # finite, so the NaN check let it by
-        tc, store = _client()
-        before = dict(store.symbols["XAUUSD"].secondary_params)
-        res = tc.post("/api/symbols/XAUUSD",
-                      json={"secondary_params": {field: bad}})
-        assert res.status_code == 400, f"secondary_params.{field}={bad} accepted"
-        assert field in res.json()["detail"]
-        assert store.symbols["XAUUSD"].secondary_params == before
-
-
-def test_bulk_patch_enforces_the_bounds_inside_secondary_params():
-    """Bulk is the other door to the same write, across every symbol at once."""
+def test_patch_symbol_ignores_retired_secondary_params():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
     tc, store = _client()
-    before = dict(store.symbols["XAUUSD"].secondary_params)
+    res = tc.post("/api/symbols/XAUUSD",
+                  json={"secondary_params": {"trail_start_atr": 0.0}})
+    assert res.status_code == 200
+    assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
+
+
+def test_bulk_patch_ignores_retired_secondary_params():
+    tc, store = _client()
     res = tc.post("/api/symbols-bulk",
                   json={"patch": {"secondary_params": {"trail_start_atr": 0.0}}})
-    assert res.status_code == 400
-    assert store.symbols["XAUUSD"].secondary_params == before
-
-
-def test_valid_secondary_params_still_go_through():
-    """The gate is the bounds, not "nested values are suspicious"."""
-    tc, store = _client()
-    res = tc.post("/api/symbols/XAUUSD", json={
-        "secondary_params": {"sl_atr_mult": 1.5, "trail_start_atr": 0.5,
-                             "trail_step_atr": 1.6, "trail_mode": "atr"}})
     assert res.status_code == 200
-    assert store.symbols["XAUUSD"].secondary_params["sl_atr_mult"] == 1.5
-    assert store.symbols["XAUUSD"].secondary_params["trail_start_atr"] == 0.5
+    assert not hasattr(store.symbols["XAUUSD"], "secondary_params")

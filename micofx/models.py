@@ -92,20 +92,6 @@ class SymbolConfig:
     # | parabolic_flip | aroon_flip   (see models.STRATEGIES)
     strategy: str = "t3_stoch"
 
-    # ---- optional second, uncorrelated signal on the same symbol ----
-    # The optimizer parks a validated runner-up here (different family, own
-    # timeframe, own exit parameters) after every applied run. It is only ever
-    # traded when the user flips ``ensemble_enabled`` on for this symbol; the
-    # engine then takes entries from either signal and skips the bar entirely
-    # when the two disagree.
-    ensemble_enabled: bool = False
-    secondary_strategy: str = ""     # "" means no secondary candidate stored
-    secondary_timeframe: str = ""
-    secondary_params: dict = field(default_factory=dict)   # OPT_FIELDS subset
-    secondary_score: float = 0.0
-    secondary_updated_at: float = 0.0
-    secondary_summary: dict = field(default_factory=dict)
-
     # ---- order-flow-proxy exhaustion reversion ----
     flow_length: int = 20            # bars of signed-volume proxy accumulated
     flow_z: float = 2.0              # |z| of that sum that counts as exhaustion
@@ -287,10 +273,6 @@ class SymbolConfig:
     # applied automatically (by the engine) the moment that magic is next
     # seen flat. Empty dict = nothing pending.
     pending_exit_patch: dict = field(default_factory=dict)
-    # Same idea, but for a same-identity secondary "refine" (see
-    # apply_secondary()): exit/risk keys to merge into secondary_params once
-    # no secondary-tagged position is open under this magic.
-    pending_secondary_exit_patch: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -342,26 +324,7 @@ class SymbolConfig:
         cfg.opt_summary = summary if isinstance(summary, dict) else {}
         pending = payload.get("pending_exit_patch")
         cfg.pending_exit_patch = pending if isinstance(pending, dict) else {}
-        pending_sec = payload.get("pending_secondary_exit_patch")
-        cfg.pending_secondary_exit_patch = pending_sec if isinstance(pending_sec, dict) else {}
-        sec = payload.get("secondary_params")
-        # Only optimiser-owned parameters may ride along in the secondary blob;
-        # anything else would let a stored candidate rewrite magic, lots or
-        # sessions through the back door when the engine overlays it.
-        cfg.secondary_params = ({k: v for k, v in sec.items() if k in OPT_FIELDS}
-                                if isinstance(sec, dict) else {})
-        sec_summary = payload.get("secondary_summary")
-        cfg.secondary_summary = sec_summary if isinstance(sec_summary, dict) else {}
-        if cfg.secondary_strategy not in STRATEGIES:
-            cfg.secondary_strategy = ""
-        if cfg.secondary_timeframe not in TIMEFRAMES:
-            cfg.secondary_timeframe = ""
         return cfg
-
-    def has_secondary(self) -> bool:
-        """True when a validated second candidate is stored and switched on."""
-        return bool(self.ensemble_enabled and self.secondary_strategy
-                    and self.secondary_timeframe)
 
     def session_start_minutes(self) -> int:
         """Minute-of-day the trading session opens."""
@@ -571,14 +534,6 @@ def uses_swing_exits(strategy: str, timeframe: str) -> bool:
     # describing a state of the world that no longer exists.
     seconds = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
     return int(seconds.get(timeframe, 0)) >= 900
-
-# Written only by ``Optimizer.apply_secondary`` and only alongside an applied
-# primary. ``ensemble_enabled`` is deliberately NOT in this list: storing a
-# candidate must never start trading it - that stays a user decision.
-SECONDARY_FIELDS = [
-    "secondary_strategy", "secondary_timeframe", "secondary_params",
-    "secondary_score", "secondary_updated_at", "secondary_summary",
-]
 
 
 @dataclass

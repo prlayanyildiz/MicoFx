@@ -278,8 +278,7 @@ class Store:
     # say nothing a human is auditing for. The fields that actually decide what
     # gets traded - strategy, timeframe, the exit/risk numbers, max_positions,
     # risk_percent - are all outside this set and always reported.
-    _CHANGE_LOG_SKIP = ("opt_summary", "secondary_summary",
-                        "opt_updated_at", "secondary_updated_at")
+    _CHANGE_LOG_SKIP = ("opt_summary", "opt_updated_at")
 
     def _log_symbol_change(self, symbol: str, before: dict[str, Any],
                            after: dict[str, Any], source: str) -> None:

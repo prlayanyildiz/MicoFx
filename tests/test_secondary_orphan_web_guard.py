@@ -20,8 +20,7 @@ from micofx.web.app import create_app
 
 
 def _cfg(symbol, magic, **over):
-    return SymbolConfig(symbol=symbol, magic=magic, secondary_strategy="micro_rev",
-                        secondary_timeframe="M5", ensemble_enabled=True, **over)
+    return SymbolConfig(symbol=symbol, magic=magic, **over)
 
 
 class _FakeSystem:
@@ -89,79 +88,79 @@ def _client(symbols, positions, settings=None):
     return TestClient(app), store
 
 
-def test_patch_symbol_secondary_identity_blocked_by_pending_orphan_scan():
+def test_patch_symbol_family_blocked_by_pending_orphan_scan():
     # secondary_tickets is empty (never got tagged) - only the orphan-scan
-    # entry knows this magic has an unresolved fill.
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+    # entry knows this magic has an unresolved fill. Identity fields of the
+    # retired second leg are ignored; the scan still blocks a primary family swap.
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
     tc, store = _client(symbols, positions=[], settings=settings)
 
-    res = tc.post("/api/symbols/XAUUSD", json={"secondary_strategy": "burst"})
+    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst"})
 
     assert res.status_code == 409
-    assert store.symbols["XAUUSD"].secondary_strategy == "micro_rev"  # unchanged
+    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
 
 
-def test_patch_symbol_secondary_identity_blocked_by_live_orphan_ticket():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+def test_patch_symbol_family_blocked_by_live_orphan_ticket():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
     settings = {"secondary_orphan_tickets": [501]}
     positions = [{"ticket": 501, "magic": 1, "symbol": "XAUUSD"}]
     tc, store = _client(symbols, positions=positions, settings=settings)
 
-    res = tc.post("/api/symbols/XAUUSD", json={"secondary_strategy": "burst"})
+    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst"})
 
     assert res.status_code == 409
-    assert store.symbols["XAUUSD"].secondary_strategy == "micro_rev"
+    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
 
 
-def test_patch_symbol_secondary_identity_allowed_when_clear():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+def test_patch_symbol_family_allowed_when_clear():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
     tc, store = _client(symbols, positions=[])
 
-    res = tc.post("/api/symbols/XAUUSD", json={"secondary_strategy": "burst"})
+    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst"})
 
     assert res.status_code == 200
-    assert store.symbols["XAUUSD"].secondary_strategy == "burst"
+    assert store.symbols["XAUUSD"].strategy == "burst"
 
 
-def test_patch_symbol_secondary_exit_field_blocked_by_pending_scan():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1,
-                              secondary_params={"trail_start_atr": 1.0})}
+def test_patch_symbol_exit_field_blocked_by_pending_scan():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
     tc, store = _client(symbols, positions=[], settings=settings)
 
-    res = tc.post("/api/symbols/XAUUSD", json={
-        "secondary_params": {"trail_start_atr": 2.0},
-    })
+    res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
     assert res.status_code == 409
-    assert store.symbols["XAUUSD"].secondary_params["trail_start_atr"] == 1.0
+    assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 
-def test_bulk_patch_secondary_change_rejects_symbol_with_pending_scan():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1), "EURUSD": _cfg("EURUSD", magic=2)}
+def test_bulk_patch_family_change_rejects_symbol_with_pending_scan():
+    symbols = {
+        "XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch"),
+        "EURUSD": _cfg("EURUSD", magic=2, strategy="t3_stoch"),
+    }
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
     tc, store = _client(symbols, positions=[], settings=settings)
 
-    res = tc.post("/api/symbols-bulk", json={"patch": {"secondary_strategy": "burst"}})
+    res = tc.post("/api/symbols-bulk", json={"patch": {"strategy": "burst"}})
 
     assert res.status_code == 200
     body = res.json()
     assert "XAUUSD" in body.get("rejected", [])
-    assert store.symbols["XAUUSD"].secondary_strategy == "micro_rev"
-    # EURUSD has no pending risk - goes through.
-    assert store.symbols["EURUSD"].secondary_strategy == "burst"
+    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+    assert store.symbols["EURUSD"].strategy == "burst"
 
 
-def test_bulk_patch_secondary_change_rejects_symbol_with_live_orphan_ticket():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
+def test_bulk_patch_family_change_rejects_symbol_with_live_orphan_ticket():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
     settings = {"secondary_orphan_tickets": [601]}
     positions = [{"ticket": 601, "magic": 1, "symbol": "XAUUSD"}]
     tc, store = _client(symbols, positions=positions, settings=settings)
 
-    res = tc.post("/api/symbols-bulk", json={"patch": {"secondary_strategy": "burst"}})
+    res = tc.post("/api/symbols-bulk", json={"patch": {"strategy": "burst"}})
 
     assert res.status_code == 200
     body = res.json()
     assert "XAUUSD" in body.get("rejected", [])
-    assert store.symbols["XAUUSD"].secondary_strategy == "micro_rev"
+    assert store.symbols["XAUUSD"].strategy == "t3_stoch"

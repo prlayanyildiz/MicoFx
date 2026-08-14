@@ -1,4 +1,4 @@
-"""Hard-scan fixes: enabled=False / ensemble_enabled=False must not freeze
+"""Hard-scan fixes: enabled=False /must not freeze
 management of an already-open position.
 
 Both bugs share one root cause: manage_positions()'s trail/BE/partial-TP
@@ -9,7 +9,7 @@ that advancement for a ticket that stays open and tracked:
   - cfg.enabled = False (pause a symbol) skipped _evaluate() entirely, so
     state.last_bar/atr froze at whatever they were the instant it was
     disabled.
-  - ensemble_enabled = False (or secondary_strategy cleared) with a
+  -(or secondary_strategy cleared) with a
     secondary-opened ticket still live: state.sec_last_bar/sec_bars were
     reset and state.sec_atr was left stale-but-still-positive, so
     manage_positions() neither swapped to primary management nor kept
@@ -134,8 +134,7 @@ def test_evaluate_still_refreshes_primary_when_leftover_ticket_is_open(monkeypat
     """
     from micofx import sessions as sessions_mod
 
-    cfg = _cfg(enabled=True, ensemble_enabled=False,
-              secondary_strategy="micro_rev", secondary_timeframe="M5")
+    cfg = _cfg(enabled=True,)
     eng = _make_engine(cfg)
     eng.client.resolve = lambda symbol: symbol
     eng.client.tick = lambda symbol: None
@@ -177,9 +176,8 @@ def test_evaluate_has_no_secondary_refresh_when_ensemble_is_on(monkeypatch):
     """
     from micofx import sessions as sessions_mod
 
-    cfg = _cfg(enabled=True, ensemble_enabled=True,
-              secondary_strategy="micro_rev", secondary_timeframe="M5")
-    assert cfg.has_secondary() is True
+    cfg = _cfg(enabled=True)
+    assert not hasattr(cfg, "has_secondary")
     eng = _make_engine(cfg)
     eng.client.resolve = lambda symbol: symbol
     eng.client.tick = lambda symbol: None

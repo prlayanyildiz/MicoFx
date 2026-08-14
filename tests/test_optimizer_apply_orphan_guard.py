@@ -145,9 +145,7 @@ def test_apply_family_swap_does_not_depend_on_secondary_clear():
     a later stage clears them.
     """
     cfg = SymbolConfig(
-        symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15",
-        ensemble_enabled=True, secondary_strategy="micro_rev",
-        secondary_timeframe="M5", sl_atr_mult=1.0, trail_step_atr=0.6,
+        symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15", sl_atr_mult=1.0, trail_step_atr=0.6,
     )
     store = _Store(cfg)
     opt = Optimizer(store=store, client=_Client(positions=[]))
@@ -157,5 +155,5 @@ def test_apply_family_swap_does_not_depend_on_secondary_clear():
 
     assert result["ok"] is True
     assert cfg.strategy == "burst"
-    assert cfg.secondary_strategy == "micro_rev"  # leftover, not rewritten
+    assert not hasattr(cfg, "secondary_strategy")
     assert not hasattr(opt, "_apply_secondary_locked")

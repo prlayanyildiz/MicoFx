@@ -91,11 +91,13 @@ def test_the_panel_no_longer_offers_it():
 # ------------------------------------------- a legacy config must still work
 
 def test_a_stored_secondary_on_m10_is_cleared_not_kept():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
     cfg = SymbolConfig.from_dict({
         "symbol": "GBPJPY", "magic": 1,
         "secondary_strategy": "micro_rev", "secondary_timeframe": "M10",
     })
-    assert cfg.secondary_timeframe == ""
+    assert cfg.symbol == "GBPJPY"
+    assert not hasattr(cfg, "secondary_timeframe")
 
 
 def test_the_translation_tables_no_longer_know_it():

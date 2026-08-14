@@ -15,8 +15,7 @@ def _eng():
 
 def test_merge_keeps_primary_buy():
     eng = _eng()
-    cfg = SymbolConfig(symbol="XAUUSD", ensemble_enabled=True,
-                       secondary_strategy="micro_rev", secondary_timeframe="M5")
+    cfg = SymbolConfig(symbol="XAUUSD",)
     state = SymbolState("XAUUSD")
     state.primary_signal = "buy"
     eng._merge_signals(cfg, state)
@@ -27,8 +26,7 @@ def test_merge_keeps_primary_buy():
 
 def test_merge_empty_primary_stays_empty():
     eng = _eng()
-    cfg = SymbolConfig(symbol="XAUUSD", ensemble_enabled=True,
-                       secondary_strategy="burst", secondary_timeframe="M5")
+    cfg = SymbolConfig(symbol="XAUUSD",)
     state = SymbolState("XAUUSD")
     state.primary_signal = ""
     eng._merge_signals(cfg, state)

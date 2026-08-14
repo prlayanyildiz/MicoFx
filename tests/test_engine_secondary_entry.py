@@ -127,9 +127,7 @@ def _make_engine(cfg, positions_after):
 def _cfg():
     # crypto group so weekend_closed() never blocks the test regardless of
     # the day this runs on.
-    return SymbolConfig(symbol="EURUSD", group="crypto", magic=1,
-                        secondary_strategy="micro_rev", secondary_timeframe="M5",
-                        ensemble_enabled=True)
+    return SymbolConfig(symbol="EURUSD", group="crypto", magic=1,)
 
 
 def _state():
@@ -723,8 +721,7 @@ def test_apply_pending_exits_lands_once_orphan_scan_clears():
 
 def test_apply_pending_exits_holds_back_secondary_while_orphan_ticket_open():
     """A3.3: secondary land path is gone, so an orphan ticket cannot apply it."""
-    cfg = SymbolConfig(symbol="EURUSD", magic=1,
-                       pending_secondary_exit_patch={"trail_start_atr": 1.5})
+    cfg = SymbolConfig(symbol="EURUSD", magic=1,)
     eng, updates = _pending_exits_engine(cfg, positions=[{"ticket": 401, "magic": 1}])
     eng._orphan_tickets = {401}
 
@@ -735,8 +732,7 @@ def test_apply_pending_exits_holds_back_secondary_while_orphan_ticket_open():
 
 def test_apply_pending_exits_does_not_land_secondary_when_flat():
     """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
-    cfg = SymbolConfig(symbol="EURUSD", magic=1,
-                       pending_secondary_exit_patch={"trail_start_atr": 1.5})
+    cfg = SymbolConfig(symbol="EURUSD", magic=1,)
     eng, updates = _pending_exits_engine(cfg, positions=[])
 
     eng._apply_pending_exits()

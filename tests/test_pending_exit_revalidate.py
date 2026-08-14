@@ -100,37 +100,22 @@ def test_a_valid_pending_patch_still_lands():
     assert live.pending_exit_patch == {}
 
 
-def test_a_bad_primary_patch_still_clears_without_a_secondary_land():
-    """A3.3: pending_secondary_exit_patch is no longer applied.
-
-    Dropping a poisoned primary patch must still happen; the leftover
-    secondary field stays on the model until A4 and is not written.
-    """
-    cfg = _cfg(pending_exit_patch={"trail_start_atr": 0.0},
-               secondary_params={"sl_atr_mult": 1.0},
-               pending_secondary_exit_patch={"trail_step_atr": 1.8})
+def test_a_bad_primary_patch_still_clears():
+    cfg = _cfg(pending_exit_patch={"trail_start_atr": 0.0})
     eng, store = _engine(cfg)
     eng._apply_pending_exits()
 
     live = store.symbols["XAUUSD"]
     assert live.pending_exit_patch == {}
-    assert live.secondary_params == {"sl_atr_mult": 1.0}
-    assert live.pending_secondary_exit_patch == {"trail_step_atr": 1.8}
 
-
-# ---------------------------------------------------------------- secondary (A3.3: land path gone)
 
 def test_pending_secondary_exit_patch_is_not_applied():
     """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
-    cfg = _cfg(secondary_params={"sl_atr_mult": 1.5, "trail_start_atr": 0.5},
-               pending_secondary_exit_patch={"trail_step_atr": 1.2})
+    cfg = _cfg()
     eng, store = _engine(cfg)
     eng._apply_pending_exits()
-
-    live = store.symbols["XAUUSD"]
-    assert live.secondary_params == {"sl_atr_mult": 1.5, "trail_start_atr": 0.5}
-    assert live.pending_secondary_exit_patch == {"trail_step_atr": 1.2}
     assert store.writes == []
+    assert not hasattr(store.symbols["XAUUSD"], "pending_secondary_exit_patch")
 
 
 # ------------------------------------------- Optimizer.apply, for real

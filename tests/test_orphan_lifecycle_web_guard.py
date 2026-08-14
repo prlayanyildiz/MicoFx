@@ -309,19 +309,19 @@ def test_bulk_primary_exit_field_allowed_without_scan_or_position():
     assert store.symbols["XAUUSD"].sl_atr_mult == 2.0
 
 
-def test_bulk_secondary_regression_still_blocked_by_live_tagged():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, secondary_strategy="t3_stoch",
-                              secondary_timeframe="M15")}
+def test_bulk_primary_family_still_blocked_by_live_open_position():
+    """Leftover tagged ticket is still an open magic; primary family swap stays 409."""
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
     positions = [{"ticket": 500, "magic": 1}]
     settings = {"secondary_tickets": [500]}
     tc, store, _eng = _client(symbols, positions=positions, settings=settings)
 
     res = tc.post("/api/symbols-bulk",
-                  json={"symbols": ["XAUUSD"], "patch": {"secondary_strategy": "burst"}})
+                  json={"symbols": ["XAUUSD"], "patch": {"strategy": "burst"}})
 
     assert res.status_code == 200
     assert res.json()["rejected"] == ["XAUUSD"]
-    assert store.symbols["XAUUSD"].secondary_strategy == "t3_stoch"
+    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
 
 
 # ---------------------------------------------------------------------- L1

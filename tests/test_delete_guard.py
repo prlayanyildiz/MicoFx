@@ -347,16 +347,15 @@ def test_seed_overwrite_refuses_with_open_bot_position():
     assert "XAUUSD" in store.symbols
 
 
-def test_patch_refuses_secondary_change_with_open_tagged_position():
-    symbols = {"XAUUSD": SymbolConfig(
-        symbol="XAUUSD", magic=990021,
-        secondary_strategy="micro_rev", secondary_timeframe="M5")}
+def test_patch_ignores_retired_secondary_identity_field():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
+    symbols = {"XAUUSD": SymbolConfig(symbol="XAUUSD", magic=990021)}
     positions = [{"ticket": 100, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
     tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_strategy": "burst"})
-    assert res.status_code == 409
-    assert store.symbols["XAUUSD"].secondary_strategy == "micro_rev"
+    assert res.status_code == 200
+    assert not hasattr(store.symbols["XAUUSD"], "secondary_strategy")
 
 
 # ------------------------------------------------------------ internal-only fields
@@ -413,70 +412,36 @@ def test_bulk_patch_refuses_exit_field_change_with_open_position():
     assert store.symbols["XAUUSD"].trail_start_atr != 3.0
 
 
-# ----------------------------------------------------- secondary_params nested guard
+# ----------------------------------------------------- retired nested blob is ignored
 
-def test_patch_refuses_non_dict_secondary_params():
+def test_patch_ignores_retired_secondary_params_blob():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok."""
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": "wipe"})
-    assert res.status_code == 400
+    assert res.status_code == 200
+    assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
-def test_patch_refuses_nan_inside_secondary_params():
+def test_patch_ignores_nan_inside_retired_secondary_params():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
-    # httpx's own json= encoder rejects NaN before it can even be sent - send
-    # the raw body instead so the (Python json-based) server-side parser,
-    # which does accept the NaN literal, is what actually gets exercised.
     res = tc.post("/api/symbols/XAUUSD", content=b'{"secondary_params": {"sl_atr_mult": NaN}}',
                   headers={"Content-Type": "application/json"})
-    assert res.status_code == 400
+    assert res.status_code == 200
+    assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
-def test_patch_refuses_secondary_params_exit_field_change_with_open_tagged_position():
-    symbols = {"XAUUSD": SymbolConfig(
-        symbol="XAUUSD", magic=990021,
-        secondary_strategy="micro_rev", secondary_timeframe="M5",
-        secondary_params={"sl_atr_mult": 1.0, "adx_min": 20.0})}
+def test_patch_ignores_secondary_params_even_with_open_position():
+    symbols = {"XAUUSD": SymbolConfig(symbol="XAUUSD", magic=990021)}
     positions = [{"ticket": 100, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
     tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"sl_atr_mult": 2.0, "adx_min": 20.0}})
-    assert res.status_code == 409
-    assert store.symbols["XAUUSD"].secondary_params["sl_atr_mult"] == 1.0
-
-
-def test_patch_refuses_secondary_params_wipe_by_omission_with_open_tagged_position():
-    # A replacement dict that simply DROPS a previously-set exit key (instead
-    # of explicitly changing its value) must be caught too - full-replace
-    # semantics mean the omission silently removes it.
-    symbols = {"XAUUSD": SymbolConfig(
-        symbol="XAUUSD", magic=990021,
-        secondary_strategy="micro_rev", secondary_timeframe="M5",
-        secondary_params={"sl_atr_mult": 1.0, "adx_min": 20.0})}
-    positions = [{"ticket": 100, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
-    tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
-
-    res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"adx_min": 20.0}})
-    assert res.status_code == 409
-    assert store.symbols["XAUUSD"].secondary_params["sl_atr_mult"] == 1.0
-
-
-def test_patch_allows_secondary_params_entry_field_change_with_open_tagged_position():
-    # Entry-signal params (not in EXIT_RISK_FIELDS) are safe to land
-    # immediately even with a tagged position open.
-    symbols = {"XAUUSD": SymbolConfig(
-        symbol="XAUUSD", magic=990021,
-        secondary_strategy="micro_rev", secondary_timeframe="M5",
-        secondary_params={"sl_atr_mult": 1.0, "adx_min": 20.0})}
-    positions = [{"ticket": 100, "symbol": "XAUUSD", "magic": 990021, "side": "buy"}]
-    tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
-
-    res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"sl_atr_mult": 1.0, "adx_min": 25.0}})
     assert res.status_code == 200
-    assert store.symbols["XAUUSD"].secondary_params["adx_min"] == 25.0
+    assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
 # ------------------------------------------------------------------- enum fields
