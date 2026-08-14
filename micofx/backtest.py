@@ -996,6 +996,11 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         "rejected_costly": rejected_costly,
         "bars": n,
         "segments": segments,
+        # The cost regime this sweep actually ran under, carried out with the
+        # numbers it produced. The setting can be flipped while a run is in
+        # flight, so reading it again downstream describes the clock, not the
+        # sweep - see Optimizer.apply's stamp.
+        "charge_costs": bool(charge_costs),
         "holdout_bars": holdout[1] - holdout[0],
         "holdout_days": round((int(bars.time[-1]) - int(bars.time[holdout[0]])) / 86400.0, 1),
         "validation_days": round((int(bars.time[holdout[0]]) - int(bars.time[validation[0]]))

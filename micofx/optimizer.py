@@ -768,7 +768,8 @@ class Optimizer:
         applied = False
         if apply_best and report.get("validated") and not reason:
             apply_result = self.apply(cfg.symbol, best["params"], score,
-                       {**best, "holdout_days": report.get("holdout_days", 0.0)},
+                       {**best, "holdout_days": report.get("holdout_days", 0.0),
+                        "charge_costs": report.get("charge_costs")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok"))
             if not applied:
@@ -1247,8 +1248,18 @@ class Optimizer:
                 # and the symbol freezes on it. SpotBrent reached exactly that
                 # state: applied 13.08 12:36 inside the cost-free window with
                 # cost_per_trade_r 0.0, while the other nine carry 0.011-0.105.
-                "charge_costs": bool(getattr(
-                    getattr(self.store, "system", None), "charge_costs", True)),
+                # Read off the sweep, not off the store. The setting can be
+                # flipped while a run is in flight, and then the store answers
+                # for the clock rather than for these numbers: the 14.08 20:10
+                # run started cost-free, the flag went True at 20:13, and
+                # SpotBrent's row landed at 20:17 stamped charge_costs True
+                # beside cost_r 0.0 over 1532 trades. The stamp exists to keep
+                # a cost-free score from being compared with a charged one, so
+                # a stamp that can lie is worse than none.
+                "charge_costs": bool(detail["charge_costs"])
+                if detail.get("charge_costs") is not None
+                else bool(getattr(getattr(self.store, "system", None),
+                                  "charge_costs", True)),
             }
         else:
             # No evidence came with this apply, so the evidence already on the
