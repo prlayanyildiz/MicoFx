@@ -404,8 +404,7 @@ class RiskManager:
     # ------------------------------------------------------------- gatekeeping
 
     def can_open(self, cfg: SymbolConfig, side: str, lot: float,
-                 positions: list[dict[str, Any]], account: dict[str, Any],
-                 sec_tickets: frozenset[int] = frozenset()) -> Verdict:
+                 positions: list[dict[str, Any]], account: dict[str, Any]) -> Verdict:
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
         mine = [p for p in positions if p["magic"] in magics]
@@ -425,19 +424,9 @@ class RiskManager:
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         cap = sys_cfg.max_scalp_positions if is_scalp_strategy(cfg.strategy) else sys_cfg.max_swing_positions
         if cap > 0:
-            def _bucket_strategy(p: dict[str, Any], c: SymbolConfig) -> str:
-                # store.symbols only ever holds the PRIMARY config; a position
-                # actually opened off the secondary signal shares the same
-                # magic, so by_magic alone always classified it as primary's
-                # family - letting a scalp secondary silently eat the swing
-                # bucket (or vice versa) instead of its own.
-                if p["ticket"] in sec_tickets and c.secondary_strategy:
-                    return c.secondary_strategy
-                return c.strategy
-
             bucket = sum(1 for p in mine
                          if (c := by_magic.get(p["magic"])) is not None
-                         and is_scalp_strategy(_bucket_strategy(p, c)) == is_scalp_strategy(cfg.strategy))
+                         and is_scalp_strategy(c.strategy) == is_scalp_strategy(cfg.strategy))
             if bucket >= cap:
                 kind = "scalp" if is_scalp_strategy(cfg.strategy) else "swing"
                 return Verdict(False, f"{kind} pozisyon limiti ({cap})")

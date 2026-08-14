@@ -315,18 +315,22 @@ def test_lot_for_risk_mode_fails_closed_without_tick_value():
     assert "tick" in note
 
 
-# --------------------------------------------------------------------------- can_open / ensemble bucket
+# --------------------------------------------------------------------------- can_open / position counts
 
-def test_can_open_counts_secondary_tagged_position_by_its_own_family():
-    # Primary is swing (st_trend), secondary is scalp (micro_rev), sharing one
-    # magic. One position is already open, opened off the SECONDARY signal.
+def test_can_open_symbol_limit_counts_every_ticket():
+    """Removing sec_tickets must not change the per-symbol stack count.
+
+    max_positions is the live honor (10 on the book). Tags never fed this
+    gate; only the scalp/swing bucket used them. Pin the symbol limit anyway
+    so a silent rewrite cannot hide behind the param deletion.
+    """
     store = _FakeStore()
-    store.system = _FakeSystem()  # fresh instance - do not mutate the shared class default
-    primary = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend",
-                   secondary_strategy="micro_rev", max_positions=5)
-    store.symbols = {"XAUUSD": primary}
-    store.system.max_scalp_positions = 1
-    store.system.max_swing_positions = 5
+    store.system = _FakeSystem()
+    cfg = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend",
+               secondary_strategy="micro_rev", max_positions=1)
+    store.symbols = {"XAUUSD": cfg}
+    store.system.max_scalp_positions = 10
+    store.system.max_swing_positions = 10
     store.system.max_total_positions = 10
     store.system.min_free_margin = 0.0
     store.system.max_margin_usage_pct = 0.0
@@ -335,15 +339,44 @@ def test_can_open_counts_secondary_tagged_position_by_its_own_family():
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
 
-    # New attempt is itself the scalp secondary - without sec_tickets telling
-    # can_open that ticket 100 is ALSO a scalp position (it shares magic 1
-    # with the swing primary), the scalp bucket reads 0/1 and this would
-    # wrongly be allowed to open a second scalp slot.
-    new_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="micro_rev", max_positions=5)
-    verdict = risk.can_open(new_cfg, "buy", 0.1, existing, account,
-                            sec_tickets=frozenset({100}))
-    assert not verdict.ok
-    assert "scalp" in verdict.reason
+    blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
+    assert not blocked.ok
+    assert "sembol pozisyon limiti" in blocked.reason
+
+    room = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=2)
+    store.symbols = {"XAUUSD": room}
+    allowed = risk.can_open(room, "buy", 0.1, existing, account)
+    assert allowed.ok
+
+
+def test_can_open_bucket_uses_primary_strategy_only():
+    """A leftover tagged ticket counts as the stored primary family.
+
+    The old sec_tickets path re-bucketed it as secondary_strategy (scalp).
+    """
+    store = _FakeStore()
+    store.system = _FakeSystem()
+    primary = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend",
+                   secondary_strategy="micro_rev", max_positions=5)
+    store.symbols = {"XAUUSD": primary}
+    store.system.max_scalp_positions = 1
+    store.system.max_swing_positions = 1
+    store.system.max_total_positions = 10
+    store.system.min_free_margin = 0.0
+    store.system.max_margin_usage_pct = 0.0
+
+    risk = RiskManager(store, _FakeClient())
+    existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
+    account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
+
+    scalp_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="micro_rev", max_positions=5)
+    scalp = risk.can_open(scalp_cfg, "buy", 0.1, existing, account)
+    assert scalp.ok  # leftover sits in the swing bucket now
+
+    swing_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=5)
+    swing = risk.can_open(swing_cfg, "buy", 0.1, existing, account)
+    assert not swing.ok
+    assert "swing" in swing.reason
 
 
 def test_can_open_allows_when_bucket_not_full():
@@ -362,8 +395,7 @@ def test_can_open_allows_when_bucket_not_full():
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
 
     new_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="micro_rev", max_positions=5)
-    verdict = risk.can_open(new_cfg, "buy", 0.1, existing, account,
-                            sec_tickets=frozenset({100}))
+    verdict = risk.can_open(new_cfg, "buy", 0.1, existing, account)
     assert verdict.ok
 
 

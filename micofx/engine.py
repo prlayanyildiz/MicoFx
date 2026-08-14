@@ -1423,8 +1423,7 @@ class Engine:
             state.entry_block = "lot"
             return
 
-        verdict = self.risk.can_open(cfg, side, lot, self._positions, account,
-                                     sec_tickets=frozenset(self._sec_tickets))
+        verdict = self.risk.can_open(cfg, side, lot, self._positions, account)
         if not verdict.ok:
             state.note = verdict.reason
             state.entry_block = _risk_block_key(verdict.reason)
