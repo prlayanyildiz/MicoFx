@@ -142,20 +142,45 @@ def cap_from_bands(bands: list[BandReading], current: float) -> tuple[float, str
     """
     if not bands:
         return current, "olcum yok - mevcut cap korundu"
-    baseline = bands[0].continuation
+    # Both readings have to agree. Continuation alone was the first version and
+    # it opened two gates it should not have: on the full series GER40's slope
+    # is -0.22pp and NAS100's band was empty, while a windowed read (4 x 5000
+    # bars) flipped GER40's sign in one window and US30's in three - and moving
+    # the horizon from 8 bars to 16 reversed GER40 outright. A signal that
+    # changes with the window is not a signal.
+    #
+    # net_atr - the follow-through actually left after paying the spread - is
+    # the quantity the gate is supposed to protect, and it decays on both of
+    # those symbols where continuation did not. Requiring the two to agree
+    # costs nothing when the case is real and refuses every case measured so
+    # far, which is the right answer for a book whose marginal bands priced
+    # out at -0.035 R (FRA40) and -0.126 R (US30).
+    base_cont, base_net = bands[0].continuation, bands[0].net_atr
     reached = None
     for band in bands[1:]:
-        if band.continuation < baseline:
+        if band.continuation < base_cont or band.net_atr < base_net:
             break
         reached = band
     if reached is None:
-        return current, (f"yon en ucuz bandin otesinde zayifliyor "
-                         f"(%{baseline * 100:.1f} -> %{bands[1].continuation * 100:.1f})"
-                         if len(bands) > 1 else "tek bant - cap degismedi")
+        if len(bands) < 2:
+            return current, "tek bant - cap degismedi"
+        nxt = bands[1]
+        which = ("yon" if nxt.continuation < base_cont else "net getiri")
+        return current, (f"{which} en ucuz bandin otesinde zayifliyor "
+                         f"(devam %{base_cont * 100:.1f} -> %{nxt.continuation * 100:.1f}, "
+                         f"net {base_net:+.3f} -> {nxt.net_atr:+.3f}) - cap degismedi")
     cap = round(min(MAX_CAP, max(MIN_CAP, reached.upper_ratio)), 2)
-    return cap, (f"{reached.name} bandina kadar yon tutuyor "
-                 f"(devam %{baseline * 100:.1f} -> %{reached.continuation * 100:.1f}, "
-                 f"net {reached.net_atr:+.3f} ATR)")
+    if cap <= current:
+        # The asymmetry, enforced rather than merely intended: a band that
+        # qualifies can still sit below the cap already in place, and returning
+        # it would narrow a live gate on a reading that was only ever trusted to
+        # widen one. GER40 is exactly that case - both readings hold through
+        # p50-p90, whose ceiling is 0.09 against a live 0.11.
+        return current, (f"{reached.name} tutuyor ama tavani mevcut cap'in altinda "
+                         f"({cap:g} <= {current:g}) - daraltilmadi")
+    return cap, (f"{reached.name} bandina kadar ikisi de tutuyor "
+                 f"(devam %{base_cont * 100:.1f} -> %{reached.continuation * 100:.1f}, "
+                 f"net {base_net:+.3f} -> {reached.net_atr:+.3f} ATR)")
 
 
 def calibrate(symbol: str, timeframe: str, bars, point: float,
