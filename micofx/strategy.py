@@ -53,7 +53,7 @@ class Params:
     # ---- adaptive cost-regime gate, shared by the scalping families ----
     cost_rank_max: float = 0.0       # 0 disables; percentile ceiling on cost/range
 
-    # ---- reversion regime ceiling (_regime + flow_rev) ----
+    # ---- reversion regime ceiling (_regime) ----
     adx_max: float = 0.0             # 0 disables; reversion dies in strong trends
 
     # ---- MACD histogram zero-cross ----
@@ -562,58 +562,6 @@ def _t3_stoch(cache: IndicatorCache, p: Params) -> Signals:
     buy[:warmup] = False
     sell[:warmup] = False
 
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
-def _flow_rev(cache: IndicatorCache, p: Params) -> Signals:
-    """Fade exhausted one-sided pressure using an OHLCV order-flow proxy.
-
-    MT5 gives tick counts, not a tape, so aggressor side is inferred from where
-    each bar closed inside its own range (close-location value) weighted by tick
-    volume. Summed over a window and standardised, an extreme reading means one
-    side has been leaning on the market hard - and the reliable part of that
-    signal is not the push but its failure: with ``flow_divergence`` on, price
-    must make a new extreme that the flow does *not* confirm, the classic
-    absorption/divergence pattern. Reversion needs a non-trending tape, which is
-    what ``adx_max`` enforces.
-    """
-    close = cache.close
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    run, z = cache.flow(p.flow_length)
-    htf_up, htf_down, _, _ = _trend_gate(cache, p)
-    regime = _regime(p, adx_series, close.size)
-
-    lo_p, hi_p = ind.rolling_min_max(close, max(2, int(p.flow_length)))
-    prev_hi = np.roll(hi_p, 1)
-    prev_lo = np.roll(lo_p, 1)
-    prev_hi[0], prev_lo[0] = hi_p[0], lo_p[0]
-
-    thr = max(0.5, float(p.flow_z))
-    # Buyers exhausted at the highs -> sell; sellers exhausted at the lows -> buy.
-    cost_gate = cache.cost_ok(p.cost_rank_max)
-    sell = regime & cost_gate & (z >= thr) & (close >= prev_hi)
-    buy = regime & cost_gate & (z <= -thr) & (close <= prev_lo)
-
-    if p.flow_divergence:
-        run_prev = np.roll(run, 1)
-        run_prev[0] = run[0]
-        # New price extreme that flow refuses to confirm.
-        sell &= run < run_prev
-        buy &= run > run_prev
-
-    if p.min_body_ratio > 0:
-        body = cache.body_ratio()
-        buy &= body >= p.min_body_ratio
-        sell &= body >= p.min_body_ratio
-
-    warmup = min(close.size, max(p.flow_length * 4, 220, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy = ind.first_of_run(buy)
-    sell = ind.first_of_run(sell)
     buy, sell = _resolve_conflicts(buy, sell)
     return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
                    htf_up=htf_up, htf_down=htf_down)
@@ -1186,42 +1134,6 @@ def _parabolic_flip(cache: IndicatorCache, p: Params) -> Signals:
     return Signals(t3=direction.astype(np.float64), k=zeros, d=zeros, atr=atr_series, adx=zeros,
                    buy=buy, sell=sell, htf_up=flat, htf_down=flat,
                    t3_kind="direction")
-
-
-def _trix_flip(cache: IndicatorCache, p: Params) -> Signals:
-    """TRIX zero-cross - the slow, triple-smoothed counterpart to the fast
-    flip families (t3_flip, macd_flip, wavetrend_flip, stoch_flip, st_trend,
-    parabolic_flip all react within a handful of bars; TRIX's three EMA
-    passes cost real lag on purpose, in exchange for filtering out the chop
-    those fast reads all still catch).
-
-    The line crossing zero (momentum turning from decelerating to
-    accelerating, or vice versa) is the entry - transition bar only, same
-    discipline as every other flip family here.
-    """
-    close = cache.close
-    size = close.size
-    line = cache.trix(p.trix_length)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-
-    above = line > 0
-    below = line < 0
-    was_above = np.roll(above, 1)
-    was_below = np.roll(below, 1)
-    was_above[0] = False
-    was_below[0] = False
-    buy = above & ~was_above
-    sell = below & ~was_below
-
-    warmup = min(size, max(p.trix_length * 12, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=zeros, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
 
 
 def _aroon_flip(cache: IndicatorCache, p: Params) -> Signals:

@@ -163,7 +163,7 @@ class SymbolConfig:
     # since the same spread is cheap at the cash open and ruinous at 23:00.
     cost_rank_max: float = 0.0       # 0 disables
 
-    # ---- reversion regime ceiling (_regime + flow_rev) ----
+    # ---- reversion regime ceiling (_regime) ----
     adx_max: float = 0.0             # reversion only; 0 disables
 
     # ---- MACD histogram zero-cross ----

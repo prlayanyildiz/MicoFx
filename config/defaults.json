@@ -352,7 +352,6 @@
     "strategies": [
       "micro_rev",
       "burst",
-      "flow_rev",
       "dual_t3",
       "mtf_pullback",
       "t3_flip",
@@ -362,7 +361,6 @@
       "wavetrend_flip",
       "stoch_flip",
       "parabolic_flip",
-      "trix_flip",
       "aroon_flip"
     ],
     "strategy_grids": {
@@ -433,42 +431,6 @@
           0.0,
           0.25,
           0.4
-        ]
-      },
-      "flow_rev": {
-        "flow_length": [
-          10,
-          20,
-          40
-        ],
-        "flow_z": [
-          1.5,
-          2.0,
-          2.5,
-          3.0
-        ],
-        "flow_divergence": [
-          false,
-          true
-        ],
-        "cost_rank_max": [
-          0.3,
-          0.5,
-          0.7
-        ],
-        "adx_max": [
-          0.0,
-          20.0,
-          25.0,
-          30.0
-        ],
-        "min_body_ratio": [
-          0.0,
-          0.25
-        ],
-        "atr_pct_min": [
-          0.0,
-          0.25
         ]
       },
       "mtf_pullback": {
@@ -841,38 +803,6 @@
           0.1,
           0.2,
           0.3
-        ],
-        "sl_atr_mult": [
-          1.0,
-          1.5,
-          2.0,
-          2.5,
-          3.0
-        ],
-        "trail_start_atr": [
-          0.3,
-          0.5,
-          0.8,
-          1.0,
-          1.4,
-          2.0
-        ],
-        "trail_step_atr": [
-          0.4,
-          0.6,
-          0.8,
-          1.2,
-          1.6,
-          2.2
-        ]
-      },
-      "trix_flip": {
-        "trix_length": [
-          9,
-          14,
-          18,
-          21,
-          27
         ],
         "sl_atr_mult": [
           1.0,
