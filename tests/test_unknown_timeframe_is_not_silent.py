@@ -71,15 +71,21 @@ def test_it_warns_once_per_name(monkeypatch):
     assert len(seen) == 1, "a poll loop must not flood the log"
 
 
-def test_m1_stays_wired_even_though_it_is_no_longer_offered():
-    """The fault was the middle state, not M1.
+def test_m1_is_gone_and_says_so(monkeypatch):
+    """Searched 14.08, removed on its numbers - and removed loudly.
 
-    M1 was searched on 14.08 and dropped on its numbers, but the wiring stayed:
-    a name that is fully wired and simply not offered is safe, while one that
-    is askable and unwired silently returns M5 bars under another label.
+    The old half-wired state was dangerous because both fallbacks were silent:
+    asking for M1 returned M5 bars measured on M5 arithmetic under an M1 label.
+    Both warn now, which is what makes taking the wiring back out safe rather
+    than a return to that trap.
     """
     assert "M1" not in TIMEFRAMES
-    assert mt5client.timeframe_seconds("M1") == 60
+
+    seen = []
+    monkeypatch.setattr(mt5client.LOG, "emit",
+                        lambda msg, level="INFO", symbol="": seen.append((msg, level)))
+    assert mt5client.timeframe_seconds("M1") == 300
+    assert seen and seen[0][1] == "WARN" and "M1" in seen[0][0]
 
 
 @pytest.mark.parametrize("name,secs", [("m5", 300), ("M15", 900), ("h1", 3600)])

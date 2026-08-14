@@ -90,7 +90,6 @@ def timeframe_const(name: str) -> int:
     # over a single bad row, so the fallback stays; it just no longer looks
     # like an ordinary resolution.
     table = {
-        "M1": mt5.TIMEFRAME_M1,
         "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
         "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1,
     }
@@ -122,7 +121,7 @@ def timeframe_seconds(name: str) -> int:
     nowhere - not in the MT5 map, not here - so adding it to TIMEFRAMES would
     have produced M5 data measured as M1 and reported as a real M1 result.
     """
-    table = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+    table = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
     key = str(name).upper()
     if key not in table:
         if key not in _TF_SECONDS_WARNED:

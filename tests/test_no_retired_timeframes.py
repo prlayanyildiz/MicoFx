@@ -30,7 +30,8 @@ from micofx import mt5client
 from micofx.models import TIMEFRAMES, uses_swing_exits
 
 # M1 left this list 14.08 - it is now wired and offered (see models.TIMEFRAMES).
-RETIRED = ("M3", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
+# M1 rejoined this list 14.08: wired and searched, then removed on its numbers.
+RETIRED = ("M1", "M3", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
 
 
 # ------------------------------------------------------ nothing resolves them
@@ -67,11 +68,7 @@ def test_no_timeframe_table_still_lists_a_retired_bar(module):
         encoding="utf-8")
     for table in _tables(source):
         named = set(re.findall(r"\"([A-Z]+\d+)\"", table))
-        # M1 is wired but not offered: it was searched, measured and dropped
-        # on 14.08, and the wiring deliberately stayed so a future attempt
-        # cannot land back in the half-wired state that served M5 bars under
-        # an M1 label. Wired-but-unoffered is safe; the reverse was not.
-        leftover = named - set(TIMEFRAMES) - {"M1"}
+        leftover = named - set(TIMEFRAMES)
         assert not leftover, f"{module}.py tablosunda kalinti: {sorted(leftover)}"
 
 

@@ -4,17 +4,18 @@ import math
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
-# M1 was wired and searched on 14.08, then dropped on its own numbers: with
-# costs charged its best XAUUSD candidate expected 0.099 R/trade against the
-# 0.121 the live M5 config already carries, and it pays 0.043 R/trade in cost
-# against M5's 0.024. It also cannot be compared fairly - max_bars caps M1 at
-# 90 days of history while every other timeframe gets the full 365, so an M1
-# candidate is scored on a quarter of the evidence.
+# M1 was wired and searched on 14.08, then removed entirely - it is noisier
+# than it is worth. With costs charged its best XAUUSD candidate expected
+# 0.099 R/trade against the 0.121 the live M5 config already carries, at
+# 0.043 R/trade of cost against M5's 0.024, and max_bars caps it at 90 days of
+# history where every other timeframe gets 365 - so its score was never
+# comparable either.
 #
-# The mt5client wiring (map entry + 60s) is deliberately LEFT IN PLACE. The
-# defect was never M1 itself, it was the half-wired state: named nowhere, yet
-# askable, so a request for it silently returned M5 bars measured as M5. Fully
-# wired but not offered is safe; offered but unwired was not.
+# The wiring went with it. What made the earlier half-wired state dangerous
+# was that both fallbacks were SILENT: asking for M1 returned M5 bars measured
+# on M5 arithmetic under an M1 label. Both now warn (see mt5client), so an
+# unwired name is refused loudly rather than quietly substituted - which is
+# what makes removing it safe rather than a return to the old trap.
 TIMEFRAMES = ["M5", "M15", "M30", "H1"]
 GROUPS = ["forex", "index", "commodity", "crypto"]
 
