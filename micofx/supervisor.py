@@ -349,8 +349,19 @@ class Supervisor:
         # The release stands; the proven-weak cases below still do not.
         released = float(getattr(verdict, "history_cleared_at", 0.0) or 0.0) > 0.0
         blocked_states = ("watch",) if released else ("watch", "idle")
+        # ...and "watch" needs evidence from the config that is running now.
+        # The watch label is built from the full 30-day window on purpose - a
+        # soft 0.6x sizing cut is allowed to remember a long record. This branch
+        # turns it into a hard refusal, and a hard stop is not allowed to run on
+        # a record the rest of this file already says belongs to a setup that no
+        # longer exists. With judged_trades at 0 there is nothing to refuse on:
+        # the re-search of 14.08 20:46 landed ten fresh configs, every judged
+        # count reset to 0, and the old configs' 30-day labels then held eight
+        # of them shut - so the book could never earn the evidence that would
+        # open it. The 0.6x cut below still applies; only the refusal waits.
         if (self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
-                and verdict.state in blocked_states):
+                and verdict.state in blocked_states
+                and (verdict.state != "watch" or verdict.judged_trades > 0)):
             return False, "AI: gunluk kayipta zayif/ispatlanmamis sembol bekliyor", 0.0
         if (self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
                 and verdict.trades >= int(self.settings["min_trades"])

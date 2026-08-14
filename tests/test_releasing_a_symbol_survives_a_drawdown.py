@@ -66,8 +66,15 @@ def test_a_symbol_nobody_judged_is_still_held():
 
 
 def test_a_proven_weak_symbol_is_still_held_even_after_a_release():
-    """Release does not buy a symbol out of a verdict the evidence rebuilt."""
-    allowed, _, _ = _gate(_sup(), _verdict("watch", cleared_at=1786728000.0))
+    """Release does not buy a symbol out of a verdict the evidence rebuilt.
+
+    The record that counts is the one made after the epoch the release stamped;
+    once those trades exist and the review has rebuilt "watch" on top of them,
+    the refusal stands whatever the operator pressed earlier.
+    """
+    v = _verdict("watch", cleared_at=1786728000.0)
+    v.judged_trades = 30
+    allowed, _, _ = _gate(_sup(), v)
     assert allowed is False, "watch is earned from trades after the epoch"
 
 
@@ -76,3 +83,29 @@ def test_none_of_this_applies_outside_a_drawdown():
     for state in ("idle", "watch"):
         allowed, _, _ = _gate(_sup(risk_scale=1.0), _verdict(state))
         assert allowed is True, f"{state} refused while the day is flat"
+
+
+def test_a_fresh_config_is_not_shut_out_by_the_old_ones_record():
+    """The deadlock seen right after the 14.08 20:46 re-search.
+
+    ``watch`` is built from the full 30-day window on purpose - a soft 0.6x
+    sizing cut may remember a long record. This branch turns it into a hard
+    refusal, and the ten fresh configs that landed at 20:46 reset every judged
+    count to 0. Eight symbols were then held shut on the previous configs'
+    labels, which is the "judge config B by config A's record" failure the rest
+    of supervisor.py exists to prevent - and it cannot resolve itself, because
+    a symbol that may not trade never earns the evidence that would open it.
+    """
+    v = _verdict("watch")
+    v.judged_trades = 0
+    allowed, _, _ = _gate(_sup(), v)
+    assert allowed is True, "no evidence about the config running now"
+
+
+def test_a_config_that_has_proven_weak_is_still_shut():
+    """Once the current config has its own record, the refusal stands."""
+    v = _verdict("watch")
+    v.judged_trades = 30
+    allowed, reason, _ = _gate(_sup(), v)
+    assert allowed is False
+    assert "ispatlanmamis" in reason
