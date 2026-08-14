@@ -6,4 +6,4 @@ numpy>=1.26.0
 
 # dev / test
 pytest>=8.0.0
-httpx2>=2.0.0          # Starlette TestClient (httpx fallback is deprecated)
+httpx>=0.28            # Starlette TestClient transport; 0.28 is what is installed

@@ -104,3 +104,113 @@ def test_the_day_boundary_still_uses_the_naive_encoding():
     assert "mktime" not in src, (
         "mktime returns a true epoch and would shift the trading day by the "
         "broker's whole UTC offset")
+
+
+# --------------------------------------------------------------- behaviour
+# The source assertions above are necessary but not sufficient: Cursor put the
+# local clock back while leaving broker_now() in place and
+# test_the_due_check_reads_the_broker_clock stayed green. These drive the real
+# decision instead.
+
+class _Bars:
+    def __init__(self, last_closed: int, n: int = 900):
+        import numpy as np
+        self.last_closed_time = last_closed
+        self.time = np.arange(last_closed - (n - 1) * 300, last_closed + 300, 300)
+        self.open = np.full(n, 100.0)
+        self.high = np.full(n, 100.5)
+        self.low = np.full(n, 99.5)
+        self.close = np.full(n, 100.0)
+        self.spread = np.full(n, 10.0)
+        self.volume = np.full(n, 1.0)
+
+    def __len__(self):
+        return len(self.close)
+
+
+class _Client:
+    """Broker clock three hours ahead of the machine's, as measured live."""
+
+    OFFSET = 10800
+
+    def __init__(self, last_closed: int):
+        self._last_closed = last_closed
+        self.bar_calls = 0
+
+    def broker_now(self):
+        import time
+        return time.time() + self.OFFSET
+
+    def server_now(self):
+        import time
+        return time.time()
+
+    def bars(self, symbol, timeframe, count):
+        self.bar_calls += 1
+        return _Bars(self._last_closed)
+
+    def info(self, symbol):
+        # Enough for the cost series _refresh_signals builds after the fetch.
+        return {"point": 0.01, "tick_value": 1.0, "tick_size": 0.01}
+
+
+def _engine(client) -> Engine:
+    eng = Engine.__new__(Engine)
+    eng.client = client
+    return eng
+
+
+def _state(next_bar_at: float, last_bar: int):
+    from micofx.engine import SymbolState
+    st = SymbolState("XAUUSD")
+    st.next_bar_at = next_bar_at
+    st.last_bar = last_bar
+    import time
+    st.last_fetch = time.time()          # not stale: only `due` can fire
+    return st
+
+
+def _params():
+    from micofx.models import SymbolConfig
+    from micofx.strategy import Params
+    return Params.from_config(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+                                           timeframe="M5"))
+
+
+def test_a_closed_bar_on_the_brokers_clock_triggers_a_refetch():
+    """The whole defect: next_bar_at is broker-stamped and had passed, but the
+    machine's clock is three hours behind it, so the old comparison said no."""
+    import time
+
+    from micofx.models import SymbolConfig
+
+    broker_last_closed = int(time.time() + _Client.OFFSET) - 60
+    client = _Client(broker_last_closed)
+    eng = _engine(client)
+    # next_bar_at already reached on the broker's clock, nowhere near it on ours.
+    state = _state(next_bar_at=time.time() + _Client.OFFSET - 30,
+                   last_bar=broker_last_closed - 300)
+
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+                                      timeframe="M5"), state, _params())
+
+    assert client.bar_calls == 1, (
+        "the bar closed on the clock that stamps it and nothing was fetched")
+
+
+def test_a_bar_that_has_not_closed_yet_does_not_refetch():
+    """The counterpart: `due` must still be able to say no."""
+    import time
+
+    from micofx.models import SymbolConfig
+
+    broker_last_closed = int(time.time() + _Client.OFFSET) - 60
+    client = _Client(broker_last_closed)
+    eng = _engine(client)
+    state = _state(next_bar_at=time.time() + _Client.OFFSET + 600,
+                   last_bar=broker_last_closed)
+
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+                                      timeframe="M5"), state, _params())
+
+    assert client.bar_calls == 0, "refetched a bar that has not closed"
