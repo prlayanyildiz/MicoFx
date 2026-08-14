@@ -172,9 +172,6 @@ class SymbolConfig:
     psar_af_step: float = 0.02
     psar_af_max: float = 0.2
 
-    # ---- TRIX zero-cross (slow, triple-smoothed) ----
-    trix_length: int = 14
-
     # ---- Aroon oscillator zero-cross ----
     aroon_length: int = 14
 
@@ -437,7 +434,7 @@ OPT_FIELDS = [
     "macd_fast", "macd_slow", "macd_signal",
     "wt_channel_len", "wt_avg_len",
     "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
-    "psar_af_step", "psar_af_max", "trix_length", "aroon_length",
+    "psar_af_step", "psar_af_max", "aroon_length",
 ]
 
 # flow_rev and trix_flip retired 14.08 on their own record: across 162 searched

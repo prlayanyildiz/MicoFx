@@ -69,9 +69,6 @@ class Params:
     psar_af_step: float = 0.02
     psar_af_max: float = 0.2
 
-    # ---- TRIX zero-cross (slow, triple-smoothed) ----
-    trix_length: int = 14
-
     # ---- Aroon oscillator zero-cross ----
     aroon_length: int = 14
 
@@ -130,7 +127,7 @@ class Params:
                 self.macd_fast, self.macd_slow, self.macd_signal,
                 self.wt_channel_len, self.wt_avg_len,
                 self.stoch_k_period, self.stoch_k_smooth, self.stoch_d_smooth,
-                self.psar_af_step, self.psar_af_max, self.trix_length,
+                self.psar_af_step, self.psar_af_max,
                 self.aroon_length)
 
 
@@ -161,15 +158,12 @@ class IndicatorCache:
         self._rank: dict[tuple, np.ndarray] = {}
         self._body: np.ndarray | None = None
         self._ema: dict[int, np.ndarray] = {}
-        self._flow: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._supertrend: dict[tuple, np.ndarray] = {}
         self._macd: dict[tuple, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
         self._wavetrend: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._stoch_slow: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._psar: dict[tuple, np.ndarray] = {}
-        self._trix: dict[int, np.ndarray] = {}
         self._aroon: dict[int, np.ndarray] = {}
-        self._delta: np.ndarray | None = None
         self._lists: tuple | None = None
         self._atr_lists: dict[int, list] = {}
         self.volume = volume if volume is not None else np.ones(close.size)
@@ -218,22 +212,6 @@ class IndicatorCache:
         if key not in self._ema:
             self._ema[key] = ind.ema(self.close, key)
         return self._ema[key]
-
-    # ---- order-flow proxy -------------------------------------------------
-
-    def delta(self) -> np.ndarray:
-        if self._delta is None:
-            self._delta = ind.delta_proxy(self.open, self.high, self.low,
-                                          self.close, self.volume)
-        return self._delta
-
-    def flow(self, length: int) -> tuple[np.ndarray, np.ndarray]:
-        """Trailing signed-volume sum and its z-score against its own history."""
-        key = (int(length), 200)
-        if key not in self._flow:
-            run = ind.rolling_sum(self.delta(), key[0])
-            self._flow[key] = (run, ind.zscore(run, key[1]))
-        return self._flow[key]
 
     def t3(self, length: int, vf: float) -> np.ndarray:
         key = (int(length), round(float(vf), 4))
@@ -293,12 +271,6 @@ class IndicatorCache:
         if key not in self._psar:
             self._psar[key] = ind.parabolic_sar(self.high, self.low, *key)
         return self._psar[key]
-
-    def trix(self, length: int) -> np.ndarray:
-        key = int(length)
-        if key not in self._trix:
-            self._trix[key] = ind.trix(self.close, key)
-        return self._trix[key]
 
     def aroon(self, length: int) -> np.ndarray:
         key = int(length)
@@ -1199,5 +1171,4 @@ def required_bars(p: Params) -> int:
                    (p.macd_slow + p.macd_signal) * 10,
                    (p.wt_channel_len + p.wt_avg_len) * 10,
                    (p.stoch_k_period + p.stoch_k_smooth + p.stoch_d_smooth) * 8,
-                   p.trix_length * 15,
                    p.aroon_length * 8))

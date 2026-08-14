@@ -142,7 +142,7 @@ _INDICATOR_PERIOD_BOUNDS = {
         "macd_fast", "macd_slow", "macd_signal",
         "wt_channel_len", "wt_avg_len",
         "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
-        "trix_length", "aroon_length", "adx_length", "atr_length",
+        "aroon_length", "adx_length", "atr_length",
         "trail_lookback",
     )
 }

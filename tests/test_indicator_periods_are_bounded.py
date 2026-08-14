@@ -47,7 +47,7 @@ def _check(patch):
 # ------------------------------------------------------------- the defect
 
 @pytest.mark.parametrize("field", ["t3_fast", "st_period", "rsi_length",
-                                   "macd_fast", "aroon_length", "trix_length"])
+                                   "macd_fast", "aroon_length"])
 def test_a_negative_period_is_refused(field):
     with pytest.raises(HTTPException) as exc:
         _check({field: -5})
