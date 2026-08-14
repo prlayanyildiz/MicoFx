@@ -2730,6 +2730,42 @@ class Engine:
         self._day_cache_at = time.time()
         return stats
 
+    def _states_view(self) -> dict[str, Any]:
+        """Per-symbol live state, plus what the spread costs against the edge.
+
+        ``expected_r`` (the holdout's edge per trade) and the live spread were
+        held in different places - the supervisor verdict and the symbol state -
+        so the one comparison that says whether a symbol can pay its own costs
+        needed a manual three-way join. Measured that way on 14.08 the book read:
+
+            beklenen kenar 0.058-0.212 R/islem   vs   spread 0.02-0.18 R/islem
+
+        Five of ten symbols had a spread at or above their entire expected edge -
+        negative before a tick moves - and nothing surfaced it. The cost gate
+        does not catch this: ``max_cost_pct_of_risk`` measures cost against R,
+        and R is 5-20x the edge, so a trade costing 17% of R clears an 18% gate
+        while spending more than twice what it expects to make.
+
+        ``edge_cover`` is cost / expected_r: below 1.0 the edge pays for the
+        spread, at 1.0 they cancel, above 1.0 the symbol is structurally short.
+        Reported, not enforced - what to do about it is a book decision (#30,
+        already measured and put to the operator once).
+        """
+        out: dict[str, Any] = {}
+        verdicts = getattr(self.supervisor, "verdicts", {}) or {}
+        for name, st in list(self.states.items()):
+            row = st.as_dict()
+            cfg = self.store.symbols.get(name)
+            atr = float(getattr(st, "atr", 0.0) or 0.0)
+            spread = float(getattr(st, "spread", 0.0) or 0.0)
+            stop = atr * float(cfg.sl_atr_mult) if cfg else 0.0
+            cost_r = (spread / stop) if stop > 0 else 0.0
+            expected = float(getattr(verdicts.get(name), "expected_r", 0.0) or 0.0)
+            row["cost_r"] = round(cost_r, 4)
+            row["edge_cover"] = round(cost_r / expected, 2) if expected > 0 else None
+            out[name] = row
+        return out
+
     def snapshot(self) -> dict[str, Any]:
         account = self.refresh_account()
         positions = self.positions_view()
@@ -2766,6 +2802,6 @@ class Engine:
             "reopt": self.reopt_status(),
             "execution": self.execution.stats(),
             "positions": positions,
-            "states": {s: st.as_dict() for s, st in list(self.states.items())},
+            "states": self._states_view(),
             "ai": self.supervisor.status(),
         }
