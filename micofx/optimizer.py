@@ -1224,6 +1224,74 @@ class Optimizer:
             LOG.emit(f"{symbol}: makas kalibrasyonu okunamadi ({exc}) - "
                      f"mevcut tavan korundu.", "OPT", symbol)
 
+    def _holdout_costed(self, symbol: str, timeframe: str, strategy: str,
+                        params: dict[str, Any]) -> dict[str, Any] | None:
+        """One charged replay of the winner on the holdout slice. Not a search.
+
+        Search may still run with ``charge_costs=False`` (#50). Live still
+        pays the spread, so the number that belongs next to a cost-free
+        apply is this one - same bars, same params, costs on.
+        """
+        cfg = self.store.symbols.get(symbol)
+        if cfg is None:
+            return None
+        info = self.client.info(symbol)
+        if not info or not (float(info.get("point") or 0) > 0):
+            return None
+        # Same bar count and the same number of segments the sweep just used,
+        # so ``edges[-2:]`` lands on the same slice. Fixed numbers here would
+        # make the log line beside this a false comparison: it names a paper
+        # expectancy and a charged one as "the same slice", and 8000 bars cut
+        # five ways is not the last fifth of 99000.
+        opt = self.store.opt_params() or {}
+        want = int(opt.get("max_bars") or 0) or 20000
+        segments = int(opt.get("segments") or 0) or 5
+        bars = self.client.bars(symbol, timeframe, want)
+        if bars is None or len(bars) < 800:
+            return None
+        n = len(bars)
+        if n < segments * 150:
+            return None
+        edges = [int(round(n * i / segments)) for i in range(segments + 1)]
+        lo, hi = edges[-2], edges[-1]
+        overlay = dict(cfg.to_dict())
+        overlay["timeframe"] = timeframe
+        overlay["strategy"] = strategy
+        overlay.update(params)
+        tmp = SymbolConfig.from_dict(overlay)
+        point = float(info["point"])
+        tf_seconds = timeframe_seconds(timeframe)
+        commission = backtest.commission_in_price(
+            tmp.commission_per_lot,
+            float(info.get("tick_value") or 0),
+            float(info.get("tick_size") or 0),
+        )
+        scale = self._spread_scale(symbol)
+        spread_price = bars.spread * point * scale
+        raw_spread_price = bars.spread * point
+        try:
+            min_stop = self.client.min_stop_distance(symbol)
+        except Exception:
+            min_stop = None
+        floor_const = float(min_stop) if min_stop else (point * 10.0)
+        min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
+        system = getattr(self.store, "system", None)
+        all_hours = bool(getattr(system, "trade_all_hours", False))
+        day_end = int(getattr(system, "day_end_flatten_min", 0) or 0)
+        tradable = backtest.session_mask(tmp, bars.time, all_hours)
+        flatten = backtest.flatten_mask(tmp, bars.time, all_hours, day_end)
+        from .strategy import IndicatorCache, Params, compute
+        p = Params.from_config(tmp)
+        cost_price = spread_price + float(commission)
+        cache = IndicatorCache(bars.high, bars.low, bars.close, bars.time, tf_seconds,
+                               bars.open, bars.volume, cost_price)
+        sig = compute(cache, p)
+        res = backtest.simulate(
+            cache, sig, bars.open, bars.spread, point, p, tradable,
+            lo, hi, commission,
+            spread_price=spread_price, min_stop=min_stop_series, flatten=flatten)
+        return res.as_dict()
+
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,
               timeframe: str | None = None, strategy: str | None = None) -> dict[str, Any]:
@@ -1303,6 +1371,26 @@ class Optimizer:
                 else bool(getattr(getattr(self.store, "system", None),
                                   "charge_costs", True)),
             }
+            # Search regime is the stamp above. This is a second, always-
+            # charged look at the same holdout so a cost-free winner that
+            # goes net-negative once spread is paid is visible without
+            # changing the apply decision (#50).
+            try:
+                costed = self._holdout_costed(
+                    symbol, next_tf, next_strat, applied_params)
+            except Exception:
+                costed = None
+            if costed is not None:
+                patch["opt_summary"]["holdout_costed"] = costed
+                paper = float((detail.get("holdout") or {}).get("expectancy") or 0.0)
+                charged = float(costed.get("expectancy") or 0.0)
+                if charged < 0:
+                    patch["opt_summary"]["costed_negative"] = True
+                    LOG.emit(
+                        f"{symbol}: maliyetsiz kâğıt {paper:+.3f}, "
+                        f"maliyetli ayni dilim {charged:+.3f} - "
+                        f"canli bu konfigi odeyerek isletecek.",
+                        "OPT", symbol)
         else:
             # No evidence came with this apply, so the evidence already on the
             # row may no longer describe what trades. Everything else here is

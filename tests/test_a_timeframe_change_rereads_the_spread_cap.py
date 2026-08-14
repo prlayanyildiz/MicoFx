@@ -144,3 +144,90 @@ def test_the_apply_path_calls_it():
     after = src[src.index("self._recalibrate_spread_cap(cfg.symbol"):]
     assert "uygulama reddedildi" not in after[:200], (
         "a refused apply must not trigger a recalibration")
+
+
+def _finish_plan(symbol="NAS100", timeframe="M5", strategy="micro_rev"):
+    from micofx.models import SymbolConfig
+
+    slice_ok = {
+        "trades": 80, "wins": 40, "losses": 40, "win_rate": 50.0,
+        "net_r": 20.0, "expectancy": 0.25, "profit_factor": 1.4,
+        "max_dd_r": 4.0, "score": 8.0, "cost_per_trade_r": 0.04,
+    }
+    cfg = SymbolConfig(symbol=symbol, magic=1, strategy="t3_stoch",
+                       timeframe="M15", sl_atr_mult=1.0)
+    cfg.opt_updated_at = 0.0
+    cfg.opt_summary = {}
+    return {
+        "cfg": cfg,
+        "started": 0.0,
+        "attempts": [{
+            "ok": True, "validated": True, "order": 0,
+            "timeframe": timeframe, "strategy": strategy,
+            "charge_costs": False,
+            "holdout_days": 30.0,
+            "best": {
+                "score": 9.0,
+                "params": {"sl_atr_mult": 1.2},
+                "selection": dict(slice_ok),
+                "validation": dict(slice_ok),
+                "holdout": dict(slice_ok),
+                "positive_ratio": 0.8,
+            },
+        }],
+    }
+
+
+def _finish_opt(apply_ok=True):
+    class Store:
+        def __init__(self):
+            self.symbols = {}
+
+        def opt_params(self):
+            return {}
+
+        def get_setting(self, key, default=None):
+            return default
+
+        def record_opt_run(self, *a, **k):
+            return None
+
+        def update_symbol(self, symbol, patch, source=""):
+            row = self.symbols[symbol]
+            for k, v in patch.items():
+                if v is not None:
+                    setattr(row, k, v)
+            return row
+
+    class Client:
+        connected = True
+
+        def positions(self, magic=None, symbol=None):
+            return []
+
+    store = Store()
+    opt = Optimizer(store=store, client=Client())
+    opt._force_apply = True
+    hooks = []
+    opt._recalibrate_spread_cap = lambda symbol, timeframe: hooks.append((symbol, timeframe))
+    if not apply_ok:
+        opt.apply = lambda *a, **k: {"ok": False, "error": "TF kilit"}
+    return opt, store, hooks
+
+
+def test_a_successful_apply_recalibrates_the_timeframe_that_landed():
+    opt, store, hooks = _finish_opt(apply_ok=True)
+    plan = _finish_plan()
+    store.symbols[plan["cfg"].symbol] = plan["cfg"]
+    report = opt._finish_symbol(plan, apply_best=True)
+    assert report.get("applied") is True, report
+    assert hooks == [("NAS100", "M5")], hooks
+
+
+def test_a_refused_apply_does_not_recalibrate():
+    opt, store, hooks = _finish_opt(apply_ok=False)
+    plan = _finish_plan()
+    store.symbols[plan["cfg"].symbol] = plan["cfg"]
+    report = opt._finish_symbol(plan, apply_best=True)
+    assert report.get("applied") is False
+    assert hooks == [], hooks
