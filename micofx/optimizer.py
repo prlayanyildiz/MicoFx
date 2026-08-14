@@ -19,6 +19,7 @@ from .models import (
     strategy_allows_timeframe, uses_swing_exits,
 )
 from .mt5client import Bars, MT5Client, timeframe_seconds
+from .spread_calibration import calibrate
 from .store import Store
 
 
@@ -780,6 +781,15 @@ class Optimizer:
                 report["keep_reason"] = apply_result.get("error", "uygulanamadi")
                 LOG.emit(f"{cfg.symbol}: uygulama reddedildi - "
                          f"{apply_result.get('error', '?')}", "OPT", cfg.symbol)
+            else:
+                # The spread ceiling is a ratio against ATR, so it means a
+                # different thing on every timeframe - a bigger ATR divides the
+                # same spread down. An apply that moves the timeframe therefore
+                # invalidates the cap it leaves behind, silently: the 14.08
+                # 21:17 run moved FRA40 from M30 to M5 and its cap went from
+                # cutting 1.5% of bars to cutting 57.9% without anything being
+                # written. Re-read here, off the timeframe that is now live.
+                self._recalibrate_spread_cap(cfg.symbol, report["timeframe"])
             # Secondary pick/store was removed 14.08 (operator): a runner-up
             # is no longer written. Existing secondary_* rows stay inert until
             # a later stage clears the fields; this path must not mint new ones.
@@ -1181,6 +1191,38 @@ class Optimizer:
                  f"(test skoru {new_score:.2f} < {old_score:.2f}), uygulanmadi.",
                  "OPT", cfg.symbol)
         return False
+
+    # Bars enough to rank the symbol's own spread distribution three ways; the
+    # calibration refuses to read anything shorter rather than set a live gate
+    # off a thin sample.
+    CALIBRATION_BARS = 20000
+
+    def _recalibrate_spread_cap(self, symbol: str, timeframe: str) -> None:
+        """Re-read ``max_spread_atr`` off the timeframe that is now live.
+
+        Never raises into the run: a failed reading leaves the cap where it is,
+        which is the same thing the calibration does when the bars are too thin
+        to read. Losing a calibration is not a reason to lose an apply.
+        """
+        try:
+            cfg = self.store.symbols.get(symbol)
+            if cfg is None:
+                return
+            bars = self.client.bars(symbol, timeframe, self.CALIBRATION_BARS)
+            info = self.client.info(symbol)
+            if bars is None or not info:
+                return
+            result = calibrate(symbol, timeframe, bars, float(info["point"]),
+                               float(getattr(cfg, "max_spread_atr", 0.0) or 0.0))
+            if abs(result.cap - float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)) < 1e-9:
+                return
+            self.store.update_symbol(symbol, {"max_spread_atr": result.cap},
+                                     source="spread kalibrasyonu")
+            LOG.emit(f"{symbol}: makas tavani {timeframe} icin yeniden okundu "
+                     f"-> {result.cap:g} ({result.reason})", "OPT", symbol)
+        except Exception as exc:                      # noqa: BLE001 - see docstring
+            LOG.emit(f"{symbol}: makas kalibrasyonu okunamadi ({exc}) - "
+                     f"mevcut tavan korundu.", "OPT", symbol)
 
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,
