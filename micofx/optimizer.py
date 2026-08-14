@@ -14,7 +14,7 @@ import numpy as np
 from . import backtest
 from .logbus import LOG
 from .models import (
-    EXIT_RISK_FIELDS, OPT_FIELDS, SECONDARY_FIELDS, STRATEGIES, STRATEGY_TIMEFRAMES,
+    EXIT_RISK_FIELDS, OPT_FIELDS, STRATEGIES, STRATEGY_TIMEFRAMES,
     SWING_GRID_OVERLAY, TIMEFRAMES, SymbolConfig, invalid_exit_param, is_scalp_strategy,
     strategy_allows_timeframe, uses_swing_exits,
 )
@@ -148,9 +148,9 @@ class Optimizer:
         # Wired late by run.py (engine.supervisor.optimizer = optimizer is the
         # same late-binding pattern) to Engine.entry_lock - constructed here
         # as a plain attribute, not a real lock, because Optimizer has no
-        # Engine reference at __init__ time and must not require one. apply()/
-        # apply_secondary() only take it when set, so tests and any other
-        # caller that never wires an engine keep working lock-free.
+        # Engine reference at __init__ time and must not require one. apply()
+        # only takes it when set, so tests and any other caller that never
+        # wires an engine keep working lock-free.
         self.entry_lock: threading.Lock | None = None
 
     @property
@@ -779,34 +779,9 @@ class Optimizer:
                 report["keep_reason"] = apply_result.get("error", "uygulanamadi")
                 LOG.emit(f"{cfg.symbol}: uygulama reddedildi - "
                          f"{apply_result.get('error', '?')}", "OPT", cfg.symbol)
-            # The runner-up is stored (never auto-traded) so the user can switch
-            # the symbol to two signals from the UI. Refreshed on every applied
-            # run, and cleared when this run found none, so a stale candidate can
-            # never outlive the primary it was measured against - but only when
-            # the primary actually landed. apply_secondary(None) *clears*, it
-            # does not skip, so calling it here when apply() itself refused
-            # would wipe out a perfectly good existing secondary over a primary
-            # change that never happened.
-            if applied:
-                second = self._pick_secondary(report, attempts)
-                sec_result = self.apply_secondary(cfg.symbol, second)
-                if not sec_result.get("ok"):
-                    # Primary already landed; surface secondary failure instead
-                    # of silently leaving a stale pairing / empty clear.
-                    report["secondary_error"] = sec_result.get(
-                        "error", "ikincil aday yazilamadi")
-                    LOG.emit(f"{cfg.symbol}: ikincil aday yazilamadi - "
-                             f"{report['secondary_error']}", "WARN", cfg.symbol)
-                report["secondary"] = (
-                    {"timeframe": second["timeframe"], "strategy": second["strategy"],
-                     "score": second["best"]["score"]} if second else None)
-                if second and sec_result.get("ok"):
-                    sec_hold = second["best"]["holdout"]
-                    LOG.emit(
-                        f"{cfg.symbol}: ikincil aday {second['strategy']}/{second['timeframe']} "
-                        f"saklandi | test {sec_hold['trades']} islem "
-                        f"PF {sec_hold['profit_factor']:.2f} net {sec_hold['net_r']:+.1f}R "
-                        f"(Semboller sekmesinden acilabilir)", "OPT", cfg.symbol)
+            # Secondary pick/store was removed 14.08 (operator): a runner-up
+            # is no longer written. Existing secondary_* rows stay inert until
+            # a later stage clears the fields; this path must not mint new ones.
 
         self.store.record_opt_run(cfg.symbol, score, {
             "timeframe": report["timeframe"], "strategy": report["strategy"],
@@ -1097,9 +1072,7 @@ class Optimizer:
             return "mevcut ayardan zayif"
         # Retention: a candidate can beat a weak/absent incumbent while still
         # having mostly evaporated out of sample - beating the incumbent says
-        # nothing about whether the edge itself is real. cfg=None (secondary
-        # screening in _pick_secondary) has no incumbent to beat above, so this
-        # is the only OOS-collapse check that pool gets.
+        # nothing about whether the edge itself is real.
         if not self._generalises(best, getattr(cfg, "symbol", "")):
             return "holdout kenari zayifladi (retention)"
         return ""
@@ -1207,178 +1180,6 @@ class Optimizer:
                  f"(test skoru {new_score:.2f} < {old_score:.2f}), uygulanmadi.",
                  "OPT", cfg.symbol)
         return False
-
-    def _pick_secondary(self, primary: dict[str, Any],
-                        attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
-        """Best validated candidate from a *different* family than the primary.
-
-        Two entries per symbol only help if they fire on different bars for
-        different reasons; a second timeframe of the same family is the same bet
-        sampled twice, so the family must differ. It has to clear exactly the
-        same gates the primary did - both out-of-sample slices, the consistency
-        ratio and the cost ceiling - because a weaker second signal does not add
-        opportunity, it dilutes the edge.
-        """
-        family = primary.get("strategy")
-        pool = [a for a in attempts
-                if a.get("ok") and a.get("validated") and a.get("strategy") != family
-                and self._is_improvement(None, a["best"])]
-        if not pool:
-            return None
-        return self._pick_by_validation(pool)
-
-    def apply_secondary(self, symbol: str, attempt: dict[str, Any] | None) -> dict[str, Any]:
-        """Store (or clear) the second signal. Never flips ``ensemble_enabled``."""
-        with (self.entry_lock if self.entry_lock is not None else contextlib.nullcontext()):
-            return self._apply_secondary_locked(symbol, attempt)
-
-    def _apply_secondary_locked(self, symbol: str, attempt: dict[str, Any] | None) -> dict[str, Any]:
-        """Body of apply_secondary() - callers must already hold entry_lock.
-
-        Split out so apply() can clear a stale secondary in the *same*
-        critical section as the primary write below, instead of releasing
-        the lock and re-acquiring it a moment later - the gap that let a
-        fresh secondary-tagged fill land under the old family/timeframe
-        pairing between the two writes.
-        """
-        cfg = self.store.symbols.get(symbol)
-        if cfg is None:
-            return {"ok": False, "error": "sembol yok"}
-        # Same reasoning as apply(): client.positions() reads [] on disconnect
-        # exactly like "nothing open", which would let live_tagged below fail
-        # closed as empty and skip the holdback - never actually verifying
-        # whether a secondary-tagged position is open.
-        if not self.client.connected:
-            return {"ok": False,
-                    "error": f"{symbol}: MT5 baglantisi yok, acik pozisyon dogrulanamiyor - "
-                             f"islem guvenlik icin reddedildi"}
-        next_identity = ((attempt["strategy"], attempt["timeframe"]) if attempt is not None
-                        else ("", ""))
-        identity_changing = (cfg.secondary_strategy, cfg.secondary_timeframe) != next_identity
-        tf_allow = self.store.opt_params().get("strategy_timeframes")
-        allow = tf_allow if isinstance(tf_allow, dict) else None
-        if attempt is not None and not strategy_allows_timeframe(
-                attempt["strategy"], attempt["timeframe"], allow):
-            # _pick_secondary only ranks already-searched attempts, and the
-            # search itself is TF-gated - this should not fire - but apply()
-            # enforces the same lock on the primary, so the secondary getting
-            # a free pass here would be the one place a dead pairing (one
-            # stored while an operator had that family pinned to a narrower set
-            # of bars) could still land, silently unusable the moment ensemble
-            # was switched on.
-            attempt = None
-        if attempt is None:
-            patch = {"secondary_strategy": "", "secondary_timeframe": "",
-                     "secondary_params": {}, "secondary_score": 0.0,
-                     "secondary_updated_at": 0.0, "secondary_summary": {}}
-        else:
-            best = attempt["best"]
-            params = {k: v for k, v in best["params"].items() if k in OPT_FIELDS}
-            # Same gate as apply(): engine.py builds the secondary signal's
-            # exit payload straight from this dict, so a broken exit model
-            # here drives a real position exactly like the primary one does.
-            bad = invalid_exit_param(params)
-            if bad:
-                LOG.emit(f"Ikincil cikis parametresi reddedildi: {bad}", "OPT", symbol)
-                return {"ok": False, "error": f"ikincil cikis parametresi gecersiz: {bad}"}
-            patch = {
-                "secondary_strategy": attempt["strategy"],
-                "secondary_timeframe": attempt["timeframe"],
-                "secondary_params": params,
-                "secondary_score": float(best["score"]),
-                "secondary_updated_at": time.time(),
-                "secondary_summary": {
-                    "holdout_retention": round(self.holdout_retention(best), 3),
-                    "holdout": best.get("holdout", {}),
-                    "validation": best.get("validation", {}),
-                    "selection": best.get("selection", {}),
-                    "positive_ratio": best.get("positive_ratio", 0.0),
-                    "params": params,
-                },
-            }
-        patch = {k: v for k, v in patch.items() if k in SECONDARY_FIELDS}
-        # Same reasoning as apply()'s pending_exit_patch default: this call is
-        # the new authoritative secondary candidate (or clears it entirely),
-        # so any earlier held-back refine is superseded unless the elif below
-        # holds one back again - otherwise a stale pending_secondary_exit_patch
-        # could get replayed on top of this by Engine._apply_pending_exits.
-        patch["pending_secondary_exit_patch"] = {}
-        # Caller (apply_secondary() or apply()) already holds entry_lock -
-        # held across the open-tagged-position check + the write so a fill
-        # cannot land in the gap between them (see Engine.entry_lock).
-        # secondary_tickets is engine-owned but persisted, so it is readable
-        # here without an engine reference.
-        tagged = {int(t) for t in (self.store.get_setting("secondary_tickets", []) or [])}
-        # A fill Engine._try_entry couldn't identify/close is a still-open
-        # secondary candidate too - it just has not made it into ``tagged``
-        # yet (or ever will, since Engine safety-closes it on sight). Gating
-        # only on ``tagged`` here meant that exact in-flight window - between
-        # a secondary fill landing and either its tag or its safety-close
-        # being recorded - let an identity swap through against a position
-        # neither this check nor manage_positions() could yet see as "ours".
-        orphan_tickets = {int(t) for t in (self.store.get_setting("secondary_orphan_tickets", []) or [])}
-        orphan_scan = self.store.get_setting("secondary_orphan_scan", {}) or {}
-        pending_scan = symbol in orphan_scan and int(orphan_scan[symbol].get("magic", -1)) == cfg.magic
-        watch_tickets = tagged | orphan_tickets
-        same_magic = self.client.positions(magic=cfg.magic) if watch_tickets else []
-        if watch_tickets and not self.client.connected:
-            # Same mid-call disconnect gap as apply(): this positions() call
-            # could have failed and returned [] regardless of what is really
-            # open, which would make live_tagged/live_orphan wrongly look empty.
-            return {"ok": False,
-                    "error": f"{symbol}: MT5 baglantisi koptu, acik ikincil pozisyon "
-                             f"dogrulanamadi - islem guvenlik icin reddedildi"}
-        live_tagged = [p for p in same_magic if p["ticket"] in tagged]
-        live_orphan = [p for p in same_magic if p["ticket"] in orphan_tickets]
-        if identity_changing:
-            # A position tagged secondary was opened, sized and its exits
-            # picked under the CURRENT secondary_strategy/timeframe's ATR.
-            # manage_positions() only falls back to the primary's exits
-            # once cfg.secondary_strategy is empty - clearing it takes
-            # effect immediately, but replacing it with a *different*
-            # family/TF would otherwise hand that same still-open ticket
-            # to a signal it was never opened or sized under, same hazard
-            # apply() guards for the primary. An unresolved orphan ticket or
-            # a still-in-progress orphan scan is the same risk before it is
-            # even tagged, so it holds the swap back too.
-            if live_tagged or live_orphan or pending_scan:
-                blocked = len(live_tagged) + len(live_orphan)
-                note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
-                return {"ok": False,
-                        "error": f"{symbol}: {blocked} acik ikincil-sinyal pozisyonu var{note}, "
-                                 f"ikincil strateji degistirilemedi (once kapanmasini bekleyin)"}
-        elif attempt is not None and (live_tagged or live_orphan or pending_scan):
-            # Same family/timeframe, just refined params ("refine"). Engine's
-            # manage_positions() re-reads cfg.secondary_params live every
-            # cycle via _secondary_config(), the same live-reread hazard
-            # apply() holds back exit/risk fields for on the primary side -
-            # this path had no equivalent holdback at all until now. L2: the
-            # identity-swap block above already treats live_orphan/pending_scan
-            # as equal risk to live_tagged (an unresolved/untracked fill is
-            # exactly the same "position under this magic may exist" hazard) -
-            # this elif only checked live_tagged, so a refine could sail
-            # through while an orphan ticket or scan window was still open.
-            sec_params = patch.get("secondary_params", {})
-            held_back = [k for k in sec_params if k in EXIT_RISK_FIELDS]
-            if held_back:
-                pending = {k: sec_params[k] for k in held_back}
-                patch["secondary_params"] = {k: v for k, v in sec_params.items()
-                                             if k not in EXIT_RISK_FIELDS}
-                if "secondary_summary" in patch:
-                    summary_params = {k: v for k, v in patch["secondary_summary"].get("params", {}).items()
-                                      if k not in EXIT_RISK_FIELDS}
-                    patch["secondary_summary"] = {**patch["secondary_summary"], "params": summary_params,
-                                                  "pending_exit_fields": sorted(held_back)}
-                patch["pending_secondary_exit_patch"] = pending
-                blocked = len(live_tagged) + len(live_orphan)
-                note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
-                LOG.emit(f"{symbol}: {blocked} acik ikincil-sinyal pozisyonu var{note}, "
-                         f"ikincil cikis/risk parametreleri ({', '.join(sorted(held_back))}) "
-                         f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)
-        # update_symbol drops None values, so an empty candidate has to be
-        # written as empty strings/dicts rather than None to actually clear.
-        updated = self.store.update_symbol(symbol, patch, source="opt ikincil")
-        return {"ok": updated is not None, "symbol": symbol}
 
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,
@@ -1506,7 +1307,7 @@ class Optimizer:
             # the entire reason the scan exists), so open_here alone would
             # read this magic as flat and skip both the family-swap block and
             # the exit/risk holdback below for a position that may still turn
-            # up. Same risk class apply_secondary() already guards for.
+            # up. Engine H1 orphan-scan is the remaining guard for that window.
             orphan_scan = self.store.get_setting("secondary_orphan_scan", {}) or {}
             pending_scan = (symbol in orphan_scan
                             and int(orphan_scan[symbol].get("magic", -1)) == cfg.magic)
@@ -1560,22 +1361,9 @@ class Optimizer:
                     LOG.emit(f"{symbol}: {len(open_here)} acik pozisyon var{scan_note}, "
                              f"cikis/risk parametreleri ({', '.join(sorted(held_back))}) "
                              f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)
-            # Clear the stale secondary BEFORE writing the new primary family.
-            # Doing it after update_symbol left a window where primary landed
-            # and a failed clear (disconnect mid-call) was ignored - apply
-            # still returned ok:True with the old secondary attached.
-            if primary_changed and cfg.has_secondary():
-                # Called inline (not via apply_secondary(), which re-acquires
-                # entry_lock and would deadlock on this plain Lock) so the
-                # clear lands in the SAME critical section as the primary
-                # write below.
-                sec_clear = self._apply_secondary_locked(symbol, None)
-                if not sec_clear.get("ok"):
-                    return {"ok": False,
-                            "error": sec_clear.get(
-                                "error",
-                                f"{symbol}: eski ikincil sinyal temizlenemedi - "
-                                f"aile degisikligi reddedildi"),
-                            "symbol": symbol, "config": None}
+            # Stale secondary_* rows are left in place (inert while ensemble
+            # is off). Clearing them is a later stage; this path must not call
+            # a secondary writer that no longer exists, and must not refuse a
+            # primary family swap because a leftover candidate is stored.
             updated = self.store.update_symbol(symbol, patch, source="opt apply")
         return {"ok": updated is not None, "symbol": symbol, "config": updated.to_dict() if updated else None}

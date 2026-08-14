@@ -515,171 +515,18 @@ def test_reject_reason_honours_configured_min_positive_ratio_above_default():
     assert opt.reject_reason(None, best) == "secim segmentleri arasinda tutarsiz"
 
 
-# --------------------------------------------------------------------------- apply_secondary guard
+# --------------------------------------------------------------------------- secondary pick removed (A1, 14.08)
 
-class _SecCfg:
-    def __init__(self, magic, secondary_strategy, secondary_timeframe):
-        self.magic = magic
-        self.secondary_strategy = secondary_strategy
-        self.secondary_timeframe = secondary_timeframe
+def test_optimizer_no_longer_picks_or_writes_a_secondary():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok.
 
-
-class _SecStore:
-    def __init__(self, cfg, tagged_tickets, orphan_tickets=None, orphan_scan=None):
-        self._cfg = cfg
-        self._tagged = tagged_tickets
-        self._orphan_tickets = orphan_tickets or []
-        self._orphan_scan = orphan_scan or {}
-        self.symbols = {"XAUUSD": cfg}
-        self.updated_with = None
-
-    def get_setting(self, key, default=None):
-        if key == "secondary_tickets":
-            return self._tagged
-        if key == "secondary_orphan_tickets":
-            return self._orphan_tickets
-        if key == "secondary_orphan_scan":
-            return self._orphan_scan
-        return default
-
-    def opt_params(self):
-        return {}
-
-    def update_symbol(self, symbol, patch, source=""):
-        self.updated_with = patch
-        for k, v in patch.items():
-            setattr(self._cfg, k, v)
-        return self._cfg
-
-
-class _SecClient:
-    connected = True
-
-    def __init__(self, positions):
-        self._positions = positions
-
-    def positions(self, magic=None, symbol=None):
-        return [p for p in self._positions if magic is None or p["magic"] == magic]
-
-
-def test_apply_secondary_refuses_family_change_with_open_tagged_position():
-    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
-    store = _SecStore(cfg, tagged_tickets=[100])
-    client = _SecClient([{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}])
-    opt = Optimizer(store=store, client=client)
-
-    new_attempt = {"strategy": "burst", "timeframe": "M5",
-                   "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
-                            "selection": {}, "positive_ratio": 1.0}}
-    result = opt.apply_secondary("XAUUSD", new_attempt)
-    assert result["ok"] is False
-    assert cfg.secondary_strategy == "micro_rev"  # unchanged
-
-
-def test_apply_secondary_allows_family_change_with_no_open_tagged_position():
-    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
-    store = _SecStore(cfg, tagged_tickets=[])
-    client = _SecClient([])
-    opt = Optimizer(store=store, client=client)
-
-    new_attempt = {"strategy": "burst", "timeframe": "M5",
-                   "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
-                            "selection": {}, "positive_ratio": 1.0}}
-    result = opt.apply_secondary("XAUUSD", new_attempt)
-    assert result["ok"] is True
-    assert store.updated_with["secondary_strategy"] == "burst"
-
-
-def test_apply_secondary_clear_refused_with_open_tagged_position():
-    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
-    store = _SecStore(cfg, tagged_tickets=[100])
-    client = _SecClient([{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}])
-    opt = Optimizer(store=store, client=client)
-
-    result = opt.apply_secondary("XAUUSD", None)
-    assert result["ok"] is False
-    assert cfg.secondary_strategy == "micro_rev"  # unchanged
-
-
-def test_apply_secondary_refuses_family_change_with_open_orphan_ticket():
-    # tagged_tickets empty (never made it into the persisted tag set), but
-    # engine.py's H1 orphan tracking still knows about this ticket - identity
-    # swap must be held back just like a tagged position would.
-    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
-    store = _SecStore(cfg, tagged_tickets=[], orphan_tickets=[100])
-    client = _SecClient([{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}])
-    opt = Optimizer(store=store, client=client)
-
-    new_attempt = {"strategy": "burst", "timeframe": "M5",
-                   "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
-                            "selection": {}, "positive_ratio": 1.0}}
-    result = opt.apply_secondary("XAUUSD", new_attempt)
-    assert result["ok"] is False
-    assert cfg.secondary_strategy == "micro_rev"  # unchanged
-
-
-def test_apply_secondary_refuses_family_change_with_pending_orphan_scan():
-    # A fill just landed and Engine hasn't found its ticket at all yet (0
-    # candidates so far) - the symbol-level scan entry alone must block, even
-    # before any concrete ticket number exists to check against positions().
-    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
-    store = _SecStore(cfg, tagged_tickets=[],
-                      orphan_scan={"XAUUSD": {"magic": 1, "known": [], "since": 0.0}})
-    client = _SecClient([])
-    opt = Optimizer(store=store, client=client)
-
-    new_attempt = {"strategy": "burst", "timeframe": "M5",
-                   "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
-                            "selection": {}, "positive_ratio": 1.0}}
-    result = opt.apply_secondary("XAUUSD", new_attempt)
-    assert result["ok"] is False
-    assert cfg.secondary_strategy == "micro_rev"  # unchanged
-
-
-def test_apply_secondary_allows_family_change_when_orphan_belongs_to_other_symbol():
-    # The pending scan is for a different symbol/magic entirely - must not
-    # block this one.
-    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
-    store = _SecStore(cfg, tagged_tickets=[],
-                      orphan_scan={"EURUSD": {"magic": 2, "known": [], "since": 0.0}})
-    client = _SecClient([])
-    opt = Optimizer(store=store, client=client)
-
-    new_attempt = {"strategy": "burst", "timeframe": "M5",
-                   "best": {"params": {}, "score": 5.0, "holdout": {}, "validation": {},
-                            "selection": {}, "positive_ratio": 1.0}}
-    result = opt.apply_secondary("XAUUSD", new_attempt)
-    assert result["ok"] is True
-    assert store.updated_with["secondary_strategy"] == "burst"
-
-
-def test_apply_secondary_refuses_when_disconnected():
-    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
-    store = _SecStore(cfg, tagged_tickets=[])
-    client = _SecClient([])
-    client.connected = False
-    opt = Optimizer(store=store, client=client)
-
-    result = opt.apply_secondary("XAUUSD", None)
-    assert result["ok"] is False
-    assert store.updated_with is None
-
-
-def test_apply_secondary_refuses_mid_call_disconnect_with_watch_tickets():
-    cfg = _SecCfg(magic=1, secondary_strategy="micro_rev", secondary_timeframe="M5")
-    store = _SecStore(cfg, tagged_tickets=[100])
-
-    class _Flip:
-        connected = True
-
-        def positions(self, magic=None, symbol=None):
-            self.connected = False
-            return []
-
-    opt = Optimizer(store=store, client=_Flip())
-    result = opt.apply_secondary("XAUUSD", None)
-    assert result["ok"] is False
-    assert store.updated_with is None
+    These used to pin apply_secondary() identity-swap / orphan / disconnect
+    guards. That writer is gone; the replacement pin is that the methods
+    themselves are absent so a search cannot mint a new candidate.
+    """
+    assert not hasattr(Optimizer, "apply_secondary")
+    assert not hasattr(Optimizer, "_pick_secondary")
+    assert not hasattr(Optimizer, "_apply_secondary_locked")
 
 
 # --------------------------------------------------------------------------- DailyGuard loss_halted

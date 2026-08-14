@@ -4,7 +4,7 @@ no HTTP handler in front of them.
 test_symbol_risk_bounds / test_opt_apply_validation cover the request bodies.
 This file covers the two paths a request never touches:
 
-- Optimizer.apply() / apply_secondary(), which the auto-apply path of a search
+- Optimizer.apply(), which the auto-apply path of a search
   run reaches directly. The search grid is user-editable, so a poisoned axis
   could be searched, win on score, and be written straight to a live symbol.
 - POST /api/opt/params, which sets that grid - refused at the point it is set,

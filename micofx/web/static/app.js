@@ -640,15 +640,6 @@ const SECTIONS = [
     ],
   },
   {
-    title: "Ikinci Sinyal (Ensemble)",
-    fields: [
-      {
-        k: "ensemble_enabled", t: "bool",
-        label: "Optimizasyonun sakladigi ikinci (farkli aile) sinyali de kullan",
-      },
-    ],
-  },
-  {
     title: "Sinyal (T3 + Stochastic RSI)",
     fields: [
       { k: "t3_length", t: "int", label: "T3 uzunluk", min: 2, max: 60 },
@@ -859,50 +850,6 @@ function buildDayPicker(cfg) {
   return wrap;
 }
 
-function renderSecToggle(card, cfg) {
-  const btn = $(`[data-sec-toggle="${cfg.symbol}"]`, card);
-  if (!btn) return;
-  const has = !!(cfg.secondary_strategy && cfg.secondary_timeframe);
-  // No stored candidate means there is nothing to switch on - hide rather than
-  // offer a button that would save a flag the engine then ignores.
-  btn.style.display = has ? "" : "none";
-  if (!has) return;
-  const on = !!cfg.ensemble_enabled;
-  const h = (cfg.secondary_summary || {}).holdout || {};
-  btn.classList.toggle("on", on);
-  btn.textContent = on ? "2. sinyal ACIK" : "2. sinyal kapali";
-  btn.title = on
-    ? `${cfg.secondary_strategy}/${cfg.secondary_timeframe} da giris uretiyor.`
-      + ` Dokunulmamis test: ${h.trades ?? "-"} islem, PF ${num(h.profit_factor, 2)},`
-      + ` net ${signed(h.net_r, 1)}R. Kapatmak icin tikla.`
-    : `Saklanmis aday: ${cfg.secondary_strategy}/${cfg.secondary_timeframe}.`
-      + ` Dokunulmamis test (TEK BASINA kostugu tarama): ${h.trades ?? "-"} islem,`
-      + ` PF ${num(h.profit_factor, 2)}, net ${signed(h.net_r, 1)}R.`
-      + ` Acmak icin tikla - ayni sembolde ikinci bir sinyal daha giris uretir,`
-      + ` ayni pozisyon limitlerini ve marji birincille paylasarak.`;
-}
-
-function secondaryNote(cfg) {
-  if (!cfg.secondary_strategy || !cfg.secondary_timeframe) {
-    return "Dogrulanmis ikinci aday yok. Bir optimizasyon kosusu birincil ayarlari "
-      + "uyguladiginda, farkli bir strateji ailesinden ve ayni OOS kapilarini gecen "
-      + "en iyi aday buraya yazilir.";
-  }
-  const h = (cfg.secondary_summary || {}).holdout || {};
-  const when = cfg.secondary_updated_at
-    ? new Date(cfg.secondary_updated_at * 1000).toLocaleDateString("tr-TR")
-    : "-";
-  return `Aday: <b>${esc(STRATEGY_LABEL[cfg.secondary_strategy] || cfg.secondary_strategy)}</b>`
-    + ` / ${esc(cfg.secondary_timeframe)} - skor ${num(cfg.secondary_score, 2)}`
-    + ` | dokunulmamis test ${h.trades != null ? h.trades : "-"} islem`
-    + ` PF ${num(h.profit_factor, 2)} net ${signed(h.net_r, 1)}R (${when}).`
-    + " Acikken iki sinyal de giris uretebilir; ayni anda ters yone bakarlarsa bar atlanir."
-    + " <b>Dikkat:</b> yukaridaki test rakamlari bu adayin TEK BASINA kostugu"
-    + " taramadan geliyor. Canlida birincil sinyalle ayni sembol pozisyon limitini,"
-    + " ayni hesap limitini ve ayni marji paylasacak - yani ikisi birlikte, ayri ayri"
-    + " olctugumuz toplamdan daha az islem acabilir.";
-}
-
 function buildSymbolCard(cfg) {
   const card = el("div", { class: "scard", "data-symbol": cfg.symbol });
 
@@ -910,21 +857,6 @@ function buildSymbolCard(cfg) {
   toggle.checked = !!cfg.enabled;
   toggle.addEventListener("click", (e) => e.stopPropagation());
   toggle.addEventListener("change", () => saveSymbol(cfg.symbol, { enabled: toggle.checked }));
-
-  // Second signal, switchable from the list without opening the card. The
-  // same ensemble_enabled field the advanced block below edits - this is the
-  // shortcut, not a second setting. Only rendered for a symbol that actually
-  // has a validated candidate stored; anywhere else the button would be a
-  // switch with nothing behind it.
-  const secBtn = el("button", {
-    class: "btn btn-sm sec-toggle",
-    "data-sec-toggle": cfg.symbol,
-    onclick: (e) => {
-      e.stopPropagation();
-      const now = !SYMBOLS.find((s) => s.symbol === cfg.symbol)?.ensemble_enabled;
-      saveSymbol(cfg.symbol, { ensemble_enabled: now }, secBtn);
-    },
-  });
 
   const head = el("div", { class: "scard-head" }, [
     el("span", { class: "caret", text: "\u25B6" }),
@@ -935,7 +867,6 @@ function buildSymbolCard(cfg) {
         el("div", { class: "desc", text: cfg.description || "" }),
       ]),
       el("span", { class: `pill ${cfg.group}`, text: GROUP_LABEL[cfg.group] || cfg.group }),
-      secBtn,
     ]),
     el("div", { class: "scard-live" }),
   ]);
@@ -959,9 +890,6 @@ function buildSymbolCard(cfg) {
       el("div", { class: "title", text: section.title }),
       el("div", { class: "form-grid" }, section.fields.map((f) => buildField(cfg, f))),
     ]);
-    if (section.title === "Ikinci Sinyal (Ensemble)") {
-      grid.appendChild(el("div", { class: "panel-note", "data-sec-note": cfg.symbol }));
-    }
     advDetails.appendChild(grid);
   });
   body.appendChild(advDetails);
@@ -1049,10 +977,6 @@ function updateSymbolCards() {
       if (input.type === "checkbox") input.checked = !!cfg[key];
       else if (String(input.value) !== String(cfg[key])) input.value = cfg[key];
     });
-
-    const secNote = $(`[data-sec-note="${cfg.symbol}"]`, card);
-    if (secNote) secNote.innerHTML = secondaryNote(cfg);
-    renderSecToggle(card, cfg);
 
     const st = states[cfg.symbol] || {};
     const sess = st.session || {};

@@ -136,8 +136,14 @@ def test_apply_refuses_mid_call_disconnect_after_positions():
     assert store.updated_with is None
 
 
-def test_apply_family_swap_aborts_when_secondary_clear_fails():
-    # Primary must not land if clearing the stale secondary pairing fails.
+def test_apply_family_swap_does_not_depend_on_secondary_clear():
+    """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok.
+
+    apply() used to refuse a primary family swap when clearing a stored
+    secondary pairing failed. That writer is gone; a leftover secondary_*
+    row must not block the primary apply. The fields stay on the row until
+    a later stage clears them.
+    """
     cfg = SymbolConfig(
         symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15",
         ensemble_enabled=True, secondary_strategy="micro_rev",
@@ -146,14 +152,10 @@ def test_apply_family_swap_aborts_when_secondary_clear_fails():
     store = _Store(cfg)
     opt = Optimizer(store=store, client=_Client(positions=[]))
 
-    def _fail_clear(symbol, attempt):
-        return {"ok": False, "error": f"{symbol}: secondary clear failed"}
-
-    opt._apply_secondary_locked = _fail_clear  # type: ignore[method-assign]
-
     result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0,
                        strategy="burst", timeframe="M5")
 
-    assert result["ok"] is False
-    assert cfg.strategy == "t3_stoch"
-    assert store.updated_with is None
+    assert result["ok"] is True
+    assert cfg.strategy == "burst"
+    assert cfg.secondary_strategy == "micro_rev"  # leftover, not rewritten
+    assert not hasattr(opt, "_apply_secondary_locked")
