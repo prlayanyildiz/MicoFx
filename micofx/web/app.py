@@ -739,6 +739,39 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             return set()
         return {p["magic"] for p in _positions() if p["ticket"] in tickets}
 
+    def _recent_deal_magics() -> set[int]:
+        """Magics that closed a trade inside the supervisor's evidence window.
+
+        A magic freed by deleting a symbol still owns that symbol's closed
+        deals, and both readers resolve a deal to a symbol *through* the magic
+        - engine.day_stats() and supervisor.review(). Hand the number to a new
+        symbol and it opens carrying wins and losses it never made.
+
+        Measured 15.08 on the live account: the book holds ten magics, the
+        first free number next_magic would return is 990101, and 990101 has 21
+        closed deals in the last thirty days. Nineteen other numbers in the
+        band it walks are in the same state, and 1082 magics across the window
+        have no symbol in the book at all.
+
+        The window is the supervisor's ``lookback_days``, not today. The
+        per-magic guard below reasoned "only today's deals matter"; that is
+        wrong for the half of the problem the supervisor owns, whose window is
+        thirty days by default.
+
+        Refuses rather than answering ``set()`` while disconnected: a dropped
+        link returns an empty deal list exactly as a quiet month does, so a
+        silent empty answer here would certify a dirty magic as clean. That is
+        the same silent-substitution failure this codebase has already been
+        bitten by three times, and the one direction this guard must never be
+        wrong in. ``_reject_magic_assignment_if_disconnected_orphans`` does not
+        cover it - that gate only fires when orphan tickets exist.
+        """
+        _require_connected()
+        days = float((store.get_setting("supervisor", {}) or {}).get("lookback_days") or 30)
+        since = time.time() - max(1.0, days) * 86400.0
+        return {int(d.get("magic", 0)) for d in client.deals_since(since)
+                if int(d.get("magic", 0)) > 0}
+
     def _magic_blocked_by_orphan_state(new_magic: int) -> str | None:
         """Human message if ``new_magic`` is still owned by orphan scan/tickets.
 
@@ -918,7 +951,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 # disconnect) - the previous ``if connected else None`` ternary
                 # dropped avoid_magics on a TOCTOU disconnect and let next_magic
                 # land on a live orphan-ticket magic.
-                avoid_magics=_orphan_ticket_magics(),
+                avoid_magics=_orphan_ticket_magics() | _recent_deal_magics(),
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -1446,7 +1479,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # so the same reuse risk as create_symbol() applies.
             _reject_magic_assignment_if_disconnected_orphans()
             updated = store.reset_symbol_to_preset(
-                symbol, avoid_magics=_orphan_ticket_magics())
+                symbol,
+                avoid_magics=_orphan_ticket_magics() | _recent_deal_magics())
         if updated is None:
             raise HTTPException(404, f"{symbol} icin varsayilan yok")
         LOG.emit("Ayarlar varsayilana dondu.", "INFO", symbol)
@@ -1705,7 +1739,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _reject_magic_assignment_if_disconnected_orphans()
             count = store.seed_symbols(
                 overwrite=False,
-                avoid_magics=_orphan_ticket_magics(),
+                avoid_magics=_orphan_ticket_magics() | _recent_deal_magics(),
             )
         return {"ok": True, "seeded": count, "symbols": symbol_payload(force=True),
                 "system": store.system.to_dict()}

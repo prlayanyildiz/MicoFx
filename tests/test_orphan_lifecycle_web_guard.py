@@ -105,9 +105,16 @@ class _FakeStore:
 
 
 class _FakeClient:
-    def __init__(self, positions, connected=True):
+    def __init__(self, positions, connected=True, deals=None):
         self._positions = positions
         self.connected = connected
+        # Closed deals the broker still remembers. A magic that appears here
+        # must never be handed to a new symbol - see
+        # test_a_fresh_magic_carries_no_history.
+        self._deals = list(deals or [])
+
+    def deals_since(self, since):
+        return [d for d in self._deals if d.get("time", 0) >= since]
 
     def positions(self, magic=None, symbol=None):
         out = self._positions
@@ -340,7 +347,17 @@ def test_create_symbol_refused_when_disconnected_with_orphan_tickets():
     assert "EURUSD" not in fake_store.symbols
 
 
-def test_create_symbol_allowed_when_disconnected_without_orphan_tickets():
+def test_create_symbol_refused_when_disconnected_even_without_orphan_tickets():
+    """Adding while disconnected used to be allowed; it cannot be.
+
+    A fresh magic is only safe if it carries no closed deals, and the broker is
+    the only place that record lives. Disconnected, ``deals_since`` answers []
+    for "no link" exactly as it does for "quiet month", so allowing the add
+    would certify an unverified number as clean - and 990101, the very next
+    number the counter reaches, held 21 closed deals when this was measured.
+    Configuring offline is not urgent; inheriting a deleted symbol's record is
+    not reversible.
+    """
     fake_client = _FakeClient([], connected=False)
     fake_engine = _FakeEngine()
     fake_store = _FakeStore({})
@@ -349,8 +366,8 @@ def test_create_symbol_allowed_when_disconnected_without_orphan_tickets():
 
     res = tc.post("/api/symbols", json={"symbol": "EURUSD"})
 
-    assert res.status_code == 200
-    assert "EURUSD" in fake_store.symbols
+    assert res.status_code == 503
+    assert "EURUSD" not in fake_store.symbols
 
 
 def test_reset_recreate_refused_when_disconnected_with_orphan_tickets():
@@ -395,7 +412,15 @@ def test_soft_seed_refused_when_disconnected_with_orphan_tickets():
     assert res.status_code == 409
 
 
-def test_soft_seed_allowed_when_disconnected_without_orphan_tickets():
+def test_soft_seed_refused_when_disconnected_even_without_orphan_tickets():
+    """Seeding mints magics too, so it inherits the same rule as create.
+
+    Same reasoning as
+    test_create_symbol_refused_when_disconnected_even_without_orphan_tickets:
+    a magic can only be certified clean against the broker's closed-deal
+    history, and disconnected that history reads as empty rather than as
+    unavailable.
+    """
     fake_client = _FakeClient([], connected=False)
     fake_engine = _FakeEngine()
     fake_store = _FakeStore({})
@@ -404,7 +429,7 @@ def test_soft_seed_allowed_when_disconnected_without_orphan_tickets():
 
     res = tc.post("/api/symbols-seed", params={"overwrite": "false"})
 
-    assert res.status_code == 200
+    assert res.status_code == 503
 
 
 # ----------------------------------------------- NOT-W mid-call disconnect
