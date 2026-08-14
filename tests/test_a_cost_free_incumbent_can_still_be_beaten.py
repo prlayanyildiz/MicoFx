@@ -102,7 +102,7 @@ def test_apply_stamps_the_assumption_it_measured_under():
     assert '"charge_costs": bool(detail["charge_costs"])' in OPTIMIZER_SRC, (
         "ozete damga yazilmiyor - kiyas bir sonraki turda yine kor kalir")
     stamp = OPTIMIZER_SRC.index('"charge_costs": bool(detail["charge_costs"])')
-    scale = OPTIMIZER_SRC.index('"spread_scale": round(self._spread_scale')
+    scale = OPTIMIZER_SRC.index('"spread_scale": round(float(detail["spread_scale"])')
     # Both stamps carry long comments explaining why they exist, so this bound
     # is about them sharing one summary block, not about line count.
     assert abs(stamp - scale) < 1600, "damga spread_scale ile ayni blokta olmali"

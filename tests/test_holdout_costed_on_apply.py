@@ -149,3 +149,18 @@ def test_the_charged_slice_is_the_one_the_sweep_used():
     body = src[src.index("opt = self.store.opt_params()"):]
     assert "self.client.bars(symbol, timeframe, want)" in body, (
         "a hardcoded window would make the comparison false")
+
+
+def test_spread_scale_on_the_row_is_the_sweeps_not_the_live_clock():
+    cfg = _cfg()
+    store = _Store(cfg)
+    opt = Optimizer(store=store, client=_Client())
+    opt._holdout_costed = lambda *a, **k: None
+    opt._spread_scale = lambda symbol: 9.0
+    result = opt.apply(
+        "FRA40", {"sl_atr_mult": 2.4}, score=9.9,
+        detail={**_detail(), "spread_scale": 0.41},
+        timeframe="M15", strategy="t3_stoch")
+    assert result["ok"] is True, result
+    assert cfg.opt_summary["spread_scale"] == 0.41
+    assert cfg.opt_summary["charge_costs"] is False

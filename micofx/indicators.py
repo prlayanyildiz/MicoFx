@@ -162,19 +162,6 @@ def close_location_value(open_: np.ndarray, high: np.ndarray, low: np.ndarray,
     return np.where(span > 1e-12, clv, 0.0)
 
 
-def delta_proxy(open_: np.ndarray, high: np.ndarray, low: np.ndarray, close: np.ndarray,
-                volume: np.ndarray) -> np.ndarray:
-    """Signed volume proxy: close-location value weighted by (tick) volume.
-
-    Honest about its limits - MT5 gives tick counts, not traded size, and this
-    infers aggressor side from candle shape rather than from the tape. It still
-    separates bars where volume arrived *into* a direction from bars where the
-    same volume produced a rejection wick.
-    """
-    vol = np.where(volume > 0, volume.astype(np.float64), 1.0)
-    return close_location_value(open_, high, low, close) * vol
-
-
 def rolling_sum(src: np.ndarray, length: int) -> np.ndarray:
     """Trailing sum with an expanding warmup head."""
     length = max(1, int(length))
@@ -187,14 +174,6 @@ def rolling_sum(src: np.ndarray, length: int) -> np.ndarray:
     if n > length:
         out[length:] = cum[length:] - cum[:-length]
     return out
-
-
-def zscore(src: np.ndarray, window: int) -> np.ndarray:
-    """Standard score of each value against its own trailing window."""
-    window = max(3, int(window))
-    mean = sma(src, window)
-    sd = rolling_std(src, window)
-    return np.where(sd > 1e-12, (src - mean) / np.where(sd > 1e-12, sd, 1.0), 0.0)
 
 
 def macd(close: np.ndarray, fast: int, slow: int, signal: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -473,28 +452,6 @@ def parabolic_sar(high: np.ndarray, low: np.ndarray,
                 af = min(af + step, cap)
         direction[i] = trend
     return np.asarray(direction, dtype=np.int8)
-
-
-def trix(close: np.ndarray, length: int) -> np.ndarray:
-    """TRIX: rate of change of a triple-smoothed EMA, as a percentage.
-
-    Three cascaded EMAs of the same length filter out far more noise than any
-    single-pass smoothing (T3's cascade included, which recombines its six
-    EMAs with weights rather than just re-smoothing the output three times) -
-    the tradeoff is lag, which is the point: this is meant to be the *slow,
-    clean* read sitting next to the fast flip families, not another fast one.
-    """
-    if close.size == 0:
-        # Same shape as true_range's guard: ema() already returns empty for an
-        # empty input, so the cascade below is fine - it is the ``prev[0]``
-        # seeding that indexes into nothing.
-        return np.empty(0, dtype=np.float64)
-    e1 = ema(close, max(1, int(length)))
-    e2 = ema(e1, max(1, int(length)))
-    e3 = ema(e2, max(1, int(length)))
-    prev = np.roll(e3, 1)
-    prev[0] = e3[0]
-    return np.where(prev != 0, (e3 - prev) / np.where(prev != 0, np.abs(prev), 1.0) * 100.0, 0.0)
 
 
 def aroon(high: np.ndarray, low: np.ndarray, length: int) -> np.ndarray:

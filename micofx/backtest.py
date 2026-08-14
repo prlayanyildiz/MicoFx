@@ -1009,4 +1009,5 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         "from": int(bars.time[0]),
         "to": int(bars.time[-1]),
         "finished_at": time.time(),
+        "spread_scale": float(scale),
     }

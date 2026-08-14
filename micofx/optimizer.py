@@ -786,7 +786,8 @@ class Optimizer:
         if apply_best and report.get("validated") and not reason:
             apply_result = self.apply(cfg.symbol, best["params"], score,
                        {**best, "holdout_days": report.get("holdout_days", 0.0),
-                        "charge_costs": report.get("charge_costs")},
+                        "charge_costs": report.get("charge_costs"),
+                        "spread_scale": report.get("spread_scale")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok"))
             if not applied:
@@ -1348,7 +1349,9 @@ class Optimizer:
                 # while the search still charged the raw bar spread would be
                 # compared, as though like for like, against one measured at
                 # the tick spread the live gate actually enforces.
-                "spread_scale": round(self._spread_scale(symbol), 3),
+                "spread_scale": round(float(detail["spread_scale"]), 3)
+                if detail.get("spread_scale") is not None
+                else round(self._spread_scale(symbol), 3),
                 # Same argument, one assumption over. charge_costs=False makes
                 # the sweep fill at the printed price and charge nothing, so a
                 # score earned that way is not comparable with one earned while

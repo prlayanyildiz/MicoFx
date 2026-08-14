@@ -70,6 +70,7 @@ def test_the_sweep_reports_the_regime_it_ran_under():
     src = inspect.getsource(backtest.walk_forward)
     assert '"charge_costs": bool(charge_costs)' in src, (
         "the report must carry the regime out with the numbers it produced")
+    assert '"spread_scale": float(scale)' in src
 
 
 def test_apply_receives_it_from_the_report():
@@ -83,3 +84,5 @@ def test_apply_receives_it_from_the_report():
                             else optimizer.Optimizer)
     assert '"charge_costs": report.get("charge_costs")' in src, (
         "apply() cannot stamp what the caller never handed it")
+    assert '"spread_scale": report.get("spread_scale")' in src, (
+        "spread_scale has the same clock-vs-measurement hazard")

@@ -533,15 +533,27 @@ class RiskManager:
         # Project the validated backtest expectancy onto real money at the live lots.
         active = [r for r in rows if r["enabled"] and r["expectancy_r"] != 0]
         projected_daily = 0.0
+        projected_costed_daily = 0.0
+        stamps: list[bool] = []
+        projected_costed_negative = False
         for cfg in list(self.store.symbols.values()):
             row = next((r for r in active if r["symbol"] == cfg.symbol), None)
-            if row is None:
-                continue
             summary = cfg.opt_summary if isinstance(cfg.opt_summary, dict) else {}
+            if "charge_costs" in summary:
+                stamps.append(bool(summary.get("charge_costs")))
+            if summary.get("costed_negative"):
+                projected_costed_negative = True
             hold = summary.get("holdout") or {}
             days = float(summary.get("holdout_days", 0) or 0)
+            if row is None:
+                continue
             if days > 0 and hold.get("net_r"):
                 projected_daily += float(hold["net_r"]) * row["risk_per_trade"] / days
+            costed = summary.get("holdout_costed") or {}
+            if days > 0 and costed.get("net_r"):
+                projected_costed_daily += float(costed["net_r"]) * row["risk_per_trade"] / days
+        projected_charge_costs = all(stamps) if stamps else bool(
+            getattr(sys_cfg, "charge_costs", True))
 
         total_risk = sum(r["risk_per_trade"] for r in rows if r["enabled"])
         total_margin = sum(r["margin_per_trade"] for r in rows if r["enabled"])
@@ -581,7 +593,14 @@ class RiskManager:
             "projected_monthly": round(projected_daily * 21.0, 2),
             "projected_monthly_pct": round(projected_daily * 21.0 / balance * 100.0, 2)
             if balance > 0 else 0.0,
+            "projected_charge_costs": projected_charge_costs,
+            "projected_costed_monthly": round(projected_costed_daily * 21.0, 2),
+            "projected_costed_negative": projected_costed_negative,
             "max_total_positions": sys_cfg.max_total_positions,
+            "max_positions_per_symbol": max(
+                (int(cfg.max_positions or 1) for cfg in list(self.store.symbols.values())),
+                default=1),
+            "max_cost_pct_of_risk": float(sys_cfg.max_cost_pct_of_risk or 0.0),
             "global_free_slots": global_slots,
             "margin_used": round(used, 2),
             "margin_budget": round(budget, 2),

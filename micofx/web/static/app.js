@@ -340,6 +340,18 @@ function renderCards() {
   const dayPct = day.pnl_pct || 0;
   const lossRatio = lossLimit > 0 ? Math.min(100, Math.max(0, (-dayPct / lossLimit) * 100)) : 0;
 
+  const ai = STATE.ai || {};
+  const costCeiling = Number(sys.max_cost_pct_of_risk || cap.max_cost_pct_of_risk || 0);
+  const regime = cap.projected_charge_costs === false
+    ? "maliyetsiz OPT"
+    : "maliyetli OPT";
+  const costedFoot = cap.projected_costed_monthly != null
+    ? ` | maliyetli dilim ${signed(cap.projected_costed_monthly)}`
+    : "";
+  const costedBadge = cap.projected_costed_negative
+    ? " | MALIYETLI DILIM NEGATIF"
+    : "";
+
   const cards = [
     { lbl: "Bakiye", val: num(acc.balance), foot: `${esc(acc.currency || "")} | kaldirac 1:${acc.leverage || "-"}`, accent: "blue" },
     { lbl: "Varlik", val: num(acc.equity), foot: `acik k/z ${signed(acc.profit)}`, accent: Number(acc.profit) >= 0 ? "green" : "red" },
@@ -359,13 +371,19 @@ function renderCards() {
     },
     {
       lbl: "Acilabilir Islem", val: `${cap.global_free_slots ?? 0}`,
-      foot: `${cap.open_total ?? 0}/${cap.max_total_positions ?? 0} dolu | butce ${num(cap.margin_budget)}`,
+      foot: `${cap.open_total ?? 0}/${cap.max_total_positions ?? 0} dolu | sembol basi ${cap.max_positions_per_symbol ?? "-"} | butce ${num(cap.margin_budget)}`,
       accent: "amber",
     },
     {
       lbl: "Beklenen Aylik", val: signed(cap.projected_monthly),
-      foot: `%${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)} | OPT dogrulamasindan`,
-      accent: (cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
+      foot: `${regime} | %${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}${costedFoot}${costedBadge}`,
+      accent: cap.projected_costed_negative ? "red"
+        : (cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
+    },
+    {
+      lbl: "AI Lot Carpani", val: num(ai.risk_scale ?? 1, 2),
+      foot: (ai.risk_scale ?? 1) < 1 ? "gunluk zarar nedeniyle kisildi" : "normal",
+      accent: (ai.risk_scale ?? 1) < 1 ? "amber" : "green",
     },
   ];
 
@@ -393,7 +411,14 @@ function renderCards() {
 // own long-run cost next to it and says when the live one is inflated.
 function costCell(r) {
   if (!r.risk_per_trade) return "-";
-  const now = `${num(r.cost_per_trade)} (%${num(r.cost_pct_of_risk, 0)})`;
+  const ceiling = Number((STATE.system || {}).max_cost_pct_of_risk
+    || (STATE.capacity || {}).max_cost_pct_of_risk || 0);
+  const live = Number(r.cost_pct_of_risk || 0);
+  const over = ceiling > 0 && live > ceiling;
+  const mark = over
+    ? ` <span class="pill off" title="Canli maliyet kapisi bu sembolu engeller">esik %${num(ceiling, 0)}</span>`
+    : "";
+  const now = `${num(r.cost_per_trade)} (%${num(r.cost_pct_of_risk, 0)})${mark}`;
   if (!r.cost_pct_typical) return now;
   const inflated = r.cost_inflation >= 1.8;
   return inflated
@@ -402,10 +427,14 @@ function costCell(r) {
 }
 
 function costCls(r) {
-  // Only call it bad when it is bad on the long-run number too. A high live
-  // reading that matches a low typical one is a moment, not a property.
+  const ceiling = Number((STATE.system || {}).max_cost_pct_of_risk
+    || (STATE.capacity || {}).max_cost_pct_of_risk || 0);
+  const typical = Number(r.cost_pct_typical || 0);
+  const live = Number(r.cost_pct_of_risk || 0);
+  const blocked = ceiling > 0 && (typical > ceiling || live > ceiling);
+  if (blocked) return "neg";
   if (r.cost_pct_typical && r.cost_inflation >= 1.8) return "warn-text";
-  return r.cost_pct_of_risk > 15 ? "neg" : "dim";
+  return live > 15 ? "neg" : "dim";
 }
 
 function costTitle(r) {
