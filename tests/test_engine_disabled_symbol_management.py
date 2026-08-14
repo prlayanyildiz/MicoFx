@@ -155,19 +155,16 @@ def test_has_open_secondary_ticket_ignores_other_magics():
     assert eng._has_open_secondary_ticket(cfg) is False
 
 
-# ------------------------------------------ _evaluate(): ensemble toggled off
+# ------------------------------------------ _evaluate(): leftover ticket, A2
 
-def test_evaluate_keeps_refreshing_secondary_when_ensemble_off_with_open_ticket(monkeypatch):
-    """ensemble_enabled=False (secondary_strategy still set) with a live
-    secondary-tagged ticket must keep state.sec_atr/sec_last_bar advancing -
-    not reset them - so manage_positions()'s per-bar throttle does not freeze.
+def test_evaluate_still_refreshes_primary_when_leftover_ticket_is_open(monkeypatch):
+    """A tagged leftover ticket must keep primary last_bar/atr advancing so
+    manage_positions does not freeze. Overlay refresh is gone (A2).
     """
     from micofx import sessions as sessions_mod
 
     cfg = _cfg(enabled=True, ensemble_enabled=False,
               secondary_strategy="micro_rev", secondary_timeframe="M5")
-    assert cfg.has_secondary() is False  # ensemble_enabled gates it off
-
     eng = _make_engine(cfg)
     eng.client.resolve = lambda symbol: symbol
     eng.client.tick = lambda symbol: None
@@ -181,73 +178,31 @@ def test_evaluate_keeps_refreshing_secondary_when_ensemble_off_with_open_ticket(
                                    minutes_to_open=None, window="24/7")
     monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: open_session)
 
-    eng._refresh_signals = lambda cfg_arg, state_arg, params: False
-    sec_refresh_calls = []
+    refresh_calls = []
 
-    def _fake_refresh_secondary(cfg_arg, state_arg):
-        sec_refresh_calls.append(cfg_arg)
-        state_arg.sec_atr = 0.0042
-        state_arg.sec_last_bar = 12345
+    def _fake_refresh(cfg_arg, state_arg, params):
+        refresh_calls.append(cfg_arg)
+        state_arg.atr = 0.0042
+        state_arg.last_bar = 12345
         return True
 
-    eng._refresh_secondary = _fake_refresh_secondary
+    eng._refresh_signals = _fake_refresh
 
     state = SymbolState(cfg.symbol)
-    state.sec_atr = 0.0042  # already had a valid ATR from before the toggle
-
     eng._evaluate(cfg, state, server_now=1000.0, account={"equity": 100.0}, allow_entry=False)
 
-    assert sec_refresh_calls == [cfg]  # kept refreshing, not skipped
-    assert state.sec_atr == 0.0042     # not reset to 0.0
-    assert state.sec_last_bar == 12345  # bar tracking advanced
+    assert refresh_calls == [cfg]
+    assert state.atr == 0.0042
+    assert state.last_bar == 12345
+    assert not hasattr(Engine, "_refresh_secondary")
+    assert not hasattr(Engine, "_secondary_config")
 
 
-def test_evaluate_resets_secondary_state_when_no_open_ticket_and_ensemble_off(monkeypatch):
-    """Same ensemble-off config, but with NO open secondary ticket - this is
-    the ordinary case (ensemble genuinely turned off, nothing to protect) and
-    must still fully clear/reset, exactly like before this fix.
-    """
-    from micofx import sessions as sessions_mod
-
-    cfg = _cfg(enabled=True, ensemble_enabled=False,
-              secondary_strategy="micro_rev", secondary_timeframe="M5")
-    eng = _make_engine(cfg)
-    eng.client.resolve = lambda symbol: symbol
-    eng.client.tick = lambda symbol: None
-    eng.client.market_open = lambda symbol: True
-    eng.store.system = SimpleNamespace(trade_all_hours=True)
-    eng._sec_tickets = set()
-    eng._positions = []  # nothing open under this magic at all
-
-    open_session = SimpleNamespace(open=True, reason="", minutes_to_close=None,
-                                   minutes_to_open=None, window="24/7")
-    monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: open_session)
-    eng._refresh_signals = lambda cfg_arg, state_arg, params: False
-
-    def _should_not_be_called(cfg_arg, state_arg):
-        raise AssertionError("_refresh_secondary must not run with no open ticket")
-
-    eng._refresh_secondary = _should_not_be_called
-
-    state = SymbolState(cfg.symbol)
-    state.sec_atr = 0.0042
-    state.sec_signal = "buy"
-    state.sec_last_bar = 999
-
-    eng._evaluate(cfg, state, server_now=1000.0, account={"equity": 100.0}, allow_entry=False)
-
-    assert state.sec_atr == 0.0
-    assert state.sec_signal == ""
-    assert state.sec_last_bar == 0
-    assert state.sec_bars is None
-
-
-def test_evaluate_does_not_refresh_secondary_just_because_ensemble_is_on(monkeypatch):
+def test_evaluate_has_no_secondary_refresh_when_ensemble_is_on(monkeypatch):
     """Ikincil sinyal 14.08'de kaldirildi (operator karari), bu davranis artik yok.
 
-    has_secondary() used to fetch a second bar stream every cycle to arm
-    entries. With no leftover tagged ticket that refresh is production, not
-    management, and must not run.
+    has_secondary() used to fetch a second bar stream every cycle. That
+    production path is gone; leftover ticket tagging is A3 and still exists.
     """
     from micofx import sessions as sessions_mod
 
@@ -267,11 +222,9 @@ def test_evaluate_does_not_refresh_secondary_just_because_ensemble_is_on(monkeyp
     monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: open_session)
     eng._refresh_signals = lambda cfg_arg, state_arg, params: False
 
-    def _should_not_be_called(cfg_arg, state_arg):
-        raise AssertionError("_refresh_secondary must not run with no open ticket")
-
-    eng._refresh_secondary = _should_not_be_called
-
     state = SymbolState(cfg.symbol)
     eng._evaluate(cfg, state, server_now=1000.0, account={"equity": 100.0}, allow_entry=False)
+
+    assert not hasattr(eng, "_refresh_secondary")
+    assert not hasattr(Engine, "_refresh_secondary")
 

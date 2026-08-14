@@ -252,7 +252,6 @@ def test_pre_existing_ticket_is_not_mistaken_for_the_new_fill(monkeypatch):
     assert state.signal == ""
     assert state.signal_source == ""
     assert state.primary_signal == ""
-    assert state.sec_signal == ""
     assert state.pending_bar_key == (0, 0)
     assert "belirsiz" in state.note
     # An empty state.signal is what _cycle() checks before it ever calls

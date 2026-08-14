@@ -128,8 +128,7 @@ class SymbolState:
     __slots__ = ("symbol", "last_bar", "next_bar_at", "last_fetch", "atr", "adx", "t3",
                  "t3_rising", "k", "d", "signal", "bars_ready", "cooldown_until",
                  "note", "session", "spread", "spread_atr", "last_signal_at", "htf", "bars",
-                 "primary_signal", "sec_signal", "sec_atr", "sec_last_bar",
-                 "sec_next_bar_at", "sec_last_fetch", "sec_bars", "signal_source",
+                 "primary_signal", "signal_source",
                  "pending_bar_key", "entry_block", "t3_kind")
 
     def __init__(self, symbol: str) -> None:
@@ -138,15 +137,8 @@ class SymbolState:
         self.next_bar_at = 0.0
         self.last_fetch = 0.0
         self.atr = 0.0
-        # ---- second (opt-in) signal, evaluated on its own timeframe ----
         self.primary_signal = ""
-        self.sec_signal = ""
-        self.signal_source = ""      # "" | "primary" | "secondary"
-        self.sec_atr = 0.0
-        self.sec_last_bar = 0
-        self.sec_next_bar_at = 0.0
-        self.sec_last_fetch = 0.0
-        self.sec_bars = None
+        self.signal_source = ""      # "" | "primary" | "secondary" (legacy tag on fills)
         # None until a bar is computed, and None thereafter for a family that
         # does not measure it - 0.0/False would read as a real flat reading.
         self.adx = None
@@ -165,7 +157,6 @@ class SymbolState:
         self.spread_atr = 0.0
         self.last_signal_at = 0.0
         self.bars = None  # most recent Bars snapshot, for structure-based trailing
-        # (last_bar, sec_last_bar) at the moment a fresh signal was last seen
         # and not yet filled - lets _evaluate retry a signal a transient block
         # (spread/slot/AI gate) ate earlier in the same bar. (0, 0) means none.
         self.pending_bar_key = (0, 0)
@@ -187,7 +178,7 @@ class SymbolState:
             "k": _round_or_none(self.k, 1), "d": _round_or_none(self.d, 1),
             "signal": self.signal,
             "signal_source": self.signal_source,
-            "primary_signal": self.primary_signal, "secondary_signal": self.sec_signal,
+            "primary_signal": self.primary_signal, "secondary_signal": "",
             "bars_ready": self.bars_ready, "note": self.note, "session": self.session,
             "spread": round(self.spread, 6), "spread_atr": round(self.spread_atr, 3),
             "cooldown_left": max(0, int(self.cooldown_until - time.time())),
@@ -276,11 +267,9 @@ class Engine:
         # reader for a feature that no longer exists.
         if store.get_setting("partial_state"):
             store.set_setting("partial_state", {})
-        # Ensemble bookkeeping: the overlaid config per symbol, and which open
-        # tickets came from the secondary signal (persisted, because positions
-        # outlive the process and must keep being managed by the exit rules they
-        # were opened under).
-        self._sec_cfgs: dict[str, tuple[tuple, SymbolConfig]] = {}
+        # Ensemble bookkeeping: which open tickets came from the secondary
+        # signal (persisted, because positions outlive the process). Overlay
+        # config cache is gone with A2; leftover tickets trail on the primary.
         self._sec_tickets: set[int] = {
             int(t) for t in (as_list(store.get_setting("secondary_tickets"), "secondary_tickets")) if str(t).isdigit()
         }
@@ -1060,7 +1049,6 @@ class Engine:
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
-            state.sec_signal = ""
             state.pending_bar_key = (0, 0)
 
     def _evaluate(self, cfg: SymbolConfig, state: SymbolState, server_now: float,
@@ -1077,7 +1065,6 @@ class Engine:
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
-            state.sec_signal = ""
             state.pending_bar_key = (0, 0)
             return False
 
@@ -1096,16 +1083,6 @@ class Engine:
             state.spread_atr = tick["spread"] / state.atr if state.atr > 0 else 0.0
 
         primary_fresh = self._refresh_signals(cfg, state, params)
-        # Secondary signal production was removed 14.08 (operator). ATR/bars
-        # still refresh when a leftover tagged ticket is open, so trail/BE
-        # does not freeze; they never arm a new entry (merge is primary-only).
-        if self._has_open_secondary_ticket(cfg):
-            self._refresh_secondary(cfg, state)
-        elif state.sec_signal or state.sec_last_bar or state.sec_atr:
-            state.sec_signal = ""
-            state.sec_last_bar = 0
-            state.sec_bars = None
-            state.sec_atr = 0.0
         self._merge_signals(cfg, state)
         fresh = primary_fresh
         bar_key = state.last_bar
@@ -1129,7 +1106,6 @@ class Engine:
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
-            state.sec_signal = ""
             state.pending_bar_key = (0, 0)
             return False
         if not self.client.market_open(cfg.symbol):
@@ -1141,7 +1117,6 @@ class Engine:
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
-            state.sec_signal = ""
             state.pending_bar_key = (0, 0)
             return False
         # Sampled here, past BOTH gates, rather than beside the tick read.
@@ -1316,76 +1291,11 @@ class Engine:
             LOG.emit(" | ".join(parts), "SIGNAL", cfg.symbol)
         return True
 
-    # ------------------------------------------------------- second signal
-
-    def _secondary_config(self, cfg: SymbolConfig) -> SymbolConfig:
-        """``cfg`` with the stored secondary timeframe and parameters overlaid.
-
-        Everything the secondary was validated with - its entry parameters *and*
-        its stop/target/trail multipliers - has to travel together, otherwise the
-        trade taken live is not the trade the walk-forward measured. Magic, lots,
-        sessions and every other non-optimiser field stay the primary's, because
-        the two signals share one symbol, one broker position limit and one
-        risk budget.
-        """
-        # The old signature only tracked the secondary's own identity
-        # (strategy/timeframe/updated_at), not the primary fields it starts
-        # from below (magic, lots, sessions, ...). Editing one of those
-        # through a plain PATCH left this cache serving a stale overlay until
-        # the secondary itself happened to change. Comparing the full primary
-        # dict is the only way to catch every field that could drift.
-        payload = cfg.to_dict()
-        sig = tuple(sorted(payload.items()))
-        hit = self._sec_cfgs.get(cfg.symbol)
-        if hit and hit[0] == sig:
-            return hit[1]
-        payload.update(cfg.secondary_params)          # already OPT_FIELDS-only
-        payload["strategy"] = cfg.secondary_strategy
-        payload["timeframe"] = cfg.secondary_timeframe
-        built = SymbolConfig.from_dict(payload)
-        self._sec_cfgs[cfg.symbol] = (sig, built)
-        return built
-
-    def _refresh_secondary(self, cfg: SymbolConfig, state: SymbolState) -> bool:
-        """Same bar-close logic as the primary, on the secondary's timeframe."""
-        sec = self._secondary_config(cfg)
-        params = Params.from_config(sec)
-        now = time.time()
-        due = self.client.server_now() >= state.sec_next_bar_at
-        stale = now - state.sec_last_fetch > _STALE_BAR_REFRESH
-        if not (due or stale or state.sec_last_bar == 0):
-            return False
-
-        sec_need = required_bars(params)
-        bars = self.client.bars(cfg.symbol, sec.timeframe, sec_need)
-        state.sec_last_fetch = now
-        # Same warmup floor as the primary leg above - the secondary signal
-        # opens real positions on the same account and has no reason to run on
-        # a shallower stack than the primary would accept.
-        if bars is None or len(bars) < max(60, sec_need // 2):
-            return False
-
-        state.sec_bars = bars
-        tf_sec = timeframe_seconds(sec.timeframe)
-        state.sec_next_bar_at = bars.last_closed_time + 2 * tf_sec + 2
-        if bars.last_closed_time == state.sec_last_bar:
-            return False
-        state.sec_last_bar = bars.last_closed_time
-
-        cache = IndicatorCache(bars.high, bars.low, bars.close, bars.time, tf_sec,
-                               bars.open, bars.volume, self._cost_series(sec, bars))
-        snap = compute(cache, params).last()
-        state.sec_atr = snap.get("atr", 0.0)
-        # Do not arm sec_signal. Leftover tickets need ATR/bars; new entries
-        # must not come from this leg.
-        return True
-
     def _merge_signals(self, cfg: SymbolConfig, state: SymbolState) -> None:
         """Primary signal is the only entry source.
 
-        Secondary production was removed 14.08 (operator). Disagreement skip
-        and secondary-wins-on-fresh-bar are gone; a primary BUY stays a BUY
-        even if a leftover sec_signal string is sitting on state.
+        Secondary production was removed 14.08 (operator). Overlay config,
+        sec_* state and the disagreement skip are gone with it.
         """
         primary = state.primary_signal
         state.signal = primary
@@ -1423,9 +1333,9 @@ class Engine:
             state.entry_block = "ikincil_tarama"
             return
         side = state.signal
+        cfg = base
+        atr = state.atr
         secondary = state.signal_source == "secondary"
-        cfg = self._secondary_config(base) if secondary else base
-        atr = state.sec_atr if secondary else state.atr
         # ``atr <= 0`` alone is not fail-closed for NaN: NaN compares False to
         # everything, so ``NaN <= 0`` is False and a NaN'd indicator (a bad bar,
         # a broker glitch) would sail straight through and size sl_dist/tp_dist
@@ -1673,7 +1583,6 @@ class Engine:
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
-            state.sec_signal = ""
             state.pending_bar_key = (0, 0)
             return
         if unresolved_ticket:
@@ -1720,7 +1629,6 @@ class Engine:
                 state.signal = ""
                 state.signal_source = ""
                 state.primary_signal = ""
-                state.sec_signal = ""
                 state.pending_bar_key = (0, 0)
                 state.note = "emir sonucu belirsiz - tekrar denenmeyecek, MT5'i kontrol edin"
                 state.entry_block = "emir_belirsiz"
@@ -1733,7 +1641,6 @@ class Engine:
                 state.signal = ""
                 state.signal_source = ""
                 state.primary_signal = ""
-                state.sec_signal = ""
                 state.pending_bar_key = (0, 0)
             # Key is set on the branch above; restated here so this exit carries
             # it locally and the coverage guard can stay strict.
@@ -1765,12 +1672,10 @@ class Engine:
 
         state.cooldown_until = time.time() + _cooldown_for(cfg)
         self._save_cooldown(cfg.symbol, state.cooldown_until)
-        self._mark_bar_filled(cfg.symbol, state.signal_source,
-                              state.sec_last_bar if secondary else state.last_bar)
+        self._mark_bar_filled(cfg.symbol, state.signal_source, state.last_bar)
         state.signal = ""
         state.signal_source = ""
         state.primary_signal = ""
-        state.sec_signal = ""
         state.note = "islem acildi"
         state.entry_block = "acildi"
         # The ticket, so an entry can be matched to its own close later. The
@@ -1991,11 +1896,6 @@ class Engine:
                 continue
             state = self.states.get(cfg.symbol)
             atr = state.atr if state else 0.0
-            if pos["ticket"] in self._sec_tickets and cfg.secondary_strategy:
-                # Opened by the second signal: manage it with the exits that
-                # signal was validated with, on its own timeframe's ATR.
-                cfg = self._secondary_config(cfg)
-                atr = state.sec_atr if state and state.sec_atr > 0 else atr
 
             # weekend_closed() already gated new entries; it never touched a
             # position that was already open going into the weekend. Crypto
@@ -2075,21 +1975,11 @@ class Engine:
             # limits rather than opinions about the trade.
 
             if atr > 0:
-                is_secondary = pos["ticket"] in self._sec_tickets
                 bars = None
                 last_bar = 0
                 if state is not None:
-                    bars = state.sec_bars if is_secondary else state.bars
-                    last_bar = state.sec_last_bar if is_secondary else state.last_bar
-                # Secondary tickets must use the secondary ATR they were validated
-                # with. Falling back to the primary ATR (different TF / regime)
-                # silently warps BE, trail and partial distances. ``<= 0`` alone
-                # is not fail-closed for NaN (NaN <= 0 is False) - without
-                # isfinite() a NaN'd sec_atr slipped past this guard and got
-                # trailed on the silently-substituted primary atr anyway.
-                if is_secondary and (state is None or not math.isfinite(state.sec_atr)
-                                     or state.sec_atr <= 0):
-                    continue
+                    bars = state.bars
+                    last_bar = state.last_bar
                 ticket = pos["ticket"]
                 if last_bar and last_bar != self._stop_bar.get(ticket):
                     # Marked done only once _update_stop reports the bar

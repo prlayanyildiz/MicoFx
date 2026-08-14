@@ -137,7 +137,7 @@ def _state():
     st = SymbolState("EURUSD")
     st.signal = "buy"
     st.signal_source = "secondary"
-    st.sec_atr = 0.001
+    st.atr = 0.001
     return st
 
 
@@ -513,7 +513,7 @@ def test_try_entry_refuses_nan_atr():
     cfg = _cfg()
     eng, client, store = _make_engine(cfg, positions_after=[])
     state = _state()
-    state.sec_atr = math.nan
+    state.atr = math.nan
 
     eng._try_entry(cfg, state, account={"balance": 1000.0})
 
@@ -522,7 +522,8 @@ def test_try_entry_refuses_nan_atr():
     assert state.signal == "buy"  # untouched, not consumed as a failed attempt
 
 
-def test_manage_positions_skips_secondary_trail_with_nan_sec_atr():
+def test_manage_positions_trails_leftover_ticket_on_primary_atr():
+    """A2: leftover tagged tickets use primary ATR/bars, not a frozen overlay."""
     cfg = _cfg()
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
@@ -540,16 +541,18 @@ def test_manage_positions_skips_secondary_trail_with_nan_sec_atr():
     eng.store.symbols = _Values()
 
     state = _state()
-    state.sec_atr = math.nan
-    state.atr = 0.002  # a healthy primary ATR that must NOT be substituted in
+    state.atr = 0.002
+    state.last_bar = 12345
     eng.states = {"EURUSD": state}
 
     calls = []
-    eng._update_stop = lambda *a, **kw: calls.append(a)
+    eng._update_stop = lambda *a, **kw: calls.append(a) or True
 
     eng.manage_positions(server_now=0.0)
 
-    assert calls == []
+    assert len(calls) == 1
+    assert calls[0][2] == 0.002  # primary ATR
+    assert eng._stop_bar[601] == 12345
 
 
 def test_symbol_daily_halt_includes_commission_in_floating_side():
