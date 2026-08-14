@@ -1224,7 +1224,24 @@ class Engine:
     def _refresh_signals(self, cfg: SymbolConfig, state: SymbolState, params: Params) -> bool:
         """Pull bars and recompute indicators when a new bar has closed."""
         now = time.time()
-        due = self.client.server_now() >= state.next_bar_at
+        # Against the BROKER's clock, not this machine's. ``next_bar_at`` is
+        # built from ``bars.last_closed_time``, a naive epoch holding the
+        # broker's wall-clock reading, while ``server_now()`` is a true epoch -
+        # subtracting one from the other leaves the broker's whole UTC offset
+        # in the answer, +10800 on this GMT+3 server. Measured 15.08 00:01:
+        # last closed bar 164 minutes "ahead" of local, next_bar_at 174 minutes
+        # ahead, so ``due`` was False on every cycle for the life of the
+        # process. The refresh still happened - ``stale`` fires every 45s - so
+        # nothing looked broken, and that is the point: the intended trigger
+        # was dead and a fallback silently carried the system. It also moved
+        # every entry off the bar close and onto a 45-second timer, which is
+        # what the measured 21-30s-into-the-bar entry timing was.
+        #
+        # Same fix ``market_open`` already uses: compare two readings of one
+        # clock. 0.0 means no tick has been read yet, and falling back to the
+        # timer there is the behaviour that has been running all along.
+        broker_now = self.client.broker_now()
+        due = broker_now > 0.0 and broker_now >= state.next_bar_at
         stale = now - state.last_fetch > _STALE_BAR_REFRESH
         if not (due or stale or state.last_bar == 0):
             return False

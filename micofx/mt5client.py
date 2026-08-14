@@ -668,6 +668,22 @@ class MT5Client:
             return False
         return (self._broker_now - t["time"]) <= max_age_sec
 
+    def broker_now(self) -> float:
+        """Newest broker-clock reading seen across the book, or 0.0 if none.
+
+        The counterpart to ``server_now()``: that one is this machine's true
+        epoch and is what session windows and day boundaries are configured
+        against, while this is the naive epoch the broker stamps on ticks and
+        bars. Anything compared against a bar's or a tick's ``time`` has to use
+        this one - see ``market_open`` for the same argument, and for what the
+        mismatch costs (a constant -10800 on this GMT+3 server, which made a
+        180-second freshness test accept three-hour-old ticks).
+
+        0.0 until the first tick is read. Callers must treat that as "unknown"
+        and fall back, never as "the epoch began".
+        """
+        return float(self._broker_now)
+
     def broker_utc_offset_hours(self, symbols: list[str]) -> int | None:
         """The broker server's own UTC offset in whole hours, or None.
 

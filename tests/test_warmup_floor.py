@@ -147,6 +147,12 @@ def test_engine_rejects_a_short_series(monkeypatch, tmp_path):
             import time
             return time.time()
 
+        def broker_now(self):
+            # The clock the new-bar trigger reads. 0.0 is "no tick seen yet",
+            # which is what a fake with no feed honestly is - the refresh then
+            # falls through to the stale timer, exactly as live does at start-up.
+            return 0.0
+
     from micofx.engine import SymbolState
 
     store = Store()
