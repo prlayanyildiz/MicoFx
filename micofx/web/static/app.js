@@ -365,7 +365,9 @@ function renderCards() {
       foot: `${day.closed_trades || 0} islem | %${num(day.win_rate, 0)} basari`,
     },
     {
-      lbl: "Gunluk Limit", val: `${signed(dayPct, 2)}%`, foot: lossLimit > 0 ? `zarar limiti %${num(lossLimit, 1)}` : "limit kapali",
+      lbl: "Gunluk Limit", val: `${signed(dayPct, 2)}%`,
+      foot: `${lossLimit > 0 ? `zarar limiti %${num(lossLimit, 1)}` : "limit kapali"}`
+        + ` | lot x${num(ai.risk_scale ?? 1, 2)}`,
       bar: lossRatio, barClass: lossRatio > 80 ? "bad" : lossRatio > 50 ? "warn" : "",
       accent: day.halted ? "red" : "",
     },
@@ -379,11 +381,6 @@ function renderCards() {
       foot: `%${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}`,
       accent: cap.projected_costed_negative ? "red"
         : (cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
-    },
-    {
-      lbl: "AI Lot Carpani", val: num(ai.risk_scale ?? 1, 2),
-      foot: (ai.risk_scale ?? 1) < 1 ? "gunluk zarar nedeniyle kisildi" : "normal",
-      accent: (ai.risk_scale ?? 1) < 1 ? "amber" : "green",
     },
   ];
 

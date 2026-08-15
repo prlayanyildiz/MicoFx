@@ -19,8 +19,17 @@ def test_openable_slots_name_the_per_symbol_cap():
 
 
 def test_ai_risk_scale_is_on_the_account_strip():
-    assert "AI Lot Carpani" in JS
+    """It had its own card; it now rides on the daily-limit one.
+
+    The multiplier is a consequence of the daily drawdown, so it reads better
+    beside the limit than alone - and alone it was the ninth card, stranded on
+    a row of its own. What must not change is that it stays visible: it cut
+    every lot to 0.40 for a whole session while the panel said nothing.
+    """
     assert "ai.risk_scale" in JS
+    limit = JS[JS.index('lbl: "Gunluk Limit"'):]
+    assert "lot x" in limit[:400], "the multiplier left the strip entirely"
+    assert "ai.risk_scale" in limit[:400]
 
 
 def test_a_cost_over_the_live_gate_is_marked():

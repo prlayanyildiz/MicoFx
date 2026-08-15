@@ -25,11 +25,11 @@ def test_render_cards_still_writes_the_v1_fields():
         "projected_costed_monthly",
         "maliyetli dilim",
         "MALIYETLI DILIM NEGATIF",
-        "AI Lot Carpani",
         "Acilabilir Islem",
         "sembol basi",
         "max_positions_per_symbol",
         "ai.risk_scale",
+        "lot x",
     ):
         assert needle in body, needle
 
@@ -57,15 +57,16 @@ def test_the_cards_in_a_row_share_one_height():
 
 
 def test_the_column_count_divides_the_cards():
-    """Ten cards, five columns: two full rows and no leftover slot.
+    """Eight cards, and every column count divides eight.
 
     auto-fill chose the count from the width, so the last row held whatever did
-    not divide - seven and a void at one size, nine and one at another. A fixed
-    count per breakpoint is duller and always tidy, and the counts chosen (5, 4,
-    3, 2) all divide ten or come close.
+    not divide - at 1590px the strip came out four, four and a single card
+    stranded on a third row. Eight cards against 8/4/2 columns leaves no
+    remainder at any breakpoint, and the widest case puts them all on one row,
+    which is what the strip is for.
     """
-    assert "grid-template-columns: repeat(5, 1fr);" in CSS
-    for count in (4, 3, 2):
+    assert "grid-template-columns: repeat(8, 1fr);" in CSS
+    for count in (4, 2):
         assert f"grid-template-columns: repeat({count}, 1fr);" in CSS
     # The word appears in the comment explaining why it went; check the rule.
     rules = [ln for ln in CSS.splitlines()
