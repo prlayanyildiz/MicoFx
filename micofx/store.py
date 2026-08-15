@@ -330,17 +330,30 @@ class Store:
             self._log_symbol_change(symbol, before, updated.to_dict(), source)
             return updated
 
-    def delete_symbol(self, symbol: str) -> bool:
+    def delete_symbol(self, symbol: str) -> int:
+        """Remove a symbol and the search history keyed to it.
+
+        Returns the number of ``opt_runs`` rows that went with it, NOT whether
+        the symbol existed - callers check that upstream (web 404s before
+        getting here). Zero therefore means "no search history", not "nothing
+        deleted". The count exists because this is an irreversible deletion the
+        log used to describe only as "portfoyden silindi": symbols in this book
+        carry 11 to 33 rows each, and 196 of them were lost on 14.08 before
+        anyone could say how many there had been.
+        """
         with self._lock:
-            cur = self._db.execute("DELETE FROM symbols WHERE symbol=?", (symbol,))
-            self._db.execute("DELETE FROM opt_runs WHERE symbol=?", (symbol,))
+            self._db.execute("DELETE FROM symbols WHERE symbol=?", (symbol,))
+            gone = self._db.execute("DELETE FROM opt_runs WHERE symbol=?", (symbol,))
+            removed = int(gone.rowcount or 0)
             self._db.commit()
             # Same copy-on-write reasoning as save_symbol() above, and held
             # inside the lock for the same reason: a delete racing a save
             # could otherwise resurrect the deleted symbol in memory.
             if symbol in self.symbols:
                 self.symbols = {k: v for k, v in self.symbols.items() if k != symbol}
-        return cur.rowcount > 0
+        if removed > 0:
+            LOG.emit(f"{symbol} silindi: {removed} opt_runs kaydi gitti.", "WARN", symbol)
+        return removed
 
     def purge_orphan_history(self) -> int:
         keep = list(self.symbols)
@@ -353,7 +366,10 @@ class Store:
             else:
                 cur = self._db.execute("DELETE FROM opt_runs")
             self._db.commit()
-            return int(cur.rowcount or 0)
+            removed = int(cur.rowcount or 0)
+        if removed > 0:
+            LOG.emit(f"yetim opt_runs silindi: {removed} kayit.", "WARN")
+        return removed
 
     def next_magic(self, avoid: set[int] | None = None) -> int:
         # list() snapshot: a concurrent save_symbol()/delete_symbol() now
@@ -654,13 +670,16 @@ class Store:
                 "INSERT INTO opt_runs(symbol, created_at, score, applied, payload) VALUES(?,?,?,?,?)",
                 (symbol, time.time(), float(score), 1 if applied else 0, blob),
             )
-            self._db.execute(
+            trimmed = self._db.execute(
                 "DELETE FROM opt_runs WHERE symbol=? AND id NOT IN "
                 "(SELECT id FROM opt_runs WHERE symbol=? ORDER BY created_at DESC LIMIT 40)",
                 (symbol, symbol),
             )
             self._db.commit()
-            return int(cur.lastrowid or 0)
+            n_trim = int(trimmed.rowcount or 0)
+        if n_trim > 0:
+            LOG.emit(f"{symbol}: opt_runs kirpildi ({n_trim} kayit).", "OPT", symbol)
+        return int(cur.lastrowid or 0)
 
     def clear_opt_history(self, symbol: str | None = None) -> int:
         with self._lock:
