@@ -27,6 +27,7 @@ from ..models import (
     READABLE_TIMEFRAMES,
     STRATEGIES,
     TIMEFRAMES,
+    SymbolConfig,
     invalid_exit_param,
     strategy_allows_timeframe,
 )
@@ -479,6 +480,34 @@ def _reject_internal_fields(patch: dict[str, Any]) -> None:
         raise HTTPException(400, f"{', '.join(found)} disaridan yazilamaz (motor ici alan)")
 
 
+def _coerce_symbol_patch(raw: dict[str, Any]) -> dict[str, Any]:
+    """Accept the panel's flat body or the bulk door's ``{\"patch\": {...}}``.
+
+    ``SymbolPatch`` is extra=allow and ``update_symbol`` only copies keys that
+    already exist on the config. A nested ``patch`` wrapper is not one of
+    those keys, so POST {\"patch\": {\"enabled\": false}} used to return
+    ok:true and change nothing. Unwrap, then refuse unknown keys - silent
+    drop is the third option this codebase is not allowed.
+    """
+    patch = dict(raw)
+    if "patch" in patch:
+        nested = patch.pop("patch")
+        if not isinstance(nested, dict):
+            raise HTTPException(400, "patch bir nesne olmali")
+        if patch:
+            raise HTTPException(
+                400,
+                "yamayi duz {\"enabled\": false} veya {\"patch\": {...}} "
+                "gonderin, ikisini birden degil")
+        patch = nested
+    known = set(SymbolConfig.__dataclass_fields__)
+    unknown = sorted(k for k in patch if k not in known)
+    if unknown:
+        raise HTTPException(
+            400, f"bilinmeyen alan: {', '.join(unknown)} - yama yok sayilmaz")
+    return patch
+
+
 def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optimizer,
                 api_token: str = "") -> FastAPI:
     """``api_token``: optional shared secret (``MICO_API_TOKEN`` env var, see run.py).
@@ -849,7 +878,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/symbols/{symbol}")
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
-        patch = body.model_dump()
+        patch = _coerce_symbol_patch(body.model_dump())
         _reject_internal_fields(patch)
         _reject_non_finite_values(patch)
         _validate_enum_fields(patch)
@@ -1614,6 +1643,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/symbols-bulk")
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
+        body.patch = _coerce_symbol_patch(body.patch)
         _reject_internal_fields(body.patch)
         _reject_non_finite_values(body.patch)
         _validate_enum_fields(body.patch)

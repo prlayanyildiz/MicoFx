@@ -161,7 +161,7 @@ def test_patch_symbol_ignores_retired_secondary_params():
     tc, store = _client()
     res = tc.post("/api/symbols/XAUUSD",
                   json={"secondary_params": {"trail_start_atr": 0.0}})
-    assert res.status_code == 200
+    assert res.status_code == 400
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
@@ -169,5 +169,5 @@ def test_bulk_patch_ignores_retired_secondary_params():
     tc, store = _client()
     res = tc.post("/api/symbols-bulk",
                   json={"patch": {"secondary_params": {"trail_start_atr": 0.0}}})
-    assert res.status_code == 200
+    assert res.status_code == 400
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")

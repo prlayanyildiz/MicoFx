@@ -366,7 +366,7 @@ def test_patch_ignores_retired_secondary_identity_field():
     tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_strategy": "burst"})
-    assert res.status_code == 200
+    assert res.status_code == 400
     assert not hasattr(store.symbols["XAUUSD"], "secondary_strategy")
 
 
@@ -432,7 +432,7 @@ def test_patch_ignores_retired_secondary_params_blob():
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": "wipe"})
-    assert res.status_code == 200
+    assert res.status_code == 400
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
@@ -442,7 +442,7 @@ def test_patch_ignores_nan_inside_retired_secondary_params():
 
     res = tc.post("/api/symbols/XAUUSD", content=b'{"secondary_params": {"sl_atr_mult": NaN}}',
                   headers={"Content-Type": "application/json"})
-    assert res.status_code == 200
+    assert res.status_code == 400
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
@@ -452,7 +452,7 @@ def test_patch_ignores_secondary_params_even_with_open_position():
     tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"sl_atr_mult": 2.0, "adx_min": 20.0}})
-    assert res.status_code == 200
+    assert res.status_code == 400
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
