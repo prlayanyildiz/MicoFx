@@ -57,10 +57,10 @@ const FIELD_HELP = {
   "cooldown_sec": "Fill sonrasi yeni giris beklemesi. Canli ve backtest en fazla 1-2 bara kisitlar.",
   "commission_per_lot": "1 lot gidis-donus komisyon (hesap para birimi). Arama ve canli maliyet buna bakar.",
 
-  "lookback_days": "Aramanin baktigi takvim gunu. Buyutmek daha uzun ornek, daha yavas tarama.",
+  "lookback_days": "Aramanin baktigi takvim gunu ustune ek bir tavan. 0 = sinirsiz, o zaman tek belirleyici Maks Bar. Sifirdan buyukse hangisi once biterse o baglar: gun sayisi mi, bar sayisi mi.",
   "refine_rounds": "Kazanan bolgede ekstra yerel tarama turu. Her tur max_combos kadar is. 0 = sadece kaba tarama.",
   "max_combos": "Bir aile/TF taramasinda denenecek ust kombinasyon. Buyutmek daha uzun surer.",
-  "max_bars": "Aramaya verilen bar tavani. Dusurmek hizlandirir, holdout'u kisaltir.",
+  "max_bars": "Aramaya verilen bar tavani ve normalde tek belirleyici olan sayi. Terminalin M5/M15 tavani 99.718; ustunu istemek hic bar getirmez, o yuzden 90.000 pay birakir. Ayni bar sayisi her sembolde ayni takvim demek degil: 90.000 M5 bari BTCUSD icin 314 gun, FRA40 icin 771 gun.",
   "segments": "Gecmisi kac esit dilime boler. Son dilim holdout, sondan onceki validation.",
   "min_trades": "Selection skorunda ornek indirimi bu islem sayisina gore. Az islem skoru kucultur.",
   "min_positive_ratio": "Selection dilimlerinin en az bu kadari net arti olmali. Dusurmek daha cok aday gecirir.",

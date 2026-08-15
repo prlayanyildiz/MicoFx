@@ -24,7 +24,20 @@ function applyStaticHelp() {
   });
 }
 
-const GROUP_LABEL = { forex: "Forex", index: "Endeks", commodity: "Emtia", crypto: "Kripto" };
+const GROUP_LABEL = { forex: "Forex", index: "Endeks", commodity: "Emtia",
+                      crypto: "Kripto", stock: "Hisse" };
+// Every <select> of groups is built from this, so a group added to the book
+// cannot go missing from the panel that has to offer it.
+function fillGroupSelects() {
+  document.querySelectorAll("select[data-groups]").forEach((sel) => {
+    const keep = sel.dataset.groups === "filter";
+    const cur = sel.value;
+    sel.innerHTML = (keep ? `<option value="">Tum gruplar</option>` : "")
+      + Object.entries(GROUP_LABEL)
+          .map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+    if (cur) sel.value = cur;
+  });
+}
 const DAY_LABEL = ["Pzt", "Sal", "Car", "Per", "Cum", "Cmt", "Paz"];
 const LOG_LEVELS = ["TRADE", "SIGNAL", "OPT", "AI", "CFG", "INFO", "WARN", "ERROR"];
 const AI_STATE = {
@@ -1885,6 +1898,8 @@ function guessGroup(name) {
   if (/BTC|ETH|XRP|LTC|SOL|ADA|DOGE|CRYPTO/.test(n)) return "crypto";
   if (/XAU|XAG|BRENT|WTI|OIL|SILVER|GOLD|NATGAS|GAS/.test(n)) return "commodity";
   if (/GER|FRA|UK100|NAS|US30|US500|SPX|DAX|CAC|NDX|DJ|HK50|HSTECH|JPN|AUS200|NIKKEI/.test(n)) return "index";
+  // Equity CFDs at this broker carry a market suffix: AAPL.US, SMSN.KR.
+  if (/^[A-Z]{1,6}\.(US|KR|CN|DE|UK|JP|HK)(-|$)/.test(n)) return "stock";
   return "forex";
 }
 
@@ -2347,4 +2362,5 @@ function wire() {
 }
 
 wire();
+fillGroupSelects();
 refresh();

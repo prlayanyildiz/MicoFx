@@ -122,13 +122,7 @@
       </div>
       <div class="toolbar-group">
         <input class="filter" id="symbol-filter" placeholder="Sembol ara...">
-        <select id="group-filter">
-          <option value="">Tum gruplar</option>
-          <option value="forex">Forex</option>
-          <option value="index">Endeks</option>
-          <option value="commodity">Emtia</option>
-          <option value="crypto">Kripto</option>
-        </select>
+        <select id="group-filter" data-groups="filter"></select>
       </div>
     </div>
     <div id="symbol-list" class="symbol-list"></div>
@@ -407,12 +401,7 @@
       <div class="portfolio-add">
         <input class="filter" id="portfolio-symbol" placeholder="Sembol (orn. EURUSD)" spellcheck="false">
         <input class="filter" id="portfolio-broker" placeholder="Broker adi (bos = ayni)" spellcheck="false">
-        <select class="filter" id="portfolio-group">
-          <option value="forex">Forex</option>
-          <option value="index">Endeks</option>
-          <option value="commodity">Emtia</option>
-          <option value="crypto">Kripto</option>
-        </select>
+        <select class="filter" id="portfolio-group" data-groups="pick"></select>
         <input class="filter" id="portfolio-minlot" type="number" step="0.01" min="0"
                placeholder="Min lot (opsiyonel)" style="width:150px" title="Sabit lot referansi olarak kullanilir">
         <input class="filter" id="portfolio-openhour" type="time"
