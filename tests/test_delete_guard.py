@@ -128,6 +128,9 @@ class _FakeExecution:
 
 
 class _FakeEngine:
+    def forget_filled_bars(self, symbol):
+        pass
+
     def forget_spread_ratio(self, symbol):
         pass
 

@@ -855,6 +855,18 @@ class Engine:
         except Exception:
             pass
 
+    def forget_filled_bars(self, symbol: str) -> None:
+        """Drop one symbol's filled-bar record at delete, not at the next prune.
+
+        Fourth and last of these. The record is keyed by symbol name and says
+        which bar already produced a fill, so a symbol re-added under the same
+        name inherits "already traded that bar" from an instrument that is gone.
+        Found 15.08 after the perpetuals were deleted: everything else was clean
+        and settings.filled_bars still held BRENTOIL-PERP.
+        """
+        if self._filled_bars.pop(str(symbol), None) is not None:
+            self.store.set_setting("filled_bars", self._filled_bars)
+
     def forget_spread_ratio(self, symbol: str) -> None:
         """Drop one symbol's spread histogram now, not at the next flush.
 

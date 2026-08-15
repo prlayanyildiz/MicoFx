@@ -1019,6 +1019,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # deleted symbol's block counts come back as the new one's.
         engine.forget_entry_blocks(symbol)
         engine.forget_spread_ratio(symbol)
+        engine.forget_filled_bars(symbol)
         LOG.emit(f"{symbol} portfoyden silindi.", "WARN", symbol)
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
         return {"ok": True, "symbols": symbol_payload(force=True), "system": store.system.to_dict()}

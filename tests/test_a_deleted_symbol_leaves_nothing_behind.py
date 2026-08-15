@@ -140,3 +140,30 @@ def test_delete_calls_the_histogram_drop_too():
     body = app[app.index("def remove_symbol"):]
     body = body[:body.index("@app.get")]
     assert "engine.forget_spread_ratio(symbol)" in body
+
+
+def test_the_filled_bar_record_goes_at_delete_too():
+    """Fourth of four. Keyed by name, so a re-add inherits "already traded".
+
+    Found 15.08 after the perpetuals were deleted: book, opt_runs, verdicts,
+    engine state, entry tally and spread histogram were all clean, and
+    settings.filled_bars still held BRENTOIL-PERP.
+    """
+    eng = Engine.__new__(Engine)
+    eng._filled_bars = {"BRENTOIL-PERP": {"primary": 123}, "NAS100": {"primary": 9}}
+    written = {}
+    eng.store = type("S", (), {"set_setting": lambda self, k, v: written.update({k: v})})()
+    eng.forget_filled_bars("BRENTOIL-PERP")
+    assert set(eng._filled_bars) == {"NAS100"}
+    assert written.get("filled_bars") == eng._filled_bars
+
+
+def test_delete_drops_all_four_name_keyed_records():
+    """Verdict, entry tally, spread histogram, filled bars - the whole set."""
+    app = (Path(__file__).resolve().parents[1] / "micofx" / "web" / "app.py").read_text(
+        encoding="utf-8")
+    body = app[app.index("def remove_symbol"):]
+    body = body[:body.index("@app.get")]
+    for call in ("engine.supervisor.forget(symbol)", "engine.forget_entry_blocks(symbol)",
+                 "engine.forget_spread_ratio(symbol)", "engine.forget_filled_bars(symbol)"):
+        assert call in body, call
