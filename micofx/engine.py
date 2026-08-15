@@ -855,6 +855,22 @@ class Engine:
         except Exception:
             pass
 
+    def forget_spread_ratio(self, symbol: str) -> None:
+        """Drop one symbol's spread histogram now, not at the next flush.
+
+        _flush_spread_ratio already prunes symbols that have left the book, and
+        its own comment says why that matters - _spread_scale looks the
+        histogram up BY NAME, so a re-added symbol would inherit a dead one's
+        distribution. But the flush is throttled to once every five minutes, so
+        "delete leaves nothing behind" was true eventually rather than
+        immediately. Deleting and re-adding inside that window is exactly what
+        an operator testing the delete path does.
+        """
+        if self._spread_ratio.pop(str(symbol), None) is not None:
+            self._spread_ratio_dirty = True
+            self._spread_ratio_at = 0.0          # bypass the throttle, once
+            self._flush_spread_ratio()
+
     def forget_entry_blocks(self, symbol: str) -> None:
         """Drop one symbol's entry tally now, rather than at the next flush.
 

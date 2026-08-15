@@ -101,3 +101,42 @@ def test_delete_calls_both():
     assert "engine.forget_entry_blocks(symbol)" in body
     assert "engine.supervisor.clear(symbol)" not in body, (
         "clear() keeps the row; deletion needs it gone")
+
+
+def _engine_with_ratio(ratio: dict):
+    eng = Engine.__new__(Engine)
+    eng._spread_ratio = ratio
+    eng._spread_ratio_dirty = False
+    eng._spread_ratio_at = 1.0
+    eng._flush_spread_ratio = lambda *a, **k: None    # type: ignore[assignment]
+    return eng
+
+
+def test_the_spread_histogram_goes_at_delete_not_at_the_next_flush():
+    """The flush prunes it, but only every five minutes.
+
+    Found 15.08 after the operator deleted LTCUSD and ADAUSD: both were gone
+    from the book, opt_runs, verdicts, engine state and the capacity table, and
+    still present under settings.spread_ratio. _spread_scale looks that
+    histogram up by name, so a symbol re-added inside the window would have been
+    searched against a dead one's spread distribution.
+    """
+    eng = _engine_with_ratio({"LTCUSD": [1, 2], "NAS100": [3, 4]})
+    eng.forget_spread_ratio("LTCUSD")
+    assert set(eng._spread_ratio) == {"NAS100"}
+    assert eng._spread_ratio_dirty is True
+    assert eng._spread_ratio_at == 0.0, "the throttle has to be bypassed once"
+
+
+def test_forgetting_a_histogram_that_is_not_there_changes_nothing():
+    eng = _engine_with_ratio({"NAS100": [3, 4]})
+    eng.forget_spread_ratio("LTCUSD")
+    assert eng._spread_ratio_dirty is False
+
+
+def test_delete_calls_the_histogram_drop_too():
+    app = (Path(__file__).resolve().parents[1] / "micofx" / "web" / "app.py").read_text(
+        encoding="utf-8")
+    body = app[app.index("def remove_symbol"):]
+    body = body[:body.index("@app.get")]
+    assert "engine.forget_spread_ratio(symbol)" in body

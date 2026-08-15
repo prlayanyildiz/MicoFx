@@ -143,6 +143,9 @@ class _FakeExecution:
 
 
 class _FakeEngine:
+    def forget_spread_ratio(self, symbol):
+        pass
+
     def forget_entry_blocks(self, symbol):
         pass
 
