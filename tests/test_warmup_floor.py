@@ -90,7 +90,6 @@ def test_the_old_floor_was_measurably_wrong(series):
 
 def test_engine_rejects_a_short_series(monkeypatch, tmp_path):
     """The guard itself, at the call site."""
-    import threading
 
     from micofx import store as store_module
 

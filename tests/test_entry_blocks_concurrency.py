@@ -28,8 +28,6 @@ import threading
 import time
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.engine import Engine
@@ -125,7 +123,6 @@ def test_a_reset_during_a_read_does_not_raise():
 
 def test_the_snapshot_is_actually_taken():
     """Guards the fix itself - a later edit dropping list() reopens the race."""
-    import re
 
     src = (Path(__file__).resolve().parents[1] / "micofx"
            / "engine.py").read_text(encoding="utf-8")

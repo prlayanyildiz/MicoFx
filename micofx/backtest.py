@@ -278,7 +278,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              lo: int = 0, hi: int | None = None, commission_price: float = 0.0,
              entries: np.ndarray | None = None,
              spread_price: np.ndarray | None = None,
-             min_stop: float | None = None,
+             min_stop: float | np.ndarray | None = None,
              flatten: np.ndarray | None = None) -> Result:
     """Replay one bar window using an already-computed signal set.
 
@@ -552,7 +552,7 @@ def combos_from_grid(grid: dict[str, list], max_combos: int,
 
 
 def _values(keys: list[str], grid: dict[str, list], idx: tuple[int, ...]) -> dict[str, Any]:
-    return {k: grid[k][i] for k, i in zip(keys, idx)}
+    return {k: grid[k][i] for k, i in zip(keys, idx, strict=True)}
 
 
 MIN_PLATEAU_NEIGHBOURS = 3

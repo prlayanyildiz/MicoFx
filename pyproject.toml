@@ -1,0 +1,65 @@
+# Static checks. Added 15.08 after a review pointed out the codebase is fully
+# type-hinted and nothing was checking the hints.
+#
+# Both tools are set to a level the code can actually pass today, so a failure
+# means "something new is wrong" rather than "the backlog is still there". A
+# checker that always fails is a checker nobody reads.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["cursor", "claude", "data", "backups"]
+
+[tool.ruff.lint]
+# E/F are the real bugs (undefined name, unused import, syntax-adjacent).
+# I sorts imports, B catches the mutable-default and loop-variable-capture
+# family, UP keeps the syntax current, SIM only where it does not fight the
+# explicit style this codebase uses on purpose.
+select = ["E", "F", "I", "B", "UP", "C4", "RET504", "ARG002"]
+ignore = [
+    "E501",    # line length is enforced by the formatter, not the linter
+    "B008",    # FastAPI's Depends() in a default is the framework's idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests carry long prose docstrings and deliberately odd fixtures.
+"tests/*" = ["B011", "ARG002", "E402", "E702", "E741"]
+# Three "unused" parameters here are unused ON PURPOSE and guarded by tests:
+# _tally_entry(source=), _evaluate(account=) and _merge_signals(cfg=) still
+# accept what the retired secondary leg used to pass, and several tests assert
+# that passing source="secondary" changes nothing. Deleting them to satisfy the
+# linter would delete the proof that the retired leg is inert.
+"micofx/engine.py" = [
+    "ARG002",
+    # C414: the list() inside sorted(self._entry_blocks.items()) is not
+    # decoration. These dicts are mutated by the trading thread while the panel
+    # reads them, the snapshot is deliberate and visible on purpose, and
+    # test_entry_blocks_concurrency asserts the call is still written out.
+    # Ruff's autofix removed it and that test caught it - which is the whole
+    # reason both exist.
+    "C414",
+]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["micofx"]
+exclude = "(?x)(^cursor/|^claude/|^tests/)"
+
+# Deliberately not strict. The value here is catching a hint that contradicts
+# the code - not annotating a codebase that already runs. Tightening these one
+# at a time, with the suite green in between, is the way to raise the bar; a
+# flag day would just get the whole thing silenced.
+ignore_missing_imports = true      # MetaTrader5 ships no stubs
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+disallow_untyped_defs = false
+disallow_any_generics = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+# The MT5 bridge is a thin wrapper over an untyped C extension; every call into
+# it is Any by construction and annotating that would be theatre.
+module = "micofx.mt5client"
+disallow_untyped_defs = false

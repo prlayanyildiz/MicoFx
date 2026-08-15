@@ -21,7 +21,6 @@ import pytest
 
 from micofx.engine import Engine
 
-
 TF_SEC = 300          # M5, matching _Cfg below
 BAR_OPEN = 1_000_000  # the reference bar opens here, closing TF_SEC later
 

@@ -7,10 +7,11 @@ walk-forward search that ultimately writes live trading params via apply().
 """
 from __future__ import annotations
 
-import pytest
 import sys
 import threading
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 

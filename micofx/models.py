@@ -17,13 +17,20 @@ from typing import Any
 # unwired name is refused loudly rather than quietly substituted - which is
 # what makes removing it safe rather than a return to the old trap.
 #
-# H1 left the *search* 14.08 (operator: wall-clock). It did not leave the
-# translation tables: opt_runs history, correlation, and any live row the
-# operator has not moved yet still name it. TIMEFRAMES is what may be
-# searched and newly written. READABLE_TIMEFRAMES is what may still be
-# fetched and traded until that row moves.
-TIMEFRAMES = ["M5", "M15", "M30", "H1"]
-READABLE_TIMEFRAMES = ["M5", "M15", "M30", "H1"]
+# H1 left the search 14.08 on wall-clock, came back 15.08 on measured cost, and
+# left again 15.08 on measured yield. The cost argument was real - UK100 spends
+# 21.3% of R on spread at M5 against 8.6% at H1 - but it was answered by moving
+# the expensive symbols, not by keeping the bar: the book now holds nothing on
+# H1, and per *day* rather than per trade H1 returns 0.110 R against M5's 1.303.
+# Throughput is the whole point at this account size, so the cheaper bar loses.
+#
+# Both lists go, because they only needed to differ while a live row still
+# named H1. TIMEFRAMES is what may be searched and newly written;
+# READABLE_TIMEFRAMES is what may still be fetched and traded. Should a symbol
+# ever need an hourly bar again, this is one line - and the reason to reopen it
+# is a R/day number, not a spread number.
+TIMEFRAMES = ["M5", "M15", "M30"]
+READABLE_TIMEFRAMES = ["M5", "M15", "M30"]
 GROUPS = ["forex", "index", "commodity", "crypto", "stock"]
 
 
@@ -281,7 +288,7 @@ class SymbolConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "SymbolConfig":
+    def from_dict(cls, payload: dict[str, Any]) -> SymbolConfig:
         if not isinstance(payload, dict):
             # _coerce goes straight to payload.items(), so a non-dict used to
             # surface as AttributeError - a type Store._load_symbols does not
@@ -505,8 +512,6 @@ def strategy_allows_timeframe(strategy: str, timeframe: str,
     # both the same, so a real empty list silently meant "allow everything"
     # instead of "allow nothing".
     if permitted is None:
-        # Live H1 rows stay legal until the operator moves them. The search
-        # planner filters TIMEFRAMES on its own and will not mint H1 jobs.
         return timeframe in READABLE_TIMEFRAMES
     return timeframe in permitted
 
@@ -531,7 +536,7 @@ def uses_swing_exits(strategy: str, timeframe: str) -> bool:
     # still translated to the right number of seconds. Nothing stores them any
     # more - every symbol row uses one of TIMEFRAMES - so the entries were
     # describing a state of the world that no longer exists.
-    seconds = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+    seconds = {"M5": 300, "M15": 900, "M30": 1800}
     return int(seconds.get(timeframe, 0)) >= 900
 
 
@@ -668,5 +673,5 @@ class SystemConfig:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "SystemConfig":
+    def from_dict(cls, payload: dict[str, Any]) -> SystemConfig:
         return _coerce(cls, payload)

@@ -15,11 +15,10 @@ wrong calls on which symbols are worth trading.
 from __future__ import annotations
 
 import sys
-import time
 import threading
+import time
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

@@ -4,6 +4,7 @@ import math
 import subprocess
 import threading
 import time
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +92,7 @@ def timeframe_const(name: str) -> int:
     # like an ordinary resolution.
     table = {
         "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
-        "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1,
+        "M30": mt5.TIMEFRAME_M30,
     }
     key = str(name).upper()
     if key not in table:
@@ -121,7 +122,7 @@ def timeframe_seconds(name: str) -> int:
     nowhere - not in the MT5 map, not here - so adding it to TIMEFRAMES would
     have produced M5 data measured as M1 and reported as a real M1 result.
     """
-    table = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+    table = {"M5": 300, "M15": 900, "M30": 1800}
     key = str(name).upper()
     if key not in table:
         if key not in _TF_SECONDS_WARNED:
@@ -905,7 +906,7 @@ class MT5Client:
         return out
 
     def deals_since(self, ts: float) -> list[dict[str, Any]]:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         # ``ts`` and deal ``time`` are both plain Unix epochs, same as
         # ``server_now()``. Widening the window end to at least "now" (instead
@@ -915,8 +916,8 @@ class MT5Client:
             if not self.connected:
                 return []
             raw = mt5.history_deals_get(
-                datetime.fromtimestamp(float(ts), tz=timezone.utc),
-                datetime.fromtimestamp(end_ts, tz=timezone.utc),
+                datetime.fromtimestamp(float(ts), tz=UTC),
+                datetime.fromtimestamp(end_ts, tz=UTC),
             )
             if raw is None:
                 # Same class as positions_get None - failed call, not empty history.
@@ -965,7 +966,7 @@ class MT5Client:
         can hold the last known good value instead of silently reverting to
         an uncorrected (breaker-disarming) anchor on a transient disconnect.
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         external = (mt5.DEAL_TYPE_BALANCE, mt5.DEAL_TYPE_CREDIT,
                     mt5.DEAL_TYPE_BONUS, mt5.DEAL_TYPE_CORRECTION)
@@ -974,8 +975,8 @@ class MT5Client:
             if not self.connected:
                 return None
             raw = mt5.history_deals_get(
-                datetime.fromtimestamp(float(ts), tz=timezone.utc),
-                datetime.fromtimestamp(end_ts, tz=timezone.utc),
+                datetime.fromtimestamp(float(ts), tz=UTC),
+                datetime.fromtimestamp(end_ts, tz=UTC),
             )
             if raw is None:
                 self.connected = False

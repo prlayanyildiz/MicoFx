@@ -44,7 +44,7 @@ def _make_engine(cfg):
 
 
 def _cfg(**over):
-    base = dict(symbol="EURUSD", group="crypto", magic=1, enabled=False)
+    base = {"symbol": "EURUSD", "group": "crypto", "magic": 1, "enabled": False}
     base.update(over)
     return SymbolConfig(**base)
 

@@ -66,9 +66,9 @@ GRID = {"t3_length": [5, 8], "sl_atr_mult": [1.5, 2.0]}
 
 
 def _run(point, **kw):
-    args = dict(cfg=SymbolConfig(symbol="GER40", magic=1), bars=_Bars(),
-                point=point, tf_seconds=300, grid=GRID, min_trades=10,
-                segments=4, max_combos=8)
+    args = {"cfg": SymbolConfig(symbol="GER40", magic=1), "bars": _Bars(),
+                "point": point, "tf_seconds": 300, "grid": GRID, "min_trades": 10,
+                "segments": 4, "max_combos": 8}
     args.update(kw)
     return bt.walk_forward(**args)
 

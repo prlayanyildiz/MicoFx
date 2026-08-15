@@ -14,9 +14,17 @@ import numpy as np
 from . import backtest
 from .logbus import LOG
 from .models import (
-    EXIT_RISK_FIELDS, OPT_FIELDS, STRATEGIES, STRATEGY_TIMEFRAMES,
-    SWING_GRID_OVERLAY, TIMEFRAMES, SymbolConfig, invalid_exit_param, is_scalp_strategy,
-    strategy_allows_timeframe, uses_swing_exits,
+    EXIT_RISK_FIELDS,
+    OPT_FIELDS,
+    STRATEGIES,
+    STRATEGY_TIMEFRAMES,
+    SWING_GRID_OVERLAY,
+    TIMEFRAMES,
+    SymbolConfig,
+    invalid_exit_param,
+    is_scalp_strategy,
+    strategy_allows_timeframe,
+    uses_swing_exits,
 )
 from .mt5client import Bars, MT5Client, timeframe_seconds
 from .spread_calibration import calibrate
@@ -407,8 +415,7 @@ class Optimizer:
         until the distribution is real.
         """
         try:
-            from .engine import (SPREAD_RATIO_BUCKETS, SPREAD_RATIO_MIN_SAMPLES,
-                                 _ratio_percentile)
+            from .engine import SPREAD_RATIO_BUCKETS, SPREAD_RATIO_MIN_SAMPLES, _ratio_percentile
             blob = self.store.get_setting("spread_ratio", {}) or {}
             counts = blob.get(symbol)
             if not isinstance(counts, (list, tuple)):

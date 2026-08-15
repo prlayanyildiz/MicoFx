@@ -29,9 +29,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.engine import (SPREAD_RATIO_BUCKETS, SPREAD_RATIO_MIN_SAMPLES,
-                           SPREAD_RATIO_STEP, Engine, SymbolState,
-                           _ratio_percentile)
+from micofx.engine import (
+    SPREAD_RATIO_BUCKETS,
+    SPREAD_RATIO_MIN_SAMPLES,
+    SPREAD_RATIO_STEP,
+    Engine,
+    SymbolState,
+    _ratio_percentile,
+)
 from micofx.models import SymbolConfig
 
 POINT = 0.01

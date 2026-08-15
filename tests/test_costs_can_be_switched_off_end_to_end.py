@@ -35,7 +35,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx import backtest
 from micofx.models import SystemConfig
 
-
 # ------------------------------------------------------- the switch exists
 
 def test_the_system_carries_the_switch_and_defaults_to_charging():

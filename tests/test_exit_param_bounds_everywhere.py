@@ -74,10 +74,9 @@ def test_every_shipped_grid_value_is_accepted():
 
 def _params_client():
     from fastapi.testclient import TestClient
+    from test_opt_apply_validation import _cfg, _FakeClient, _FakeEngine, _FakeOptimizer, _FakeStore
 
     from micofx.web.app import create_app
-    from test_opt_apply_validation import (_FakeClient, _FakeEngine, _FakeOptimizer,
-                                           _FakeStore, _cfg)
 
     class _Store(_FakeStore):
         def __init__(self, symbols):

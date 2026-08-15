@@ -5,7 +5,6 @@ import threading
 from types import SimpleNamespace
 
 from micofx.engine import Engine
-from micofx.models import SymbolConfig
 
 
 class _Client:

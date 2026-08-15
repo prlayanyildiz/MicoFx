@@ -51,14 +51,14 @@ HOUR = 3600.0
 def test_a_gmt3_server_reads_as_plus_three():
     # tick.time encodes the broker's wall clock as though it were UTC, so a
     # GMT+3 server's ticks sit three hours ahead of a true epoch.
-    c = _client({s: 3 * HOUR for s in ("A", "B", "C", "D")})
+    c = _client(dict.fromkeys(("A", "B", "C", "D"), 3 * HOUR))
     assert c.broker_utc_offset_hours(["A", "B", "C", "D"]) == 3
 
 
 def test_the_october_shift_shows_as_gmt_plus_two():
     # End of European DST: the server drops to GMT+2 while Turkey stays UTC+3,
     # so the drift the caller computes becomes -1.
-    c = _client({s: 2 * HOUR for s in ("A", "B", "C", "D")})
+    c = _client(dict.fromkeys(("A", "B", "C", "D"), 2 * HOUR))
     broker = c.broker_utc_offset_hours(["A", "B", "C", "D"])
     assert broker == 2
     assert broker - 3 == -1          # drift against a UTC+3 machine
@@ -88,7 +88,7 @@ def test_no_symbols_at_all_answers_none():
 
 def test_a_partial_hour_offset_rounds_to_whole_hours():
     # Broker clocks sit on whole hours; anything else is quote latency.
-    c = _client({s: 2 * HOUR + 4.0 for s in ("A", "B", "C")})
+    c = _client(dict.fromkeys(("A", "B", "C"), 2 * HOUR + 4.0))
     assert c.broker_utc_offset_hours(["A", "B", "C"]) == 2
 
 
@@ -139,8 +139,8 @@ def test_a_missing_binding_returns_none_without_warning(monkeypatch):
     condition that can never change on this package. A log that buries its own
     real warnings under a known non-issue is the failure this whole day was
     about."""
-    from micofx.logbus import LOG
     from micofx import mt5client as mod
+    from micofx.logbus import LOG
 
     class _NoSessions:
         pass
@@ -157,8 +157,8 @@ def test_a_missing_binding_returns_none_without_warning(monkeypatch):
 
 
 def test_a_real_failure_on_a_capable_build_still_warns(monkeypatch):
-    from micofx.logbus import LOG
     from micofx import mt5client as mod
+    from micofx.logbus import LOG
 
     class _Broken:
         @staticmethod

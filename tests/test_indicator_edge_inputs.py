@@ -149,7 +149,6 @@ def test_wilder_clamps_its_period_like_every_sibling():
 def test_a_clean_series_never_produces_inf():
     """NaN/inf in equals NaN/inf out is fine; manufacturing one is not."""
     n = N
-    high, low, close = _series("normal", n) + 0.5, _series("normal", n) - 0.5, _series("normal", n)
     for name in PUBLIC:
         fn = getattr(ind, name)
         try:

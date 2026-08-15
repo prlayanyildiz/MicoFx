@@ -53,7 +53,7 @@ OWN = {"brst_lookback": [10, 20], "brst_range_z": [1.0, 2.0]}
 
 # ------------------------------------------------------------- the defect
 
-@pytest.mark.parametrize("tf", ["M15", "M30", "H1"])
+@pytest.mark.parametrize("tf", ["M15", "M30"])
 @pytest.mark.parametrize("axis", sorted(SWING_GRID_OVERLAY))
 def test_the_overlay_reaches_the_search_on_long_bars(tf, axis):
     grid = _merge(SHARED, OWN, "burst", tf)
@@ -78,7 +78,7 @@ def test_the_trail_start_floor_holds():
 
 def test_a_family_that_states_its_own_range_still_wins():
     own = dict(OWN, sl_atr_mult=[4.0, 5.0])
-    grid = _merge(SHARED, own, "burst", "H1")
+    grid = _merge(SHARED, own, "burst", "M30")
     assert grid["sl_atr_mult"] == [4.0, 5.0], "ailenin kendi beyani ezilmis"
     # ...while the axes it said nothing about still get widened.
     assert grid["trail_step_atr"] == SWING_GRID_OVERLAY["trail_step_atr"]
@@ -92,12 +92,12 @@ def test_short_bars_keep_the_shared_grid():
 
 
 def test_the_family_parameters_survive_either_way():
-    for tf in ("M5", "H1"):
+    for tf in ("M5", "M30"):
         grid = _merge(SHARED, OWN, "burst", tf)
         assert grid["brst_lookback"] == [10, 20]
         assert grid["brst_range_z"] == [1.0, 2.0]
 
 
 def test_an_axis_only_the_overlay_knows_is_still_added():
-    grid = _merge({"sl_atr_mult": [0.5]}, {}, "t3_stoch", "H1")
+    grid = _merge({"sl_atr_mult": [0.5]}, {}, "t3_stoch", "M30")
     assert grid["trail_step_atr"] == SWING_GRID_OVERLAY["trail_step_atr"]

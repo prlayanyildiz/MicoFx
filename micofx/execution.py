@@ -241,8 +241,7 @@ class ExecutionMonitor:
             })
             book.setdefault("risk_dist", abs(float(pos["price_open"]) - float(pos["sl"]))
                             if pos["sl"] else 0.0)
-        gone = set(self._open) - seen
-        return gone
+        return set(self._open) - seen
 
     def reap(self, gone: set[int], deals: list[dict[str, Any]],
              client) -> list[dict[str, Any]]:

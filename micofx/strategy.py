@@ -98,7 +98,7 @@ class Params:
     atr_pct_min: float = 0.0
 
     @classmethod
-    def from_config(cls, cfg: SymbolConfig, **overrides: Any) -> "Params":
+    def from_config(cls, cfg: SymbolConfig, **overrides: Any) -> Params:
         base = {f: getattr(cfg, f) for f in cls.__dataclass_fields__ if hasattr(cfg, f)}
         base.update({k: v for k, v in overrides.items() if k in cls.__dataclass_fields__})
         return cls(**base)

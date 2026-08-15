@@ -20,7 +20,8 @@ import inspect
 import numpy as np
 import pytest
 
-from micofx import backtest, engine as engine_mod
+from micofx import backtest
+from micofx import engine as engine_mod
 from micofx.models import trail_min_step
 from micofx.strategy import IndicatorCache, Params, Signals
 

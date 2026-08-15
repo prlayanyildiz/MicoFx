@@ -18,7 +18,6 @@ from micofx.mt5client import MT5Client
 from micofx.optimizer import Optimizer
 from micofx.risk import DailyGuard, RiskManager
 
-
 # --------------------------------------------------------------------------- session_mask
 
 def test_session_mask_inside_window_allowed():
@@ -260,7 +259,7 @@ class _FakeClient:
 
 
 def _cfg(**over):
-    base = dict(symbol="TEST", lot_mode="fixed", fixed_lot=0.1, max_lot=0.3)
+    base = {"symbol": "TEST", "lot_mode": "fixed", "fixed_lot": 0.1, "max_lot": 0.3}
     base.update(over)
     return SymbolConfig(**base)
 

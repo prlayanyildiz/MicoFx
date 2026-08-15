@@ -153,7 +153,7 @@ def test_update_symbol_concurrent_single_field_writes_both_land(tmp_path, monkey
         s.update_symbol(symbol, {"risk_percent": 0.5, "max_positions": 1})
         start = threading.Barrier(2)
 
-        def _patch(field, value):
+        def _patch(field, value, start=start):
             start.wait()
             s.update_symbol(symbol, {field: value})
 

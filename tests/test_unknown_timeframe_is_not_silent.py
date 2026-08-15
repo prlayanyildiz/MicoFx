@@ -13,8 +13,10 @@ not in the MT5 map, not in this table - so adding it to TIMEFRAMES would have
 produced M5 data measured as M1 and reported as a genuine M1 result. M1 was
 then wired properly; the guard here uses a name that still is not.
 
-H1 left TIMEFRAMES (the searchable set) on 14.08 but stayed in this seconds
-table and the MT5 map. That is deliberate: history still names H1. A name in
+H1 spent a day in this seconds table and the MT5 map after leaving TIMEFRAMES,
+so that a live row still naming it kept resolving. None does, and it left both
+tables on 15.08, so it now falls to M5 with a warning like any other retired
+name. That is the point of the warning: a name in
 the table with no warning is "we can still read this bar"; a name in
 TIMEFRAMES is "we will search it". ``test_h1_is_not_searchable`` pins the
 split. This file still pins "TIMEFRAMES never hits the fallback".
@@ -32,9 +34,9 @@ from micofx import mt5client
 from micofx.models import TIMEFRAMES
 
 # Bar lengths keyed by name, so the assertion follows TIMEFRAMES instead of
-# pinning today's list - H1 left the search on 14.08 and came back on 15.08,
+# pinning today's list - H1 moved three times in two days,
 # and a literal made that a test edit both times.
-_EXPECTED = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+_EXPECTED = {"M5": 300, "M15": 900, "M30": 1800}
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +101,7 @@ def test_m1_is_gone_and_says_so(monkeypatch):
     assert seen and seen[0][1] == "WARN" and "M1" in seen[0][0]
 
 
-@pytest.mark.parametrize("name,secs", [("m5", 300), ("M15", 900), ("h1", 3600)])
+@pytest.mark.parametrize("name,secs", [("m5", 300), ("M15", 900), ("m30", 1800)])
 def test_case_is_still_ignored(name, secs, monkeypatch):
     seen = []
     monkeypatch.setattr(mt5client.LOG, "emit",

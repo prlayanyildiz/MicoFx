@@ -7,3 +7,9 @@ numpy>=1.26.0
 # dev / test
 pytest>=8.0.0
 httpx>=0.28            # Starlette TestClient transport; 0.28 is what is installed
+
+# Static checks (dev only - the bot does not import these).
+# Run: python -m ruff check micofx/ tests/   -> must be clean
+#      python -m mypy                        -> 28 known, see pyproject.toml
+ruff>=0.16
+mypy>=1.11

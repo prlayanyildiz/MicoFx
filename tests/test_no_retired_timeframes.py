@@ -27,16 +27,19 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx import mt5client
-from micofx.models import TIMEFRAMES, READABLE_TIMEFRAMES, uses_swing_exits
+from micofx.models import READABLE_TIMEFRAMES, TIMEFRAMES, uses_swing_exits
 
 # Bar lengths keyed by name, so the assertion follows TIMEFRAMES instead of
-# pinning today's list - H1 left the search on 14.08 and came back on 15.08,
-# and a literal made that a test edit both times.
-_EXPECTED = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+# pinning today's list - H1 left the search on 14.08, came back on 15.08 and
+# left again the same evening, and a literal made that a test edit each time.
+_EXPECTED = {"M5": 300, "M15": 900, "M30": 1800}
 
 # M1 left this list 14.08 - it is now wired and offered (see models.TIMEFRAMES).
 # M1 rejoined this list 14.08: wired and searched, then removed on its numbers.
-RETIRED = ("M1", "M3", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
+# H1 is here for the third time and, unlike the first, on a measurement: 0.110
+# R/day against M5's 1.303. The cost case for it was answered by moving the
+# expensive symbols instead of keeping the bar - nothing in the book is hourly.
+RETIRED = ("M1", "M3", "H1", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
 
 
 # ------------------------------------------------------ nothing resolves them
@@ -55,12 +58,10 @@ def test_a_retired_timeframe_has_no_second_count(name):
 def test_the_offered_timeframes_still_translate():
     assert ([mt5client.timeframe_seconds(t) for t in TIMEFRAMES]
             == [_EXPECTED[t] for t in TIMEFRAMES])
-    assert mt5client.timeframe_seconds("H1") == 3600
-    # The wider exit envelope is decided by the bar, not the family: the two
-    # scalp lengths (M1 since 14.08, M5) keep the tight grid, M15+ get swing.
+    # The wider exit envelope is decided by the bar, not the family: only the
+    # scalp length (M5) keeps the tight grid, M15+ get swing.
     for tf in TIMEFRAMES:
         assert uses_swing_exits("t3_stoch", tf) is (tf != "M5")
-    assert uses_swing_exits("t3_stoch", "H1") is True
 
 
 # ------------------------------------- the tables themselves carry no leftovers

@@ -29,8 +29,7 @@ def _grids():
     """Every grid the optimizer can search: the shared one plus per-family."""
     opt = load_defaults()["optimizer"]
     yield "shared", opt["grid"]
-    for family, axes in (opt.get("strategy_grids") or {}).items():
-        yield family, axes
+    yield from (opt.get("strategy_grids") or {}).items()
 
 
 def test_every_trail_axis_reaches_past_the_old_ceiling():

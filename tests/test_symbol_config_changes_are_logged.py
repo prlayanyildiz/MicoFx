@@ -25,7 +25,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.logbus import LOG, _PERSIST
+from micofx.logbus import _PERSIST, LOG
 from micofx.models import SymbolConfig
 from micofx.store import Store
 

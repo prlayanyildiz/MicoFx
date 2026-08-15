@@ -9,7 +9,7 @@ is not listed here is invisible to it, so the list is the contract.
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from micofx import mt5client
 from micofx import strategy as strat
@@ -81,8 +81,11 @@ def probe_all(emit_sink: list) -> None:
 
     LOG.emit = _cap
     try:
-        for name, fn in LOOKUPS:
+        for _name, fn in LOOKUPS:
             before = len(emit_sink)
-            fn(lambda: [row for row in emit_sink[before:] if row[1] == "WARN"])
+            # `before` bound at definition: the lambda is called inside this
+            # iteration today, but a lookup that stashed it would read the last
+            # loop's offset and report another lookup's warnings as its own.
+            fn(lambda before=before: [r for r in emit_sink[before:] if r[1] == "WARN"])
     finally:
         LOG.emit = orig

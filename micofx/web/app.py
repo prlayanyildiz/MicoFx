@@ -21,9 +21,14 @@ from .. import APP_NAME, __version__
 from ..engine import Engine
 from ..logbus import LOG
 from ..models import (
-    EXIT_PARAM_BOUNDS, EXIT_RISK_FIELDS, GROUPS, STRATEGIES, TIMEFRAMES,
+    EXIT_PARAM_BOUNDS,
+    EXIT_RISK_FIELDS,
+    GROUPS,
     READABLE_TIMEFRAMES,
-    invalid_exit_param, strategy_allows_timeframe,
+    STRATEGIES,
+    TIMEFRAMES,
+    invalid_exit_param,
+    strategy_allows_timeframe,
 )
 from ..mt5client import MT5Client
 from ..optimizer import Optimizer
@@ -141,16 +146,7 @@ _SYMBOL_RISK_BOUNDS = {
 # carry "0 disables" in models.py - and bounding those at 1 would refuse the
 # live US500 config. A length has no such reading: an average over no bars is
 # a mistake, not a disabled filter.
-_INDICATOR_PERIOD_BOUNDS = {
-    key: (1, 10000, True) for key in (
-        "t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length",
-        "macd_fast", "macd_slow", "macd_signal",
-        "wt_channel_len", "wt_avg_len",
-        "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
-        "aroon_length", "adx_length", "atr_length",
-        "trail_lookback",
-    )
-}
+_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "macd_fast", "macd_slow", "macd_signal", "wt_channel_len", "wt_avg_len", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "aroon_length", "adx_length", "atr_length", "trail_lookback"), (1, 10000, True))
 
 
 _SYSTEM_RISK_BOUNDS = {
@@ -1312,16 +1308,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             by_layer.setdefault(row["layer"], []).append(row["symbol"])
         by_gate = {g: [r["symbol"] for r in rows if g in r["fails"]]
                    for g in ("olculebilir", "maliyet", "tavan", "siklik")}
-        thin = [r["symbol"] for r in rows if r["thin_sample"]]
+        thin_symbols = [r["symbol"] for r in rows if r["thin_sample"]]
         return {
             "ok": True, "rows": rows, "by_gate": by_gate,
             "by_layer": by_layer,
             "window_days": window_days, "min_sample": sample_floor,
             "min_fill_rate": fill_floor,
-            "thin_sample": thin,
+            "thin_sample": thin_symbols,
             "note": (
                 f"{sum(1 for r in rows if r['clean'])}/{len(rows)} sembol dort kapiyi da geciyor. "
-                f"Orneklemi {sample_floor} altinda kalan: {', '.join(thin) if thin else 'yok'} - "
+                f"Orneklemi {sample_floor} altinda kalan: "
+                f"{', '.join(thin_symbols) if thin_symbols else 'yok'} - "
                 f"bu sembollerde 'olculebilir' bayragi tek basina okunmamali."
             ),
         }
@@ -1562,7 +1559,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if point <= 0:
             raise HTTPException(503, f"{symbol}: point degeri okunamadi")
 
-        from .. import backtest, indicators as ind
+        from .. import backtest
+        from .. import indicators as ind
         commission = backtest.commission_in_price(
             cfg.commission_per_lot,
             float(info.get("tick_value", 0.0) or 0.0),
@@ -1689,7 +1687,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 current = store.symbols.get(symbol) if guarded else None
                 if guarded and current is None:
                     continue
-                if needs_tf_check:
+                if needs_tf_check and current is not None:
                     next_strat = body.patch.get("strategy", current.strategy)
                     next_tf = body.patch.get("timeframe", current.timeframe)
                     if not strategy_allows_timeframe(next_strat, next_tf, allow):

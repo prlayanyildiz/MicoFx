@@ -10,8 +10,7 @@ from __future__ import annotations
 import MetaTrader5 as mt5
 import pytest
 
-from micofx.execution import (DEAL_REASON_SL, DEAL_REASON_SO, DEAL_REASON_TP,
-                              ExecutionMonitor)
+from micofx.execution import DEAL_REASON_SL, DEAL_REASON_SO, ExecutionMonitor
 
 
 class _Store:

@@ -12,16 +12,15 @@ from __future__ import annotations
 import sys
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from micofx.supervisor import DEFAULTS, Supervisor
 from micofx.web.app import _reject_wrong_type_against, create_app
-from fastapi import HTTPException
-import pytest
 
 
 class _FakeStore:
@@ -211,8 +210,7 @@ def test_the_loss_streak_trigger_is_not_a_hair_trigger():
 
 
 def test_watch_fires_on_the_evidence_quarantine_cannot_use():
-    import types
-    from micofx.supervisor import DEFAULTS, Supervisor, SymbolVerdict
+    from micofx.supervisor import DEFAULTS, SymbolVerdict
 
     cfgs = {**DEFAULTS}
     v = SymbolVerdict(symbol="GER40")

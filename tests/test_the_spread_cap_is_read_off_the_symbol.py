@@ -23,8 +23,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.spread_calibration import (MAX_CAP, MIN_CAP, BandReading,
-                                       cap_from_bands, read_bands)
+from micofx.spread_calibration import MAX_CAP, MIN_CAP, BandReading, cap_from_bands, read_bands
 
 
 class _Bars:

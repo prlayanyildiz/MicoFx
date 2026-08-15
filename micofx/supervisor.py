@@ -6,11 +6,6 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .logbus import LOG
-from .models import SymbolConfig
-from .mt5client import MT5Client
-from .store import Store
-
 # What a run with no losing trades at all scores. Imported rather than
 # redeclared: this exact defect has now appeared three times in three modules
 # (_pf, _judge's inline copy, Result.profit_factor), so the value and the
@@ -18,6 +13,10 @@ from .store import Store
 # it as "excellent" - quarantine_pf 0.8, watch_pf 1.0, bad_hour_pf 0.7 - which
 # is what a flawless record deserves.
 from .backtest import PF_NO_LOSSES  # noqa: E402  (re-exported; see above)
+from .logbus import LOG
+from .models import SymbolConfig
+from .mt5client import MT5Client
+from .store import Store
 
 DEFAULTS: dict[str, Any] = {
     "enabled": True,
@@ -395,12 +394,12 @@ class Supervisor:
         hour_scale = float((verdict.hour_risk_scales or {}).get(hour, 1.0))
         return True, "", max(0.1, min(1.0, self.risk_scale * verdict.risk_scale * hour_scale))
 
-    def priority(self, cfg: SymbolConfig, verdict: "SymbolVerdict | None" = None) -> float:
+    def priority(self, cfg: SymbolConfig, verdict: SymbolVerdict | None = None) -> float:
         """Higher score wins when several symbols race for the last free slots."""
         with self._lock:
             return self._priority_locked(cfg, verdict)
 
-    def _priority_locked(self, cfg: SymbolConfig, verdict: "SymbolVerdict | None" = None) -> float:
+    def _priority_locked(self, cfg: SymbolConfig, verdict: SymbolVerdict | None = None) -> float:
         v = verdict if verdict is not None else self.verdicts.get(cfg.symbol)
         hold = (cfg.opt_summary or {}).get("holdout") or {}
         expected_r = float(hold.get("expectancy", 0.0) or 0.0)
@@ -559,7 +558,7 @@ class Supervisor:
         since_cfg = max(float(getattr(cfg, "opt_updated_at", 0.0) or 0.0),
                         float(v.history_cleared_at or 0.0))
         streak = 0
-        for deal, x in zip(reversed(trades), reversed(nets)):
+        for deal, x in zip(reversed(trades), reversed(nets), strict=True):
             if float(deal.get("time", 0.0)) < since_cfg:
                 break
             if x < 0:
@@ -597,7 +596,7 @@ class Supervisor:
         # its own record at the same price - deliberately not a cheaper one, so
         # a healthy config is not suspended on a handful of noisy trades.
         if since_cfg > 0:
-            own = [x for d, x in zip(trades, nets)
+            own = [x for d, x in zip(trades, nets, strict=True)
                    if float(d.get("time", 0.0)) >= since_cfg]
             judged_pf, judged_n = self._pf(own), len(own)
         else:
@@ -610,7 +609,7 @@ class Supervisor:
         # config change.
         released_at = float(v.history_cleared_at or 0.0)
         if released_at > 0.0:
-            since_release = [x for d, x in zip(trades, nets)
+            since_release = [x for d, x in zip(trades, nets, strict=True)
                              if float(d.get("time", 0.0)) >= released_at]
             watch_n = len(since_release)
             watch_pf_val = self._pf(since_release)
@@ -781,7 +780,7 @@ class Supervisor:
         it would take to earn an outright block, which is backwards.
         """
         buckets: dict[int, list[float]] = {}
-        for deal, net in zip(trades, nets):
+        for deal, net in zip(trades, nets, strict=True):
             hour = time.gmtime(deal["time"]).tm_hour if deal["time"] > 0 else 0
             buckets.setdefault(hour, []).append(net)
         scales: dict[int, float] = {}
@@ -819,7 +818,7 @@ class Supervisor:
                    cfgs: dict[str, Any]) -> list[int]:
         """Server-clock hours that lose persistently for this symbol."""
         buckets: dict[int, list[float]] = {}
-        for deal, net in zip(trades, nets):
+        for deal, net in zip(trades, nets, strict=True):
             hour = time.gmtime(deal["time"]).tm_hour if deal["time"] > 0 else 0
             buckets.setdefault(hour, []).append(net)
 

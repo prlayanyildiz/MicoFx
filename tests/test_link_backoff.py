@@ -32,7 +32,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.engine import LINK_BACKOFF_SEC, Engine, SymbolState
-from micofx.models import SymbolConfig
 from micofx.mt5client import AMBIGUOUS_RETCODES
 
 

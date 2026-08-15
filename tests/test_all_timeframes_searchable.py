@@ -40,7 +40,6 @@ from micofx.models import (
     uses_swing_exits,
 )
 
-
 # ------------------------------------------------- every pairing is searchable
 
 @pytest.mark.parametrize("strategy", sorted(STRATEGIES))
@@ -50,18 +49,18 @@ def test_every_family_may_search_every_timeframe(strategy, timeframe):
         f"{strategy}/{timeframe} aramaya giremiyor")
 
 
-def test_the_scalp_families_reach_the_hourly_chart_too():
+def test_the_scalp_families_reach_the_longest_offered_bar_too():
     """No family is fenced off a timeframe; the search decides on the numbers.
 
-    This asserted "H1 is not in TIMEFRAMES" while H1 was out of the search
-    (14.08-15.08). It came back once the cost was measured - 17.8% more bars,
-    against 8.6% of R in spread for UK100 versus 21.3% at M5 - so the standing
-    rule is the one that was always underneath: every family may be paired with
-    every offered bar, and the holdout picks.
+    Written against H1 three times as that bar came and went. The rule under it
+    never moved and is what this now asserts directly: whatever the longest
+    offered bar happens to be, a scalp family may be paired with it and the
+    holdout picks. Fencing by family name was always a guess about where a
+    strategy works, made before the measurement instead of after it.
     """
+    longest = TIMEFRAMES[-1]
     for family in sorted(SCALP_STRATEGIES):
-        assert strategy_allows_timeframe(family, "H1")
-    assert "H1" in TIMEFRAMES
+        assert strategy_allows_timeframe(family, longest)
 
 
 def test_the_swing_families_reach_the_five_minute_chart():
@@ -90,15 +89,19 @@ def test_a_retired_family_is_not_quietly_accepted():
 @pytest.mark.parametrize("strategy", sorted(STRATEGIES))
 def test_the_wider_exit_grid_is_decided_by_bar_length_not_by_family(strategy):
     assert uses_swing_exits(strategy, "M5") is False
-    for tf in ("M15", "M30", "H1"):
+    for tf in ("M15", "M30"):
         assert uses_swing_exits(strategy, tf) is True, (
             f"{strategy}/{tf} hala scalp olcusunde stop izgarasiyla araniyor")
 
 
-def test_a_scalp_family_on_hourly_bars_gets_the_swing_envelope():
-    """micro_rev/H1 used to search with a five-minute stop grid."""
+def test_a_scalp_family_on_long_bars_gets_the_swing_envelope():
+    """micro_rev/M30 used to search with a five-minute stop grid.
+
+    Written for micro_rev/H1; the hazard is the same at any bar longer than the
+    family's name suggests, and M30 is the longest one offered now.
+    """
     assert is_scalp_strategy("micro_rev")
-    assert uses_swing_exits("micro_rev", "H1") is True
+    assert uses_swing_exits("micro_rev", "M30") is True
     assert uses_swing_exits("micro_rev", "M5") is False
 
 
@@ -135,17 +138,20 @@ def test_an_unrecognised_bar_never_claims_the_swing_envelope():
     assert uses_swing_exits("t3_stoch", "") is False
 
 
-def test_the_searchable_timeframes_are_exactly_these_four():
-    """M1 was searched on 14.08 and dropped on its own numbers: 0.099 R/trade
-    against M5's 0.121, at 0.043 R/trade of cost against 0.024, on a quarter of
-    the history. That one stays out.
+def test_the_searchable_timeframes_are_exactly_these_three():
+    """Each name here left on a measurement, not on an argument.
 
-    H1 left the same day on a speed call rather than a measurement, and came
-    back on 15.08 when the measurement was taken: the broker holds ~50k H1 bars
-    per symbol against 99k lower down, so it costs 17.8% more simulated bars,
-    and it is the only affordable bar for the expensive end of the book.
+    M1: 0.099 R/trade against M5's 0.121, at 0.043 R/trade of cost against
+    0.024, on a quarter of the history. M3 the same way.
 
-    M1 stays in the translation tables (READABLE_TIMEFRAMES, mt5client) because
-    history still names it. TIMEFRAMES is the menu.
+    H1 is the one that moved twice. It left 14.08 on a wall-clock guess, which
+    was not a measurement and should not have counted; came back 15.08 on a
+    real cost reading (UK100 spends 21.3% of R on spread at M5 against 8.6% at
+    H1); and left again that evening on a yield reading that outranks it -
+    0.110 R/**day** against M5's 1.303. Per trade the hourly bar is cheaper and
+    per day it is far poorer, and at this account size the day is what compounds.
+    The cost problem was answered by moving the expensive symbols instead.
+
+    Reopening it needs a R/day number, not a spread number.
     """
-    assert TIMEFRAMES == ["M5", "M15", "M30", "H1"]
+    assert TIMEFRAMES == ["M5", "M15", "M30"]
