@@ -71,6 +71,7 @@ def test_the_sweep_reports_the_regime_it_ran_under():
     assert '"charge_costs": bool(charge_costs)' in src, (
         "the report must carry the regime out with the numbers it produced")
     assert '"spread_scale": float(scale)' in src
+    assert '"min_positive_ratio": float(min_positive_ratio)' in src
 
 
 def test_apply_receives_it_from_the_report():
@@ -86,3 +87,5 @@ def test_apply_receives_it_from_the_report():
         "apply() cannot stamp what the caller never handed it")
     assert '"spread_scale": report.get("spread_scale")' in src, (
         "spread_scale has the same clock-vs-measurement hazard")
+    assert '"min_positive_ratio": report.get("min_positive_ratio")' in src, (
+        "the consistency gate threshold is the same clock-vs-measurement hazard")

@@ -248,6 +248,31 @@ def run(cache: IndicatorCache, open_: np.ndarray, spread_pts: np.ndarray, point:
                     commission_price=commission_price)
 
 
+def stop_floor_const(min_stop: float | None, point: float) -> float:
+    """Broker stop floor used when the caller has a single number, not a series.
+
+    ``None`` means the caller never asked the broker. ``0.0`` is what
+    ``min_stop_distance`` returns when symbol info is missing - also unknown.
+    Both become ten points. Zero is the one that used to be swallowed by
+    ``if min_stop else`` with no warning, and by a different rule in each
+    caller: simulate() took it as a floor of zero, walk_forward() as ten
+    points.
+
+    Deliberately silent. This runs inside the optimizer's worker PROCESSES
+    (ProcessPoolExecutor), thousands of times per sweep, and logbus serialises
+    on a thread lock that does not reach across processes - its rotation is a
+    read-truncate-rewrite that two processes would interleave. The warning
+    belongs where the number is read once, in the parent: see
+    Optimizer._plan_symbol.
+    """
+    if min_stop is None:
+        return float(point) * 10.0
+    value = float(min_stop)
+    if value == 0.0:
+        return float(point) * 10.0
+    return value
+
+
 def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarray,
              point: float, p: Params, tradable: np.ndarray | None = None,
              lo: int = 0, hi: int | None = None, commission_price: float = 0.0,
@@ -291,8 +316,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     # freeze_level, current spread) - live can legally require a wider stop than
     # this default, which understates the true stop/trail floor for symbols
     # where the broker's own minimum exceeds ten points.
-    if min_stop is None:
-        min_stop = point * 10.0
+    if min_stop is None or (
+            not isinstance(min_stop, np.ndarray) and float(min_stop) == 0.0):
+        min_stop = stop_floor_const(
+            None if min_stop is None else float(min_stop), point)
     # Per-bar, when the caller supplies a series. mt5client.min_stop_distance is
     # max(stops_level, spread * 1.5, point * 10), so the floor MOVES with the
     # spread - and the optimizer was passing one snapshot taken at plan time,
@@ -713,7 +740,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     # that series is zeroed when costs are switched off, and this is not a cost.
     # A stop cannot sit inside the spread whatever the accounting says.
     raw_spread_price = bars.spread * point
-    floor_const = float(min_stop) if min_stop else (point * 10.0)
+    floor_const = stop_floor_const(min_stop, point)
     min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
 
     if not charge_costs:
@@ -966,6 +993,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
             "raw_score": raw[idx],
             "plateau_neighbours": neighbours.get(idx, 0),
             "positive_ratio": detail[idx]["positive_ratio"],
+            "min_positive_ratio": float(min_positive_ratio),
             "selection": detail[idx]["pooled"],
             "segments": detail[idx]["segments"],
             # OOS slices scored against the apply-gate sample size (12), not the
@@ -1001,6 +1029,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         # flight, so reading it again downstream describes the clock, not the
         # sweep - see Optimizer.apply's stamp.
         "charge_costs": bool(charge_costs),
+        "min_positive_ratio": float(min_positive_ratio),
         "holdout_bars": holdout[1] - holdout[0],
         "holdout_days": round((int(bars.time[-1]) - int(bars.time[holdout[0]])) / 86400.0, 1),
         "validation_days": round((int(bars.time[holdout[0]]) - int(bars.time[validation[0]]))

@@ -477,6 +477,13 @@ class Optimizer:
         # symbol whose broker requires a wider stop than that guess gets judged
         # against the floor it will actually have to trade under.
         min_stop = self.client.min_stop_distance(cfg.symbol)
+        # Read once here, in the parent. A zero means symbol info could not be
+        # read, and the sweep will fall back to ten points for every combo -
+        # worth saying once, and only sayable here: backtest.stop_floor_const
+        # runs in the worker processes, where logbus cannot serialise.
+        if not min_stop:
+            LOG.emit(f"{cfg.symbol}: broker stop tabani okunamadi (min_stop=0) - "
+                     f"arama 10 point varsayacak.", "WARN", cfg.symbol)
         # What the LIVE gate will actually see, rather than what the bars
         # recorded. simulate() charges and gates on the entry bar's spread;
         # engine._try_entry uses the current tick, which runs wider, so a
@@ -787,7 +794,8 @@ class Optimizer:
             apply_result = self.apply(cfg.symbol, best["params"], score,
                        {**best, "holdout_days": report.get("holdout_days", 0.0),
                         "charge_costs": report.get("charge_costs"),
-                        "spread_scale": report.get("spread_scale")},
+                        "spread_scale": report.get("spread_scale"),
+                        "min_positive_ratio": report.get("min_positive_ratio")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok"))
             if not applied:
@@ -1001,8 +1009,12 @@ class Optimizer:
         # admit/validate a 0.4-0.59 candidate exactly as asked, then this
         # gate re-rejected it anyway with a threshold the user never set,
         # under a generic message indistinguishable from a real failure.
-        min_positive = float(self.store.opt_params().get("min_positive_ratio", 0.6)) \
-            if self.store is not None else 0.6
+        if best.get("min_positive_ratio") is not None:
+            min_positive = float(best["min_positive_ratio"])
+        elif self.store is not None:
+            min_positive = float(self.store.opt_params().get("min_positive_ratio", 0.6))
+        else:
+            min_positive = 0.6
         if best.get("positive_ratio", 0) < min_positive:
             return "secim segmentleri arasinda tutarsiz"
         # A configuration gets the settling time the system already says it
@@ -1273,7 +1285,7 @@ class Optimizer:
             min_stop = self.client.min_stop_distance(symbol)
         except Exception:
             min_stop = None
-        floor_const = float(min_stop) if min_stop else (point * 10.0)
+        floor_const = backtest.stop_floor_const(min_stop, point)
         min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
         system = getattr(self.store, "system", None)
         all_hours = bool(getattr(system, "trade_all_hours", False))
@@ -1372,6 +1384,10 @@ class Optimizer:
                 if detail.get("charge_costs") is not None
                 else bool(getattr(getattr(self.store, "system", None),
                                   "charge_costs", True)),
+                "min_positive_ratio": float(detail["min_positive_ratio"])
+                if detail.get("min_positive_ratio") is not None
+                else float((self.store.opt_params() if self.store is not None else {})
+                           .get("min_positive_ratio", 0.6) or 0.6),
             }
             # Search regime is the stamp above. This is a second, always-
             # charged look at the same holdout so a cost-free winner that

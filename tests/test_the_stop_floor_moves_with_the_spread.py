@@ -86,4 +86,5 @@ def test_a_caller_passing_a_plain_number_still_works():
 
 
 def test_the_default_is_still_ten_points():
-    assert "min_stop = point * 10.0" in BACKTEST
+    assert "return float(point) * 10.0" in BACKTEST
+    assert "def stop_floor_const(" in BACKTEST
