@@ -375,8 +375,8 @@ function renderCards() {
       accent: "amber",
     },
     {
-      lbl: "Beklenen Aylik", val: signed(cap.projected_monthly),
-      foot: `${regime} | %${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}${costedFoot}${costedBadge}`,
+      lbl: "Beklenen Aylik", val: signed(cap.projected_monthly), wide: true,
+      foot: `${regime}<span class="foot-line">%${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}${costedFoot}${costedBadge}</span>`,
       accent: cap.projected_costed_negative ? "red"
         : (cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
     },
@@ -388,7 +388,7 @@ function renderCards() {
   ];
 
   $("#account-cards").innerHTML = cards.map((c) => `
-    <div class="card ${c.accent ? "accent-" + c.accent : ""}">
+    <div class="card ${c.wide ? "wide " : ""}${c.accent ? "accent-" + c.accent : ""}">
       <div class="lbl">${c.lbl}</div>
       <div class="val">${c.val}</div>
       <div class="foot">${c.foot || ""}</div>

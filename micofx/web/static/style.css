@@ -100,14 +100,34 @@ main { padding: 16px; max-width: 1720px; margin: 0 auto; }
 
 /* ----------------------------------------------------------------- cards */
 
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  align-items: start;
+  gap: 10px;
+  margin-bottom: 14px;
+}
 .card {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 11px 13px;
+  min-height: 0;
+  height: auto;
 }
 .card .lbl { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
 .card .val { font-family: var(--mono); font-size: 20px; font-weight: 600; margin-top: 3px; }
-.card .foot { font-size: 10.5px; color: var(--muted); margin-top: 3px; font-family: var(--mono); }
+.card .foot {
+  font-size: 10.5px; color: var(--muted); margin-top: 3px; font-family: var(--mono);
+  white-space: normal; line-height: 1.35;
+}
+.card .foot-line { display: block; }
+/* The only card carrying a sentence rather than a number. Two tracks give it
+   room to say the cost regime and its costed counterpart on one line each,
+   instead of wrapping into a paragraph that used to set the row's height. */
+.card.wide { grid-column: span 2; }
+@media (max-width: 700px) { .card.wide { grid-column: span 1; } }
+@media (max-width: 1280px) {
+  .cards { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+}
 .card.accent-green { border-left: 3px solid var(--green); }
 .card.accent-red { border-left: 3px solid var(--red); }
 .card.accent-blue { border-left: 3px solid var(--blue); }
