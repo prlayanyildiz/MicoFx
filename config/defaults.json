@@ -13,6 +13,7 @@
     "max_cost_pct_of_risk": 18.0,
     "max_margin_usage_pct": 45.0,
     "daily_loss_pct": 3.0,
+    "max_concurrent_risk_pct": 8.0,
     "daily_profit_pct": 0.0,
     "min_free_margin": 50.0,
     "slippage_points": 20,

@@ -88,6 +88,7 @@ const FIELD_HELP = {
   "lot_multiplier": "Butun lotlara carpilan global carpan. 2 = her sey iki kat.",
   "size_by_edge": "Aciksa holdout beklentisi yuksek sembole daha buyuk lot.",
   "daily_loss_pct": "Gunluk gerceklesen zarar bakiyenin bu yuzdesini asinca yeni giris durur. 0 = kapali.",
+  "max_concurrent_risk_pct": "Acik pozisyonlarin kalan 1R'si artı yeni girisin 1R'si ozkaynagin bu yuzdesini asinca o giris reddedilir. Fren (gunluk zarar) gerceklesen+acik zarara bakar; bu kapi henuz acilmamis riske bakar. 0 = kapali.",
   "daily_loss_flatten": "Aciksa gunluk veya sembol limiti asilinca acik pozisyonlar da kapanir. Kapaliysa limit sadece yeni islemi durdurur.",
   "daily_profit_pct": "Gunluk kar bakiyenin bu yuzdesine ulasinca yeni giris durur. 0 = kapali.",
   "trade_all_hours": "Sembol seans ve islem gunlerini yoksayar. Hafta sonu / fiyat yok kurali durur. Arama seans saatlerinde olculdu; acmak o rakamlari gecersiz kilar.",

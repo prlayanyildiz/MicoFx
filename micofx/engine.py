@@ -84,6 +84,7 @@ _RISK_BLOCK_KEYS: tuple[tuple[str, str], ...] = (
     ("marj hesaplanamadi", "risk_marj_okunamadi"),
     ("serbest marj yetersiz", "risk_serbest_marj"),
     ("marj kullanimi limiti", "risk_marj_kullanimi"),
+    ("eszamanli risk limiti", "risk_eszamanli"),
 )
 
 
@@ -1495,7 +1496,8 @@ class Engine:
             state.entry_block = "lot"
             return
 
-        verdict = self.risk.can_open(cfg, side, lot, self._positions, account)
+        verdict = self.risk.can_open(
+            cfg, side, lot, self._positions, account, sl_distance=sl_dist)
         if not verdict.ok:
             state.note = verdict.reason
             state.entry_block = _risk_block_key(verdict.reason)

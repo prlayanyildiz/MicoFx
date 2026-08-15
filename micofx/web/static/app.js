@@ -1638,6 +1638,7 @@ const SYS_FIELDS = [
   { k: "lot_multiplier", label: "Global lot carpani", t: "num", step: 0.25, min: 0.1, max: 20 },
   { k: "size_by_edge", label: "Kaniti guclu sembole buyuk lot", t: "bool" },
   { k: "daily_loss_pct", label: "Gunluk zarar limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
+  { k: "max_concurrent_risk_pct", label: "Eszamanli risk limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
   { k: "daily_loss_flatten", label: "Limit asilinca acik pozisyonlari da kapat", t: "bool" },
   { k: "daily_profit_pct", label: "Gunluk kar hedefi % (0=kapali)", t: "num", step: 0.25, min: 0 },
   { k: "trade_all_hours", label: "Tum saatlerde islem (sembol seanslarini yoksay)", t: "bool" },

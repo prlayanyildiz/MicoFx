@@ -564,6 +564,13 @@ class SystemConfig:
     # on whatever stop distance each position already had. Default on: a
     # "daily loss limit" should stop the daily loss, not just further ones.
     daily_loss_flatten: bool = True
+    # Live 1R sum (open remaining stop distance + the entry about to open),
+    # as a percent of equity. Separate from daily_loss_pct: that one reads
+    # equity already lost and can halt the day; this one refuses a single
+    # fill before the book is oversized. 0 disables. Default 8: the daily
+    # halt is 10, and AT8 showed that without this gate the only concurrent
+    # cap was 1:100 margin accidentally binding.
+    max_concurrent_risk_pct: float = 8.0
     daily_profit_pct: float = 0.0     # 0 disables the profit stop
     min_free_margin: float = 50.0
 

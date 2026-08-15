@@ -172,6 +172,7 @@ _SYSTEM_RISK_BOUNDS = {
     "lot_multiplier": (0.0, 50.0, False),
     "max_margin_usage_pct": (0.0, 100.0, True),   # 0 = uncapped (falls back to free margin), valid
     "daily_loss_pct": (0.0, 100.0, True),   # 0 = disabled, valid
+    "max_concurrent_risk_pct": (0.0, 100.0, True),  # 0 = disabled, valid
     "daily_profit_pct": (0.0, 100.0, True),  # 0 = disabled, valid
     "max_total_positions": (1, 200, True),
 }

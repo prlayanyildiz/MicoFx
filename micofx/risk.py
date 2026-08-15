@@ -401,10 +401,39 @@ class RiskManager:
         rows.sort(key=lambda r: -r["overshoot"])
         return rows
 
+    def risk_dollars(self, symbol: str, lot: float, sl_distance: float) -> float:
+        """Account-currency value of 1R at this lot and stop distance.
+
+        Shared by the dashboard row and the can_open gate so a trail that
+        shortens the live stop and a new fill sized off ATR cannot disagree
+        about what a dollar of risk is.
+        """
+        if lot <= 0 or sl_distance <= 0:
+            return 0.0
+        return sl_distance * self.client.money_per_price_unit(symbol, lot)
+
+    def remaining_position_risk(self, pos: dict[str, Any]) -> float:
+        """1R still at risk on an open ticket, from entry to the *current* SL.
+
+        A trail pulled to entry (or into profit) is zero remaining risk and
+        must free budget; counting the original stop would keep the gate
+        conservative after the danger has already left.
+        """
+        sl = float(pos.get("sl") or 0.0)
+        entry = float(pos.get("price_open") or 0.0)
+        volume = float(pos.get("volume") or 0.0)
+        if sl <= 0 or entry <= 0 or volume <= 0:
+            return 0.0
+        dist = (entry - sl) if pos.get("side") == "buy" else (sl - entry)
+        if dist <= 0:
+            return 0.0
+        return self.risk_dollars(str(pos.get("symbol") or ""), volume, dist)
+
     # ------------------------------------------------------------- gatekeeping
 
     def can_open(self, cfg: SymbolConfig, side: str, lot: float,
-                 positions: list[dict[str, Any]], account: dict[str, Any]) -> Verdict:
+                 positions: list[dict[str, Any]], account: dict[str, Any],
+                 sl_distance: float = 0.0) -> Verdict:
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
         mine = [p for p in positions if p["magic"] in magics]
@@ -445,6 +474,14 @@ class RiskManager:
             if projected > sys_cfg.max_margin_usage_pct:
                 return Verdict(False, f"marj kullanimi limiti (%{projected:.1f} > %{sys_cfg.max_margin_usage_pct:g})")
 
+        cap = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
+        if cap > 0 and equity > 0:
+            open_r = sum(self.remaining_position_risk(p) for p in mine)
+            new_r = self.risk_dollars(cfg.symbol, lot, sl_distance)
+            projected_r = (open_r + new_r) / equity * 100.0
+            if projected_r > cap:
+                return Verdict(False, f"eszamanli risk limiti (%{projected_r:.1f} > %{cap:g})")
+
         return Verdict(True)
 
     # ------------------------------------------------------------- dashboard
@@ -482,7 +519,7 @@ class RiskManager:
             symbol_slots = max(0, cfg.max_positions - len(open_now))
 
             # What one unit of risk (1R) is worth in account currency at this lot.
-            r_value = sl_dist * self.client.money_per_price_unit(cfg.symbol, lot)
+            r_value = self.risk_dollars(cfg.symbol, lot, sl_dist)
             cost = cfg.commission_per_lot * lot
             tick = self.client.tick(cfg.symbol)
             if tick:
@@ -610,4 +647,6 @@ class RiskManager:
             "margin_budget": round(budget, 2),
             "margin_usage_pct": round(used / equity * 100.0, 2) if equity > 0 else 0.0,
             "max_margin_usage_pct": sys_cfg.max_margin_usage_pct,
+            "max_concurrent_risk_pct": float(
+                getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0),
         }

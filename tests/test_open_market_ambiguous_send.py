@@ -358,7 +358,7 @@ def _entry_harness(open_market_result):
         def lot_for(self, cfg, sl_distance, balance, ai_scale=1.0):
             return 0.1, "ok"
 
-        def can_open(self, cfg, side, lot, positions, account, sec_tickets=frozenset()):
+        def can_open(self, cfg, side, lot, positions, account, sec_tickets=frozenset(), **_kw):
             return Verdict(ok=True)
 
     class _Store:
