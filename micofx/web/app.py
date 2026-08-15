@@ -101,6 +101,11 @@ _SYMBOL_RISK_BOUNDS = {
     "sl_atr_mult": (0.0, 20.0, False),
     "trail_start_atr": (0.0, 20.0, False),
     "trail_step_atr": (0.0, 20.0, False),
+    # The per-symbol daily loss gate, and the only live-risk field the panel
+    # let through unbounded (found 15.08, audit slice 7). Zero disables it, so
+    # the minimum is inclusive; above 100 it can never fire, which reads as
+    # "set" while behaving as "off" - the shape this codebase keeps paying for.
+    "symbol_daily_loss_pct": (0.0, 100.0, True),
     # Zero is valid (many CFD accounts charge none); negative is not, and it
     # was accepted. A rebate is a plausible reason someone would try it, and
     # the consequence is that two live risk controls stop working:
@@ -1613,6 +1618,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _reject_non_finite_values(body.patch)
         _validate_enum_fields(body.patch)
         _validate_risk_bounds(body.patch)
+        # The single PATCH checks these and this door did not, so the same
+        # field was accepted at two different strictnesses depending on which
+        # button the operator used - the same two-callers-two-rules shape as
+        # backtest's stop floor.
+        _validate_risk_bounds(body.patch, _INDICATOR_PERIOD_BOUNDS,
+                              label="toplu duzenleme")
         # Bulk is the other door to the same write, and the one that would
         # apply a malformed window to the whole portfolio at once.
         _validate_sessions(body.patch)
