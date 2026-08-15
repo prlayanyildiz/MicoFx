@@ -8,9 +8,12 @@ JS = (Path(__file__).resolve().parents[1] / "micofx" / "web" / "static" / "app.j
 
 
 def test_monthly_projection_names_the_cost_regime():
-    assert "maliyetsiz OPT" in JS
+    assert "maliyetsiz" in JS
     assert "projected_costed_monthly" in JS
-    assert "MALIYETLI DILIM NEGATIF" in JS
+    # Reworded on 15.08: the flag is per symbol and the figure beside it is a
+    # sum, so "maliyetli dilim +634 | MALIYETLI DILIM NEGATIF" read as a
+    # contradiction on one line.
+    assert "bazi semboller maliyetli dilimde negatif" in JS
 
 
 def test_openable_slots_name_the_per_symbol_cap():

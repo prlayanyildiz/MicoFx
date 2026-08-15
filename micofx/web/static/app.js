@@ -364,15 +364,6 @@ function renderCards() {
 
   const ai = STATE.ai || {};
   const costCeiling = Number(sys.max_cost_pct_of_risk || cap.max_cost_pct_of_risk || 0);
-  const regime = cap.projected_charge_costs === false
-    ? "maliyetsiz OPT"
-    : "maliyetli OPT";
-  const costedFoot = cap.projected_costed_monthly != null
-    ? ` | maliyetli dilim ${signed(cap.projected_costed_monthly)}`
-    : "";
-  const costedBadge = cap.projected_costed_negative
-    ? " | MALIYETLI DILIM NEGATIF"
-    : "";
 
   const cards = [
     { lbl: "Bakiye", val: num(acc.balance), foot: `${esc(acc.currency || "")} | kaldirac 1:${acc.leverage || "-"}`, accent: "blue" },
@@ -497,25 +488,27 @@ function renderCapacity() {
 
   const enabled = (cap.rows || []).filter((r) => r.enabled);
   const openable = enabled.filter((r) => r.free_slots > 0).length;
+  // Deliberately does NOT repeat the cards above it. Open/total positions, free
+  // slots and the monthly projection all have their own card; saying them twice
+  // made the longest line on the page out of numbers the operator had already
+  // read. What stays is what no card carries: the portfolio-wide risk if every
+  // slot filled, and the assumption the projection was measured under.
+  const costedNote = cap.projected_costed_negative
+    ? ` <span class="pill bad" title="En az bir sembolun maliyetli holdout dilimi negatif - toplam artida olsa bile">bazi semboller maliyetli dilimde negatif</span>`
+    : "";
   $("#capacity-summary").innerHTML =
-    `${enabled.length} aktif sembol | ${cap.open_total ?? 0}/${cap.max_total_positions ?? 0} pozisyon dolu | ` +
-    `${cap.global_free_slots ?? 0} slot bos | lot carpani <b>x${num(cap.lot_multiplier, 2)}</b>` +
+    `${enabled.length} aktif sembol | ${openable} acilabilir | ` +
+    `lot carpani <b>x${num(cap.lot_multiplier, 2)}</b>` +
     `${cap.size_by_edge ? " + avantaj agirligi" : ""} | ` +
     `hepsi acilirsa toplam risk ${num(cap.total_risk_per_trade)} (%${num(cap.total_risk_pct, 2)}) | ` +
     `slot limitinde en kotu risk ${num(cap.concurrent_risk)} (%${num(cap.concurrent_risk_pct, 2)}), ` +
     `marj ${num(cap.concurrent_margin)} | ` +
     `guvenli ust sinir <b>x${num(cap.safe_multiplier, 2)}</b> | ` +
-    // Moved off the projection card, which was the only one carrying a
-    // sentence and therefore the only one setting a row's height. The regime
-    // matters more than it looks: a cost-free number and a charged one are not
-    // comparable, and the card shows the cost-free one.
-    `beklenen aylik <b>${signed(cap.projected_monthly)}</b> ` +
-    `(${cap.projected_charge_costs ? "maliyetli OPT" : "maliyetsiz OPT"})` +
+    `marj butcesi ${num(cap.margin_budget)} | ` +
+    `projeksiyon ${cap.projected_charge_costs ? "maliyetli" : "maliyetsiz"} OPT'ten` +
     (cap.projected_costed_monthly
-      ? ` | maliyetli dilim ${signed(cap.projected_costed_monthly)}` : "") +
-    (cap.projected_costed_negative
-      ? ` | <span class="pill bad">MALIYETLI DILIM NEGATIF</span>` : "") +
-    ` | butce ${num(cap.margin_budget)}`;
+      ? `, maliyetli dilim ${signed(cap.projected_costed_monthly)}` : "") +
+    costedNote;
 }
 
 function renderExecution() {

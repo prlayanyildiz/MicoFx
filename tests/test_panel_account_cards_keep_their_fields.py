@@ -20,11 +20,11 @@ def test_render_cards_still_writes_the_v1_fields():
     body = JS
     for needle in (
         "Beklenen Aylik",
-        "maliyetsiz OPT",
-        "maliyetli OPT",
+        "maliyetsiz",
+        "maliyetli",
         "projected_costed_monthly",
         "maliyetli dilim",
-        "MALIYETLI DILIM NEGATIF",
+        "maliyetli dilimde negatif",
         "Acilabilir Islem",
         "sembol basi",
         "max_positions_per_symbol",
@@ -91,7 +91,31 @@ def test_every_card_is_the_same_shape():
 
 
 def test_the_projection_detail_survived_the_move():
-    """Moved, not dropped - the regime is the reason the number is readable."""
-    for needle in ("beklenen aylik", "maliyetsiz OPT", "maliyetli OPT",
-                   "maliyetli dilim", "MALIYETLI DILIM NEGATIF", "butce"):
+    """Moved, not dropped - the regime is the reason the number is readable.
+
+    The figure itself stayed on the card, so the capacity line stopped repeating
+    it; what the line keeps is the part no card carries - which regime the
+    projection was measured under, and its charged counterpart.
+    """
+    for needle in ("maliyetsiz", "maliyetli", "maliyetli dilim",
+                   "marj butcesi", "projeksiyon"):
         assert needle in JS, needle
+
+
+def test_the_capacity_line_stops_repeating_the_cards():
+    """It was the longest line on the page, made of numbers already read."""
+    line = JS[JS.index('$("#capacity-summary").innerHTML'):]
+    line = line[:line.index(";", line.index("costedNote"))]
+    for repeated in ("pozisyon dolu", "slot bos", "beklenen aylik"):
+        assert repeated not in line, f"{repeated} is on a card already"
+
+
+def test_the_costed_badge_does_not_contradict_the_sum():
+    """It fired on any symbol going negative while the total read positive.
+
+    "maliyetli dilim +634,16 | MALIYETLI DILIM NEGATIF" on one line is a
+    contradiction to anyone reading it; the flag is per symbol and the figure is
+    a sum, so the badge has to say which of the two it is talking about.
+    """
+    assert "bazi semboller maliyetli dilimde negatif" in JS
+    assert "MALIYETLI DILIM NEGATIF" not in JS
