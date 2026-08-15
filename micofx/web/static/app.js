@@ -375,8 +375,8 @@ function renderCards() {
       accent: "amber",
     },
     {
-      lbl: "Beklenen Aylik", val: signed(cap.projected_monthly), wide: true,
-      foot: `${regime} | %${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}<span class="foot-line">${costedFoot}${costedBadge}</span>`,
+      lbl: "Beklenen Aylik", val: signed(cap.projected_monthly),
+      foot: `%${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}`,
       accent: cap.projected_costed_negative ? "red"
         : (cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
     },
@@ -388,7 +388,7 @@ function renderCards() {
   ];
 
   $("#account-cards").innerHTML = cards.map((c) => `
-    <div class="card ${c.wide ? "wide " : ""}${c.accent ? "accent-" + c.accent : ""}">
+    <div class="card ${c.accent ? "accent-" + c.accent : ""}">
       <div class="lbl">${c.lbl}</div>
       <div class="val">${c.val}</div>
       <div class="foot">${c.foot || ""}</div>
@@ -485,7 +485,18 @@ function renderCapacity() {
     `hepsi acilirsa toplam risk ${num(cap.total_risk_per_trade)} (%${num(cap.total_risk_pct, 2)}) | ` +
     `slot limitinde en kotu risk ${num(cap.concurrent_risk)} (%${num(cap.concurrent_risk_pct, 2)}), ` +
     `marj ${num(cap.concurrent_margin)} | ` +
-    `guvenli ust sinir <b>x${num(cap.safe_multiplier, 2)}</b>`;
+    `guvenli ust sinir <b>x${num(cap.safe_multiplier, 2)}</b> | ` +
+    // Moved off the projection card, which was the only one carrying a
+    // sentence and therefore the only one setting a row's height. The regime
+    // matters more than it looks: a cost-free number and a charged one are not
+    // comparable, and the card shows the cost-free one.
+    `beklenen aylik <b>${signed(cap.projected_monthly)}</b> ` +
+    `(${cap.projected_charge_costs ? "maliyetli OPT" : "maliyetsiz OPT"})` +
+    (cap.projected_costed_monthly
+      ? ` | maliyetli dilim ${signed(cap.projected_costed_monthly)}` : "") +
+    (cap.projected_costed_negative
+      ? ` | <span class="pill bad">MALIYETLI DILIM NEGATIF</span>` : "") +
+    ` | butce ${num(cap.margin_budget)}`;
 }
 
 function renderExecution() {

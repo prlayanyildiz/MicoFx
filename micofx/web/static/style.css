@@ -107,12 +107,19 @@ main { padding: 16px; max-width: 1720px; margin: 0 auto; }
 /* ----------------------------------------------------------------- cards */
 
 .cards {
+  /* Ten cards, so the column count is chosen to divide them: five and five,
+     never seven and a void. auto-fill picked the track count from the width and
+     left whatever did not divide as empty slots on the last row - which is what
+     "dagimik" was. A fixed count per breakpoint is duller and always tidy. */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  grid-template-columns: repeat(5, 1fr);
   align-items: stretch;
   gap: 10px;
   margin-bottom: 14px;
 }
+@media (max-width: 1500px) { .cards { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 1150px) { .cards { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 820px)  { .cards { grid-template-columns: repeat(2, 1fr); } }
 .card {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 11px 13px;
@@ -130,10 +137,7 @@ main { padding: 16px; max-width: 1720px; margin: 0 auto; }
 /* The only card carrying a sentence rather than a number. Two tracks give it
    room to say the cost regime and its costed counterpart on one line each,
    instead of wrapping into a paragraph that used to set the row's height. */
-.card.wide { grid-column: span 2; }
-@media (max-width: 700px) { .card.wide { grid-column: span 1; } }
 @media (max-width: 1280px) {
-  .cards { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 }
 .card.accent-green { border-left: 3px solid var(--green); }
 .card.accent-red { border-left: 3px solid var(--red); }
