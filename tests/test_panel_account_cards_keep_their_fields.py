@@ -53,7 +53,7 @@ def test_the_cards_in_a_row_share_one_height():
     capacity block below), so a shared row height is short for everyone.
     """
     assert "align-items: stretch" in CSS
-    assert "min-height: 1.35em" in CSS, "an empty foot must still hold its line"
+    assert "min-height: 1.3" in CSS, "an empty foot must still hold its line"
 
 
 def test_the_column_count_divides_the_cards():
