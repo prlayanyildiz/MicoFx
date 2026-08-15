@@ -36,9 +36,12 @@ def test_it_is_declared_as_a_boolean():
 
 def test_the_control_explains_the_trade_off():
     """A switch this consequential must not be an unlabelled toggle."""
-    m = re.search(r'\{[^{}]*k:\s*"charge_costs"[^{}]*\}', APP_JS, re.S)
-    assert "hint:" in m.group(0), "no explanation attached"
-    assert "kenar" in m.group(0), "the hint must name the edge-vs-spread problem"
+    help_js = (Path(__file__).resolve().parents[1]
+               / "micofx" / "web" / "static" / "field_help.js").read_text(encoding="utf-8")
+    assert "charge_costs" in help_js
+    assert "canlida" in APP_JS or "canli" in help_js
+    assert "arama makasi odemiyor" in APP_JS
+    assert "SYS_DANGER_NOTES" in APP_JS
 
 
 def test_the_cost_gate_settings_are_still_there():

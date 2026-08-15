@@ -545,9 +545,21 @@ class Optimizer:
             # Halving keeps the window as long as the terminal can actually
             # serve. The floor is the 600-bar minimum the caller already
             # enforces, so this never manufactures a sample too thin to judge.
+            asked = want
             while (got is None or len(got) < 600) and want > 1200:
                 want //= 2
                 got = self.client.bars(cfg.symbol, tf, want)
+            # Say so when it happened. The halving is the right behaviour but it
+            # was silent, and a silently shortened window is the same hazard as
+            # every other silent substitution in this codebase: two symbols get
+            # compared on different amounts of history and the run record reads
+            # as though they were equal. The count that was actually served is
+            # already stored on the run (walk_forward reports `bars`); this is
+            # so it is visible while it is happening.
+            if want < asked:
+                LOG.emit(f"{cfg.symbol} {tf}: {asked} bar istendi, terminal "
+                         f"vermedi - {len(got) if got is not None else 0} bar ile "
+                         f"arandi (pencere kisaldi).", "WARN", cfg.symbol)
             cached_bars[tf] = got
 
         for tf in timeframes:

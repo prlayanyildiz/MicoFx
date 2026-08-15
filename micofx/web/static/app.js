@@ -681,9 +681,7 @@ const POSITION_SECTION = {
     { k: "risk_percent", t: "num", label: "Risk %", step: 0.05, min: 0.05 },
     { k: "max_lot", t: "num", label: "Maks lot", step: 0.01, min: 0.01, max: 20 },
     { k: "max_positions", t: "int", label: "Maks pozisyon", min: 1, max: 50 },
-    { k: "symbol_daily_loss_pct", t: "num", label: "Sembol gunluk zarar limiti % (0=kapali)", step: 0.1, min: 0,
-      hint: "Bu sembol bugun bakiyenin bu kadarini kaybedince, hesabin genel gunluk limiti dolmasa bile "
-          + "sadece bu sembolde yeni giris durur." },
+    { k: "symbol_daily_loss_pct", t: "num", label: "Sembol gunluk zarar limiti % (0=kapali)", step: 0.1, min: 0 },
   ],
 };
 
@@ -1623,25 +1621,17 @@ const SYS_FIELDS = [
   { k: "lot_multiplier", label: "Global lot carpani", t: "num", step: 0.25, min: 0.1, max: 20 },
   { k: "size_by_edge", label: "Kaniti guclu sembole buyuk lot", t: "bool" },
   { k: "daily_loss_pct", label: "Gunluk zarar limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
-  { k: "daily_loss_flatten", label: "Limit asilinca acik pozisyonlari da kapat", t: "bool",
-    hint: "Hesap genelindeki gunluk limit icin - ve sembol bazli 'Gunluk zarar limiti %' asilinca o "
-          + "sembolun pozisyonu icin de. Kapaliysa limit(ler) sadece yeni islemi durdurur." },
+  { k: "daily_loss_flatten", label: "Limit asilinca acik pozisyonlari da kapat", t: "bool" },
   { k: "daily_profit_pct", label: "Gunluk kar hedefi % (0=kapali)", t: "num", step: 0.25, min: 0 },
-  { k: "trade_all_hours", label: "Tum saatlerde islem (sembol seanslarini yoksay)", t: "bool",
-    hint: "Semboller sekmesindeki seans pencerelerini ve islem gunlerini devre disi birakir. "
-        + "Piyasa kapali / fiyat akmiyor kontrolu yerinde kalir. Dikkat: optimizasyon sonuclari "
-        + "yalnizca seans saatlerinde olculdu, acik birakinca o rakamlar gecerli olmaz." },
-  { k: "day_end_flatten_min", label: "Gun sonu kapanis (dk, 0=kapali)", t: "int", min: 0, max: 720,
-    hint: "Brokerin gun sonuna (00:00) kalan son N dakikada yeni giris yok, acik pozisyonlar kapatilir. "
-        + "Seans penceresinden bagimsiz calisir, tum saatlerde islem acikken de gecerlidir. Kripto dahil tum semboller." },
+  { k: "trade_all_hours", label: "Tum saatlerde islem (sembol seanslarini yoksay)", t: "bool" },
+  { k: "day_end_flatten_min", label: "Gun sonu kapanis (dk, 0=kapali)", t: "int", min: 0, max: 720 },
   { k: "close_on_stop", label: "Durdurunca pozisyonlari kapat", t: "bool" },
   { k: "autostart_bot", label: "Acilista botu baslat", t: "bool" },
   { k: "auto_reopt", label: "Otomatik periyodik yeniden optimizasyon", t: "bool" },
   { k: "auto_reopt_days", label: "Yeniden optimizasyon araligi (gun, 0=kapali)", t: "num", step: 0.5, min: 0, max: 90 },
   { k: "auto_reopt_weekday", label: "Tercih edilen gun", t: "select",
     opts: [["-1", "Farketmez"], ["0", "Pazartesi"], ["1", "Sali"], ["2", "Carsamba"],
-           ["3", "Persembe"], ["4", "Cuma"], ["5", "Cumartesi"], ["6", "Pazar"]],
-    hint: "Varsayilan Cumartesi: agir walk-forward piyasa sakinken kosar. Saat filtresiyle birlikte bilgisayarin yerel (Windows) saatine bakar." },
+           ["3", "Persembe"], ["4", "Cuma"], ["5", "Cumartesi"], ["6", "Pazar"]] },
   { k: "auto_reopt_hour", label: "Tercih edilen saat (bilgisayarin yerel/Windows saati)", t: "select",
     opts: [["-1", "Farketmez"], ...Array.from({ length: 24 }, (_, h) => [String(h), `${String(h).padStart(2, "0")}:00`])] },
 ];
@@ -1651,34 +1641,57 @@ const SYS_FIELDS = [
 // (nothing here was deleted) but tucked behind a collapsed <details> so the
 // main list is the dozen dials someone actually turns day to day.
 const SYS_FIELDS_ADVANCED = [
-  { k: "max_scalp_positions", label: "Maks scalp pozisyon (M5, 0=ayri limit yok)", t: "int", min: 0, max: 50,
-    hint: "micro_rev/burst pozisyonlarini toplam icinde ayri bir kovaya koyar, boylece bir seri scalp doldurmasi swing icin yer birakmaz." },
+  { k: "max_scalp_positions", label: "Maks scalp pozisyon (M5, 0=ayri limit yok)", t: "int", min: 0, max: 50 },
   { k: "max_swing_positions", label: "Maks swing pozisyon (M15+, 0=ayri limit yok)", t: "int", min: 0, max: 50 },
   { k: "block_high_cost", label: "Yuksek maliyetli girisi engelle (opsiyonel)", t: "bool" },
   { k: "max_cost_pct_of_risk", label: "Maks maliyet / risk % (engel acikken)", t: "num", step: 1, min: 5, max: 80 },
-  { k: "charge_costs", label: "Aramada spread/komisyonu tahsil et", t: "bool",
-    hint: "Kapaliyken arama maliyeti hic odemez, bu yuzden spread'inden kucuk kenarli konfigleri de secebilir. 14.08 olcumu: beklenen kenar 0.058-0.212 R/islem iken canli spread 0.02-0.27 R/islem - dort sembol kendi spread'ini odeyemiyordu (panelde 'ortu' sutunu). Acmak bunu duzeltir ama arama daha az, daha secici konfig bulur: kitap kucululur. Acinca yeniden arama gerekir, yoksa mevcut ayarlar degismez." },
+  { k: "charge_costs", label: "Aramada spread/komisyonu tahsil et", t: "bool" },
   { k: "max_margin_usage_pct", label: "Maks marj kullanimi %", t: "num", step: 1, min: 1, max: 100 },
   { k: "min_free_margin", label: "Min serbest marj", t: "num", step: 10, min: 0 },
   { k: "slippage_points", label: "Slippage (point)", t: "int", min: 0, max: 500 },
   { k: "poll_interval_sec", label: "Dongu araligi (sn)", t: "num", step: 0.5, min: 0.5 },
-  { k: "opt_max_workers", label: "Maks optimizasyon paralel surec (0=otomatik)", t: "int", min: 0, max: 32,
-    hint: "Zayif/paylasimli bir bulut sunucuda dusuk tut, optimizasyon calisirken canli motoru ve MT5'i yormasin." },
+  { k: "opt_max_workers", label: "Maks optimizasyon paralel surec (0=otomatik)", t: "int", min: 0, max: 32 },
   { k: "mt5_terminal_path", label: "MT5 terminal yolu (terminal64.exe - hangi platform olursa)", t: "text", wide: true },
   { k: "autostart_mt5", label: "Acilista MT5 terminalini baslat (yol ayarliysa ve kapaliysa)", t: "bool" },
   { k: "autostart_mt5_wait_sec", label: "MT5 baglanti bekleme (sn)", t: "int", min: 15, max: 300 },
-  { k: "backup_enabled", label: "Otomatik aksam yedegi acik", t: "bool",
-    hint: "Kapatirsan gece gorevi calisir ama hicbir sey yazmaz. Yedek konumu bu makinede olmayan bir surucuyu gosteriyorsa (orn. D: yoksa) ya yolu degistir ya da bunu kapat." },
+  { k: "backup_enabled", label: "Otomatik aksam yedegi acik", t: "bool" },
   { k: "backup_dir", label: "Yedek konumu (aksam otomatik yedek buraya gider)", t: "text", wide: true },
   { k: "backup_dir_secondary", label: "Ikinci yedek konumu (bos = kapali; ayni yedek buraya da kopyalanir - farkli bir FIZIKSEL disk veya bulut klasoru secin)", t: "text", wide: true },
   { k: "backup_keep", label: "Tutulacak yedek sayisi", t: "int", min: 1, max: 30 },
 ];
 
+const SYS_DANGER_NOTES = {
+  trade_all_hours: {
+    when: true,
+    text: "seans kapisi kapali; arama rakamlari seans saatlerinde olculdu.",
+  },
+  charge_costs: {
+    when: false,
+    text: "arama makasi odemiyor; secilen konfig canlida odeyecek.",
+  },
+};
+
+function syncSysDangerNotes(sys) {
+  $$("[data-sys-warn]").forEach((node) => {
+    const spec = SYS_DANGER_NOTES[node.dataset.sysWarn];
+    if (!spec) return;
+    const on = !!sys[node.dataset.sysWarn];
+    const show = on === spec.when;
+    node.hidden = !show;
+    node.textContent = show ? spec.text : "";
+  });
+}
+
 function buildSysField(f) {
   let input;
   if (f.t === "bool") {
     input = el("input", { type: "checkbox" });
-    input.addEventListener("change", () => saveSystem({ [f.k]: input.checked }, input));
+    input.addEventListener("change", () => {
+      saveSystem({ [f.k]: input.checked }, input);
+      if (SYS_DANGER_NOTES[f.k]) {
+        syncSysDangerNotes({ ...(STATE.system || {}), [f.k]: input.checked });
+      }
+    });
   } else if (f.t === "text") {
     input = el("input", { type: "text", spellcheck: "false" });
     input.addEventListener("change", async () => {
@@ -1704,7 +1717,14 @@ function buildSysField(f) {
     el("label", { text: f.label }),
     f.t === "bool" ? el("label", { class: "chk" }, [input, el("span", { text: "Aktif" })]) : input,
   ]);
-  if (f.hint) field.appendChild(el("div", { class: "dim small", text: f.hint }));
+  const danger = SYS_DANGER_NOTES[f.k];
+  if (danger) {
+    field.appendChild(el("div", {
+      class: "field-warn",
+      "data-sys-warn": f.k,
+      hidden: "hidden",
+    }));
+  }
   if (f.wide) field.classList.add("field-wide");
   return titled(field, f.k);
 }
@@ -1731,6 +1751,7 @@ function renderSystem() {
     if (input.type === "checkbox") input.checked = !!sys[key];
     else if (String(input.value) !== String(sys[key])) input.value = sys[key];
   });
+  syncSysDangerNotes(sys);
 
   const mt5 = STATE.mt5 || {};
   const acc = STATE.account || {};

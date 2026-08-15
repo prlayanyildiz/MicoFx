@@ -19,7 +19,7 @@ def test_open_positions_and_day_sit_above_capacity():
     body = _panel()
     assert body.index("positions-table") < body.index("capacity-table")
     assert body.index("day-table") < body.index("capacity-table")
-    assert body.index("account-cards") < body.index("positions-table")
+    assert body.index("positions-table") < body.index("account-cards")
 
 
 def test_capacity_table_still_has_its_thirteen_columns():

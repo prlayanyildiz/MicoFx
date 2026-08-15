@@ -256,6 +256,7 @@ input[type="time"] {
 select { font-family: inherit; }
 select#group-filter { width: 150px; }
 
+.field-warn { color: var(--amber); font-size: 11px; line-height: 1.35; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field > label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
 .field-wide { grid-column: 1 / -1; }
