@@ -411,8 +411,15 @@ class Store:
     ) -> SymbolConfig:
         """Add a product from a group preset; raises ValueError on bad/duplicate names."""
         name = str(symbol or "").strip().upper().replace(" ", "_")
-        if not name or not all(ch.isalnum() or ch in "._" for ch in name):
-            raise ValueError("Gecerli bir sembol adi yazin (harf/rakam/_/.)")
+        # The hyphen is not decoration: this broker names 158 tradeable
+        # instruments with one - every dated equity CFD (AAPL.US-24) and the
+        # perpetuals (BRENTOIL-PERP). Refusing it rejected real symbols with a
+        # message that reads like the operator mistyped. Kept deliberately
+        # narrow beyond that: the name is a settings key, a dict key and a URL
+        # path segment, so no slashes, spaces or punctuation that would change
+        # what those mean.
+        if not name or not all(ch.isalnum() or ch in "._-" for ch in name):
+            raise ValueError("Gecerli bir sembol adi yazin (harf/rakam/_/./-)")
         if name in self.symbols:
             raise ValueError(f"{name} zaten portfoyde")
         presets = self.defaults.get("group_presets", {})
