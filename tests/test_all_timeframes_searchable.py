@@ -50,11 +50,18 @@ def test_every_family_may_search_every_timeframe(strategy, timeframe):
         f"{strategy}/{timeframe} aramaya giremiyor")
 
 
-def test_the_scalp_families_still_resolve_on_a_legacy_hourly_row():
-    """H1 left the search; a stored H1 pairing must still be legal to trade."""
+def test_the_scalp_families_reach_the_hourly_chart_too():
+    """No family is fenced off a timeframe; the search decides on the numbers.
+
+    This asserted "H1 is not in TIMEFRAMES" while H1 was out of the search
+    (14.08-15.08). It came back once the cost was measured - 17.8% more bars,
+    against 8.6% of R in spread for UK100 versus 21.3% at M5 - so the standing
+    rule is the one that was always underneath: every family may be paired with
+    every offered bar, and the holdout picks.
+    """
     for family in sorted(SCALP_STRATEGIES):
         assert strategy_allows_timeframe(family, "H1")
-    assert "H1" not in TIMEFRAMES
+    assert "H1" in TIMEFRAMES
 
 
 def test_the_swing_families_reach_the_five_minute_chart():
@@ -128,11 +135,17 @@ def test_an_unrecognised_bar_never_claims_the_swing_envelope():
     assert uses_swing_exits("t3_stoch", "") is False
 
 
-def test_the_searchable_timeframes_are_exactly_the_three():
-    """M1 was searched on 14.08 and dropped on its own numbers. H1 left the
-    search the same day on an operator speed call, not on a measurement.
+def test_the_searchable_timeframes_are_exactly_these_four():
+    """M1 was searched on 14.08 and dropped on its own numbers: 0.099 R/trade
+    against M5's 0.121, at 0.043 R/trade of cost against 0.024, on a quarter of
+    the history. That one stays out.
 
-    Both stay in the translation tables (see models.READABLE_TIMEFRAMES and
-    mt5client) because history still names them. TIMEFRAMES is the menu.
+    H1 left the same day on a speed call rather than a measurement, and came
+    back on 15.08 when the measurement was taken: the broker holds ~50k H1 bars
+    per symbol against 99k lower down, so it costs 17.8% more simulated bars,
+    and it is the only affordable bar for the expensive end of the book.
+
+    M1 stays in the translation tables (READABLE_TIMEFRAMES, mt5client) because
+    history still names it. TIMEFRAMES is the menu.
     """
-    assert TIMEFRAMES == ["M5", "M15", "M30"]
+    assert TIMEFRAMES == ["M5", "M15", "M30", "H1"]

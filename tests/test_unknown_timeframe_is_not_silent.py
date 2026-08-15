@@ -31,6 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx import mt5client
 from micofx.models import TIMEFRAMES
 
+# Bar lengths keyed by name, so the assertion follows TIMEFRAMES instead of
+# pinning today's list - H1 left the search on 14.08 and came back on 15.08,
+# and a literal made that a test edit both times.
+_EXPECTED = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+
 
 @pytest.fixture(autouse=True)
 def _forget_warned():
@@ -50,7 +55,7 @@ def test_every_offered_timeframe_has_a_real_length():
     finally:
         m.LOG.emit = orig
     assert seen == [], f"an offered timeframe is not wired: {seen}"
-    assert lengths == [300, 900, 1800]
+    assert lengths == [_EXPECTED[t] for t in TIMEFRAMES]
 
 
 def test_an_unwired_name_says_so(monkeypatch):

@@ -22,7 +22,7 @@ from typing import Any
 # operator has not moved yet still name it. TIMEFRAMES is what may be
 # searched and newly written. READABLE_TIMEFRAMES is what may still be
 # fetched and traded until that row moves.
-TIMEFRAMES = ["M5", "M15", "M30"]
+TIMEFRAMES = ["M5", "M15", "M30", "H1"]
 READABLE_TIMEFRAMES = ["M5", "M15", "M30", "H1"]
 GROUPS = ["forex", "index", "commodity", "crypto"]
 

@@ -29,6 +29,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx import mt5client
 from micofx.models import TIMEFRAMES, READABLE_TIMEFRAMES, uses_swing_exits
 
+# Bar lengths keyed by name, so the assertion follows TIMEFRAMES instead of
+# pinning today's list - H1 left the search on 14.08 and came back on 15.08,
+# and a literal made that a test edit both times.
+_EXPECTED = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+
 # M1 left this list 14.08 - it is now wired and offered (see models.TIMEFRAMES).
 # M1 rejoined this list 14.08: wired and searched, then removed on its numbers.
 RETIRED = ("M1", "M3", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
@@ -48,7 +53,8 @@ def test_a_retired_timeframe_has_no_second_count(name):
 
 
 def test_the_offered_timeframes_still_translate():
-    assert [mt5client.timeframe_seconds(t) for t in TIMEFRAMES] == [300, 900, 1800]
+    assert ([mt5client.timeframe_seconds(t) for t in TIMEFRAMES]
+            == [_EXPECTED[t] for t in TIMEFRAMES])
     assert mt5client.timeframe_seconds("H1") == 3600
     # The wider exit envelope is decided by the bar, not the family: the two
     # scalp lengths (M1 since 14.08, M5) keep the tight grid, M15+ get swing.
