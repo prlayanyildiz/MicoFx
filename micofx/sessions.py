@@ -46,7 +46,16 @@ def weekend_closed(cfg: SymbolConfig, server_epoch: float) -> bool:
     session windows below are configured against), not UTC or the broker's.
 
     Crypto is exempt: those symbols trade 24/7 and are supposed to.
+
+    So are individual symbols marked ``weekend_open``. The group is too coarse
+    a place to decide this: BRENTOIL-PERP and GOLD-PERP are commodities that
+    print bars through the weekend - 9.9% of their hourly bars fall on a
+    Saturday or Sunday, against 28% for crypto (full coverage) and 0% for
+    SpotBrent and XAUUSD, which are the same asset classes. Held shut by the
+    group rule, they lost every weekend hour they could have traded.
     """
+    if getattr(cfg, "weekend_open", False):
+        return False
     if str(getattr(cfg, "group", "") or "").strip().lower() in WEEKEND_OPEN_GROUPS:
         return False
     day, _minute = server_clock(server_epoch)

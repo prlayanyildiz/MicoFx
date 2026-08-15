@@ -259,6 +259,10 @@ class SymbolConfig:
 
     # ---- trading hours (broker server time) ----
     use_sessions: bool = True
+    # Weekend trading is not an asset class, it is an instrument. The perpetuals
+    # print Saturday/Sunday bars while the spot contracts of the same commodity
+    # do not, so ``group`` cannot answer this - see sessions.weekend_closed.
+    weekend_open: bool = False
     sessions: list = field(default_factory=list)
     trade_days: list = field(default_factory=lambda: [1, 2, 3, 4, 5])  # Mon..Sun = 1..7
     flat_before_close_min: int = 0   # close positions N min before the last window ends
