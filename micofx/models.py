@@ -24,7 +24,7 @@ from typing import Any
 # fetched and traded until that row moves.
 TIMEFRAMES = ["M5", "M15", "M30", "H1"]
 READABLE_TIMEFRAMES = ["M5", "M15", "M30", "H1"]
-GROUPS = ["forex", "index", "commodity", "crypto"]
+GROUPS = ["forex", "index", "commodity", "crypto", "stock"]
 
 
 def _coerce(cls, payload: dict[str, Any]):

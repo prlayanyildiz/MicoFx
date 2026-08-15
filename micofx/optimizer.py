@@ -530,7 +530,16 @@ class Optimizer:
         for tf in needed_tfs:
             # Same calendar window for every timeframe, otherwise a slow timeframe
             # gets judged on years of history while a fast one gets days.
-            want = min(bar_cap, int(lookback_days * 86400 / timeframe_seconds(tf)))
+            # 0 = no day limit, the same convention every other optional
+            # ceiling here uses (symbol_daily_loss_pct, day_end_flatten_min,
+            # htf_factor, max_spread_atr). It used to mean "ask for zero bars",
+            # which files every timeframe as "veri yetersiz (0 bar)" and searches
+            # nothing - so switching the day window off looked like switching the
+            # optimiser off. Parking it at 4000 worked around that and put an
+            # eleven-year window on the panel, which reads as a setting rather
+            # than as "unused".
+            per_tf = int(lookback_days * 86400 / timeframe_seconds(tf))
+            want = min(bar_cap, per_tf) if lookback_days > 0 else bar_cap
             got = self.client.bars(cfg.symbol, tf, want)
             # A terminal that does not hold this much history for this
             # timeframe answers with nothing at all rather than with fewer

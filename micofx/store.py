@@ -454,7 +454,8 @@ class Store:
         LOG.emit(f"{name} portfoye eklendi.", "INFO", name)
         return cfg
 
-    GROUP_LABEL = {"forex": "Forex", "index": "Endeks", "commodity": "Emtia", "crypto": "Kripto"}
+    GROUP_LABEL = {"forex": "Forex", "index": "Endeks", "commodity": "Emtia",
+                   "crypto": "Kripto", "stock": "Hisse"}
 
     def sort_symbols_by_group(self) -> list[str]:
         """Reorder the portfolio alphabetically by group label, then by symbol name within each group."""
