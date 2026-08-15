@@ -436,7 +436,13 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
                     trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
                     trail = trail_atr
-                    if structural and swing_lo is not None:
+                    # Both series or neither (line 341-342), so the short
+                    # leg's swing_hi cannot be None here. Named anyway: the
+                    # guard used to test only swing_lo while the body indexes
+                    # both, so the day those two stop being built together the
+                    # crash lands on shorts only, in the trail, under one
+                    # trail_mode - the least reproducible shape there is.
+                    if structural and swing_lo is not None and swing_hi is not None:
                         struct_sl = (swing_lo[j] - a * 0.15) if is_buy \
                             else (swing_hi[j] + a * 0.15)
                         # Chained ternary here used to bind as
