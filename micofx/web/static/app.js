@@ -401,10 +401,23 @@ function renderCards() {
       accent: "amber",
     },
     {
-      lbl: "Beklenen Aylik", val: signed(cap.projected_monthly),
-      foot: `%${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}`,
+      lbl: "Beklenen Aylik",
+      val: signed(cap.projected_costed_monthly ?? cap.projected_monthly),
+      foot: (() => {
+        const paper = Number(cap.projected_monthly ?? 0);
+        const costed = Number(cap.projected_costed_monthly ?? paper);
+        const pct = cap.projected_costed_monthly_pct ?? cap.projected_monthly_pct;
+        const daily = cap.projected_costed_daily ?? cap.projected_daily;
+        const denom = Math.max(Math.abs(paper), Math.abs(costed), 1e-9);
+        const gap = Math.abs(paper - costed) / denom;
+        const gapNote = gap > 0.25
+          ? ` | kagit/maliyetli fark %${num(gap * 100, 0)}`
+          : "";
+        return `%${num(pct, 2)} | gunluk ${signed(daily)}`
+          + ` | maliyet odenmeden ${signed(paper)}${gapNote}`;
+      })(),
       accent: cap.projected_costed_negative ? "red"
-        : (cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
+        : (cap.projected_costed_monthly ?? cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
     },
   ];
 

@@ -82,19 +82,47 @@ def _apply(costed, logs=None):
     return cfg
 
 
-def test_negative_costed_holdout_flags_and_logs_but_still_applies():
+def test_negative_costed_holdout_is_not_applied():
+    """Paper-positive, charged-negative still applied (#50). Found 16.08:
+    UK100/SpotBrent/JPN225 paper E +0.09..+0.13, charged −0.21..−0.01,
+    together −7.55 $/day against a 2113 $ balance.
+    """
+    cfg = _cfg()
+    store = _Store(cfg)
+    opt = Optimizer(store=store, client=_Client())
+    opt._holdout_costed = lambda *a, **k: {"trades": 665, "expectancy": -0.056}
+    result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
+                       detail=_detail(), timeframe="M15", strategy="t3_stoch")
+    assert result["ok"] is False
+    assert "maliyet" in result["error"]
+    assert cfg.sl_atr_mult == 1.0
+
+
+def test_force_still_applies_a_costed_negative_candidate():
     logs = []
-    cfg = _apply({"trades": 665, "expectancy": -0.056}, logs)
-    summary = cfg.opt_summary
-    assert cfg.sl_atr_mult == 2.4, "apply reddedilmemeli"
-    assert summary["charge_costs"] is False, "arama rejimi karismamali"
-    assert summary["holdout_costed"]["expectancy"] == -0.056
-    assert summary["costed_negative"] is True
-    assert any(
-        "FRA40" in m and "maliyetsiz" in m and "maliyetli ayni dilim" in m
-        and level == "OPT"
-        for m, level, _ in logs
-    ), logs
+    cfg = _cfg()
+    store = _Store(cfg)
+    opt = Optimizer(store=store, client=_Client())
+    opt._force_apply = True
+    opt._holdout_costed = lambda *a, **k: {"trades": 665, "expectancy": -0.056}
+    from micofx.logbus import LOG
+    orig = LOG.emit
+
+    def _cap(msg, level="INFO", symbol=""):
+        logs.append((msg, level, symbol))
+        return orig(msg, level, symbol)
+
+    LOG.emit = _cap
+    try:
+        result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
+                           detail=_detail(), timeframe="M15", strategy="t3_stoch")
+    finally:
+        LOG.emit = orig
+    assert result["ok"] is True, result
+    assert cfg.sl_atr_mult == 2.4
+    assert cfg.opt_summary["costed_negative"] is True
+    assert cfg.opt_summary["holdout_costed"]["expectancy"] == -0.056
+    assert any("maliyetli ayni dilim" in m for m, _, _ in logs)
 
 
 def test_positive_costed_holdout_is_stamped_without_the_flag():

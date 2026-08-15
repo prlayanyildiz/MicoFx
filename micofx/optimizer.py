@@ -1411,6 +1411,21 @@ class Optimizer:
         if bad:
             LOG.emit(f"Cikis parametresi reddedildi: {bad}", "OPT", symbol)
             return {"ok": False, "error": f"cikis parametresi gecersiz: {bad}"}
+        # Charged same-slice look used to stamp costed_negative and still
+        # apply (#50). UK100/SpotBrent/JPN225 were the bill: paper-positive
+        # winners that lose once spread is paid. A measurement that cannot
+        # change the decision is not a gate.
+        costed = None
+        if detail is not None:
+            try:
+                costed = self._holdout_costed(
+                    symbol, next_tf, next_strat, applied_params)
+            except Exception:
+                costed = None
+            charged = float((costed or {}).get("expectancy") or 0.0) if costed else 0.0
+            if costed is not None and charged < 0 and not getattr(self, "_force_apply", False):
+                return {"ok": False,
+                        "error": f"maliyetli holdout negatif ({charged:+.3f})"}
         patch = dict(applied_params)
         if timeframe in TIMEFRAMES:
             patch["timeframe"] = timeframe
@@ -1462,15 +1477,8 @@ class Optimizer:
                 else float((self.store.opt_params() if self.store is not None else {})
                            .get("min_positive_ratio", 0.6) or 0.6),
             }
-            # Search regime is the stamp above. This is a second, always-
-            # charged look at the same holdout so a cost-free winner that
-            # goes net-negative once spread is paid is visible without
-            # changing the apply decision (#50).
-            try:
-                costed = self._holdout_costed(
-                    symbol, next_tf, next_strat, applied_params)
-            except Exception:
-                costed = None
+            # Search regime is the stamp above. Same charged look that
+            # already gated the apply; force still stamps the flag.
             if costed is not None:
                 patch["opt_summary"]["holdout_costed"] = costed
                 paper = float((detail.get("holdout") or {}).get("expectancy") or 0.0)

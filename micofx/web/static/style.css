@@ -198,6 +198,7 @@ table.grid .empty { color: var(--dim); text-align: center; padding: 18px; font-s
 .pill.index { background: #2c2450; color: #b09bff; }
 .pill.commodity { background: #423318; color: #ffc76b; }
 .pill.crypto { background: #133b38; color: #5fe3c8; }
+.pill.stock { background: #3a2448; color: #e59bff; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {

@@ -23,6 +23,8 @@ def test_render_cards_still_writes_the_v1_fields():
         "maliyetsiz",
         "maliyetli",
         "projected_costed_monthly",
+        "maliyet odenmeden",
+        "kagit/maliyetli fark",
         "maliyetli dilim",
         "maliyetli dilimde negatif",
         "Acilabilir Islem",
@@ -32,6 +34,12 @@ def test_render_cards_still_writes_the_v1_fields():
         "lot x",
     ):
         assert needle in body, needle
+
+
+def test_stock_group_has_the_same_kind_of_pill_as_the_others():
+    assert ".pill.stock" in CSS
+    for group in (".pill.forex", ".pill.index", ".pill.commodity", ".pill.crypto"):
+        assert group in CSS
 
 
 def test_the_leftover_card_does_not_stretch_across_a_row():
@@ -84,6 +92,9 @@ def test_every_card_is_the_same_shape():
     # The literal appears in prose further down the file; check the card
     # definitions and the markup that renders them.
     defs = JS[JS.index("const cards = ["):JS.index("$(\"#account-cards\")")]
+    assert "signed(cap.projected_costed_monthly" in defs, (
+        "headline must be the charged figure, not the paper one")
+    assert "maliyet odenmeden" in defs
     assert "wide" not in defs, "no card may claim extra width any more"
     assert "foot-line" not in defs
     markup = JS[JS.index("$(\"#account-cards\")"):]
