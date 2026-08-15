@@ -637,7 +637,7 @@ def test_api_requires_token_when_configured():
     client = _FakeClient([])
     engine = _FakeEngine()
     app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
+    tc = TestClient(app, unauth=True)
 
     res = tc.get("/api/system")
     assert res.status_code == 401
@@ -649,7 +649,7 @@ def test_api_accepts_correct_token():
     client = _FakeClient([])
     engine = _FakeEngine()
     app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
+    tc = TestClient(app, unauth=True)
 
     res = tc.get("/api/system", headers={"X-Mico-Token": "secret123"})
     assert res.status_code == 200
@@ -662,7 +662,7 @@ def test_api_rejects_empty_token_header():
     client = _FakeClient([])
     engine = _FakeEngine()
     app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
+    tc = TestClient(app, unauth=True)
 
     res = tc.get("/api/system", headers={"X-Mico-Token": ""})
     assert res.status_code == 401
@@ -675,7 +675,7 @@ def test_api_rejects_wrong_length_token():
     client = _FakeClient([])
     engine = _FakeEngine()
     app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
+    tc = TestClient(app, unauth=True)
 
     res = tc.get("/api/system", headers={"X-Mico-Token": "short"})
     assert res.status_code == 401
@@ -684,100 +684,41 @@ def test_api_rejects_wrong_length_token():
     assert res.status_code == 401
 
 
-def test_index_page_requires_token_when_configured():
-    # B4: "/" used to be left out of the gate entirely, so the token embedded
-    # in its own (then-unauthenticated) HTML was readable by anyone who could
-    # reach the port at all - the exact population a non-localhost bind's
-    # token exists to keep out. Must 401 with no credentials.
+def test_index_page_bootstraps_without_embedding_the_secret():
     store = _FakeStore({})
     client = _FakeClient([])
     engine = _FakeEngine()
     app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
+    tc = TestClient(app, unauth=True)
 
     res = tc.get("/")
-    assert res.status_code == 401
-    assert "secret123" not in res.text
-
-
-def test_index_page_embeds_token_with_query_param():
-    # A plain browser navigation cannot set a custom header, so the token
-    # gate on "/" accepts it as a query param too.
-    store = _FakeStore({})
-    client = _FakeClient([])
-    engine = _FakeEngine()
-    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
-
-    res = tc.get("/?token=secret123")
     assert res.status_code == 200
-    assert "secret123" in res.text
-
-
-def test_index_page_embeds_token_with_header():
-    store = _FakeStore({})
-    client = _FakeClient([])
-    engine = _FakeEngine()
-    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
-
-    res = tc.get("/", headers={"X-Mico-Token": "secret123"})
-    assert res.status_code == 200
-    assert "secret123" in res.text
-
-
-def test_index_page_rejects_wrong_token():
-    store = _FakeStore({})
-    client = _FakeClient([])
-    engine = _FakeEngine()
-    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
-
-    res = tc.get("/?token=wrong")
-    assert res.status_code == 401
     assert "secret123" not in res.text
+    assert "mico-api-token" not in res.text
 
 
-def test_logs_download_requires_token_when_configured():
-    store = _FakeStore({})
-    client = _FakeClient([])
-    engine = _FakeEngine()
-    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
-
-    res = tc.get("/api/logs/download")
-    assert res.status_code == 401
-
-
-def test_logs_download_accepts_query_param_token():
-    # M6: a plain <a href> download link cannot set a custom header - the
-    # gate special-cases this one GET route to also accept ?token=, which is
-    # what app.js's download link relies on.
-    store = _FakeStore({})
-    client = _FakeClient([])
-    engine = _FakeEngine()
-    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
-
-    res = tc.get("/api/logs/download?token=secret123")
-    assert res.status_code != 401  # 404 (no log file yet) is fine - just not auth-rejected
-
-
-def test_other_api_routes_reject_query_param_token():
-    # L3: ?token= is intentionally narrow - only "/" and the log download
-    # link need it (a plain browser navigation can't set a header). Every
-    # other /api/* route goes through app.js's fetch-based api() helper,
-    # which already sets X-Mico-Token - accepting a query param there too
-    # would just widen where the token can leak (proxy logs, browser
-    # history, an outbound Referer) for no usability gain.
+def test_query_param_token_does_not_unlock_the_api():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     store = _FakeStore(symbols)
     client = _FakeClient([])
     engine = _FakeEngine()
     app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
+    tc = TestClient(app, unauth=True)
 
     res = tc.get("/api/system?token=secret123")
+    assert res.status_code == 401
+    res = tc.get("/api/logs/download?token=secret123")
+    assert res.status_code == 401
+
+
+def test_logs_download_requires_session():
+    store = _FakeStore({})
+    client = _FakeClient([])
+    engine = _FakeEngine()
+    app = create_app(store, client, engine, optimizer=None, api_token="secret123")
+    tc = TestClient(app, unauth=True)
+
+    res = tc.get("/api/logs/download")
     assert res.status_code == 401
 
 
@@ -787,7 +728,7 @@ def test_other_api_routes_still_accept_header_token():
     client = _FakeClient([])
     engine = _FakeEngine()
     app = create_app(store, client, engine, optimizer=None, api_token="secret123")
-    tc = TestClient(app)
+    tc = TestClient(app, unauth=True)
 
     res = tc.get("/api/system", headers={"X-Mico-Token": "secret123"})
     assert res.status_code == 200

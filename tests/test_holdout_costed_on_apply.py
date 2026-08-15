@@ -144,10 +144,11 @@ def test_the_charged_slice_is_the_one_the_sweep_used():
     from micofx.optimizer import Optimizer
 
     src = inspect.getsource(Optimizer._holdout_costed)
-    assert 'opt.get("max_bars")' in src, "the bar count must come from the sweep's params"
+    helper = inspect.getsource(Optimizer._bars_for_holdout)
+    assert 'opt.get("max_bars")' in helper, "fallback bar count must come from the sweep's params"
     assert 'opt.get("segments")' in src, "so must the segment count"
-    body = src[src.index("opt = self.store.opt_params()"):]
-    assert "self.client.bars(symbol, timeframe, want)" in body, (
+    assert "_bars_for_holdout" in src, "must reuse the run snapshot when it exists"
+    assert "self.client.bars(symbol, timeframe, want)" in helper, (
         "a hardcoded window would make the comparison false")
 
 

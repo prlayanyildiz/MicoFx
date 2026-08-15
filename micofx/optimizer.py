@@ -161,6 +161,8 @@ class Optimizer:
         # only takes it when set, so tests and any other caller that never
         # wires an engine keep working lock-free.
         self.entry_lock: threading.Lock | None = None
+        # Bars fetched at plan time, reused for incumbent replay (AS3).
+        self._bar_snap: dict[tuple[str, str], Any] = {}
 
     @property
     def busy(self) -> bool:
@@ -577,6 +579,7 @@ class Optimizer:
                          f"vermedi - {len(got) if got is not None else 0} bar ile "
                          f"arandi (pencere kisaldi).", "WARN", cfg.symbol)
             cached_bars[tf] = got
+            self._bar_snap[(cfg.symbol, tf)] = got
 
         for tf in timeframes:
             bars = cached_bars.get(tf)
@@ -634,6 +637,7 @@ class Optimizer:
         behind the MT5 lock - now overlaps the search instead of running as a
         serial prologue in front of it.
         """
+        self._bar_snap = {}
         plans: dict[str, dict[str, Any]] = {}
         allow = tf_allow if isinstance(tf_allow, dict) else STRATEGY_TIMEFRAMES
         # Count only legal family×TF pairs so the progress bar is honest.
@@ -1286,6 +1290,26 @@ class Optimizer:
             LOG.emit(f"{symbol}: makas kalibrasyonu okunamadi ({exc}) - "
                      f"mevcut tavan korundu.", "OPT", symbol)
 
+    def _bars_for_holdout(self, symbol: str, timeframe: str):
+        """Holdout bars from the run snapshot, else a live fetch.
+
+        A second client.bars() mid-run can close a new bar and shift the
+        window the candidate was scored on (AS3).
+        """
+        snap = getattr(self, "_bar_snap", None) or {}
+        got = snap.get((symbol, timeframe))
+        if got is not None:
+            return got
+        opt = {}
+        store = getattr(self, "store", None)
+        if store is not None:
+            try:
+                opt = store.opt_params() or {}
+            except Exception:
+                opt = {}
+        want = int(opt.get("max_bars") or 0) or 20000
+        return self.client.bars(symbol, timeframe, want)
+
     def _holdout_costed(self, symbol: str, timeframe: str, strategy: str,
                         params: dict[str, Any]) -> dict[str, Any] | None:
         """One charged replay of the winner on the holdout slice. Not a search.
@@ -1306,9 +1330,8 @@ class Optimizer:
         # expectancy and a charged one as "the same slice", and 8000 bars cut
         # five ways is not the last fifth of 99000.
         opt = self.store.opt_params() or {}
-        want = int(opt.get("max_bars") or 0) or 20000
         segments = int(opt.get("segments") or 0) or 5
-        bars = self.client.bars(symbol, timeframe, want)
+        bars = self._bars_for_holdout(symbol, timeframe)
         if bars is None or len(bars) < 800:
             return None
         n = len(bars)

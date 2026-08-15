@@ -4,11 +4,31 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import fastapi.testclient as _ftc
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.logbus import LOG
+
+
+class TestClient(_ftc.TestClient):
+    """Same as FastAPI's client, plus the in-memory session header.
+
+    create_app always issues a session secret now (AS1). Tests that check the
+    gate itself pass ``unauth=True``.
+    """
+
+    def __init__(self, app, *args, unauth: bool = False, **kwargs):
+        super().__init__(app, *args, **kwargs)
+        if unauth:
+            return
+        token = getattr(getattr(app, "state", None), "api_token", "") or ""
+        if token:
+            self.headers["x-mico-token"] = token
+
+
+_ftc.TestClient = TestClient
 
 
 @pytest.fixture(autouse=True)

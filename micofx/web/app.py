@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html as html_escape
 import math
 import os
 import re
@@ -524,62 +523,52 @@ def _coerce_symbol_patch(raw: dict[str, Any]) -> dict[str, Any]:
     if unknown:
         raise HTTPException(
             400, f"bilinmeyen alan: {', '.join(unknown)} - yama yok sayilmaz")
+    if not patch:
+        raise HTTPException(400, "bos yama - degisecek bir alan yok")
     return patch
+
+
+SESSION_COOKIE = "mico_session"
+_CRITICAL_MUTATIONS = frozenset({
+    "/api/bot/panic", "/api/bot/start", "/api/bot/stop",
+    "/api/app/shutdown", "/api/app/restart",
+    "/api/positions-close-all",
+})
 
 
 def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optimizer,
                 api_token: str = "") -> FastAPI:
-    """``api_token``: optional shared secret (``MICO_API_TOKEN`` env var, see run.py).
+    """Session secret is always on, including 127.0.0.1.
 
-    Empty (the default) means no auth at all - fine for the default 127.0.0.1
-    bind, which nothing outside this machine can reach anyway. It exists for
-    the one case that default doesn't cover: ``MICO_HOST=0.0.0.0``, where
-    every /api/* route (panic, bot start/stop, close-all, symbol edits, MT5
-    path) would otherwise be reachable - and controllable - by anyone who can
-    reach the port, no login of any kind. Set once it is not just localhost.
+    A missing token used to skip the middleware entirely, so a page on
+    another origin could POST /api/bot/panic at the local panel (AS1).
+    The secret lives in an HttpOnly SameSite=Strict cookie set on GET /,
+    not in the URL and not in the HTML.
     """
+    if not api_token:
+        api_token = secrets.token_urlsafe(24)
     app = FastAPI(title=f"{APP_NAME} Terminal", version=__version__, docs_url=None, redoc_url=None)
+    app.state.api_token = api_token
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
-    if api_token:
-        # ``?token=`` is only ever needed where a plain browser navigation
-        # can't set a custom header: the bootstrap "/" load, and the
-        # <a href> log download link. Every other /api/* route goes through
-        # app.js's fetch-based api() helper, which already sets the
-        # X-Mico-Token header - letting those also accept a query param
-        # would just widen where the token can end up (proxy/access logs,
-        # browser history, a Referer header on an outbound request) for no
-        # actual usability gain.
-        _QUERY_TOKEN_PATHS = {"/", "/api/logs/download"}
-
-        @app.middleware("http")
-        async def _require_api_token(request, call_next):
-            path = request.url.path
-            # ``/`` used to be deliberately left out of this gate on the theory
-            # that embedding the token in its (unauthenticated) HTML was safe
-            # because "whoever can already fetch this HTML... is exactly who
-            # the token is meant to let in" - but on a non-localhost bind
-            # ANYONE can fetch "/" with no credentials at all, so that meta
-            # tag handed the token to precisely the population it exists to
-            # keep out. Gating "/" too is what actually makes that comment true.
-            if path.startswith("/api/") or path == "/":
-                token = request.headers.get("x-mico-token")
-                if not token and path in _QUERY_TOKEN_PATHS:
-                    token = request.query_params.get("token")
-                # L3: plain `!=` on the token leaks a timing side-channel
-                # (early-exit on the first mismatched byte) - irrelevant on
-                # the default 127.0.0.1 bind but this whole gate only exists
-                # for MICO_HOST=0.0.0.0, where a remote attacker can time it.
-                # compare_digest needs two strings; the `not token` guard
-                # keeps the missing-header/query-param (None) case from ever
-                # reaching it.
-                if not token or not secrets.compare_digest(token, api_token):
-                    if path == "/":
-                        return PlainTextResponse(
-                            "MicoFX: token gerekli - ?token=<MICO_API_TOKEN> ile acin.",
-                            status_code=401)
-                    return JSONResponse({"detail": "gecersiz veya eksik API token"}, status_code=401)
+    @app.middleware("http")
+    async def _require_session(request, call_next):
+        path = request.url.path
+        if path.startswith("/static") or path == "/favicon.ico" or path == "/":
             return await call_next(request)
+        if not path.startswith("/api/"):
+            return await call_next(request)
+        offered = request.headers.get("x-mico-token") or request.cookies.get(SESSION_COOKIE)
+        if not offered or not secrets.compare_digest(str(offered), api_token):
+            return JSONResponse({"detail": "gecersiz veya eksik oturum"}, status_code=401)
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path in _CRITICAL_MUTATIONS:
+            origin = request.headers.get("origin")
+            site = (request.headers.get("sec-fetch-site") or "").lower()
+            host = request.headers.get("host") or ""
+            allowed = {f"http://{host}", f"https://{host}"}
+            if site == "cross-site" or not origin or origin not in allowed:
+                return JSONResponse({"detail": "istenmeyen kaynak"}, status_code=403)
+        return await call_next(request)
 
     _symbol_payload_cache: dict[str, Any] = {"at": 0.0, "rows": []}
 
@@ -612,19 +601,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         html = (TEMPLATES / "index.html").read_text(encoding="utf-8")
-        if api_token:
-            # Reaching this handler at all means the token middleware above
-            # already accepted a matching x-mico-token header or ?token=
-            # query param for this exact request - static assets stay
-            # unauthenticated (just JS/CSS, no data), but the page itself
-            # does not anymore. Embedding the token back into the HTML here
-            # is genuinely trusted-origin at this point: whoever is loading
-            # this page already had the token to get this far.
-            html = html.replace(
-                "<head>",
-                f'<head>\n<meta name="mico-api-token" content="{html_escape.escape(api_token)}">',
-                1)
-        return HTMLResponse(html)
+        resp = HTMLResponse(html)
+        resp.set_cookie(
+            SESSION_COOKIE, api_token,
+            httponly=True, samesite="strict", path="/",
+        )
+        return resp
 
     @app.get("/favicon.ico")
     def favicon() -> PlainTextResponse:
@@ -1761,8 +1743,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     if exit_changing and (current.magic in open_magics or pending_scan):
                         rejected.append(symbol)
                         continue
+                current = store.symbols.get(symbol)
+                material = current is not None and any(
+                    getattr(current, k, None) != body.patch[k]
+                    for k in body.patch if hasattr(current, k))
                 updated = store.update_symbol(symbol, body.patch, source="panel toplu")
-                if updated is not None:
+                if updated is not None and material:
                     changed += 1
         finally:
             if guarded:

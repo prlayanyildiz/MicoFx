@@ -61,14 +61,12 @@ let portfolioSig = "";
 let aiTableSig = "";
 let refreshBusy = false;
 
-const API_TOKEN = document.querySelector('meta[name="mico-api-token"]')?.content || "";
-
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  if (API_TOKEN) headers["X-Mico-Token"] = API_TOKEN;
   const res = await fetch(path, {
     ...options,
     headers,
+    credentials: "same-origin",
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   let data = {};
@@ -2348,15 +2346,8 @@ function wire() {
     $("#logview").innerHTML = "";
     logAfter = 0;
   };
-  // A plain <a href> navigation cannot set the X-Mico-Token header the way
-  // api() does for fetch calls - when a token is configured (non-localhost
-  // bind) this download would otherwise 401. The gate already accepts
-  // ?token= as a fallback (see create_app()'s middleware), so appending it
-  // here is enough - no need to turn this into a fetch+blob download.
-  if (API_TOKEN) {
-    const dl = $("#btn-log-download");
-    if (dl) dl.href = `/api/logs/download?token=${encodeURIComponent(API_TOKEN)}`;
-  }
+  // Same-origin <a href> sends the HttpOnly session cookie; the secret
+  // must not go in the URL (history, Referer, access logs).
 
   renderLogLevels();
 }
