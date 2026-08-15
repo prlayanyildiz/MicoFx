@@ -371,12 +371,12 @@ function renderCards() {
     },
     {
       lbl: "Acilabilir Islem", val: `${cap.global_free_slots ?? 0}`,
-      foot: `${cap.open_total ?? 0}/${cap.max_total_positions ?? 0} dolu | sembol basi ${cap.max_positions_per_symbol ?? "-"} | butce ${num(cap.margin_budget)}`,
+      foot: `${cap.open_total ?? 0}/${cap.max_total_positions ?? 0} dolu | sembol basi ${cap.max_positions_per_symbol ?? "-"}`,
       accent: "amber",
     },
     {
       lbl: "Beklenen Aylik", val: signed(cap.projected_monthly), wide: true,
-      foot: `${regime}<span class="foot-line">%${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}${costedFoot}${costedBadge}</span>`,
+      foot: `${regime} | %${num(cap.projected_monthly_pct, 2)} | gunluk ${signed(cap.projected_daily)}<span class="foot-line">${costedFoot}${costedBadge}</span>`,
       accent: cap.projected_costed_negative ? "red"
         : (cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
     },

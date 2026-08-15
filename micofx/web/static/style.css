@@ -94,6 +94,12 @@ main { padding: 16px; max-width: 1720px; margin: 0 auto; }
 }
 .panel-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .panel-note { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+#capacity-summary {
+  white-space: normal;
+  line-height: 1.45;
+  max-width: min(100%, 920px);
+  text-align: right;
+}
 .split { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; }
 @media (max-width: 1150px) { .split { grid-template-columns: 1fr; } }
 .danger-zone { border-color: #3a2028; }
@@ -103,7 +109,7 @@ main { padding: 16px; max-width: 1720px; margin: 0 auto; }
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
-  align-items: start;
+  align-items: stretch;
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -116,6 +122,7 @@ main { padding: 16px; max-width: 1720px; margin: 0 auto; }
 .card .lbl { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
 .card .val { font-family: var(--mono); font-size: 20px; font-weight: 600; margin-top: 3px; }
 .card .foot {
+  min-height: 1.35em;
   font-size: 10.5px; color: var(--muted); margin-top: 3px; font-family: var(--mono);
   white-space: normal; line-height: 1.35;
 }

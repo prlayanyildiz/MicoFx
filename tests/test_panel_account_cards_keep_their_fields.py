@@ -32,11 +32,26 @@ def test_render_cards_still_writes_the_v1_fields():
         assert needle in body, needle
 
 
-def test_account_cards_size_to_content_not_a_fixed_row():
-    """auto-fit stretched the leftover card across the next row."""
+def test_the_leftover_card_does_not_stretch_across_a_row():
+    """auto-fit collapses the empty tracks and the last card fills the width.
+
+    That was half of "kutular buyuk": one card ending up as wide as the strip.
+    auto-fill keeps the tracks, so a card stays a card.
+    """
     assert "auto-fill" in CSS
-    assert "align-items: start" in CSS
     assert "minmax(" in CSS
+
+
+def test_the_cards_in_a_row_share_one_height():
+    """The other half was a ragged edge.
+
+    align-items:start let each card stop at its own content, so a strip where
+    two cards carried three lines of foot and eight carried one looked
+    scattered. Those two feet are one line now (the detail is unchanged in the
+    capacity block below), so a shared row height is short for everyone.
+    """
+    assert "align-items: stretch" in CSS
+    assert "min-height: 1.35em" in CSS, "an empty foot must still hold its line"
 
 
 def test_the_projection_card_gets_two_tracks():
