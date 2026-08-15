@@ -47,9 +47,18 @@
         <div class="table-wrap">
           <table class="grid" id="positions-table">
             <thead>
-              <tr><th>Sembol</th><th>Yon</th><th class="num">Lot</th><th class="num">Giris</th>
-                  <th class="num">Fiyat</th><th class="num">SL</th><th class="num">TP</th>
-                  <th class="num">K/Z</th><th>Sure</th><th></th></tr>
+              <tr>
+                <th data-help="th.pos.Sembol">Sembol</th>
+                <th data-help="th.pos.Yon">Yon</th>
+                <th class="num" data-help="th.pos.Lot">Lot</th>
+                <th class="num" data-help="th.pos.Giris">Giris</th>
+                <th class="num" data-help="th.pos.Fiyat">Fiyat</th>
+                <th class="num" data-help="th.pos.SL">SL</th>
+                <th class="num" data-help="th.pos.TP">TP</th>
+                <th class="num" data-help="th.pos.KZ">K/Z</th>
+                <th data-help="th.pos.Sure">Sure</th>
+                <th></th>
+              </tr>
             </thead>
             <tbody></tbody>
           </table>
@@ -60,8 +69,13 @@
         <div class="panel-head"><h2>Gunluk Ozet</h2><div class="panel-note" id="day-note"></div></div>
         <div class="table-wrap">
           <table class="grid" id="day-table">
-            <thead><tr><th>Sembol</th><th class="num">Islem</th><th class="num">Kazanc</th>
-                       <th class="num">Kayip</th><th class="num">Net</th></tr></thead>
+            <thead><tr>
+              <th data-help="th.day.Sembol">Sembol</th>
+              <th class="num" data-help="th.day.Islem">Islem</th>
+              <th class="num" data-help="th.day.Kazanc">Kazanc</th>
+              <th class="num" data-help="th.day.Kayip">Kayip</th>
+              <th class="num" data-help="th.day.Net">Net</th>
+            </tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -77,50 +91,21 @@
         <table class="grid" id="capacity-table">
           <thead>
             <tr>
-              <th>Sembol</th><th>Grup</th><th>Durum</th>
-              <th class="num">Lot</th><th class="num">Avantaj</th><th class="num">Lot Modu</th>
-              <th class="num">Acik</th><th class="num">Limit</th>
-              <th class="num">Acilabilir</th>
-              <th class="num">Marj / Islem</th>
-              <th class="num">Risk / Islem (1R)</th>
-              <th class="num">Maliyet / Islem</th>
-              <th class="num">Beklenen / Islem</th>
-              <th class="num">Acik K/Z</th>
+              <th data-help="th.cap.Sembol">Sembol</th>
+              <th data-help="th.cap.Grup">Grup</th>
+              <th data-help="th.cap.Durum">Durum</th>
+              <th class="num" data-help="th.cap.Lot">Lot</th>
+              <th class="num" data-help="th.cap.Avantaj">Avantaj</th>
+              <th class="num" data-help="th.cap.Lot Modu">Lot Modu</th>
+              <th class="num" data-help="th.cap.Acik">Acik</th>
+              <th class="num" data-help="th.cap.Limit">Limit</th>
+              <th class="num" data-help="th.cap.Acilabilir">Acilabilir</th>
+              <th class="num" data-help="th.cap.Marj">Marj / Islem</th>
+              <th class="num" data-help="th.cap.Risk">Risk / Islem (1R)</th>
+              <th class="num" data-help="th.cap.Maliyet">Maliyet / Islem</th>
+              <th class="num" data-help="th.cap.Beklenen">Beklenen / Islem</th>
+              <th class="num" data-help="th.cap.AcikKZ">Acik K/Z</th>
             </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h2>Gerceklesme Kalitesi (Kayma)</h2>
-        <div class="panel-note" id="exec-note"></div>
-      </div>
-      <div class="table-wrap">
-        <table class="grid" id="exec-table">
-          <thead>
-            <tr><th>Sembol</th><th class="num">Ornek</th><th class="num">Aleyhte</th>
-                <th class="num">Lehte</th><th class="num">Aleyhte/Lehte</th>
-                <th class="num">Ort. puan</th><th class="num">En kotu</th>
-                <th class="num">Ort. R</th><th class="num">Net etki</th><th>Durum</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h2>Canli Sembol Durumu</h2>
-        <div class="panel-note">Sinyal motoru her kapanan barda yeniden hesaplar</div>
-      </div>
-      <div class="table-wrap">
-        <table class="grid" id="live-table">
-          <thead>
-            <tr><th>Sembol</th><th>Strateji</th><th>TF</th><th>Seans</th><th>T3</th><th>UST TF</th>
-                <th class="num">%K</th><th class="num">%D</th><th class="num">ADX</th>
-                <th class="num">ATR</th><th class="num">Spread</th>
-                <th>Sinyal</th><th>Not</th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -151,6 +136,59 @@
 
   <section class="page" id="page-tani">
     <div class="panel">
+      <div class="panel-head"><h2>Gerceklesme Kalitesi (Kayma)</h2>
+        <div class="panel-note" id="exec-note"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="exec-table">
+          <thead>
+            <tr>
+              <th data-help="th.exec.Sembol">Sembol</th>
+              <th class="num" data-help="th.exec.Ornek">Ornek</th>
+              <th class="num" data-help="th.exec.Aleyhte">Aleyhte</th>
+              <th class="num" data-help="th.exec.Lehte">Lehte</th>
+              <th class="num" data-help="th.exec.Oran">Aleyhte/Lehte</th>
+              <th class="num" data-help="th.exec.OrtPuan">Ort. puan</th>
+              <th class="num" data-help="th.exec.EnKotu">En kotu</th>
+              <th class="num" data-help="th.exec.OrtR">Ort. R</th>
+              <th class="num" data-help="th.exec.Net">Net etki</th>
+              <th data-help="th.exec.Durum">Durum</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Canli Sembol Durumu</h2>
+        <div class="panel-note">Sinyal motoru her kapanan barda yeniden hesaplar</div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="live-table">
+          <thead>
+            <tr>
+              <th data-help="th.live.Sembol">Sembol</th>
+              <th data-help="th.live.Strateji">Strateji</th>
+              <th data-help="th.live.TF">TF</th>
+              <th data-help="th.live.Seans">Seans</th>
+              <th data-help="th.live.T3">T3</th>
+              <th data-help="th.live.HTF">UST TF</th>
+              <th class="num" data-help="th.live.K">%K</th>
+              <th class="num" data-help="th.live.D">%D</th>
+              <th class="num" data-help="th.live.ADX">ADX</th>
+              <th class="num" data-help="th.live.ATR">ATR</th>
+              <th class="num" data-help="th.live.Spread">Spread</th>
+              <th data-help="th.live.Sinyal">Sinyal</th>
+              <th data-help="th.live.Not">Not</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
       <div class="panel-head"><h2>Eleme Kapilari</h2>
         <div class="panel-note" id="gates-note">Yukleniyor...</div>
         <button class="btn btn-sm" id="btn-gates-refresh">Yenile</button>
@@ -159,14 +197,14 @@
         <table class="grid" id="gates-table">
           <thead>
             <tr><th>Sembol</th><th>Strateji</th><th>TF</th>
-                <th class="num" title="Holdout islem sayisi">n</th>
-                <th class="num" title="Holdout kenari (R) / gereken 2xSE">Kenar</th>
-                <th class="num" title="Kenarin standart hata cinsinden buyuklugu">Sigma</th>
-                <th class="num" title="Islem basina maliyet (R) / kabul tavani">Maliyet</th>
-                <th class="num" title="Su anki spread/ATR / kendi tavani">Spread</th>
-                <th class="num" title="Gerceklesen / holdout'un vaat ettigi islem">Siklik</th>
+                <th class="num" data-help="th.gate.n">n</th>
+                <th class="num" data-help="th.gate.Kenar">Kenar</th>
+                <th class="num" data-help="th.gate.Sigma">Sigma</th>
+                <th class="num" data-help="th.gate.Maliyet">Maliyet</th>
+                <th class="num" data-help="th.gate.Spread">Spread</th>
+                <th class="num" data-help="th.gate.Siklik">Siklik</th>
                 <th>Kalinan kapi</th>
-                <th title="Haftalik review katmani - otomatik kapatma yok, sadece siniflandirma">Katman</th></tr>
+                <th data-help="th.gate.Katman">Katman</th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -183,9 +221,9 @@
         <table class="grid" id="blocks-table">
           <thead>
             <tr><th>Sembol</th>
-                <th class="num" title="Ayri sinyal (bar) sayisi / toplam poll denemesi">Sinyal</th>
-                <th class="num" title="Islemle sonuclanan">Acilan</th>
-                <th class="num" title="Acilan / deneme">Oran</th>
+                <th class="num" data-help="th.block.Sinyal">Sinyal</th>
+                <th class="num" data-help="th.block.Acilan">Acilan</th>
+                <th class="num" data-help="th.block.Oran">Oran</th>
                 <th>Engelleyen kapilar</th></tr>
           </thead>
           <tbody></tbody>
@@ -203,9 +241,9 @@
         <table class="grid" id="ratio-table">
           <thead>
             <tr><th>Sembol</th>
-                <th class="num" title="Toplanan olcum sayisi">Ornek</th>
-                <th class="num" title="Canli tick spread / bar spread, medyan">Medyan</th>
-                <th class="num" title="90. yuzdelik - kuyrugun nereye gittigi">p90</th>
+                <th class="num" data-help="th.ratio.Ornek">Ornek</th>
+                <th class="num" data-help="th.ratio.Medyan">Medyan</th>
+                <th class="num" data-help="th.ratio.p90">p90</th>
                 <th>Durum</th></tr>
           </thead>
           <tbody></tbody>
@@ -252,7 +290,7 @@
                      <th class="num">Secmeli PF</th><th class="num">Secmeli R</th>
                      <th class="num">Test Islem</th><th class="num">Test PF</th>
                      <th class="num">Test R</th>
-                     <th class="num" title="Test beklentisi, secim/dogrulamanin zayif olaninin ne kadarini koruyor">Kalicilik</th>
+                     <th class="num" data-help="th.opt.Kalicilik">Kalicilik</th>
                      <th>Durum</th><th>Parametreler</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
@@ -282,7 +320,7 @@
                      <th class="num">Secmeli R</th>
                      <th class="num">Test Islem</th><th class="num">Test PF</th>
                      <th class="num">Test R</th>
-                     <th class="num" title="Test beklentisi, secim/dogrulamanin zayif olaninin ne kadarini koruyor">Kalicilik</th>
+                     <th class="num" data-help="th.opt.Kalicilik">Kalicilik</th>
                      <th>Uygulandi</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
@@ -448,6 +486,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="/static/field_help.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

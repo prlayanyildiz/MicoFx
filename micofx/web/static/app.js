@@ -5,6 +5,25 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+function helpTitle(k, ns) {
+  const h = typeof FIELD_HELP === "undefined" ? {} : FIELD_HELP;
+  if (ns && h[`${ns}.${k}`]) return h[`${ns}.${k}`];
+  return h[k] || "";
+}
+
+function titled(node, k, ns) {
+  const tip = helpTitle(k, ns);
+  if (tip) node.title = tip;
+  return node;
+}
+
+function applyStaticHelp() {
+  $$("[data-help]").forEach((node) => {
+    const tip = helpTitle(node.dataset.help);
+    if (tip) node.title = tip;
+  });
+}
+
 const GROUP_LABEL = { forex: "Forex", index: "Endeks", commodity: "Emtia", crypto: "Kripto" };
 const DAY_LABEL = ["Pzt", "Sal", "Car", "Per", "Cum", "Cmt", "Paz"];
 const LOG_LEVELS = ["TRADE", "SIGNAL", "OPT", "AI", "CFG", "INFO", "WARN", "ERROR"];
@@ -153,7 +172,10 @@ function selectTab(name) {
     if (!OPT_PARAMS) loadOptParams().then(loadOptHistory);
     else syncOptPicker();
   }
-  if (name === "tani") { loadGates(); loadBlocks(); loadSpreadRatio(); }
+  if (name === "tani") {
+    loadGates(); loadBlocks(); loadSpreadRatio();
+    renderExecution(); renderLive();
+  }
   if (name === "log") pollLogs();
 }
 
@@ -319,7 +341,7 @@ function renderTop() {
   }
 
   $("#topstats").innerHTML = items.map(([lbl, val, klass]) =>
-    `<div class="tstat"><div class="lbl">${lbl}</div><div class="val ${klass}">${val}</div></div>`
+    `<div class="tstat" title="${esc(helpTitle("top." + lbl))}"><div class="lbl">${lbl}</div><div class="val ${klass}">${val}</div></div>`
   ).join("");
 
   $("#btn-start").disabled = !!bot.running;
@@ -385,7 +407,7 @@ function renderCards() {
   ];
 
   $("#account-cards").innerHTML = cards.map((c) => `
-    <div class="card ${c.accent ? "accent-" + c.accent : ""}">
+    <div class="card ${c.accent ? "accent-" + c.accent : ""}" title="${esc(helpTitle("card." + c.lbl))}">
       <div class="lbl">${c.lbl}</div>
       <div class="val">${c.val}</div>
       <div class="foot">${c.foot || ""}</div>
@@ -795,9 +817,12 @@ function buildField(cfg, spec) {
     input.addEventListener("change", () => {
       saveSymbol(cfg.symbol, { [spec.k]: input.checked }, input);
     });
-    return el("div", { class: "field" }, [
+    const box = el("div", { class: "field" }, [
       el("label", { class: "chk" }, [input, el("span", { text: spec.label })]),
     ]);
+    const tip = helpTitle(spec.k);
+    if (tip) box.title = tip;
+    return box;
   }
   if (spec.t === "select") {
     input = el("select", {}, spec.opts.map(([v, l]) => el("option", { value: v, text: l })));
@@ -815,7 +840,10 @@ function buildField(cfg, spec) {
     if (spec.t !== "select" && !isFinite(value)) { input.value = cfg[spec.k]; return; }
     saveSymbol(cfg.symbol, { [spec.k]: value }, input);
   });
-  return el("div", { class: "field" }, [el("label", { text: spec.label }), input]);
+  const box = el("div", { class: "field" }, [el("label", { text: spec.label }), input]);
+  const tip = helpTitle(spec.k);
+  if (tip) box.title = tip;
+  return box;
 }
 
 function buildSessionEditor(cfg) {
@@ -936,13 +964,14 @@ function buildSymbolCard(cfg) {
   body.appendChild(el("div", { class: "subgrid" }, [
     el("div", { class: "title", text: "Islem Saatleri (bilgisayarin yerel saati)" }),
     el("div", { class: "form-grid" }, [
-      el("div", { class: "field" }, [
+      titled(el("div", { class: "field" }, [
         el("label", { text: "Saat filtresi" }),
         el("label", { class: "chk" }, [useSessions, el("span", { text: "Sadece belirtilen saatlerde islem ac" })]),
-      ]),
+      ]), "use_sessions"),
       el("div", { class: "field" }, [el("label", { text: "Araliklar" }), buildSessionEditor(cfg)]),
       el("div", { class: "field" }, [el("label", { text: "Gunler" }), buildDayPicker(cfg)]),
-      el("div", { class: "field" }, [el("label", { text: "Kapanistan X dk once kapat" }), flat]),
+      titled(el("div", { class: "field" }, [el("label", { text: "Kapanistan X dk once kapat" }), flat]),
+        "flat_before_close_min"),
     ]),
   ]));
 
@@ -1091,7 +1120,8 @@ function renderOptForm() {
     const input = el("input", { type: "number", step: f.step, min: f.min, max: f.max });
     input.value = OPT_PARAMS[f.k];
     input.dataset.optKey = f.k;
-    $("#opt-settings").appendChild(el("div", { class: "field" }, [el("label", { text: f.label }), input]));
+    $("#opt-settings").appendChild(titled(
+      el("div", { class: "field" }, [el("label", { text: f.label }), input]), f.k));
   });
 
   $("#opt-settings-advanced").innerHTML = "";
@@ -1099,7 +1129,8 @@ function renderOptForm() {
     const input = el("input", { type: "number", step: f.step, min: f.min, max: f.max });
     input.value = OPT_PARAMS[f.k];
     input.dataset.optKey = f.k;
-    $("#opt-settings-advanced").appendChild(el("div", { class: "field" }, [el("label", { text: f.label }), input]));
+    $("#opt-settings-advanced").appendChild(titled(
+      el("div", { class: "field" }, [el("label", { text: f.label }), input]), f.k));
   });
 
   const grid = OPT_PARAMS.grid || {};
@@ -1107,7 +1138,8 @@ function renderOptForm() {
   Object.keys(grid).forEach((key) => {
     const input = el("input", { type: "text", value: (grid[key] || []).join(", ") });
     input.dataset.gridKey = key;
-    $("#opt-grid").appendChild(el("div", { class: "field" }, [el("label", { text: key }), input]));
+    $("#opt-grid").appendChild(titled(
+      el("div", { class: "field" }, [el("label", { text: key }), input]), key));
   });
 }
 
@@ -1560,10 +1592,10 @@ function renderAI() {
         });
       }
       input.dataset.aiKey = f.k;
-      box.appendChild(el("div", { class: "field" }, [
+      box.appendChild(titled(el("div", { class: "field" }, [
         el("label", { text: f.label }),
         f.t === "bool" ? el("label", { class: "chk" }, [input, el("span", { text: "Aktif" })]) : input,
-      ]));
+      ]), f.k, "ai"));
     });
   }
   $$("[data-ai-key]", box).forEach((input) => {
@@ -1674,7 +1706,7 @@ function buildSysField(f) {
   ]);
   if (f.hint) field.appendChild(el("div", { class: "dim small", text: f.hint }));
   if (f.wide) field.classList.add("field-wide");
-  return field;
+  return titled(field, f.k);
 }
 
 function renderSystem() {
@@ -2003,8 +2035,10 @@ async function refresh() {
 
     renderTop();
     if (activeTab === "panel") {
-      renderCards(); renderCapacity(); renderExecution(); renderPositions();
-      renderDayTable(); renderLive();
+      renderCards(); renderCapacity(); renderPositions(); renderDayTable();
+    }
+    if (activeTab === "panel" || activeTab === "tani") {
+      renderExecution(); renderLive();
     }
     if (!cardsBuilt && SYMBOLS.length) buildSymbolCards();
     if (activeTab === "semboller") updateSymbolCards();
@@ -2032,6 +2066,7 @@ function confirmThen(message, fn) {
 }
 
 function wire() {
+  applyStaticHelp();
   $$(".tab").forEach((t) => t.addEventListener("click", () => selectTab(t.dataset.tab)));
 
   const gatesBtn = $("#btn-gates-refresh");
