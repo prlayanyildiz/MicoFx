@@ -116,5 +116,5 @@ def test_flat_enabled_false_still_disables():
 def test_unknown_field_is_rejected_not_ok_true():
     tc, store = _client([_cfg("BTCUSD", enabled=True)])
     res = tc.post("/api/symbols/BTCUSD", json={"not_a_config_field": 1})
-    assert res.status_code == 400, res.text
+    assert res.status_code == 422, res.text
     assert store.symbols["BTCUSD"].enabled is True

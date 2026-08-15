@@ -15,7 +15,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, create_model
 
 from .. import APP_NAME, __version__
 from ..engine import Engine
@@ -28,6 +28,7 @@ from ..models import (
     STRATEGIES,
     TIMEFRAMES,
     SymbolConfig,
+    SystemConfig,
     invalid_exit_param,
     strategy_allows_timeframe,
 )
@@ -42,27 +43,46 @@ TEMPLATES = WEB_DIR / "templates"
 STATIC = WEB_DIR / "static"
 
 
-class SymbolPatch(BaseModel):
-    model_config = {"extra": "allow"}
+def _dataclass_patch(name: str, src: type, extra_fields: dict | None = None) -> type[BaseModel]:
+    """Optional-field PATCH model whose keys are exactly ``src``'s fields.
+
+    extra=allow plus update_* copying only known keys was how
+    {\"patch\": {\"enabled\": false}} returned ok:true and changed nothing.
+    extra=forbid makes that a 422 at the door. ``patch`` is an optional
+    wrapper so the bulk envelope still works on the single-symbol route.
+    """
+    fields: dict[str, Any] = dict.fromkeys(src.__dataclass_fields__, (Any | None, None))
+    if extra_fields:
+        fields.update(extra_fields)
+    return create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
 
 
-class SymbolCreate(BaseModel):
+class _ForbidModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+SymbolPatch = _dataclass_patch(
+    "SymbolPatch", SymbolConfig,
+    extra_fields={"patch": (dict[str, Any] | None, None)},
+)
+
+
+class SymbolCreate(_ForbidModel):
     symbol: str
     group: str = "forex"
     broker_symbol: str = ""
-    enabled: bool = True
+    enabled: bool = False
 
 
-class BulkPatch(BaseModel):
+class BulkPatch(_ForbidModel):
     symbols: list[str] | None = None
     patch: dict[str, Any] = {}
 
 
-class SystemPatch(BaseModel):
-    model_config = {"extra": "allow"}
+SystemPatch = _dataclass_patch("SystemPatch", SystemConfig)
 
 
-class OptRun(BaseModel):
+class OptRun(_ForbidModel):
     symbols: list[str] | None = None
     apply_best: bool = True
     bars: int | None = None
@@ -72,7 +92,7 @@ class OptRun(BaseModel):
     force: bool = False
 
 
-class OptApply(BaseModel):
+class OptApply(_ForbidModel):
     symbol: str
     run_id: int | None = None
     params: dict[str, Any] | None = None
@@ -82,15 +102,14 @@ class OptApply(BaseModel):
     force: bool = False
 
 
-class StopBody(BaseModel):
+class StopBody(_ForbidModel):
     close: bool | None = None
 
 
 # Sanity bounds on the fields that directly control position size/risk.
-# ``SymbolPatch``/``SystemPatch`` allow arbitrary keys through (needed for the
-# many optimizer-only fields), so nothing before this stopped a client from
-# pushing e.g. risk_percent=500 straight to the API with zero pushback - the
-# UI's own number-input min/max never protected anything but the UI.
+# Patch models list every config field (see ``_dataclass_patch``) so a
+# client can still send optimizer-only keys; unknown keys are 422. The
+# numeric bounds below still catch e.g. risk_percent=500 on a known field.
 _SYMBOL_RISK_BOUNDS = {
     "risk_percent": (0.0, 20.0, False),   # (min, max, min_inclusive) - % of balance per trade
     "max_lot": (0.0, 20.0, False),
@@ -878,7 +897,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/symbols/{symbol}")
     def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
-        patch = _coerce_symbol_patch(body.model_dump())
+        patch = _coerce_symbol_patch(body.model_dump(exclude_unset=True))
         _reject_internal_fields(patch)
         _reject_non_finite_values(patch)
         _validate_enum_fields(patch)
@@ -997,7 +1016,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             raise HTTPException(400, str(exc)) from exc
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
         return {"ok": True, "config": cfg.to_dict(), "symbols": symbol_payload(force=True),
-                "system": store.system.to_dict()}
+                "system": store.system.to_dict(),
+                "message": f"{cfg.symbol} eklendi - kapali; optimizasyon sonrasi acabilirsiniz"}
 
     @app.delete("/api/symbols/{symbol}")
     def remove_symbol(symbol: str) -> dict[str, Any]:
@@ -1812,7 +1832,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/system")
     def patch_system(body: SystemPatch) -> dict[str, Any]:
-        patch = body.model_dump()
+        patch = body.model_dump(exclude_unset=True)
         patch.pop("running", None)  # bot state is owned by start/stop
         _reject_non_finite_values(patch)
         _validate_risk_bounds(patch, _SYSTEM_RISK_BOUNDS)

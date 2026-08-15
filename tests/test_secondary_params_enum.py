@@ -87,7 +87,7 @@ def test_patch_symbol_ignores_retired_secondary_params_enum():
     res = tc.post("/api/symbols/XAUUSD", json={
         "secondary_params": {"trail_mode": "<script>alert(1)</script>", "sl_atr_mult": 1.5},
     })
-    assert res.status_code == 400
+    assert res.status_code == 422
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 

@@ -29,6 +29,11 @@ ignore = [
 # accept what the retired secondary leg used to pass, and several tests assert
 # that passing source="secondary" changes nothing. Deleting them to satisfy the
 # linter would delete the proof that the retired leg is inert.
+# add_symbol(enabled=...) is accepted and ignored ON PURPOSE: callers and group
+# presets still pass it, and honouring it is the hole that put nine unsearched
+# symbols live on factory settings. Deleting the parameter would break those
+# callers; honouring it would reopen the hole. It is ignored, and a test says so.
+"micofx/store.py" = ["ARG002"]
 "micofx/engine.py" = [
     "ARG002",
     # C414: the list() inside sorted(self._entry_blocks.items()) is not

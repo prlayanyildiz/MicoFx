@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'c:\\Users\\prlay\\MicoFx\\.codex\\hooks\\bridge-session.ps1'",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

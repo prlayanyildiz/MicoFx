@@ -1916,7 +1916,7 @@ async function addPortfolioSymbol(symbol, brokerSymbol = "", group = "") {
   try {
     const res = await api("/api/symbols", {
       method: "POST",
-      body: { symbol: name, group: g, broker_symbol: brokerSymbol || "", enabled: true },
+      body: { symbol: name, group: g, broker_symbol: brokerSymbol || "" },
     });
     SYMBOLS = res.symbols || [];
     if (res.system) STATE.system = res.system;
@@ -1944,7 +1944,7 @@ async function addPortfolioSymbol(symbol, brokerSymbol = "", group = "") {
       });
       extra += `, seans ${patched.start}-${patched.end}`;
     }
-    toast(`${addedSymbol} eklendi${extra}`, "ok");
+    toast(`${addedSymbol} eklendi${extra} - kapali; optimizasyon sonrasi acabilirsiniz`, "ok");
     const symInput = $("#portfolio-symbol");
     const brInput = $("#portfolio-broker");
     if (symInput) symInput.value = "";

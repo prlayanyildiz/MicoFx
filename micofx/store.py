@@ -406,10 +406,15 @@ class Store:
         group: str = "forex",
         broker_symbol: str = "",
         magic: int | None = None,
-        enabled: bool = True,
+        enabled: bool = False,
         avoid_magics: set[int] | None = None,
     ) -> SymbolConfig:
-        """Add a product from a group preset; raises ValueError on bad/duplicate names."""
+        """Add a product from a group preset; raises ValueError on bad/duplicate names.
+
+        Always born disabled. The caller (and the group preset) may ask for
+        enabled=True; that is the hole that put nine unsearched symbols live
+        on factory t3_stoch. Enable is a later, guarded write.
+        """
         name = str(symbol or "").strip().upper().replace(" ", "_")
         # The hyphen is not decoration: this broker names 158 tradeable
         # instruments with one - every dated equity CFD (AAPL.US-24) and the
@@ -428,13 +433,14 @@ class Store:
         payload: dict[str, Any] = {
             "symbol": name,
             "group": group,
-            "enabled": bool(enabled),
+            "enabled": False,
             "broker_symbol": str(broker_symbol or "").strip(),
         }
         payload.update(presets.get(group, {}))
         payload["symbol"] = name
         payload["group"] = group
-        payload["enabled"] = bool(enabled)
+        # Preset / caller True is ignored - same force seed_symbols uses.
+        payload["enabled"] = False
         payload["broker_symbol"] = str(broker_symbol or "").strip()
         if magic is not None:
             payload["magic"] = int(magic)
@@ -451,7 +457,8 @@ class Store:
                                source="sembol ekleme (otomatik buyutme)")
         self.sort_symbols_by_group()
         cfg = self.symbols[name]
-        LOG.emit(f"{name} portfoye eklendi.", "INFO", name)
+        LOG.emit(f"{name} portfoye eklendi (kapali; optimizasyon sonrasi acilabilir).",
+                 "INFO", name)
         return cfg
 
     GROUP_LABEL = {"forex": "Forex", "index": "Endeks", "commodity": "Emtia",
@@ -558,7 +565,7 @@ class Store:
         payload: dict[str, Any] = {
             "symbol": symbol,
             "group": group,
-            "enabled": True,
+            "enabled": False,
             "broker_symbol": cfg.broker_symbol if cfg else "",
         }
         payload.update(self.defaults.get("group_presets", {}).get(group, {}))
@@ -567,6 +574,8 @@ class Store:
         payload["symbol"] = symbol
         payload["group"] = group
         payload["broker_symbol"] = cfg.broker_symbol if cfg else ""
+        # Unsearched defaults - same force as seed / add_symbol.
+        payload["enabled"] = False
         # Existing symbol keeps its magic. Recreate (cfg is None) must use the
         # same clash avoid soft-seed does - defaults.json ships a fixed magic
         # that may already be owned by another symbol / orphan scan / ticket.

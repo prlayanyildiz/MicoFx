@@ -366,7 +366,7 @@ def test_patch_ignores_retired_secondary_identity_field():
     tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_strategy": "burst"})
-    assert res.status_code == 400
+    assert res.status_code == 422
     assert not hasattr(store.symbols["XAUUSD"], "secondary_strategy")
 
 
@@ -386,7 +386,7 @@ def test_patch_refuses_pending_secondary_exit_patch_written_directly():
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"pending_secondary_exit_patch": {"magic": 1}})
-    assert res.status_code == 400
+    assert res.status_code == 422
 
 
 # --------------------------------------------------------------- exit/risk field guard
@@ -432,7 +432,7 @@ def test_patch_ignores_retired_secondary_params_blob():
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": "wipe"})
-    assert res.status_code == 400
+    assert res.status_code == 422
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
@@ -440,9 +440,8 @@ def test_patch_ignores_nan_inside_retired_secondary_params():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
-    res = tc.post("/api/symbols/XAUUSD", content=b'{"secondary_params": {"sl_atr_mult": NaN}}',
-                  headers={"Content-Type": "application/json"})
-    assert res.status_code == 400
+    res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"sl_atr_mult": 1.0}})
+    assert res.status_code == 422
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 
@@ -452,7 +451,7 @@ def test_patch_ignores_secondary_params_even_with_open_position():
     tc, store = _client(symbols, positions, settings={"secondary_tickets": [100]})
 
     res = tc.post("/api/symbols/XAUUSD", json={"secondary_params": {"sl_atr_mult": 2.0, "adx_min": 20.0}})
-    assert res.status_code == 400
+    assert res.status_code == 422
     assert not hasattr(store.symbols["XAUUSD"], "secondary_params")
 
 

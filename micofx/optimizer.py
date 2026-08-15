@@ -1128,6 +1128,20 @@ class Optimizer:
             return "holdout kenari zayifladi (retention)"
         return ""
 
+    def _fresh_incumbent_holdout(self, cfg) -> dict[str, Any] | None:
+        """Same-window holdout of the *live* config. None = use the stamp.
+
+        Tests construct Optimizer with object.__new__ and no client; a
+        raised replay must fall back, not invent a comparison.
+        """
+        try:
+            params = {k: getattr(cfg, k) for k in OPT_FIELDS if hasattr(cfg, k)}
+            out = self._holdout_costed(
+                cfg.symbol, cfg.timeframe, cfg.strategy, params)
+        except Exception:
+            return None
+        return out if isinstance(out, dict) else None
+
     def _beats_incumbent(self, cfg, hold: dict[str, Any]) -> bool:
         """Is this holdout at least as good as the live config's own holdout?
 
@@ -1224,6 +1238,14 @@ class Optimizer:
                      f"atlandi - aday kendi kapilariyla degerlendirildi.",
                      "OPT", cfg.symbol)
             return True
+        # Stamp and candidate are not the same window (JPN225 160.64 vs a
+        # same-slice live replay). Replay the live config here; keep the
+        # stamp only when that replay is missing (no client, thin bars).
+        fresh = self._fresh_incumbent_holdout(cfg)
+        if fresh is not None:
+            old_score = float(fresh.get("score", 0.0) or 0.0)
+            if old_score <= 0.0:
+                return True
         new_score = float(hold.get("score", 0.0) or 0.0)
         if new_score >= old_score:
             return True
