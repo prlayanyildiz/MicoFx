@@ -83,6 +83,8 @@ CORRUPT = [
     ("auto_reopt_at", {"t": 1}),
     ("day_start_balance", "cok"),
     ("day_start_balance", ["x"]),
+    ("day_start_login", "cok"),
+    ("day_start_login", ["x"]),
 ]
 
 

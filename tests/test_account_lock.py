@@ -42,10 +42,23 @@ def test_lock_allows_the_same_account():
 
 
 def test_empty_lock_binds_the_first_account():
-    d = decide_account_lock(0, "", 61562752, "Pepperstone-Demo")
+    d = decide_account_lock(0, "", 61562752, "Pepperstone-Demo", trade_mode=0)
     assert d.allow_entry is True
     assert d.bind_login == 61562752
     assert d.bind_server == "Pepperstone-Demo"
+
+
+def test_empty_lock_does_not_bind_a_real_money_account():
+    """Live 16.08: empty lock wrote the first connected login; that login
+    was trade_mode==2. Auto-bind must refuse and wait for operator confirm."""
+    d = decide_account_lock(
+        0, "", 51501624, "PepperstoneBS-MT5-Live01", trade_mode=2,
+    )
+    assert d.allow_entry is False
+    assert d.bind_login is None
+    assert d.bind_server is None
+    assert "operator" in d.reason.lower() or "onay" in d.reason.lower()
+    assert "gercek para" in d.reason.lower() or "live" in d.reason.lower()
 
 
 class _Store:
@@ -82,11 +95,38 @@ def test_engine_mismatch_sets_reason_and_does_not_rebind():
 def test_engine_empty_lock_writes_the_connected_account():
     store = _Store(login=0, server="")
     eng = _engine(store)
-    reason = eng._enforce_account_lock({"login": 61562752, "server": "Pepperstone-Demo"})
+    reason = eng._enforce_account_lock({
+        "login": 61562752, "server": "Pepperstone-Demo", "trade_mode": 0,
+    })
     assert reason == ""
     assert store.system.account_lock_login == 61562752
     assert store.system.account_lock_server == "Pepperstone-Demo"
     assert store.updates[0][1] == "hesap-kilidi"
+
+
+def test_engine_empty_lock_does_not_bind_a_real_money_account():
+    store = _Store(login=0, server="")
+    eng = _engine(store)
+    reason = eng._enforce_account_lock({
+        "login": 51501624, "server": "PepperstoneBS-MT5-Live01", "trade_mode": 2,
+    })
+    assert reason
+    assert "onay" in reason.lower() or "operator" in reason.lower()
+    assert store.system.account_lock_login == 0
+    assert store.updates == []
+
+
+def test_enforce_passes_trade_mode_into_the_lock():
+    src = Path("micofx/engine.py").read_text(encoding="utf-8")
+    body = src.split("def _enforce_account_lock(", 1)[1].split("\n    def ", 1)[0]
+    assert "trade_mode" in body
+    assert "decide_account_lock" in body
+
+
+def test_empty_lock_copy_does_not_promise_to_bind_live():
+    src = Path("micofx/web/static/app.js").read_text(encoding="utf-8")
+    assert "ilk bagli hesap yazilir" not in src
+    assert "ilk baglanan hesap yazilir" not in src
 
 
 def test_cycle_allow_entry_is_gated_on_the_lock_reason():

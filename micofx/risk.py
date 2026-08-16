@@ -32,6 +32,11 @@ class DailyGuard:
         # during its own __init__ - so a single bad row stopped the app
         # starting rather than degrading anything.
         self.start_balance: float = as_number(store.get_setting("day_start_balance"), 0.0, "day_start_balance")
+        # The chip is meaningless without the login it was taken from. A
+        # terminal that hops from a 2113 demo onto a 0.51 live account used
+        # to treat the gap as a -99.98% trading day and persist the halt.
+        self.start_login: int = int(as_number(
+            store.get_setting("day_start_login"), 0.0, "day_start_login"))
         self.halted: bool = bool(store.get_setting("day_halted", False))
         self.halt_reason: str = str(store.get_setting("day_halt_reason", ""))
         # Distinguishes *why* halted is True - a profit-target halt should
@@ -55,10 +60,52 @@ class DailyGuard:
         # before the first successful history read lands.
         self.cash_flow: float = as_number(store.get_setting("day_cash_flow"), 0.0, "day_cash_flow")
 
-    def rollover(self, server_epoch: float, balance: float) -> bool:
+    def observe_account(self, login: int, balance: float) -> bool:
+        """Rebuild the chip when the terminal is on a different login.
+
+        Returns True if the chip was replaced. Callers treat that like a
+        rollover: per-symbol sticky halts belonged to the previous account.
+        """
+        login = int(login or 0)
+        if login <= 0:
+            return False
+        current = int(getattr(self, "start_login", 0) or 0)
+        if current == login:
+            return False
+        if float(balance) <= 0:
+            return False
+        old = current
+        self.start_login = login
+        self.start_balance = float(balance)
+        self.halted = False
+        self.halt_reason = ""
+        self.loss_halted = False
+        self.cash_flow = 0.0
+        self._zero_balance_warned = False
+        self.store.set_setting("day_start_login", self.start_login)
+        self.store.set_setting("day_start_balance", self.start_balance)
+        self.store.set_setting("day_halted", False)
+        self.store.set_setting("day_halt_reason", "")
+        self.store.set_setting("day_loss_halted", False)
+        self.store.set_setting("day_cash_flow", 0.0)
+        if old:
+            LOG.emit(
+                f"Gun cipasi hesap degisti ({old} -> {login}) | yeni bakiye "
+                f"{balance:.2f} - fark zarar sayilmadi.",
+                "WARN",
+            )
+        else:
+            LOG.emit(
+                f"Gun cipasi hesaba baglandi ({login}) | bakiye {balance:.2f}",
+                "INFO",
+            )
+        return True
+
+    def rollover(self, server_epoch: float, balance: float, login: int = 0) -> bool:
+        rebound = self.observe_account(int(login or 0), float(balance))
         key = time.strftime("%Y-%m-%d", time.gmtime(server_epoch))
         if key == self.day_key and self.start_balance > 0:
-            return False
+            return rebound
         if balance <= 0:
             # Nothing to anchor against, so refuse the rollover rather than
             # anchor at zero. Anchoring at zero re-armed this same branch on
@@ -86,7 +133,10 @@ class DailyGuard:
         self.cash_flow = 0.0
         self.store.set_setting("day_cash_flow", 0.0)
         self.store.set_setting("day_key", key)
+        if login:
+            self.start_login = int(login)
         self.store.set_setting("day_start_balance", self.start_balance)
+        self.store.set_setting("day_start_login", int(getattr(self, "start_login", 0) or 0))
         self.store.set_setting("day_halted", False)
         self.store.set_setting("day_halt_reason", "")
         self.store.set_setting("day_loss_halted", False)
@@ -138,7 +188,16 @@ class DailyGuard:
         # the drawdown lot damper too).
         return (equity - self.cash_flow - self.start_balance) / self.start_balance * 100.0
 
-    def check(self, equity: float, sys_cfg: SystemConfig) -> Verdict:
+    def check(
+        self,
+        equity: float,
+        sys_cfg: SystemConfig,
+        login: int = 0,
+        balance: float | None = None,
+    ) -> Verdict:
+        if login:
+            chip = float(balance) if balance is not None else float(equity)
+            self.observe_account(int(login or 0), chip)
         if self.halted:
             return Verdict(False, self.halt_reason or "gunluk limit")
         pct = self.pnl_pct(equity)

@@ -589,8 +589,14 @@ class Engine:
         getter = getattr(self.client, "decision_now", None)
         server_now = getter() if callable(getter) else None
         self._note_session_clock(self.client.server_now())
+        login = int(account.get("login") or 0)
+        balance = float(account.get("balance", 0.0) or 0.0)
         if server_now is not None:
-            self._handle_daily_rollover(server_now, account.get("balance", 0.0))
+            self._handle_daily_rollover(server_now, balance, login=login)
+        else:
+            observer = getattr(self.risk.daily, "observe_account", None)
+            if callable(observer):
+                observer(login, balance)
         # Must follow the rollover (which resets the figure) and precede the
         # guard.check() below, so the breaker never sees a deposit as profit.
         self._refresh_cash_flow()
@@ -621,7 +627,10 @@ class Engine:
         # still gated separately below via allow_entry.
         self.manage_positions(server_now)
 
-        guard = self.risk.daily.check(account.get("equity", 0.0), self.store.system)
+        guard = self.risk.daily.check(
+            account.get("equity", 0.0), self.store.system,
+            login=login, balance=balance,
+        )
         # The loss guard alone only ever blocked NEW entries - an already-open
         # position kept riding its own (possibly distant) stop while the
         # account kept bleeding floating loss past the configured limit. When
@@ -2477,6 +2486,7 @@ class Engine:
             str(getattr(sys, "account_lock_server", "") or ""),
             int(account.get("login") or 0),
             str(account.get("server") or ""),
+            trade_mode=int(account.get("trade_mode") or 0),
         )
         updater = getattr(self.store, "update_system", None)
         if decision.bind_login is not None and callable(updater):
@@ -2610,8 +2620,8 @@ class Engine:
         self.risk.daily.set_cash_flow(
             self.client.cash_flow_since(self._day_start_epoch()))
 
-    def _handle_daily_rollover(self, server_now: float, balance: float) -> None:
-        if self.risk.daily.rollover(server_now, balance):
+    def _handle_daily_rollover(self, server_now: float, balance: float, login: int = 0) -> None:
+        if self.risk.daily.rollover(server_now, balance, login=login):
             # New broker day - every symbol-level sticky halt from yesterday
             # is stale, same as DailyGuard.loss_halted resetting itself.
             if self._symbol_halted:

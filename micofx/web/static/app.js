@@ -1846,7 +1846,7 @@ function renderSystem() {
     ["Hesap turu", Number(acc.trade_mode) === 2 ? "GERCEK PARA" : (acc.trade_mode == null || acc.trade_mode === "" ? "-" : "demo/contest")],
     ["Kilit", (sys.account_lock_login
       ? `${sys.account_lock_login} @ ${sys.account_lock_server || "-"}`
-      : "(bos - ilk bagli hesap yazilir)")],
+      : "(bos - demo otomatik, gercek para operator onayi)")],
     ["Isim", acc.name || "-"],
     ["AutoTrading", mt5.trade_allowed ? "Acik" : "KAPALI"],
     ["Terminal build", mt5.build || "-"],
@@ -1870,7 +1870,7 @@ function renderSystem() {
     } else if (sys.account_lock_login) {
       lockNote.textContent = `Kilitli hesap: ${sys.account_lock_login} @ ${sys.account_lock_server || "-"}`;
     } else {
-      lockNote.textContent = "Hesap kilidi bos - ilk baglanan hesap yazilir ve loglanir.";
+      lockNote.textContent = "Hesap kilidi bos - demo ilk baglanista yazilir; gercek para operator onayi ister.";
     }
   }
 

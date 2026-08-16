@@ -24,6 +24,7 @@ def decide_account_lock(
     expected_server: str,
     login: int,
     server: str,
+    trade_mode: int = 0,
 ) -> AccountLockDecision:
     found_login = int(login or 0)
     found_server = str(server or "").strip()
@@ -35,6 +36,14 @@ def decide_account_lock(
     exp_login = int(expected_login or 0)
     exp_server = str(expected_server or "").strip()
     if exp_login == 0 and not exp_server:
+        if is_real_money_account(trade_mode):
+            return AccountLockDecision(
+                allow_entry=False,
+                reason=(
+                    "hesap kilidi: gercek para hesabi otomatik baglanmaz, "
+                    "operator onayi gerekli"
+                ),
+            )
         return AccountLockDecision(
             allow_entry=True,
             bind_login=found_login,

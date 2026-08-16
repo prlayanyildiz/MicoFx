@@ -657,7 +657,7 @@ def test_daily_rollover_clears_sticky_symbol_halts():
     eng._symbol_halted = {"EURUSD": "gunluk sembol zarar limiti (5.00%)"}
     settings = {}
     eng.store = SimpleNamespace(set_setting=lambda k, v: settings.__setitem__(k, v))
-    eng.risk = SimpleNamespace(daily=SimpleNamespace(rollover=lambda now, bal: True))
+    eng.risk = SimpleNamespace(daily=SimpleNamespace(rollover=lambda now, bal, login=0: True))
 
     eng._handle_daily_rollover(server_now=0.0, balance=1000.0)
 
@@ -670,7 +670,7 @@ def test_daily_rollover_leaves_sticky_symbol_halts_when_same_day():
     eng._symbol_halted = {"EURUSD": "gunluk sembol zarar limiti (5.00%)"}
     calls = []
     eng.store = SimpleNamespace(set_setting=lambda k, v: calls.append((k, v)))
-    eng.risk = SimpleNamespace(daily=SimpleNamespace(rollover=lambda now, bal: False))
+    eng.risk = SimpleNamespace(daily=SimpleNamespace(rollover=lambda now, bal, login=0: False))
 
     eng._handle_daily_rollover(server_now=0.0, balance=1000.0)
 
