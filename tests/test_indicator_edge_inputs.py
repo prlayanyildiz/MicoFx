@@ -109,8 +109,12 @@ def test_the_public_surface_is_what_this_file_thinks_it_is():
     Twenty-five since trix/delta_proxy/zscore left with the retired families
     (W4) on top of the earlier unsearched-family cull. rolling_rank stayed:
     cost_rank and the ATR rank still use it.
+
+    Twenty-four since close_location_value went: nothing called it, and burst -
+    the one family that wants a close-location reading - computes its own
+    inline. Two copies of one formula, and the exported one was the dead half.
     """
-    assert len(PUBLIC) >= 25, PUBLIC
+    assert len(PUBLIC) >= 24, PUBLIC
     for expected in ("atr", "rsi", "adx", "wilder", "true_range", "supertrend"):
         assert expected in PUBLIC
 

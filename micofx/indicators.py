@@ -148,20 +148,6 @@ def rolling_std(src: np.ndarray, length: int) -> np.ndarray:
     return np.sqrt(np.maximum(mean_sq - mean * mean, 0.0))
 
 
-def close_location_value(open_: np.ndarray, high: np.ndarray, low: np.ndarray,
-                         close: np.ndarray) -> np.ndarray:
-    """Where a bar closed inside its own range, on -1..+1.
-
-    ``((C-L) - (H-C)) / (H-L)``. This is the standard OHLC proxy for whether a
-    bar's volume was accumulated by aggressive buyers or sellers; it is what MT5
-    order-flow indicators fall back on for FX, where no true tape exists.
-    """
-    span = high - low
-    safe = np.where(span > 1e-12, span, 1.0)
-    clv = ((close - low) - (high - close)) / safe
-    return np.where(span > 1e-12, clv, 0.0)
-
-
 def rolling_sum(src: np.ndarray, length: int) -> np.ndarray:
     """Trailing sum with an expanding warmup head."""
     length = max(1, int(length))

@@ -74,17 +74,6 @@ def _coerce(cls, payload: dict[str, Any]):
     return cls(**kwargs)
 
 
-@dataclass
-class SessionWindow:
-    """A single intraday trading window, expressed in broker server time."""
-
-    start: str = "00:00"
-    end: str = "23:59"
-
-    def minutes(self) -> tuple[int, int]:
-        return _hhmm(self.start), _hhmm(self.end)
-
-
 def _hhmm(value: str) -> int:
     try:
         hh, mm = str(value).split(":")

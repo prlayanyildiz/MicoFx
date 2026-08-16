@@ -17,10 +17,17 @@ _probe_*.py
 .env
 .pytest_cache/
 .pytest_tmp/
+.vscode/
+# Ajan koprüsü: brief'ler, cevaplar, olcum scriptleri ve oturum kancalari.
+# Bunlar CALISMA malzemesi, urun degil - depoyu klonlayan biri MicoFX'i
+# kurmak istiyor, bizim hangi ajana ne yazdigimizi degil. Hepsi ayni sinif,
+# hepsi disarida.
 .claude/
+claude/
 .cursor/
 cursor/
-.vscode/
-claude/
-.bridge/spool.md
-.bridge/seen.txt
+chatgpt/
+antigravity/
+.bridge/
+.codex/
+CLAUDE_ONERILERI.md
