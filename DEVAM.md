@@ -189,6 +189,21 @@ Portföy holdout'ta 1.80 R/gün, 26.7 işlem/gün. GER40 tek başına toplamın
 Canlı 626 işlem: kazanma %30.0, başabaş %34.2, ortalama kazanç +8.25,
 ortalama kayıp −4.30. **Açık 4.2 puan** ve hâlâ açıklanmadı.
 
+**Uygulama kalitesi elendi (EX-1, 17.08).** Kayma: 10–14.08 penceresinde
+515 örnek, giriş bacağı n=269 ortalama **+0,00032 R** (medyan 0). Spread
+oranı: sembol başına 78k–121k örnek, medyan 0,95–1,15; dokuz sembolde
+ekstra maliyet ortalama **+0,00113 R/işlem**. Toplam **0,00145 R/işlem**,
+626 işlemde 0,9 R — holdout işlem başı beklentisinin (0,111 R) **%1,3'ü**.
+Açığın ~%0'ı. Negatif sonuç, bu yol da kapandı.
+
+**Yan bulgu, açık: stop bacağı ölü görünüyor.** 217 örneğin tamamında
+`adverse`, `points` ve `r` tam sıfır. Giriş bacağında 269 örneğin 124'ü
+sıfır değil, çıkışta 29'un 9'u — yani kaydedici çalışıyor, stop bacağında
+çalışmıyor. Sıfır varyans, kardeş bacaklar değişkenken, ölçümün doğru
+olduğunu değil **ölü** olduğunu düşündürür (DEVAM §5 birinci sınıf). Gerçek
+hesapta para tam da stop kaymasında kaybedilir; bu körlükle demo'dan
+canlıya geçilmez.
+
 Marj: kitap 1:100'de 1.274 $ marj yiyor, marj seviyesi %166. US2000 ve
 XAUUSD ikisi marjın %63'ünü alıp 0.20 R/gün veriyor; GER40 38 $ marjla 0.772
 R/gün veriyor. **Backtest marjı hiç bilmiyor** — her sembolü tekil vakumda
