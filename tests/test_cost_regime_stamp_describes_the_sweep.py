@@ -36,13 +36,9 @@ class _Store:
 
 
 def _stamp(detail: dict, store_says: bool) -> bool:
-    """Rebuild the one expression under test, bound off the real class."""
     opt = Optimizer.__new__(Optimizer)
     opt.store = _Store(store_says)
-    value = detail.get("charge_costs")
-    return (bool(detail["charge_costs"]) if value is not None
-            else bool(getattr(getattr(opt.store, "system", None),
-                              "charge_costs", True)))
+    return opt._charge_costs_stamp(detail)
 
 
 def test_a_cost_free_sweep_is_not_relabelled_by_a_later_flip():
@@ -59,6 +55,12 @@ def test_an_old_result_without_the_field_falls_back_to_the_store():
     """Rows produced before walk_forward reported it must still record something."""
     assert _stamp({"holdout_days": 36.5}, store_says=True) is True
     assert _stamp({"holdout_days": 36.5}, store_says=False) is False
+
+
+def test_an_omitted_key_does_not_claim_charged_when_cost_is_zero():
+    """opt_history apply: no charge_costs on the row, store True, holdout free."""
+    hold = {"holdout": {"trades": 400, "cost_per_trade_r": 0.0}}
+    assert _stamp(hold, store_says=True) is False
 
 
 def test_the_sweep_reports_the_regime_it_ran_under():

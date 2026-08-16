@@ -865,6 +865,7 @@ class Optimizer:
             "validated": bool(report.get("validated")),
             "holdout_retention": report["holdout_retention"],
             "keep_reason": reason,
+            "charge_costs": report.get("charge_costs"),
         }, applied)
 
         report["applied"] = applied
@@ -1352,8 +1353,9 @@ class Optimizer:
             float(info.get("tick_size") or 0),
         )
         scale = self._spread_scale(symbol)
-        spread_price = bars.spread * point * scale
-        raw_spread_price = bars.spread * point
+        spread_pts = backtest.imputed_spread_pts(bars.spread)
+        spread_price = spread_pts * point * scale
+        raw_spread_price = spread_pts * point
         try:
             min_stop = self.client.min_stop_distance(symbol)
         except Exception:
@@ -1377,12 +1379,40 @@ class Optimizer:
             spread_price=spread_price, min_stop=min_stop_series, flatten=flatten)
         return res.as_dict()
 
+    def _charge_costs_stamp(self, detail: dict[str, Any] | None) -> bool:
+        """What the holdout numbers were actually priced under.
+
+        Explicit sweep flag wins. An omitted key used to fall back to the
+        live store, which is how a cost-free holdout got stamped True
+        (opt_history apply; AV1). If the holdout has trades and paid
+        nothing, the numbers are cost-free regardless of the store.
+        """
+        hold = (detail or {}).get("holdout") or {}
+        trades = int(hold.get("trades") or 0)
+        cost = float(hold.get("cost_per_trade_r") or 0.0)
+        if detail is not None and detail.get("charge_costs") is not None:
+            claimed = bool(detail["charge_costs"])
+        else:
+            claimed = bool(getattr(getattr(self.store, "system", None),
+                                   "charge_costs", True))
+        if claimed and trades > 0 and cost <= 0:
+            return False
+        return claimed
+
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,
               timeframe: str | None = None, strategy: str | None = None) -> dict[str, Any]:
         cfg = self.store.symbols.get(symbol)
         if cfg is None:
             return {"ok": False, "error": "sembol yok"}
+        if detail is not None and detail.get("charge_costs") is True:
+            hold = detail.get("holdout") or {}
+            if (int(hold.get("trades") or 0) > 0
+                    and float(hold.get("cost_per_trade_r") or 0.0) <= 0
+                    and not getattr(self, "_force_apply", False)):
+                return {"ok": False,
+                        "error": "charge_costs damgasi maliyetle celisiyor "
+                                 "(cost_per_trade_r=0)"}
         next_tf = timeframe if timeframe in TIMEFRAMES else cfg.timeframe
         next_strat = strategy if strategy in STRATEGIES else cfg.strategy
         # Same custom map the search itself used, not always the shipped
@@ -1468,10 +1498,10 @@ class Optimizer:
                 # beside cost_r 0.0 over 1532 trades. The stamp exists to keep
                 # a cost-free score from being compared with a charged one, so
                 # a stamp that can lie is worse than none.
-                "charge_costs": bool(detail["charge_costs"])
-                if detail.get("charge_costs") is not None
-                else bool(getattr(getattr(self.store, "system", None),
-                                  "charge_costs", True)),
+                #
+                # AV1: the store fallback is still a lie when detail omits the
+                # key (opt_history apply) and holdout.cost_per_trade_r is 0.
+                "charge_costs": self._charge_costs_stamp(detail),
                 "min_positive_ratio": float(detail["min_positive_ratio"])
                 if detail.get("min_positive_ratio") is not None
                 else float((self.store.opt_params() if self.store is not None else {})

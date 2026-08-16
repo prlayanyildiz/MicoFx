@@ -56,8 +56,8 @@ def test_a_wide_bar_lifts_the_floor_above_the_plan_time_value():
 
 def test_walk_forward_builds_it_from_the_raw_spread_not_the_cost_series():
     """spread_price is zeroed by charge_costs; this must not be."""
-    assert "raw_spread_price = bars.spread * point" in BACKTEST
-    raw = BACKTEST.index("raw_spread_price = bars.spread * point")
+    assert "raw_spread_price = spread_pts * point" in BACKTEST
+    raw = BACKTEST.index("raw_spread_price = spread_pts * point")
     zero = BACKTEST.index("spread_price = np.zeros_like(spread_price)")
     assert raw < zero, "taban serisi maliyet sifirlamasindan SONRA kuruluyor"
     block = BACKTEST[raw:zero]

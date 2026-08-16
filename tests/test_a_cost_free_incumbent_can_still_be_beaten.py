@@ -99,9 +99,9 @@ def test_apply_stamps_the_assumption_it_measured_under():
     # the wrong question when the flag is flipped mid-run - see
     # test_cost_regime_stamp_describes_the_sweep. It now comes off the sweep's
     # own report, with the store only as a fallback for older results.
-    assert '"charge_costs": bool(detail["charge_costs"])' in OPTIMIZER_SRC, (
+    assert '"charge_costs": self._charge_costs_stamp(detail)' in OPTIMIZER_SRC, (
         "ozete damga yazilmiyor - kiyas bir sonraki turda yine kor kalir")
-    stamp = OPTIMIZER_SRC.index('"charge_costs": bool(detail["charge_costs"])')
+    stamp = OPTIMIZER_SRC.index('"charge_costs": self._charge_costs_stamp(detail)')
     scale = OPTIMIZER_SRC.index('"spread_scale": round(float(detail["spread_scale"])')
     # Both stamps carry long comments explaining why they exist, so this bound
     # is about them sharing one summary block, not about line count.

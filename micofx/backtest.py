@@ -166,6 +166,23 @@ def session_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False) 
     return mask
 
 
+def imputed_spread_pts(spread: np.ndarray) -> np.ndarray:
+    """Replace recorded-zero spreads with the symbol's own median quote.
+
+    GER40 M30: 24% of 90k bars have spread 0, and the first fifth is *all*
+    zeros - a history hole, not a free market. Charging those bars as 0
+    (AV1) made the search pick a max_spread_atr below the live quote.
+    Dropping them would throw away the price path and rewrite WF windows.
+    Median of the bars that *do* quote keeps the calendar and prices the
+    hole at what this symbol typically costs.
+    """
+    pts = np.asarray(spread, dtype=np.float64)
+    quoted = pts[pts > 0]
+    if quoted.size == 0:
+        return pts
+    return np.where(pts > 0, pts, float(np.median(quoted)))
+
+
 def flatten_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False,
                  day_end_flatten_min: int = 0) -> np.ndarray:
     """Boolean mask of bars where a still-open position must be force-closed.
@@ -735,7 +752,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     # had it. A p90 would make the search far more pessimistic than the
     # backtest has ever been, on no evidence that it should be.
     scale = float(spread_scale) if spread_scale and spread_scale > 0 else 1.0
-    spread_price = bars.spread * point * scale
+    spread_pts = imputed_spread_pts(bars.spread)
+    spread_price = spread_pts * point * scale
     # The broker's own floor under any stop, per bar. mt5client.min_stop_distance
     # is max(stops_level, spread * 1.5, point * 10) and the caller passes the
     # value it read once at plan time; only the stops_level part of that is
@@ -745,7 +763,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     # Deliberately built from the RAW bar spread, not from ``spread_price`` -
     # that series is zeroed when costs are switched off, and this is not a cost.
     # A stop cannot sit inside the spread whatever the accounting says.
-    raw_spread_price = bars.spread * point
+    raw_spread_price = spread_pts * point
     floor_const = stop_floor_const(min_stop, point)
     min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
 
