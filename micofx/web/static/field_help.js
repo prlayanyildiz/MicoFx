@@ -89,7 +89,7 @@ const FIELD_HELP = {
 
   "max_total_positions": "Hesapta ayni anda acik bot pozisyonu tavani. Sembol basi limitten sonra ikinci kapi.",
   "lot_multiplier": "Butun lotlara carpilan global carpan. 2 = her sey iki kat.",
-  "size_by_edge": "Aciksa holdout beklentisi yuksek sembole daha buyuk lot.",
+  "size_by_edge": "Aciksa lot, holdout net R / holdout maxDD oranina gore (karekok medyan, 0.6-2.2). Pencere uzunlugu orana girmez.",
   "daily_loss_pct": "Gunluk gerceklesen zarar bakiyenin bu yuzdesini asinca yeni giris durur. 0 = kapali.",
   "max_concurrent_risk_pct": "Acik pozisyonlarin kalan 1R'si artı yeni girisin 1R'si ozkaynagin bu yuzdesini asinca o giris reddedilir. Fren (gunluk zarar) gerceklesen+acik zarara bakar; bu kapi henuz acilmamis riske bakar. 0 = kapali.",
   "daily_loss_flatten": "Aciksa gunluk veya sembol limiti asilinca acik pozisyonlar da kapanir. Kapaliysa limit sadece yeni islemi durdurur.",
@@ -163,7 +163,7 @@ const FIELD_HELP = {
   "th.cap.Grup": "Forex / endeks / emtia / kripto.",
   "th.cap.Durum": "enabled: aktif = yeni girise acik, kapali = sinyal uretilmez.",
   "th.cap.Lot": "Su anki hesaplanan giris lotu (risk, carpan, avantaj dahil).",
-  "th.cap.Avantaj": "size_by_edge aciksa holdout kenarina gore lot carpani. 1 = notr.",
+  "th.cap.Avantaj": "size_by_edge aciksa holdout net R / maxDD carpani. 1 = notr. Karekok medyan, 0.6-2.2 kelepce.",
   "th.cap.Lot Modu": "Sabit lot mu, risk yuzdesi mi; dipnot hesap ozeti.",
   "th.cap.Acik": "Bu sembolde acik bot pozisyonu.",
   "th.cap.Limit": "max_positions (sembol basi tavan).",

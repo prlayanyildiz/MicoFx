@@ -571,7 +571,7 @@ class SystemConfig:
     max_scalp_positions: int = 0
     max_swing_positions: int = 0
     lot_multiplier: float = 1.0       # scales every symbol's size at once
-    size_by_edge: bool = False        # weight each symbol by its validated expectancy
+    size_by_edge: bool = False        # weight each symbol by holdout net R / max DD
     max_margin_usage_pct: float = 45.0
     daily_loss_pct: float = 3.0
     # When the loss guard trips, force-close what is still open instead of

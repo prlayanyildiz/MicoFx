@@ -513,7 +513,7 @@ function renderCapacity() {
       <td><span class="pill ${esc(r.group)}">${esc(GROUP_LABEL[r.group] || r.group)}</span></td>
       <td><span class="pill ${r.enabled ? "on" : "off"}">${r.enabled ? "aktif" : "kapali"}</span></td>
       <td class="num">${num(r.lot, 2)}</td>
-      <td class="num ${r.edge_scale > 1 ? "pos" : (r.edge_scale < 1 ? "neg" : "dim")}">${r.edge_scale != null ? "x" + num(r.edge_scale, 2) : "-"}</td>
+      <td class="num ${r.edge_scale > 1 ? "pos" : (r.edge_scale < 1 ? "neg" : "dim")}" title="holdout net R / maxDD, karekok medyan, 0.6-2.2">${r.edge_scale != null ? "x" + num(r.edge_scale, 2) : "-"}</td>
       <td class="num dim">${esc(r.lot_note || r.lot_mode)}</td>
       <td class="num ${r.open_positions ? "pos" : "dim"}">${r.open_positions}</td>
       <td class="num dim">${r.max_positions}</td>
@@ -540,7 +540,7 @@ function renderCapacity() {
   $("#capacity-summary").innerHTML =
     `${enabled.length} aktif sembol | ${openable} acilabilir | ` +
     `lot carpani <b>x${num(cap.lot_multiplier, 2)}</b>` +
-    `${cap.size_by_edge ? " + avantaj agirligi" : ""} | ` +
+    `${cap.size_by_edge ? " + avantaj (holdout R/maxDD)" : ""} | ` +
     `hepsi acilirsa toplam risk ${num(cap.total_risk_per_trade)} (%${num(cap.total_risk_pct, 2)}) | ` +
     `slot limitinde en kotu risk ${num(cap.concurrent_risk)} (%${num(cap.concurrent_risk_pct, 2)}), ` +
     `marj ${num(cap.concurrent_margin)} | ` +
@@ -1705,7 +1705,7 @@ async function saveAI(patch, flashNode) {
 const SYS_FIELDS = [
   { k: "max_total_positions", label: "Maks toplam pozisyon", t: "int", min: 1, max: 50 },
   { k: "lot_multiplier", label: "Global lot carpani", t: "num", step: 0.25, min: 0.1, max: 20 },
-  { k: "size_by_edge", label: "Kaniti guclu sembole buyuk lot", t: "bool" },
+  { k: "size_by_edge", label: "Holdout R/maxDD ile lot", t: "bool" },
   { k: "daily_loss_pct", label: "Gunluk zarar limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
   { k: "max_concurrent_risk_pct", label: "Eszamanli risk limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
   { k: "daily_loss_flatten", label: "Limit asilinca acik pozisyonlari da kapat", t: "bool" },

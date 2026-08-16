@@ -238,32 +238,32 @@ class RiskManager:
 
     @staticmethod
     def _edge_metric(cfg: SymbolConfig) -> float:
-        """Validated edge productivity of one symbol, in R per calendar day.
+        """Validated edge productivity: holdout net R per unit of holdout DD.
 
-        Per-trade expectancy alone is the wrong yardstick for splitting a shared
-        risk budget: a symbol that earns 0.045R six times a day contributes as
-        much as one earning 0.35R once a day, yet the per-trade view sizes the
-        first at the floor and the second near the ceiling. Holdout net R over
-        the holdout window measures what the symbol actually produces per day of
-        exposure, which is the quantity the portfolio is buying with its risk.
-        Falls back to per-trade expectancy when the window length is unknown.
+        Window length used to sit in the denominator (R per calendar day), so
+        an M5 symbol whose bar cap filled ~92 days looked six times more
+        productive than an M30 symbol with the same total R over ~610 days.
+        Net R and max_dd_r are earned on the same slice, so the ratio does not
+        care how long the cap happened to run. Unmeasurable input (no DD,
+        non-positive DD, non-positive net R) returns 0 so edge_scale stays
+        the 1.0 neutral — not EDGE_MIN.
         """
         summary = cfg.opt_summary or {}
         hold = summary.get("holdout") or {}
-        days = float(summary.get("holdout_days", 0.0) or 0.0)
         net_r = float(hold.get("net_r", 0.0) or 0.0)
-        if days > 0 and net_r > 0:
-            return net_r / days
-        return float(hold.get("expectancy", 0.0) or 0.0)
+        max_dd = float(hold.get("max_dd_r", 0.0) or 0.0)
+        if net_r > 0 and max_dd > 0:
+            return net_r / max_dd
+        return 0.0
 
     def edge_scale(self, cfg: SymbolConfig) -> float:
         """Size a symbol relative to how well its validated edge compares.
 
-        Every symbol carries the daily R rate its own held-out slice produced,
-        and those numbers differ by an order of magnitude. Splitting risk equally
-        therefore spends as much on the weakest instrument as on the strongest.
-        The ratio is square-rooted because an edge measured over a few dozen
-        trades is a noisy estimate and does not deserve full leverage.
+        Every enabled symbol carries holdout net R / holdout max DD, and those
+        ratios differ by enough that equal risk spends as much on the weakest
+        book member as on the strongest. The ratio is square-rooted because
+        maxDD is a single-path statistic and does not deserve full leverage;
+        EDGE_MIN/MAX (0.6/2.2) are the same clamp as before.
         """
         if not self.store.system.size_by_edge:
             return 1.0

@@ -1594,7 +1594,7 @@ class Optimizer:
             # It is not decoration: portfolio-gates decides measurability, the
             # cost gate and the review layer from holdout.trades/expectancy/
             # cost_per_trade_r, risk._edge_metric sizes from holdout.net_r over
-            # holdout_days, and _beats_incumbent compares the next candidate
+            # holdout.max_dd_r, and _beats_incumbent compares the next candidate
             # against holdout and spread_scale. All three would read numbers
             # earned by different parameters as current.
             #

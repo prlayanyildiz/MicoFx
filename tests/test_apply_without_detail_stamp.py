@@ -14,7 +14,7 @@ of what this configuration proved:
     to decide measurability, the cost gate and which review layer the symbol
     lands in - the panel the hourly review reads before cutting a symbol.
   * ``risk._edge_metric`` sizes the position from ``holdout.net_r`` over
-    ``holdout_days``.
+    ``holdout.max_dd_r``.
   * ``_beats_incumbent`` compares the next candidate's score against
     ``holdout``, and its spread assumption against ``spread_scale``.
 
