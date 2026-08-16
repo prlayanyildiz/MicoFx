@@ -292,7 +292,14 @@ beraberliğinde holdout işlem sayısına bakıyor. Küçük ama holdout'a dokun
 beraberliği validation ve deterministik ad sırasıyla çöz.
 
 **BT — evren taraması.** Broker'da 1729 sembol var, kitapta 10. Hepsini
-walk_forward'dan geçir, holdout R/gün'e göre sırala, `validated` işaretle.
+walk_forward'dan geçir, **holdout R/maxDD'ye (calmar) göre sırala**,
+`validated` işaretle. Sıralama ölçütü R/gün değil: LEV-1 onu geçersiz
+kıldı ve evrende pencere farkı kitaptakinden vahşi olacak.
+
+Ham tarama bu makinede **~104 saat** (10 sembol / 36 dk kalibrasyonundan;
+1729 × 36 sweep × ~6 sn). Tek hamlede koşulmaz. Sıra: ön eleme → sayım →
+bütçe kararı → tarama; her kademede durulur. İkinci bir `Optimizer.start`
+canlı botla MT5 üzerinde yarışır, tarama ayrı betik olmalı.
 Hipotez: **tavan düşük çünkü üst sıradaki semboller kitapta yok.** FX'i
 atlama — "FX'te M5 pahalı" ölçüldü ve doğru, ama M15/M30 FX hiç ölçülmedi.
 
