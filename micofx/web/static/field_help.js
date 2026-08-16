@@ -64,7 +64,6 @@ const FIELD_HELP = {
   "segments": "Gecmisi kac esit dilime boler. Son dilim holdout, sondan onceki validation.",
   "min_trades": "Selection skorunda ornek indirimi bu islem sayisina gore. Az islem skoru kucultur.",
   "min_positive_ratio": "Selection dilimlerinin en az bu kadari net arti olmali. Dusurmek daha cok aday gecirir.",
-  "selection_metric": "Validation diliminde kazanan adayi hangi sayi secer. Kapilar (min_positive, maliyet, validated) ayni kalir. score = net_r x ornek x dd (varsayilan). money_per_day = E x islem/gun x risk. gap_freq = (wr - basabas%) x islem/gun. costed_e = maliyetli E, min_trades alti 0.",
   "plateau_weight": "Komsu grid skorlarini kazananla karistirir. Yuksek = izole spike elenir.",
 
   "ai.lookback_days": "Denetleyicinin canli islemleri saydigi gun. Arama lookback'inden bagimsiz.",

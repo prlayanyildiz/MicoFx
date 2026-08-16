@@ -1119,13 +1119,6 @@ const OPT_SETTING_FIELDS = [
   { k: "lookback_days", label: "Gecmis penceresi (gun)", step: 10, min: 20 },
   { k: "refine_rounds", label: "Yerel iyilestirme turu", step: 1, min: 0, max: 5 },
   { k: "max_combos", label: "Maks kombinasyon", step: 100, min: 20 },
-  { k: "selection_metric", label: "Secim metrigi", kind: "enum",
-    options: [
-      ["score", "score (net_r x ornek x dd)"],
-      ["money_per_day", "money_per_day (E x islem/gun)"],
-      ["gap_freq", "gap_freq ((wr-BE) x islem/gun)"],
-      ["costed_e", "costed_e (maliyetli E)"],
-    ] },
 ];
 
 const OPT_SETTING_FIELDS_ADVANCED = [
