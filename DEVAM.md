@@ -41,6 +41,19 @@ kendi görevini seçmez, okuduğu commit hash'ini raporun başına yazar.
 **Süre sınırı yok.** Köprü sürekli çalışır; Claude boş durmaz, Cursor'a her
 zaman yeni ve farklı bir iş bırakır. "Bekleyelim" bir plan değildir.
 
+**İki makine kuralı.** Sunucudaki oturum canlı sistemin sahibidir: botu o
+çalıştırır, canlı ayarı o değiştirir, commit'i o atar. Laptop yalnızca
+operatör açıkça isterse devreye girer.
+
+16.08'de bu kural yokken ikimiz aynı pytest hatasına aynı anda girdik —
+biri ölçüp `DEVAM.md`'ye yazdı, diğeri düzeltti, push çakıştı ve rebase
+gerekti. Zararsız atlatıldı ama aynı çakışma canlı ayarda olsaydı biri
+diğerinin değişikliğini sessizce ezerdi.
+
+Devralan taraf önce `git fetch` ile ayrışma var mı bakar. **Aynı anda iki
+makinede bot çalıştırılmaz** — ikisi de "doğru" hesapta olduğu için hesap
+kilidi bunu yakalamaz ve her sinyal iki kez açılır.
+
 ---
 
 ## 2. Cursor protokolü (bağlayıcı)
@@ -204,6 +217,12 @@ beraberliği validation ve deterministik ad sırasıyla çöz.
 walk_forward'dan geçir, holdout R/gün'e göre sırala, `validated` işaretle.
 Hipotez: **tavan düşük çünkü üst sıradaki semboller kitapta yok.** FX'i
 atlama — "FX'te M5 pahalı" ölçüldü ve doğru, ama M15/M30 FX hiç ölçülmedi.
+
+**httpx uyarısı (acil değil).** Suite şu uyarıyı veriyor: *"Using httpx with
+starlette.testclient is deprecated; install httpx2 instead."* Bugün zararsız
+ama bir sürüm yükseltmesinde `TestClient` kullanan her test kırılır —
+`tests/conftest.py` onu sarmalıyor, yani tek noktadan çözülebilir. Kırılmadan
+önce ele alınsın; kırıldıktan sonra bakılırsa suite tamamen durur.
 
 **Sıraya bağımlı test.** `test_the_new_bar_trigger_uses_the_brokers_clock.py::
 test_the_day_boundary_still_uses_the_naive_encoding` tam suite'te bir kez
