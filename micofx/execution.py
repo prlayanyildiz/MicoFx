@@ -20,7 +20,8 @@ speaks:
   * **broker-side stop/target fills** - the expected price is the SL or TP that
     was on the position the last time the engine saw it (so a trailed stop is
     compared against where it actually sat, not against where it started), and
-    the realised price comes from the closing deal.
+    the realised price is the volume-weighted close across the broker's chunks,
+    not the last print (that last print is often the stop level itself).
 
 Sign convention: ``adverse`` is positive when the fill was *worse* for the
 account. A buy filling higher than requested is adverse; a sell filling lower is
@@ -318,16 +319,19 @@ class ExecutionMonitor:
                 # against, so it is reported but never scored as slippage.
                 continue
             info = client.info(book["symbol"]) or {}
+            # Score the same VWAP the log already reports. The last chunk's
+            # print is often the stop level itself; using it made every
+            # multi-print stop look like a perfect fill.
             self.record(
                 book["symbol"], "stop" if is_stop else "target",
-                expected, float(deal["price"]),
+                expected, float(price),
                 # The closing leg trades the opposite way to the position.
                 deal_is_buy=(book["side"] == "sell"),
                 risk_dist=float(book.get("risk_dist", 0.0)),
                 point=float(info.get("point", 0.0) or 0.0),
-                volume=float(deal.get("volume", 0.0)),
+                volume=float(volume),
                 money_per_price=client.money_per_price_unit(book["symbol"],
-                                                            float(deal.get("volume", 0.0))),
+                                                            float(volume)),
             )
         return reports
 
