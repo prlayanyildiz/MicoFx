@@ -194,7 +194,28 @@ görev `Ready` görünüyor ama tek bir arşiv üretmedi. Yürüyüş okunamayan
 atlamalı ve sayısını raporlamalı; hata mesajı konsol kod sayfasından
 bağımsız basılmalı.
 
-**BS-1 — en büyük kalem.** `risk.py` portföy kapıları canlıda var,
+**BS-3 — konfig çalkantısı. Yeni en büyük kalem.** `opt_runs`'ta 58
+uygulanmış konfig var, 11.08 19:09 – 16.08 09:00 UTC arası. Medyan ömür
+**12,8 saat**; %68,8'i 24 saatten kısa yaşamış; en kısası 24 dakika. XAUUSD
+dört günde sekiz kez strateji değiştirdi. Holdout aylarca barda ölçülüyor,
+canlı yarım günde değiştiriliyor — **ölçülen şey ile işletilen şey aynı
+değil.** +640/−986 farkının en güçlü açıklaması bu. Çalkantı freni
+(`reopt_min_age_hours=48`, `supervisor.py:69`) 15.08 civarında geldi, yani
+bu 58 değişimin çoğu frensiz dönemin ürünü. Ölç: her konfigin uygulandığı
+andan bir sonrakine kadar canlıda ne kazandığı, ve önceki konfig
+bırakılsaydı kâğıtta ne kazanacağı. Fark, çalkantının faturası.
+
+**BS-1 — ölçüldü, iki kez kapandı.** Canlı sayaçta portföy kapıları
+(`max_concurrent_risk_pct`, `max_margin_usage_pct`, `max_total_positions`)
+14–16.08 penceresinde **0 kez** ateşledi; ateşleyen canlı-only kapılar
+`spread` (%47) ve `ai_gate` (%22). Geriye dönük "kesilen kova"nın net R'si
+ölçülemedi: `entry_blocks` yalnız sayaç tutuyordu, bar kimliği yoktu
+(`9b20ddd` ile eklendi, pencere 16.08 21:34 UTC'den itibaren doluyor).
+Zayıf hâl de yürümedi — bugünkü konfigle kâğıt, Ağustos canlı fill'lerinin
+yalnız %11'ini yeniden üretiyor. Sebebi BS-3. Aşağıdaki eski gerekçe
+tarihsel kayıt olarak duruyor:
+
+**BS-1 (özgün gerekçe).** `risk.py` portföy kapıları canlıda var,
 `backtest.py`'de yok: `max_concurrent_risk_pct`, `max_margin_usage_pct`,
 `max_total_positions`, günlük halt, `block_high_cost`, `_symbol_daily_halt`,
 supervisor kısıtları. Backtest her sembolü tekil vakumda koşuyor, yani kâğıt
