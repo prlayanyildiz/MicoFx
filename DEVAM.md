@@ -74,6 +74,14 @@ söylemeli. Seçim veya validasyon dilimindeki iyileşme kanıt değildir.
 `n<30` ise "yetersiz" yaz, bulgu diye sunma. Popülasyon kullanıyorsan kaç
 sembol / kaç gün olduğunu başlığa yaz.
 
+**`n>=30` yeterli demek değil — farkın büyüklüğüne göre güç hesapla.**
+17.08'de bütün bir gece, n=173'te ölçülen 3,41 puanlık bir farkın peşinde
+koşuldu; o örneklemde standart hata 3,59 puandı, yani fark gürültünün
+içindeydi (p=0,34). Oran karşılaştırması yapıyorsan standart hatayı ve
+güven aralığını **raporun içine yaz**. Ayırt etmek istediğin fark
+biliniyorsa gereken n'i de yaz. `n>=30` kuralı bir taban, bir yeterlilik
+kanıtı değil.
+
 **Zaman dilimini ve pencereyi de yaz.** Bu projede aynı sayı farklı zaman
 diliminde farklı şey demek: bar çekme sınırı sabit olduğu için M5 ~95 gün,
 M30 ~610 gün görüyor. Gün başına ifade edilen her ölçüt (R/gün, işlem/gün)
@@ -281,7 +289,25 @@ konuldu (`opt_runs` payload'ından, yeniden koşulmadan):
 | fark | **−3,42 puan** |
 | canlı < holdout olan tenure | 18 / 28 |
 
-Yani DEVAM §6'daki 4,2 puanın neredeyse tamamı bu. **Çalkantı (B) elendi:**
+**DÜZELTME (17.08, aynı gece): bu fark istatistiksel olarak ayırt
+edilemiyor.** n=173'te, beklenen oran %33,47 iken standart hata **3,59
+puan**. Gözlenen fark 3,41 puan, yani **bir standart hatanın altında**:
+z=−0,95, iki yönlü p=**0,34**, %95 güven aralığı **%23,2 – %36,9**. Bu
+örneklem 3,4 puanlık bir farkı göremez. "(A) kâğıt abartıyor" bir **yön**,
+bulgu değil — ve ben onu bulgu diye yazmıştım.
+
+3,4 puanı %80 güçle ayırt etmek **~1494 işlem** ister; ölçülen canlı hızda
+(28,4 işlem/gün) **~53 gün**. Ölçüm penceresi 16.08 21:34 UTC'de sıfırdan
+başladı.
+
+DEVAM §6'nın kendi başlığı ayrı bir karşılaştırma ve o daha güçlü: 626
+işlemde %30,0 vs başabaş %34,2 → standart hata 1,90 puan, z=−2,22,
+p=**0,027**. Yani "canlı başabaşın altında" savunulabilir; "canlı kendi
+holdout'unun altında" **bu veriyle savunulamaz**.
+
+Aşağıdaki tenure karşılaştırması yön olarak duruyor:
+
+**Çalkantı (B) elendi denmişti — o da bu güçle elenmiş sayılmaz:**
 tenure'lar kendi holdout'una yakın çıksaydı sorun konfigin yaşamaması
 olurdu; çıkmıyorlar. Yaşayan konfig bile kâğıdın söylediğinden kötü
 bitiriyor. Çalkantı gerçek ama açığın sebebi değil.
