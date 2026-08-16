@@ -74,6 +74,13 @@ söylemeli. Seçim veya validasyon dilimindeki iyileşme kanıt değildir.
 `n<30` ise "yetersiz" yaz, bulgu diye sunma. Popülasyon kullanıyorsan kaç
 sembol / kaç gün olduğunu başlığa yaz.
 
+**Zaman dilimini ve pencereyi de yaz.** Bu projede aynı sayı farklı zaman
+diliminde farklı şey demek: bar çekme sınırı sabit olduğu için M5 ~95 gün,
+M30 ~610 gün görüyor. Gün başına ifade edilen her ölçüt (R/gün, işlem/gün)
+zaman dilimiyle birlikte verilmezse yanıltıcıdır — LEV-1 tam olarak bu
+yüzden oldu. İki sembolü karşılaştırıyorsan pencerelerinin eşit olup
+olmadığını önce söyle.
+
 **Fail-first.** Yeni davranışın testi, kod olmadan kırılmalı. Raporda stash
 altında alınan hata mesajını göster.
 
@@ -194,7 +201,32 @@ görev `Ready` görünüyor ama tek bir arşiv üretmedi. Yürüyüş okunamayan
 atlamalı ve sayısını raporlamalı; hata mesajı konsol kod sayfasından
 bağımsız basılmalı.
 
-**BS-3 — konfig çalkantısı. Yeni en büyük kalem.** `opt_runs`'ta 58
+**LEV-1 — kaldıraç ölçütü zaman dilimine bağlı (BUG).** `risk.edge_scale`
+her sembolü holdout **R/gün**'üne göre boyutluyor, medyana oranın karekökü,
+0,6–2,2 arası. Ama holdout penceresi zaman dilimiyle belirleniyor, çünkü bar
+çekme sınırı sabit:
+
+| TF | holdout gün (ortalama) | semboller |
+|---|---:|---|
+| M5 | 95,5 | JPN225, US2000, SpotBrent, XAUUSD |
+| M15 | 277,7 | US500 |
+| M30 | 611,9 | FRA40, GER40, NAS100, UK100, US30 |
+
+Aynı toplam R, M5'te altı kat büyük bir R/gün üretiyor. Tavana (2,2)
+dayanan iki sembolün ikisi de M5: XAUUSD ve JPN225. GER40 mutlak en iyi
+üretici (638 günde +180,2 R) ama 1,43 alıyor; UK100 652 günde ölçüldüğü
+için tabana (0,60) düşüyor.
+
+Sonuç: **JPN225 etkin %1,76 risk × 2 pozisyon = özkaynağın %3,52'si**, ve
+bu ağırlığı 92 günlük bir pencereden alıyor. Ölçüt edge'i değil, ölçüm
+penceresinin kısalığını ödüllendiriyor.
+
+Kaldıracı artırmadan önce bu düzelmeli: kaldıraç işaretimizi büyütür, ve
+canlı işaret şu an negatif (−986 $/ay). Karar kuralı: **canlı edge'in
+işareti pozitife dönmeden toplam risk artırılmaz**; artırılacaksa da
+düzeltilmiş ölçütle ve tek seferde değil.
+
+**BS-3 — konfig çalkantısı.** `opt_runs`'ta 58
 uygulanmış konfig var, 11.08 19:09 – 16.08 09:00 UTC arası. Medyan ömür
 **12,8 saat**; %68,8'i 24 saatten kısa yaşamış; en kısası 24 dakika. XAUUSD
 dört günde sekiz kez strateji değiştirdi. Holdout aylarca barda ölçülüyor,
