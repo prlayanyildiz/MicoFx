@@ -194,6 +194,12 @@ XAUUSD ikisi marjın %63'ünü alıp 0.20 R/gün veriyor; GER40 38 $ marjla 0.77
 R/gün veriyor. **Backtest marjı hiç bilmiyor** — her sembolü tekil vakumda
 optimize ediyor, o yüzden sistematik olarak en dar stopu seçiyor.
 
+**`daily_loss_pct` 22 — geçici ve kasıtlı.** 16.08 22:41'de operatör
+panelden 10 → 22 yaptı. Sebep ölçüm: gün freni erken tetiklenirse örnek
+kesilir ve BS-3'ün fatura yarısı yine ölçülemez. Bu bir arıza değil, geri
+alma. Ölçüm penceresi kapandığında düşürülecek — demo hesapta bile %22
+günlük zarar, 2.113 $ üzerinde 465 $ demek.
+
 Kitap: 10 sembol, hepsi açık, `lot_mode=risk`, sembol başına `max_positions=2`.
 Risk yüzdeleri 0.2 (SpotBrent, XAUUSD, US500) ve 0.8 (diğer yedi). Hepsi dolsa
 teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
