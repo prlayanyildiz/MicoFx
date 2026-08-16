@@ -196,13 +196,26 @@ ekstra maliyet ortalama **+0,00113 R/işlem**. Toplam **0,00145 R/işlem**,
 626 işlemde 0,9 R — holdout işlem başı beklentisinin (0,111 R) **%1,3'ü**.
 Açığın ~%0'ı. Negatif sonuç, bu yol da kapandı.
 
-**Yan bulgu, açık: stop bacağı ölü görünüyor.** 217 örneğin tamamında
-`adverse`, `points` ve `r` tam sıfır. Giriş bacağında 269 örneğin 124'ü
-sıfır değil, çıkışta 29'un 9'u — yani kaydedici çalışıyor, stop bacağında
-çalışmıyor. Sıfır varyans, kardeş bacaklar değişkenken, ölçümün doğru
-olduğunu değil **ölü** olduğunu düşündürür (DEVAM §5 birinci sınıf). Gerçek
-hesapta para tam da stop kaymasında kaybedilir; bu körlükle demo'dan
-canlıya geçilmez.
+**Stop bacağının sıfırı ölçüm hatası değil, venue raporu (EX-2, 17.08).**
+217 örneğin tamamında `adverse`, `points`, `r` sıfırdı. Kod totolojisi
+değil: karşılaştırma bilet SL'i ile bildirilen fill arasında, iki ayrı
+sayı. Kanıt dump'tan: kitapta **1199 SL kapanışının 1199'unda** bildirilen
+fiyat biletin SL'ine eşit ve **hiçbiri birden fazla deal değil**.
+Pepperstone-Demo stopları tam SL fiyatından dolduruyor.
+
+**Gerçek hesapta bu böyle olmayacak.** Orada stop, seviyeyi delerek ve
+parçalı dolar. Yani bu demo, kayıp bacağını sistematik olarak iyimser
+gösteriyor ve 4,2 puanın stop kaynaklı kısmını **ölçemez**. Canlı paraya
+geçilirken bu körlük hatırlanmalı.
+
+Bu arada gerçek bir gizli böcek bulundu ve onarıldı (`739e834`): parçalı
+stop fill'i son print'e göre puanlanıyordu, son print de çoğu zaman stop
+seviyesinin kendisi. VWAP'a bağlandı — bu demoda hiçbir şeyi değiştirmiyor
+(parçalı fill yok), gerçek hesapta ölçümün doğru olmasını sağlıyor.
+
+**Ölçülmemiş kalan:** kâğıt orijinal SL'den çıkıldığını varsayar; canlı
+skor **son görülen** (trail'lenmiş) SL'ye karşı bakar. Trail sonrası tam
+fill, bu bacakta kâğıt/canlı farkını göstermez.
 
 Marj: kitap 1:100'de 1.274 $ marj yiyor, marj seviyesi %166. US2000 ve
 XAUUSD ikisi marjın %63'ünü alıp 0.20 R/gün veriyor; GER40 38 $ marjla 0.772
@@ -255,6 +268,28 @@ Kaldıracı artırmadan önce bu düzelmeli: kaldıraç işaretimizi büyütür,
 canlı işaret şu an negatif (−986 $/ay). Karar kuralı: **canlı edge'in
 işareti pozitife dönmeden toplam risk artırılmaz**; artırılacaksa da
 düzeltilmiş ölçütle ve tek seferde değil.
+
+**EX-3 — sorunun adı kondu: kâğıt kendi konfiginin kazanma oranını
+abartıyor.** 58 tenure / 173 işlem / 6,1 gün, 11.08 19:09 UTC sonrası.
+Her tenure için canlı sonuç, **o konfigin kendi holdout'uyla** yan yana
+konuldu (`opt_runs` payload'ından, yeniden koşulmadan):
+
+| | |
+|---|---|
+| canlı kazanma oranı | **%30,06** (52/173) |
+| aynı konfiglerin holdout'u, canlı n ile ağırlıklı | **%33,47** |
+| fark | **−3,42 puan** |
+| canlı < holdout olan tenure | 18 / 28 |
+
+Yani DEVAM §6'daki 4,2 puanın neredeyse tamamı bu. **Çalkantı (B) elendi:**
+tenure'lar kendi holdout'una yakın çıksaydı sorun konfigin yaşamaması
+olurdu; çıkmıyorlar. Yaşayan konfig bile kâğıdın söylediğinden kötü
+bitiriyor. Çalkantı gerçek ama açığın sebebi değil.
+
+Uygulama kalitesi (EX-1) ve stop kayması (EX-2) bu 3,4 puanı taşımıyor.
+**Geriye kalan tek aday: kâğıt kenarın kendisi — özellikle bar-fill
+varsayımı.** Ödeme oranı karşılaştırması yapıldı ama $ ile R karıştığı için
+bulgu sayılmadı; her tenure `n<30`, popülasyon olarak sunuldu.
 
 **BS-3 — konfig çalkantısı.** `opt_runs`'ta 58
 uygulanmış konfig var, 11.08 19:09 – 16.08 09:00 UTC arası. Medyan ömür
