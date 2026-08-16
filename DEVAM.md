@@ -7,6 +7,11 @@ varsa buraya yazılır.
 Yeni bir oturum açıldığında: önce bunu, sonra `git log` oku. Commit
 mesajları neden'leri taşıyor, kod ne'yi.
 
+> 16.08.2026 notu: bu dosya aslında git'te DEĞİLDİ — eski makinede hiç
+> commit edilmemişti ve `MicoFxOld` klasörü taşıma sonrası silinince tek
+> kopyası kaybolmak üzereydi. İçeriği oturum belleğinden geri yazıldı ve
+> commit edildi. Bir daha silinmesin diye artık gerçekten takipte.
+
 ---
 
 ## 1. Köprü — kim ne yapar
@@ -67,19 +72,23 @@ değerlidir. İyi haber üretmek için veriyi bükme.
 
 ---
 
-## 3. MicoFXOld'dan taşınacak dosyalar
+## 3. Ortam (yeni makine, 16.08.2026)
 
-Git bunları getirmez. Sürekliliği istiyorsan elle kopyala:
-
-| dosya | ne işe yarar |
+| ne | nerede |
 |---|---|
-| `data/micofx.db` | kitap: sembol ayarları, optimizer geçmişi, sistem ayarları. **Bot kapalıyken kopyala.** |
-| `cursor/_bp.json` | gece saatleri holdout testi, 10 sembol x 3 kol. Saatler süren koşunun çıktısı. |
-| `cursor/_universe_live01.json` | Live01 sunucusundaki 1739 sembol + spec'leri. BT taraması için. |
-| `claude/FOR_CURSOR.md` | bekleyen iş kuyruğu |
-| `~/.claude/projects/C--Users-prlay-MicoFx/memory/` | Claude'un kalıcı notları (8 dosya + MEMORY.md) |
+| proje | `C:\Users\Administrator\MicoFx` |
+| sanal ortam | `C:\MicoFX-venv` — **proje dışında, bilerek**. `python`/`pytest` PATH'te değil |
+| test/ruff | `C:\MicoFX-venv\Scripts\python.exe -m pytest -q` ve `... -m ruff check .` |
+| panel portu | 8900 (`MICO_PORT` ile değişir) |
+| MT5 | `C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe` |
 
-Sıfırdan başlanacaksa sadece son ikisi bile çok şey kurtarır.
+`MicoFxOld` silindi. Git'in getirmediği ne varsa (`data/micofx.db`,
+`cursor/_bp.json`, `cursor/_universe_live01.json`) artık sadece bu makinede.
+`~/.claude/.../memory/` boş geldi — eski Claude notları taşınmadı, kayıp.
+
+pytest bu makinede `sessionfinish`'te `WinError 1463` (sembolik bağlantı
+izlenemiyor) ile patlıyor. Testler bitiyor, özet satırı yutuluyor; çıktıyı
+dosyaya alıp `short test summary` bölümünü okumak gerek.
 
 ---
 
@@ -146,12 +155,13 @@ XAUUSD ikisi marjın %63'ünü alıp 0.20 R/gün veriyor; GER40 38 $ marjla 0.77
 R/gün veriyor. **Backtest marjı hiç bilmiyor** — her sembolü tekil vakumda
 optimize ediyor, o yüzden sistematik olarak en dar stopu seçiyor.
 
+Kitap: 10 sembol, hepsi açık, `lot_mode=risk`, sembol başına `max_positions=2`.
+Risk yüzdeleri 0.2 (SpotBrent, XAUUSD, US500) ve 0.8 (diğer yedi). Hepsi dolsa
+teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
+
 ---
 
 ## 7. Açık işler, öncelik sırasıyla
-
-**Hemen (canlı):** hesap kilidini demo'ya geri al, günlük freni sıfırla, gün
-çıpasını demo bakiyesine yeniden kur, MT5'te AutoTrading'i aç.
 
 **BUG — gün çıpası hesap bilmiyor.** Hesap değişince bakiye farkını zarar
 sanıyor: demo çıpası 2.113 $ iken live 0.51 $'a geçilince fren "%99.98 zarar"
@@ -180,7 +190,7 @@ haksız cezalandırmış olabilir. Onar, 10 sembolde önce/sonra holdout ver.
 beraberliğinde holdout işlem sayısına bakıyor. Küçük ama holdout'a dokunuyor;
 beraberliği validation ve deterministik ad sırasıyla çöz.
 
-**BT — evren taraması.** Broker'da 1739 sembol var, kitapta 10. Hepsini
+**BT — evren taraması.** Broker'da 1729 sembol var, kitapta 10. Hepsini
 walk_forward'dan geçir, holdout R/gün'e göre sırala, `validated` işaretle.
 Hipotez: **tavan düşük çünkü üst sıradaki semboller kitapta yok.** FX'i
 atlama — "FX'te M5 pahalı" ölçüldü ve doğru, ama M15/M30 FX hiç ölçülmedi.
@@ -188,6 +198,10 @@ atlama — "FX'te M5 pahalı" ölçüldü ve doğru, ama M15/M30 FX hiç ölçü
 **Sıraya bağımlı test.** `test_the_new_bar_trigger_uses_the_brokers_clock.py::
 test_the_day_boundary_still_uses_the_naive_encoding` tam suite'te bir kez
 kırıldı, izole geçiyor. Global durum sızıyor; kaynağı bulunmalı.
+
+**Ruff borcu.** `run.py` E402 x9 (import'lar sürüm kontrolünün altında,
+bilerek) ve `backup.py:285-286` F541. İkisi de kasıtlı — `per-file-ignores`'a
+gerekçesiyle yazılmalı ki ruff yeniden "temiz = yeşil" olsun.
 
 ---
 
