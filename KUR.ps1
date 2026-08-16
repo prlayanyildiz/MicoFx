@@ -42,7 +42,11 @@ function Test-PythonRuns([string]$exe) {
     if (-not (Test-Path -LiteralPath $exe)) { return $false }
     return ((Invoke-Native { & $exe -c "import sys" }) -eq 0)
 }
-function Step([int]$n, [string]$msg) { Write-Host ""; Say "[$n/5] $msg" "Cyan" }
+function Step([int]$n, [string]$msg) { Write-Host ""; Say "[$n/7] $msg" "Cyan" }
+
+# Only used to tell the operator how to re-add a missing remote (ZIP installs
+# arrive without one). Kept next to the step counter so the two stay in view.
+$RepoUrl = "https://github.com/prlayanyildiz/MicoFx.git"
 
 Say "============================================" "Cyan"
 Say "  MicoFX kurulum" "Cyan"
@@ -276,6 +280,56 @@ if ($queryRc -eq 0) {
         Say "    $action" "Yellow"
     }
 }
+
+# ------------------------------------------------------------------ [6] Git
+Step 6 "Git kimligi ve GitHub erisimi..."
+# Without a name and an email git refuses to commit at all, and the failure
+# arrives later - mid-session, after work is already done - rather than here
+# where it is one line to fix. Only filled in when missing: an operator who
+# already configured their own identity keeps it.
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $haveName  = (& git -C $Root config user.name)  2>$null
+    $haveMail  = (& git -C $Root config user.email) 2>$null
+    if (-not $haveName) { & git -C $Root config user.name  "prlayanyildiz" | Out-Null }
+    if (-not $haveMail) { & git -C $Root config user.email "prlayanyildiz@gmail.com" | Out-Null }
+    Say ("  Kimlik: " + (& git -C $Root config user.name) + " <" + (& git -C $Root config user.email) + ">") "Green"
+
+    $remote = (& git -C $Root remote get-url origin) 2>$null
+    if ($remote) {
+        Say "  Uzak depo: $remote" "Green"
+        # Push credentials are NOT set up here on purpose. Git Credential
+        # Manager ships with Git for Windows and asks on the first push, in
+        # the operator's own browser - which is the one place a token should
+        # ever be typed. Writing one into a file from an installer would put
+        # a live credential on disk in plain text.
+        Say "  Ilk 'git push' calistiginda GitHub girisi tarayicida acilir." "Yellow"
+        Say "  Tarayici olmayan sunucuda: 'winget install GitHub.cli' sonra" "Yellow"
+        Say "  'gh auth login' -> HTTPS -> cihaz kodu ile giris yapin." "Yellow"
+    } else {
+        Say "  Uzak depo yok (ZIP ile kurulmus olabilir) - push yapilamaz." "Yellow"
+        Say "  Eklemek icin: git remote add origin $RepoUrl" "Yellow"
+    }
+} else {
+    Say "  Git yok - surum gecmisi ve push kullanilamaz." "Yellow"
+}
+
+# ---------------------------------------------------------- [7] Dogrulama
+Step 7 "Kurulum kendini dogruluyor (test suite)..."
+# A green suite here is the difference between "the files copied" and "this
+# machine can actually run it". Cheap - about a minute - and it has already
+# caught a broken venv that every earlier step reported as fine.
+$testRc = Invoke-Native { & $VenvPy -m pytest -q --basetemp (Join-Path $Root ".pytest_tmp") }
+if ($testRc -eq 0) {
+    Say "  Testler gecti." "Green"
+} else {
+    # Not fatal: the app may still run, and stopping here would leave a
+    # half-installed machine with no shortcuts. But it must be loud.
+    Say "  TESTLER GECMEDI - kurulum tamamlandi ama bu makinede bir sorun var." "Red"
+    Say "  Elle calistirip ciktiya bakin:" "Yellow"
+    Say ("    " + $VenvPy + " -m pytest -q") "Yellow"
+}
+$lintRc = Invoke-Native { & $VenvPy -m ruff check (Join-Path $Root "micofx") (Join-Path $Root "tests") }
+if ($lintRc -eq 0) { Say "  Ruff temiz." "Green" } else { Say "  Ruff uyari verdi (engelleyici degil)." "Yellow" }
 
 # ------------------------------------------------------------------- bitti
 Write-Host ""
