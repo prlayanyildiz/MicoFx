@@ -233,11 +233,18 @@ canlının hiç alamadığı işlemleri alıyor. Ölç: aynı dönemde kâğıt 
 pozitif mi negatif mi? Holdout +640 ile canlı −986 arasındaki **1600 $/ay**
 buradan çıkabilir.
 
-**BS-2 — kağıtta al/sat asimetrisi (BUG).** `backtest.py`: long girişte
-spread ödeniyor (`open+s`), short'ta stop kontrolünde (`high+s >= sl`). Her
-bacak spread'i bir kez ödüyor ama farklı yerde — long'da giriş kötüleşiyor,
-short'ta stop kolaylaşıyor. Arama bugüne kadar short ağırlıklı configleri
-haksız cezalandırmış olabilir. Onar, 10 sembolde önce/sonra holdout ver.
+**BS-2 — onarıldı, ama etkisi ölçülmedi.** Asimetri `a5562e9` içinde
+kapandı (16.08 18:13): short giriş artık `open-s`, stop ham `high`; long
+zaten `open+s` / ham `low`. İki bacak spread'i aynı yerde — girişte —
+ödüyor, stop ham bardan okunuyor. Kanıt
+`tests/test_short_fill_pays_spread_on_entry.py`. Commit mesajı saat
+sapmasından bahsettiği için düzeltme gömülü kaldı ve bu liste dört saat
+boyunca yanlış bilgi taşıdı.
+
+**Ölçülmeyen kısım duruyor:** onarım *arama sonucunu* büktü mü? Eski
+simülatörle koşulmuş aramalar short ağırlıklı konfigleri haksız
+ödüllendiriyordu; aynı arama uzayında onarım öncesi/sonrası hangi aile/TF
+kazanıyor, karşılaştırılmadı. Net R farkından daha önemli olan bu.
 
 **BS-2b — holdout beraberlik sızıntısı.** `optimizer.py` aile/TF
 beraberliğinde holdout işlem sayısına bakıyor. Küçük ama holdout'a dokunuyor;
