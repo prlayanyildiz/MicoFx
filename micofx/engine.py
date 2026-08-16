@@ -61,6 +61,39 @@ BROKER_CLOCK_MAX_AGE_SEC = DECISION_CLOCK_MAX_AGE_SEC
 # ticks from one hour is exactly the reading that misled us once already.
 SPREAD_RATIO_MIN_SAMPLES = 400
 
+# Observation ring for entry-block *identity* (symbol, reason, bar_key, epoch).
+# Counters in ``entry_blocks`` stay as they are; this does not replace them
+# and is not read by any gate. Live rate measured 14-16.08: 156 signals in
+# 2 days ~ 78/day. 2048 rows is ~26 days, a few hundred KB of JSON at most
+# - small next to ``execution_samples``, enough for a G7-style window after
+# a restart. Oldest dropped.
+ENTRY_EVENT_LIMIT = 2048
+
+
+def _bar_key_json(bar_key: Any) -> list | str | int | float | None:
+    """JSON-safe form of a bar identity. Tuples become lists."""
+    if bar_key is None:
+        return None
+    if isinstance(bar_key, (list, tuple)):
+        out: list[Any] = []
+        for x in bar_key:
+            if isinstance(x, bool):
+                out.append(str(x))
+            elif isinstance(x, int):
+                out.append(int(x))
+            elif isinstance(x, float):
+                out.append(int(x) if x == int(x) else float(x))
+            else:
+                out.append(str(x))
+        return out
+    if isinstance(bar_key, bool):
+        return str(bar_key)
+    if isinstance(bar_key, int):
+        return int(bar_key)
+    if isinstance(bar_key, float):
+        return int(bar_key) if bar_key == int(bar_key) else float(bar_key)
+    return str(bar_key)
+
 # How long to leave a symbol alone after the broker link refused its order.
 #
 # A connection-class rejection is verified against the position book before it
@@ -376,8 +409,14 @@ class Engine:
         # In-memory only: the (bar, reason) episode each leg was last counted
         # for, so the per-poll retry loop cannot inflate the signal count. A
         # restart starting a fresh episode is the honest reading - the new
-        # process re-derives the signal from bars it fetched itself.
+        # process re-derives the signal from bars it fetched itself. Bar
+        # identity for later measurement lives in ``_entry_events`` (persisted
+        # separately); this map is only the de-dupe latch.
         self._entry_last_bar: dict[str, dict[str, tuple]] = {}
+        self._entry_event_limit = ENTRY_EVENT_LIMIT
+        self._entry_events: list[dict[str, Any]] = []
+        self._entry_events_dirty = False
+        self._load_entry_events()
         # How much wider the live tick's spread runs than the bar spread the
         # walk-forward charges, per symbol, as a coarse histogram of the ratio.
         #
@@ -706,6 +745,13 @@ class Engine:
                 wants = self._evaluate(cfg, state, server_now, account, allow_entry=allow_entry)
                 if wants:
                     ready.append(cfg)
+                # Daily halt (and only that) used to return from _evaluate
+                # before _try_entry, so the ready-loop tally never saw it.
+                # Observation only - this does not change whether entries run.
+                if state.signal and self._trading and not guard.ok:
+                    self._tally_entry(cfg.symbol, "gunluk_halt",
+                                      bar_key=state.pending_bar_key,
+                                      source=state.signal_source)
                 if not self._trading and state.note in ("", "bekliyor", "sinyal yok"):
                     state.note = "bot durdu - izleme"
                 elif self._trading and not guard.ok:
@@ -746,7 +792,9 @@ class Engine:
                     state.note = f"hata: {exc}"
                     self._tally_entry(cfg.symbol, "hata")
                     LOG.emit(f"Giris hatasi: {exc}", "ERROR", cfg.symbol)
-            self._flush_entry_blocks()
+        # Always, not only when something was ready. Daily/symbol halt tallies
+        # happen on cycles where allow_entry is False and ready stays empty.
+        self._flush_entry_blocks()
         self._flush_spread_ratio()
 
     # ----------------------------------------------------- entry diagnostics
@@ -883,14 +931,16 @@ class Engine:
             attempts, signals = counts["attempts"], counts["signals"]
             attempts[key] = int(attempts.get(key, 0)) + 1
             # One episode per (bar, leg, reason); the retry loop must not
-            # inflate it. Held in memory only - a restart starting a fresh
-            # episode is the honest reading, since the signal is re-derived
-            # from bars the new process fetches for itself.
+            # inflate it. The de-dupe latch is in-memory (a restart starting a
+            # fresh episode is the honest reading). The bar identity itself is
+            # appended to ``_entry_events`` and persisted, so a later window
+            # can name the bars the counters only counted.
             seen = self._entry_last_bar.setdefault(str(symbol), {})
             episode = (repr(bar_key), key)
             if seen.get(leg) != episode:
                 seen[leg] = episode
                 signals[key] = int(signals.get(key, 0)) + 1
+                self._record_entry_event(str(symbol), key, bar_key)
             self._entry_blocks_dirty = True
         except Exception:
             pass
@@ -930,24 +980,99 @@ class Engine:
         under the same name before the next flush keeps counters that belong to
         the instrument that left.
         """
-        if self._entry_blocks.pop(str(symbol), None) is not None:
+        name = str(symbol)
+        dropped = self._entry_blocks.pop(name, None) is not None
+        last = getattr(self, "_entry_last_bar", None)
+        if isinstance(last, dict) and last.pop(name, None) is not None:
+            dropped = True
+        events = getattr(self, "_entry_events", None)
+        if events:
+            kept = [e for e in events if e.get("symbol") != name]
+            if len(kept) != len(events):
+                self._entry_events = kept
+                dropped = True
+        if dropped:
             self._entry_blocks_dirty = True
+            self._entry_events_dirty = True
             self._flush_entry_blocks()
 
-    def _flush_entry_blocks(self) -> None:
-        """Persist the tally. Diagnostics must never interrupt a cycle."""
-        if not self._entry_blocks_dirty:
-            return
+    def _load_entry_events(self) -> None:
+        """Restore the observation ring. Corrupt rows are skipped, not coerced."""
         try:
-            # Same bound as the spread histogram and _mark_bar_filled: a
-            # deleted symbol's counters are neither readable nor meaningful,
-            # and left alone they grow the blob forever.
+            limit = int(getattr(self, "_entry_event_limit", ENTRY_EVENT_LIMIT)
+                        or ENTRY_EVENT_LIMIT)
+            events: list[dict[str, Any]] = []
+            for item in as_list(self.store.get_setting("entry_block_events"),
+                                "entry_block_events"):
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    symbol = str(item["symbol"])
+                    reason = str(item["reason"])
+                    epoch = float(item["epoch"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                bar_key = item.get("bar_key")
+                if isinstance(bar_key, tuple):
+                    bar_key = list(bar_key)
+                elif bar_key is not None and not isinstance(bar_key, list):
+                    continue
+                events.append({
+                    "symbol": symbol,
+                    "reason": reason,
+                    "bar_key": bar_key,
+                    "epoch": epoch,
+                })
+            self._entry_events = events[-limit:]
+        except Exception:
+            self._entry_events = []
+
+    def _record_entry_event(self, symbol: str, reason: str, bar_key: Any) -> None:
+        """Append one new-episode row and drop the oldest if the ring is full."""
+        events = getattr(self, "_entry_events", None)
+        if events is None:
+            self._entry_events = []
+            events = self._entry_events
+        events.append({
+            "symbol": str(symbol),
+            "reason": str(reason),
+            "bar_key": _bar_key_json(bar_key),
+            "epoch": time.time(),
+        })
+        limit = int(getattr(self, "_entry_event_limit", ENTRY_EVENT_LIMIT)
+                    or ENTRY_EVENT_LIMIT)
+        if len(events) > limit:
+            self._entry_events = events[-limit:]
+        self._entry_events_dirty = True
+
+    def _flush_entry_blocks(self) -> None:
+        """Persist counters and, separately, the observation ring.
+
+        Counters are ~1 KB and may hit disk every poll while a signal is
+        held off. The ring is ~200 KB at capacity; writing it on every
+        attempt would be ~9 GB/day. It is marked dirty only when a new
+        episode is appended.
+        """
+        try:
+            blocks_dirty = getattr(self, "_entry_blocks_dirty", False)
+            events_dirty = getattr(self, "_entry_events_dirty", False)
+            if not blocks_dirty and not events_dirty:
+                return
             live = set(self.store.symbols)
-            self._entry_blocks = {s: c for s, c in self._entry_blocks.items()
-                                  if s in live}
-            self.store.set_setting("entry_blocks", self._entry_blocks)
-            self.store.set_setting("entry_blocks_since", self._entry_blocks_since)
-            self._entry_blocks_dirty = False
+            if blocks_dirty:
+                self._entry_blocks = {s: c for s, c in self._entry_blocks.items()
+                                      if s in live}
+                self.store.set_setting("entry_blocks", self._entry_blocks)
+                self.store.set_setting("entry_blocks_since", self._entry_blocks_since)
+                self._entry_blocks_dirty = False
+            if events_dirty:
+                events = [e for e in list(getattr(self, "_entry_events", []) or [])
+                          if e.get("symbol") in live]
+                limit = int(getattr(self, "_entry_event_limit", ENTRY_EVENT_LIMIT)
+                            or ENTRY_EVENT_LIMIT)
+                self._entry_events = events[-limit:]
+                self.store.set_setting("entry_block_events", self._entry_events)
+                self._entry_events_dirty = False
         except Exception:
             pass
 
@@ -1006,8 +1131,10 @@ class Engine:
     def reset_entry_blocks(self) -> None:
         self._entry_blocks = {}
         self._entry_last_bar = {}
+        self._entry_events = []
         self._entry_blocks_since = time.time()
         self._entry_blocks_dirty = True
+        self._entry_events_dirty = True
         self._flush_entry_blocks()
 
     # ------------------------------------------------- scheduled re-optimize
@@ -1256,6 +1383,10 @@ class Engine:
         symbol_halt = self._symbol_daily_halt(cfg)
         if symbol_halt:
             state.note = symbol_halt
+            if state.signal:
+                self._tally_entry(cfg.symbol, "sembol_halt",
+                                  bar_key=state.pending_bar_key or (state.signal_source, bar_key),
+                                  source=state.signal_source)
             return False
         if not state.signal:
             state.note = state.note if state.note else "sinyal yok"

@@ -59,8 +59,10 @@ def _engine(store=None):
     eng.store = store or _Store()
     eng._entry_blocks = {}
     eng._entry_last_bar = {}
+    eng._entry_events = []
     eng._entry_blocks_since = 1000.0
     eng._entry_blocks_dirty = False
+    eng._entry_events_dirty = False
     return eng
 
 
