@@ -350,6 +350,9 @@ function renderTop() {
   if (acc.netting) {
     items.push(["Hesap modu", "NETTING - ISLEM DURDU", "neg"]);
   }
+  if (Number(acc.trade_mode) === 2) {
+    items.push(["Hesap", "GERCEK PARA", "neg"]);
+  }
 
   $("#topstats").innerHTML = items.map(([lbl, val, klass]) =>
     `<div class="tstat" title="${esc(helpTitle("top." + lbl))}"><div class="lbl">${lbl}</div><div class="val ${klass}">${val}</div></div>`
@@ -363,6 +366,13 @@ function renderTop() {
   if (banner) {
     banner.hidden = !clockWarn;
     banner.textContent = clockWarn;
+  }
+  const lock = STATE.account_lock || {};
+  const lockBanner = $("#lock-warn");
+  if (lockBanner) {
+    const lockText = (lock.reason || "").trim();
+    lockBanner.hidden = !lockText;
+    lockBanner.textContent = lockText;
   }
 }
 
@@ -1833,6 +1843,10 @@ function renderSystem() {
     ["Durum", mt5.connected ? "Bagli" : `Kopuk - ${mt5.error || ""}`],
     ["Broker", mt5.company || "-"],
     ["Hesap", `${acc.login || "-"} @ ${acc.server || "-"}`],
+    ["Hesap turu", Number(acc.trade_mode) === 2 ? "GERCEK PARA" : (acc.trade_mode == null || acc.trade_mode === "" ? "-" : "demo/contest")],
+    ["Kilit", (sys.account_lock_login
+      ? `${sys.account_lock_login} @ ${sys.account_lock_server || "-"}`
+      : "(bos - ilk bagli hesap yazilir)")],
     ["Isim", acc.name || "-"],
     ["AutoTrading", mt5.trade_allowed ? "Acik" : "KAPALI"],
     ["Terminal build", mt5.build || "-"],
@@ -1847,6 +1861,18 @@ function renderSystem() {
     ` | dongu ${bot.cycle || 0} | son tur ${num(bot.last_cycle_ms, 0)} ms | ` +
     `${bot.last_cycle_at ? new Date(bot.last_cycle_at * 1000).toLocaleTimeString("tr-TR") : "-"}` +
     (bot.last_error ? ` | HATA: ${bot.last_error}` : "");
+
+  const lock = STATE.account_lock || {};
+  const lockNote = $("#sys-lock-note");
+  if (lockNote) {
+    if (lock.reason) {
+      lockNote.innerHTML = `<span class="pill bad">KILIT</span> ${esc(lock.reason)}`;
+    } else if (sys.account_lock_login) {
+      lockNote.textContent = `Kilitli hesap: ${sys.account_lock_login} @ ${sys.account_lock_server || "-"}`;
+    } else {
+      lockNote.textContent = "Hesap kilidi bos - ilk baglanan hesap yazilir ve loglanir.";
+    }
+  }
 
   const day = STATE.day || {};
   $("#sys-day-note").innerHTML = day.halted
@@ -2221,6 +2247,45 @@ function wire() {
       refresh();
     } catch (e) { toast(e.message, "err"); }
   };
+  const lockBtn = $("#sys-lock-confirm");
+  if (lockBtn) {
+    lockBtn.onclick = async () => {
+      const acc = STATE.account || {};
+      const login = acc.login;
+      const server = acc.server || "";
+      if (!login) {
+        toast("Bagli hesap yok", "err");
+        return;
+      }
+      const typed = window.prompt(
+        `Bagli hesabi kilitlemek icin hesap numarasini yazin (${login}):`,
+        "",
+      );
+      if (typed == null) return;
+      if (String(typed).trim() !== String(login)) {
+        toast("Hesap numarasi eslesmedi - kilit degismedi", "err");
+        return;
+      }
+      const serverTyped = window.prompt(
+        `Sunucu adini yazin (${server}):`,
+        "",
+      );
+      if (serverTyped == null) return;
+      if (String(serverTyped).trim() !== String(server)) {
+        toast("Sunucu adi eslesmedi - kilit degismedi", "err");
+        return;
+      }
+      try {
+        const res = await api("/api/account-lock", {
+          method: "POST",
+          body: { confirm_login: Number(login), confirm_server: server },
+        });
+        if (res.system) STATE.system = res.system;
+        toast(`Hesap kilidi: ${login} @ ${server}`, "ok");
+        refresh();
+      } catch (e) { toast(e.message, "err"); }
+    };
+  }
   $("#btn-broker-search").onclick = searchBrokerSymbols;
   $("#broker-search").addEventListener("keydown", (e) => {
     if (e.key === "Enter") searchBrokerSymbols();

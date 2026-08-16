@@ -39,7 +39,7 @@ def test_a_one_hour_split_warns():
     warn = session_clock_warning(skew)
     assert warn is not None
     assert "1 saat" in warn
-    assert "backtest" in warn
+    assert "saat farkli" in warn
 
 
 def test_unknown_broker_now_is_not_a_false_alarm():

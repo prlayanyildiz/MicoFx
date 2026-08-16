@@ -73,6 +73,10 @@ _TICK_TTL = 0.5
 # struct anywhere at all. One-sided on purpose - a tick in the PAST is the
 # exact condition market_open() exists to detect and must never be discarded.
 _MAX_TICK_AHEAD_SEC = 48 * 3600.0
+# Session/day gates need a *current* broker clock. The newest tick stamp is
+# the only one MetaTrader5's Python API exposes, and it freezes when the
+# market shuts. Past this age it is Friday's close, not "now".
+DECISION_CLOCK_MAX_AGE_SEC = 600.0
 _RECONNECT_COOLDOWN = 5.0
 
 
@@ -496,6 +500,9 @@ class MT5Client:
             "margin": a.margin, "margin_free": a.margin_free,
             "margin_level": a.margin_level, "leverage": a.leverage,
             "name": a.name, "trade_allowed": bool(a.trade_allowed),
+            # 0=demo, 1=contest, 2=real. The panel must show real distinctly;
+            # demo vs live symbol specs here are otherwise identical.
+            "trade_mode": int(getattr(a, "trade_mode", 0)),
             # Every position-count guard in this app (max_positions,
             # max_total_positions, weekend/secondary ticket tracking) assumes
             # one ticket per opened trade - true only under retail hedging.
@@ -690,6 +697,28 @@ class MT5Client:
         0.0 until the first tick is read. Callers must treat that as "unknown"
         and fall back, never as "the epoch began".
         """
+        return float(self._broker_now)
+
+    def decision_now(self) -> float | None:
+        """Fresh naive broker epoch for session and day gates, or None.
+
+        ``broker_now()`` is the newest tick stamp. Over a weekend that stamp
+        is Friday's close. Feeding it to ``sessions.evaluate`` would look like
+        Friday afternoon on Sunday and could reopen a weekday window.
+        Extrapolating it with the local elapsed time would invent a broker
+        clock MetaTrader5 does not expose. Refusing the decision (no new
+        entries, no session flatten, no day rollover) is the fail-closed
+        answer. Positions already open keep being trailed; the broker itself
+        is shut.
+
+        None when no tick has been seen, or when the stamp is older than
+        ``DECISION_CLOCK_MAX_AGE_SEC``. Never falls back to Windows time.
+        """
+        if self._broker_now <= 0:
+            return None
+        age = self.broker_now_age()
+        if age is None or age > DECISION_CLOCK_MAX_AGE_SEC:
+            return None
         return float(self._broker_now)
 
     def broker_now_age(self) -> float | None:

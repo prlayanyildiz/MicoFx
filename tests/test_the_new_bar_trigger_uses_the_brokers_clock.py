@@ -98,12 +98,25 @@ def test_the_execution_deal_window_uses_the_broker_clock_too():
 
 
 def test_the_day_boundary_still_uses_the_naive_encoding():
-    """Correct already - pinned so a 'tidy-up' does not turn it into mktime."""
-    src = inspect.getsource(Engine._day_start_epoch)
-    assert "calendar.timegm" in src
-    assert "mktime" not in src, (
-        "mktime returns a true epoch and would shift the trading day by the "
-        "broker's whole UTC offset")
+    """Correct already - pinned so a 'tidy-up' does not turn it into mktime.
+
+    Reads the file, not inspect.getsource. That helper looks up the live
+    function object's co_firstlineno in linecache. A previous test that
+    called inspect.getsource(Engine) on the whole class, or a ruff --fix
+    that shifted line numbers under an already-imported Engine, made this
+    assertion fail once in a full suite while the isolated file stayed
+    green. The method is never executed here, so the flake was not a
+    sessions/mt5client/indicator cache leak into live.
+    """
+    src = Path("micofx/engine.py").read_text(encoding="utf-8")
+    start = src.index("def _day_start_epoch")
+    body = src[start:src.index("\n    def ", start + 1)]
+    assert "calendar.timegm" in body
+    # Substring "mktime" also hits a comment that forbids the call. Pin the
+    # call, not the letters.
+    assert "time.mktime" not in body, (
+        "time.mktime returns a true epoch and would shift the trading day by "
+        "the broker's whole UTC offset")
 
 
 # --------------------------------------------------------------- behaviour

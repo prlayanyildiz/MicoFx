@@ -56,7 +56,7 @@ class DailyGuard:
         self.cash_flow: float = as_number(store.get_setting("day_cash_flow"), 0.0, "day_cash_flow")
 
     def rollover(self, server_epoch: float, balance: float) -> bool:
-        key = time.strftime("%Y-%m-%d", time.localtime(server_epoch))
+        key = time.strftime("%Y-%m-%d", time.gmtime(server_epoch))
         if key == self.day_key and self.start_balance > 0:
             return False
         if balance <= 0:

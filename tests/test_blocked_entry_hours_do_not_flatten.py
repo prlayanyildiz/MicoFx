@@ -57,9 +57,8 @@ def test_shrinking_the_window_with_flat_before_does_flatten():
 
 def test_live_evaluate_blocks_the_hour_without_flatten():
     cfg = _cfg(blocked_entry_hours=[4])
-    import time
-    # evaluate reads the machine clock; mktime builds that clock, not UTC.
-    epoch = time.mktime((2026, 8, 17, 4, 0, 0, 0, 0, -1))  # Monday
+    import calendar
+    epoch = calendar.timegm((2026, 8, 17, 4, 0, 0, 0, 0, 0))  # Monday 04:00 broker
     state = evaluate(cfg, float(epoch))
     assert state.open is False
     assert state.reason == "saat kapali"

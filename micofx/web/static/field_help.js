@@ -132,6 +132,7 @@ const FIELD_HELP = {
   "top.Acik K/Z": "Su anki acik pozisyonlarin yuzmemis kari/zarari.",
   "top.Gun": "Bugun kapanan islemlerin gerceklesen neti ve bakiyeye yuzdesi.",
   "top.Pozisyon": "Acik bot pozisyonu / max_total_positions.",
+  "top.Hesap": "trade_mode=2 ise GERCEK PARA. Demo ile ayni ekranda karismasin diye.",
 
   "card.Bakiye": "Hesap bakiyesi. Dipnot: para birimi ve kaldirac.",
   "card.Varlik": "Bakiye + acik K/Z. Dipnottaki acik k/z canli, gunluk sonuc degil.",

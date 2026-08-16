@@ -108,6 +108,11 @@ class StopBody(_ForbidModel):
     close: bool | None = None
 
 
+class AccountLockBody(_ForbidModel):
+    confirm_login: int
+    confirm_server: str
+
+
 # Sanity bounds on the fields that directly control position size/risk.
 # Patch models list every config field (see ``_dataclass_patch``) so a
 # client can still send optimizer-only keys; unknown keys are 422. The
@@ -552,6 +557,7 @@ _CRITICAL_MUTATIONS = frozenset({
     "/api/bot/panic", "/api/bot/start", "/api/bot/stop",
     "/api/app/shutdown", "/api/app/restart",
     "/api/positions-close-all",
+    "/api/account-lock",
 })
 
 
@@ -1844,6 +1850,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def patch_system(body: SystemPatch) -> dict[str, Any]:
         patch = body.model_dump(exclude_unset=True)
         patch.pop("running", None)  # bot state is owned by start/stop
+        lock_keys = [k for k in ("account_lock_login", "account_lock_server") if k in patch]
+        if lock_keys:
+            raise HTTPException(
+                400,
+                f"{', '.join(lock_keys)} buradan yazilamaz - "
+                "bagli hesabi kilitlemek icin /api/account-lock kullanin",
+            )
         _reject_non_finite_values(patch)
         _validate_risk_bounds(patch, _SYSTEM_RISK_BOUNDS)
         # Both destinations go through the identical gate: the secondary one
@@ -1891,6 +1904,34 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             result["terminal"] = client.terminal_flags()
             result["configured_path"] = updated.mt5_terminal_path
         return result
+
+    @app.post("/api/account-lock")
+    def confirm_account_lock(body: AccountLockBody) -> dict[str, Any]:
+        # The only door that retargets the lock. /api/system refuses those
+        # two fields so a typo in a bulk PATCH cannot silently follow the
+        # terminal onto a live login.
+        account = engine.refresh_account(force=True)
+        login = int(account.get("login") or 0)
+        server = str(account.get("server") or "").strip()
+        confirm_login = int(body.confirm_login)
+        confirm_server = str(body.confirm_server or "").strip()
+        if login <= 0:
+            raise HTTPException(400, "bagli hesap yok - once MT5 baglanin")
+        if confirm_login != login or confirm_server != server:
+            raise HTTPException(
+                400,
+                f"onay eslesmedi: yazilan {confirm_login} @ {confirm_server}, "
+                f"bagli {login} @ {server}",
+            )
+        updated = store.update_system(
+            {"account_lock_login": login, "account_lock_server": server},
+            source="panel hesap-kilidi",
+        )
+        enforce = getattr(engine, "_enforce_account_lock", None)
+        if callable(enforce):
+            enforce(account)
+        LOG.emit(f"hesap kilidi onaylandi: {login} @ {server}", "WARN")
+        return {"ok": True, "system": updated.to_dict()}
 
     @app.post("/api/bot/start")
     def bot_start() -> dict[str, Any]:

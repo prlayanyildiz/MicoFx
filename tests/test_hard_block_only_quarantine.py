@@ -12,6 +12,7 @@ the old refusals.
 """
 from __future__ import annotations
 
+import calendar
 import sys
 import time
 from pathlib import Path
@@ -61,7 +62,7 @@ def test_blocked_hour_does_not_refuse():
     v.blocked_hours = [10]
     v.hour_risk_scales = {10: 0.5}
     v.risk_scale = 1.0
-    at_ten = time.mktime(time.struct_time((2026, 8, 10, 10, 30, 0, 0, 222, -1)))
+    at_ten = calendar.timegm((2026, 8, 10, 10, 30, 0, 0, 0, 0))
     allowed, reason, scale = _gate(_sup(1.0), v, at_ten)
     assert allowed is True, reason
     assert scale <= 0.5

@@ -77,7 +77,7 @@ def test_the_throttle_still_applies_after_a_restart(monkeypatch):
     sup = _supervisor(store)
 
     # 09:xx local - the hour the throttle was earned in.
-    monkeypatch.setattr(time, "localtime", lambda _t=None: time.struct_time(
+    monkeypatch.setattr(time, "gmtime", lambda _t=None: time.struct_time(
         (2026, 8, 10, 9, 30, 0, 0, 222, 0)))
 
     allowed, reason, scale = sup.gate(_Cfg(), 0.0)
@@ -91,7 +91,7 @@ def test_an_unthrottled_hour_is_left_alone(monkeypatch):
     store.set_setting("supervisor", {**DEFAULTS, "prefer_strong_on_dd": False})
     sup = _supervisor(store)
 
-    monkeypatch.setattr(time, "localtime", lambda _t=None: time.struct_time(
+    monkeypatch.setattr(time, "gmtime", lambda _t=None: time.struct_time(
         (2026, 8, 10, 15, 30, 0, 0, 222, 0)))
 
     _allowed, _reason, scale = sup.gate(_Cfg(), 0.0)

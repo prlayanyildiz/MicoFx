@@ -345,14 +345,10 @@ class Supervisor:
         if verdict is None:
             return True, "", self.risk_scale
 
-        # Local time, not UTC: blocked_hours/_hour_risk_scales are bucketed
-        # from deal timestamps via gmtime() too, but those raw MT5 deal times
-        # are the broker's own clock reading (not true UTC) - and the broker
-        # here runs on the same clock the user configures everything else
-        # against (Windows/TR local). server_now() is now plain time.time()
-        # with no offset applied, so gmtime() here would compare against true
-        # UTC instead and silently gate the wrong hour of day.
-        hour = time.localtime(server_now).tm_hour
+        # Deal timestamps and session gates use the naive broker epoch.
+        # ``server_now`` here is that same stamp (``decision_now``), so gmtime
+        # is the broker hour, matching how hour_risk_scales were bucketed.
+        hour = time.gmtime(server_now).tm_hour
         hard_only = bool(self.settings.get("hard_block_only_quarantine", True))
         if hour in (verdict.blocked_hours or []) and not hard_only:
             return False, f"AI: {hour:02d}:00 saati zararli", 0.0

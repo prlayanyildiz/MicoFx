@@ -30,8 +30,8 @@ panel could name one window and count down another.
 """
 from __future__ import annotations
 
+import calendar
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -41,8 +41,8 @@ from micofx.models import SymbolConfig
 
 
 def _at(hh: int, mm: int) -> float:
-    """Local epoch for 2026-08-12 (a Wednesday) at hh:mm."""
-    return time.mktime((2026, 8, 12, hh, mm, 0, 0, 0, -1))
+    """Naive broker epoch for 2026-08-12 (Wednesday) at hh:mm."""
+    return calendar.timegm((2026, 8, 12, hh, mm, 0, 0, 0, 0))
 
 
 def _cfg(windows: list[tuple[str, str]], flat: int = 5) -> SymbolConfig:

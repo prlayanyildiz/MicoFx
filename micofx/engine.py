@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Any
 
-from . import backtest, execution, sessions
+from . import account_lock, backtest, execution, sessions
 from . import indicators as ind
 from .execution import ExecutionMonitor
 from .logbus import LOG
@@ -17,7 +17,13 @@ from .models import (
     strategy_allows_timeframe,
     trail_min_step,
 )
-from .mt5client import AMBIGUOUS_RETCODES, NON_RETRYABLE_RETCODES, MT5Client, timeframe_seconds
+from .mt5client import (
+    AMBIGUOUS_RETCODES,
+    DECISION_CLOCK_MAX_AGE_SEC,
+    NON_RETRYABLE_RETCODES,
+    MT5Client,
+    timeframe_seconds,
+)
 from .risk import RiskManager
 from .store import Store, as_dict, as_list, as_number
 from .strategy import IndicatorCache, Params, Signals, compute, required_bars
@@ -50,7 +56,7 @@ SPREAD_RATIO_BUCKETS = 51
 # the broker. Generous on purpose: ticks thin out overnight, and the case this
 # has to catch is a shut market, which is hours away from this bound, not
 # minutes.
-BROKER_CLOCK_MAX_AGE_SEC = 600.0
+BROKER_CLOCK_MAX_AGE_SEC = DECISION_CLOCK_MAX_AGE_SEC
 # Below this many samples the ratio is not reported or applied - a handful of
 # ticks from one hour is exactly the reading that misled us once already.
 SPREAD_RATIO_MIN_SAMPLES = 400
@@ -277,6 +283,7 @@ class Engine:
             if str(t).isdigit()
         }
         self._netting_warned = False
+        self._account_lock_reason = ""
         # A position opened before the scale-out ladder was removed can still
         # be open right now, and its old partial_state row is meaningless to
         # the current exit model - drop the setting once rather than carry a
@@ -579,9 +586,11 @@ class Engine:
         if not account:
             return
 
-        server_now = self.client.server_now()
-        self._note_session_clock(server_now)
-        self._handle_daily_rollover(server_now, account.get("balance", 0.0))
+        getter = getattr(self.client, "decision_now", None)
+        server_now = getter() if callable(getter) else None
+        self._note_session_clock(self.client.server_now())
+        if server_now is not None:
+            self._handle_daily_rollover(server_now, account.get("balance", 0.0))
         # Must follow the rollover (which resets the figure) and precede the
         # guard.check() below, so the breaker never sees a deposit as profit.
         self._refresh_cash_flow()
@@ -664,8 +673,13 @@ class Engine:
                      "takibi) tek ticket = tek pozisyon varsayimina dayaniyor, "
                      "netting'de gecersiz kaliyor. Yeni islem acilmasi guvenlik "
                      "icin durduruldu - hedging hesabina gecin.", "ERROR")
+        lock_reason = getattr(self, "_account_lock_reason", "")
+        if lock_reason:
+            for st in self.states.values():
+                if st.note in ("", "bekliyor", "sinyal yok"):
+                    st.note = lock_reason
         allow_entry = (self._trading and guard.ok and not netting
-                       and self.client.connected)
+                       and self.client.connected and not lock_reason)
         # Two-pass cycle: first refresh every symbol, then fill free slots in
         # priority order so a weak signal does not steal the last seat from a
         # stronger one when several bars close in the same poll.
@@ -1115,7 +1129,7 @@ class Engine:
             state.primary_signal = ""
             state.pending_bar_key = (0, 0)
 
-    def _evaluate(self, cfg: SymbolConfig, state: SymbolState, server_now: float,
+    def _evaluate(self, cfg: SymbolConfig, state: SymbolState, server_now: float | None,
                   account: dict[str, Any], allow_entry: bool) -> bool:
         """Refresh state; return True when this symbol wants an entry this bar."""
         state.note = ""
@@ -1126,6 +1140,18 @@ class Engine:
             # Same stale-signal hazard as the other gates - clear the whole
             # chain, not just state.signal, so a fixed mapping doesn't revive
             # a signal from before resolution broke.
+            state.signal = ""
+            state.signal_source = ""
+            state.primary_signal = ""
+            state.pending_bar_key = (0, 0)
+            return False
+
+        if server_now is None:
+            # Last tick is too old to be "now". Do not evaluate Friday's close
+            # as Sunday's session, and do not fall back to Windows time.
+            state.note = "broker saati bayat"
+            state.session = {"open": False, "window": "saat bayat",
+                             "minutes_to_close": None, "minutes_to_open": None}
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
@@ -1447,11 +1473,21 @@ class Engine:
         # Last mile before the order. The session gate already refuses weekends,
         # but this is the one call that actually spends money, so it does not
         # take that on trust.
-        if sessions.weekend_closed(base, self.client.server_now()):
-            state.note = "hafta sonu kapali"
-            state.signal = ""
-            state.entry_block = "hafta_sonu"
-            return
+        getter = getattr(self.client, "decision_now", None)
+        if callable(getter):
+            clock = getter()
+            if clock is None:
+                state.note = "broker saati bayat"
+                state.signal = ""
+                state.entry_block = "saat_bayat"
+                return
+            if sessions.weekend_closed(base, clock):
+                state.note = "hafta sonu kapali"
+                state.signal = ""
+                state.entry_block = "hafta_sonu"
+                return
+        else:
+            clock = 0.0
 
         tick = self.client.tick(cfg.symbol)
         if tick is None:
@@ -1469,7 +1505,7 @@ class Engine:
             state.entry_block = "volatilite"
             return
 
-        allowed, ai_reason, scale = self.supervisor.gate(cfg, self.client.server_now())
+        allowed, ai_reason, scale = self.supervisor.gate(cfg, clock)
         if not allowed:
             state.note = ai_reason
             state.entry_block = "ai_gate"
@@ -1901,7 +1937,7 @@ class Engine:
 
     # ---------------------------------------------------- position management
 
-    def manage_positions(self, server_now: float) -> None:
+    def manage_positions(self, server_now: float | None) -> None:
         if not self.client.connected:
             # Caller should have bailed already; never prune tags / exposure
             # from an unverified empty book.
@@ -2012,7 +2048,8 @@ class Engine:
             # Flag session / day-end flatten into a sticky set BEFORE the
             # window can expire - DONE_PARTIAL True must not fall through to
             # trail once should_flatten/day_end_close flips False.
-            if (sessions.should_flatten(cfg, server_now, self.store.system.trade_all_hours)
+            if server_now is not None and (
+                    sessions.should_flatten(cfg, server_now, self.store.system.trade_all_hours)
                     or sessions.day_end_close(server_now, self.store.system.day_end_flatten_min)):
                 if pos["ticket"] not in self._force_flat_pending:
                     self._force_flat_pending.add(pos["ticket"])
@@ -2428,6 +2465,39 @@ class Engine:
         # the bar - that is exactly the update the trade earned.
         return False
 
+    def _enforce_account_lock(self, account: dict[str, Any]) -> str:
+        """Bind on first sight, or block new entries when the terminal moved.
+
+        Open-position management is intentionally not gated on this: leaving
+        an already-open ticket unmanaged is worse than trading the wrong book.
+        """
+        sys = getattr(self.store, "system", None)
+        decision = account_lock.decide_account_lock(
+            int(getattr(sys, "account_lock_login", 0) or 0),
+            str(getattr(sys, "account_lock_server", "") or ""),
+            int(account.get("login") or 0),
+            str(account.get("server") or ""),
+        )
+        updater = getattr(self.store, "update_system", None)
+        if decision.bind_login is not None and callable(updater):
+            updater(
+                {
+                    "account_lock_login": decision.bind_login,
+                    "account_lock_server": decision.bind_server or "",
+                },
+                source="hesap-kilidi",
+            )
+            LOG.emit(
+                f"hesap kilidi kuruldu: {decision.bind_login} @ {decision.bind_server}",
+                "WARN",
+            )
+        reason = "" if decision.allow_entry else decision.reason
+        prev = getattr(self, "_account_lock_reason", "")
+        if reason and reason != prev:
+            LOG.emit(reason, "ERROR")
+        self._account_lock_reason = reason
+        return reason
+
     # ---------------------------------------------------------------- reports
 
     def refresh_account(self, force: bool = False) -> dict[str, Any]:
@@ -2438,6 +2508,7 @@ class Engine:
         if account:
             self._account = account
             self._account_at = now
+            self._enforce_account_lock(account)
             return self._account
         if force:
             # A forced refresh that came back empty means the live call just
@@ -2521,10 +2592,11 @@ class Engine:
         """Epoch the current trading day's deal history starts at.
 
         Raw MT5 deal timestamps are naive epochs encoding the broker's own
-        wall-clock reading (not true UTC) - the same naive-epoch encoding
-        calendar.timegm() produces from day_key's local calendar date, so the
-        two line up as long as the broker's clock and this machine's local
-        clock read the same wall-clock time (true for this setup).
+        wall-clock reading (not true UTC). ``day_key`` is that same calendar
+        date via ``gmtime(broker epoch)``, and ``calendar.timegm`` of midnight
+        on that date is the matching naive midnight. Converting that date
+        through the machine timezone into a true UTC epoch would shift the
+        day by the broker's UTC offset.
         """
         guard = self.risk.daily
         if guard.day_key:
@@ -2709,11 +2781,18 @@ class Engine:
             "mt5": {
                 "connected": self.client.connected,
                 "error": self.client.last_error,
-                "server_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.client.server_now())),
+                "server_time": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(
+                    self.client.broker_now() or self.client.server_now())),
                 **self.client.terminal_flags(),
                 **self._session_clock_payload(),
             },
             "account": account,
+            "account_lock": {
+                "ok": not getattr(self, "_account_lock_reason", ""),
+                "reason": getattr(self, "_account_lock_reason", ""),
+                "expected_login": int(getattr(self.store.system, "account_lock_login", 0) or 0),
+                "expected_server": str(getattr(self.store.system, "account_lock_server", "") or ""),
+            },
             "day": {
                 **self.day_stats(),
                 "pnl_pct": round(self.risk.daily.pnl_pct(equity), 2),

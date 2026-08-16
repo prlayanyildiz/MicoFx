@@ -679,6 +679,13 @@ class SystemConfig:
     autostart_mt5: bool = False
     autostart_mt5_wait_sec: int = 90
 
+    # Expected MT5 login + server. 0 / "" means unset: the first connected
+    # account is written here (logged, not silent). A mismatch blocks new
+    # entries only; open positions keep being managed. The panel confirm
+    # endpoint is the only way to retarget the lock.
+    account_lock_login: int = 0
+    account_lock_server: str = ""
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 

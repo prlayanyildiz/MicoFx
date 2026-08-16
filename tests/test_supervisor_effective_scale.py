@@ -10,6 +10,7 @@ is how an operator concludes the supervisor is holding symbols back.
 """
 from __future__ import annotations
 
+import calendar
 import sys
 import time
 from pathlib import Path
@@ -178,8 +179,8 @@ def test_a_blocked_hour_actually_blocks_only_at_that_hour():
     sup.verdicts = {"XAUUSD": v}
     cfg = sup.store.symbols["XAUUSD"]
 
-    at_ten = time.mktime(time.struct_time((2026, 8, 10, 10, 30, 0, 0, 222, -1)))
-    at_eleven = time.mktime(time.struct_time((2026, 8, 10, 11, 30, 0, 0, 222, -1)))
+    at_ten = calendar.timegm((2026, 8, 10, 10, 30, 0, 0, 0, 0))
+    at_eleven = calendar.timegm((2026, 8, 10, 11, 30, 0, 0, 0, 0))
 
     allowed_ten, reason_ten, _ = sup.gate(cfg, at_ten)
     allowed_eleven, _, _ = sup.gate(cfg, at_eleven)

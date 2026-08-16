@@ -23,13 +23,14 @@ class SessionState:
 
 
 def server_clock(server_epoch: float) -> tuple[int, int]:
-    """Return (isoweekday 1..7, minute-of-day) for the given epoch, local time.
+    """Return (isoweekday 1..7, minute-of-day) from a naive broker epoch.
 
-    Session windows and trade days are configured by the user against their
-    own machine's wall clock, so that - not UTC or a guessed broker offset -
-    is the calendar this must agree with.
+    Bar and tick timestamps are the broker's wall clock encoded as Unix time,
+    the same numbers ``backtest.session_mask`` reads with ``times % 86400``.
+    ``gmtime`` is that reading. ``localtime`` is this machine's timezone and
+    is the clock that used to drift an hour off Pepperstone every October.
     """
-    st = time.localtime(server_epoch)
+    st = time.gmtime(server_epoch)
     weekday = st.tm_wday + 1  # tm_wday: Monday == 0
     return weekday, st.tm_hour * 60 + st.tm_min
 
@@ -42,8 +43,8 @@ def weekend_closed(cfg: SymbolConfig, server_epoch: float) -> bool:
     a Saturday order was MT5 refusing the fill - which depends on the broker
     marking the symbol closed and on the last tick looking stale enough. A stale
     Friday quote that still reads as fresh would walk straight past that. The day
-    of week comes from the machine's own local calendar (the same clock the
-    session windows below are configured against), not UTC or the broker's.
+    of week comes from ``server_clock`` (naive broker epoch, ``gmtime``), the
+    same yardstick as the session windows below.
 
     Crypto is exempt: those symbols trade 24/7 and are supposed to.
 
@@ -269,7 +270,7 @@ def session_clock_warning(skew_hours: int | None) -> str | None:
     n = int(skew_hours)
     return (
         f"broker saati yerel saatten {n:+d} saat farkli - "
-        f"seans pencereleri backtest ile ayni araligi gostermiyor"
+        f"seanslar broker damgasinda, Windows DST sapmasi"
     )
 
 
