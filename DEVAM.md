@@ -320,9 +320,32 @@ Maliyet kapısı (spread / H1 ATR14, eşik = kitabın en pahalısı FRA40 0,0897
   geçmiyor, seans örtüşüyor. Kenar ölçülmedi. İçinde ~53 tarihli `*.US-24`
   CFD çöp isim var.
 
-Bütçe: kalan 1034 × 36 sweep × 6 sn = **62 saat**. Hisse hariç 49 isim =
-**2,9 saat**. Sıralama `calmar`; R/gün değil, LEV-1 onu geçersiz kıldı.
-Ölçüm betiği `cursor/_bt0_measure.py`, çıktı `cursor/_bt0_result.json`.
+**FX kapandı — ölçüldü, kitabı geçmiyor.** 21 FX ismi M5/M15/M30'da
+tarandı, 11'i `n>=30`. En iyi yeterli isim **AUDJPY M30 calmar 1,96**;
+kitabın dördüncüsü US30 2,35, en iyisi GER40 3,72. Yani FX'in en iyisi
+kitabın ilk dördüne giremiyor. `n<30` olan CHFJPY (3,99) ve GBPUSD (2,42)
+bulgu sayılmaz. DEVAM §4 "FX'te M5 pahalı" diyordu; **M15/M30 de ölçüldü,
+aynı sonuç.** FX yeniden önerilmez.
+
+**Tarama durduruldu (17.08, operatör kararı).** Gerekçe: efor, açıklanmamış
+canlı/kâğıt farkını kapatmaya gitsin. Kitap 10 sembolde kalıyor. Karar
+mantıklı — açıklayamadığın bir sistemi 49 yeni sembole yaymak, açıklanmamış
+sorunu çoğaltmaktır (DEVAM §5'in tamamı bu sınıf).
+
+**Kaybolmasın diye: hisse sürtünme ekonomisi ölçüldü ve çarpıcı.**
+Hareket/maliyet (H1 ATR ÷ spread): kitap medyanı **21,5**, kitabın en iyisi
+XAUUSD 83,4. Üst hisseler TSLA.US **456,6**, MU.US 399,8, MSFT.US 290,8.
+ATR% olarak kitap medyanı %0,20, üst hisseler %1,3–1,9. Yani **8–21 kat**
+daha iyi sürtünme, **6–9 kat** daha çok hareket. Bu *kenar değil*,
+sürtünme ekonomisi — kenar hiç ölçülmedi (boşluk riski, bilanço günleri,
+tek isim riski de ölçülmedi). Seçilmiş 49 isimlik liste
+`claude/_bt2_shortlist.json`'da hazır bekliyor, ~3 saat. Canlı/kâğıt farkı
+açıklandıktan **sonra** yeniden değerlendirilecek.
+
+Bütçe kaydı: kalan 1034 × 36 sweep × 6 sn = 62 saat; hisse hariç 49 isim
+2,9 saat. Sıralama `calmar`. Betikler `cursor/_bt0_measure.py`,
+`cursor/_bt1_scan.py`, `claude/_bt2_select.py`; çıktılar
+`cursor/_bt0_result.json`, `cursor/_bt1_result.json`.
 Hipotez: **tavan düşük çünkü üst sıradaki semboller kitapta yok.** FX'i
 atlama — "FX'te M5 pahalı" ölçüldü ve doğru, ama M15/M30 FX hiç ölçülmedi.
 
