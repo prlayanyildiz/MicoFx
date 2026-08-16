@@ -386,14 +386,14 @@
     }
   ],
   "optimizer": {
-    "lookback_days": 365,
-    "max_bars": 130000,
+    "lookback_days": 0,
+    "max_bars": 90000,
     "segments": 5,
     "min_trades": 40,
     "min_positive_ratio": 0.6,
     "selection_metric": "score",
     "plateau_weight": 0.5,
-    "refine_rounds": 3,
+    "refine_rounds": 5,
     "timeframes": [
       "M5",
       "M15",

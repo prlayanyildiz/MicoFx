@@ -80,7 +80,12 @@ def test_the_real_template_still_loads(tmp_path, monkeypatch):
     data = paths.load_defaults()
     assert isinstance(data, dict)
     assert data["symbols"]
-    assert data["optimizer"]["lookback_days"] > 0
+    # 0 is a value, not a missing one: it means "no day cap, max_bars decides",
+    # and it is what the tuned machine runs so a fresh install searches the same
+    # window. The guard is against a typo'd tiny number - three days of bars
+    # would find a config on almost no evidence and apply it.
+    lookback = data["optimizer"]["lookback_days"]
+    assert lookback == 0 or lookback >= 60
 
 
 def test_the_error_survives_into_run_main(tmp_path, monkeypatch, capsys):
