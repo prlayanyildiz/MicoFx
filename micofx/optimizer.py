@@ -864,6 +864,10 @@ class Optimizer:
             "strategy": cfg.strategy, "timeframe": cfg.timeframe,
             "updated_at": float(getattr(cfg, "opt_updated_at", 0.0) or 0.0),
         } if incumbent else None
+        # Snapshot before apply() mutates cfg. Old rows omit these keys;
+        # new rows always write them so ``None`` is distinguishable from
+        # ``False`` and from a missing historical field.
+        previous = {"strategy": cfg.strategy, "timeframe": cfg.timeframe}
         applied = False
         closed = not bool(getattr(cfg, "enabled", True))
         if closed and apply_best and report.get("validated") and not reason:
@@ -916,6 +920,9 @@ class Optimizer:
             "holdout_retention": report["holdout_retention"],
             "keep_reason": report.get("keep_reason") or reason,
             "charge_costs": report.get("charge_costs"),
+            "force": bool(getattr(self, "_force_apply", False)),
+            "applied_at": time.time() if applied else None,
+            "previous": previous if applied else None,
         }, applied)
 
         report["applied"] = applied
