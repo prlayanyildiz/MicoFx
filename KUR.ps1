@@ -71,11 +71,29 @@ if ($LASTEXITCODE -ne 0) {
 
 # ---------------------------------------------------------- [2] Sanal ortam
 Step 2 "Sanal ortam hazirlaniyor..."
+# Varligina degil, CALISTIGINA bakiyoruz. Bir venv kuruldugu makinedeki
+# python.exe'ye MUTLAK yol tutar, ve o yol degisince dosyalar yerinde durur
+# ama hicbiri calismaz - pip "No Python at '...'" der ve kurulum bir sonraki
+# adimda, bambaska bir hata gibi gorunerek olur. Bu tam olarak su yollarla
+# olur: kullanici-kurulumu Python'dan tum-kullanicilar kurulumuna gecmek
+# (AppData\Local\Programs -> C:\Program Files), Python'u kaldirip yeniden
+# kurmak, ya da proje klasorunu baska bir makineye senkronlamak.
+$venvOk = $false
 if (Test-Path -LiteralPath $VenvPy) {
-    Say "  Zaten var, atlaniyor." "Green"
-} else {
+    & $VenvPy -c "import sys" 2>$null
+    $venvOk = ($LASTEXITCODE -eq 0)
+    if ($venvOk) {
+        Say "  Zaten var ve calisiyor, atlaniyor." "Green"
+    } else {
+        Say "  Var ama bozuk (Python yolu degismis) - yeniden kuruluyor." "Yellow"
+        Remove-Item -LiteralPath $Venv -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+if (-not $venvOk) {
     & python -m venv $Venv
     if (-not (Test-Path -LiteralPath $VenvPy)) { throw "Sanal ortam olusturulamadi: $Venv" }
+    & $VenvPy -c "import sys" 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "Sanal ortam kuruldu ama calismiyor: $VenvPy" }
     Say "  Olusturuldu." "Green"
 }
 
