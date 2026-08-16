@@ -8,14 +8,15 @@
 # MIN_PYTHON=(3,10) ile en basta reddeder.
 #
 # Ne yapar, sirayla:
-#   1. Python 3.12.7 (yoksa: winget -> python.org'dan dogrudan indir -> elle)
-#   2. Depoyu getirir (git varsa klonlar, yoksa ZIP indirir)
-#   3. KUR.bat'i calistirir (sanal ortam + paketler + kisayollar)
+#   1. Python 3.12.7 (yoksa: winget -> python.org'dan dogrudan indir)
+#   2. Git (yoksa: winget -> git-scm'den dogrudan indir)
+#   3. Depoyu getirir (git ile klonlar; git yine de yoksa ZIP)
+#   4. KUR.bat'i calistirir (sanal ortam + paketler + kisayollar)
 #
-# Neden ZIP yedegi var: Windows Server'da cogu zaman winget YOKTUR, ve
-# winget yoksa git de kurulamaz. Klon yapilamayinca "KUR.bat'i calistir"
-# tavsiyesi de bosa duser - dosyalar makinede degildir. ZIP yolu bu
-# tavuk-yumurta dongusunu git'e hic dokunmadan kirar.
+# Ikisi de winget'siz kurulabiliyor, cunku Windows Server imajlarinda winget
+# cogu zaman YOKTUR - ve winget yoksa "once git kur" tavsiyesi bosa duser.
+# ZIP yolu son care olarak duruyor: git kurulumu da basarisiz olursa depo
+# yine de gelir, ama versiyon gecmisi ve `pull` olmadan.
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -24,6 +25,7 @@ $Dest    = Join-Path $env:USERPROFILE "MicoFx"
 $RepoGit = "https://github.com/prlayanyildiz/MicoFx.git"
 $RepoZip = "https://github.com/prlayanyildiz/MicoFx/archive/refs/heads/main.zip"
 $PyUrl   = "https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe"
+$GitApi  = "https://api.github.com/repos/git-for-windows/git/releases/latest"
 
 function Say([string]$m, [string]$c = "Gray") { Write-Host $m -ForegroundColor $c }
 function Head([string]$m) { Write-Host ""; Say "== $m" "Cyan" }
@@ -48,10 +50,10 @@ Say "=============================================" "Cyan"
 Say "  MicoFX - sifir PC kurulumu" "Cyan"
 Say "=============================================" "Cyan"
 Say "  Hedef klasor : $Dest"
-Say "  Gereken      : Python 3.10+ (kurulacak surum 3.12.7)"
+Say "  Gereken      : Python 3.10+ (kurulacak surum 3.12.7) + Git"
 
 # ------------------------------------------------------------------ Python
-Head "1/3  Python"
+Head "1/4  Python"
 Refresh-Path
 $havePy = $false
 if (Get-Command python -ErrorAction SilentlyContinue) {
@@ -99,8 +101,49 @@ if (-not $havePy) {
     Say ("  Kuruldu: " + (& python --version 2>&1)) "Green"
 }
 
+# --------------------------------------------------------------------- Git
+Head "2/4  Git"
+Refresh-Path
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    Say ("  Var: " + ((& git --version 2>&1) -join " ")) "Green"
+} else {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Say "  winget ile Git kuruluyor..." "Yellow"
+        winget install -e --id Git.Git --silent `
+            --accept-package-agreements --accept-source-agreements
+    } else {
+        # Surumu sabitlemiyoruz: GitHub'in "latest" ucundan o anki 64-bit
+        # kurulumunu aliyoruz. Sabit bir URL bir sure sonra 404 olur ve
+        # kurulum sessizce ZIP yoluna duser - yani git bir daha hic kurulmaz.
+        Say "  winget yok - Git github'dan indiriliyor (~62 MB)..." "Yellow"
+        try {
+            $rel = Invoke-RestMethod -Uri $GitApi -UseBasicParsing
+            $asset = $rel.assets | Where-Object {
+                $_.name -like "Git-*-64-bit.exe" -and $_.name -notlike "*Portable*"
+            } | Select-Object -First 1
+            if (-not $asset) { throw "64-bit kurulum bulunamadi" }
+            $gexe = Join-Path $env:TEMP $asset.name
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $gexe -UseBasicParsing
+            Say "  Sessiz kurulum basladi..."
+            $gp = Start-Process -FilePath $gexe -Wait -PassThru -ArgumentList @(
+                "/VERYSILENT", "/NORESTART", "/NOCANCEL", "/SP-", "/CLOSEAPPLICATIONS")
+            if ($gp.ExitCode -ne 0) { throw "kurulum kodu $($gp.ExitCode)" }
+            Remove-Item $gexe -Force -ErrorAction SilentlyContinue
+        } catch {
+            # Git olmadan da devam edebiliyoruz (ZIP), o yuzden durmuyoruz.
+            Say "  Git kurulamadi ($_) - ZIP yolu kullanilacak." "Yellow"
+        }
+    }
+    Refresh-Path
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        Say ("  Kuruldu: " + ((& git --version 2>&1) -join " ")) "Green"
+    } else {
+        Say "  Git yok - depo ZIP ile gelecek (guncelleme icin gecmis olmaz)." "Yellow"
+    }
+}
+
 # -------------------------------------------------------------------- Depo
-Head "2/3  Depo"
+Head "3/4  Depo"
 $haveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
 
 if (Test-Path (Join-Path $Dest ".git")) {
@@ -146,6 +189,6 @@ if (-not (Test-Path (Join-Path $Dest "KUR.bat"))) { throw "Depo getirilemedi: $D
 Say "  Hazir: $Dest" "Green"
 
 # ------------------------------------------------------------------- Kurul
-Head "3/3  Ortam kurulumu"
+Head "4/4  Ortam kurulumu"
 Set-Location $Dest
 & (Join-Path $Dest "KUR.bat")

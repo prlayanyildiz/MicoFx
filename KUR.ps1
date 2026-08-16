@@ -17,6 +17,26 @@ $Venv = "C:\MicoFX-venv"
 $VenvPy = Join-Path $Venv "Scripts\python.exe"
 
 function Say([string]$msg, [string]$colour = "Gray") { Write-Host $msg -ForegroundColor $colour }
+
+function Test-PythonRuns([string]$exe) {
+    # Bir venv'in calisip calismadigini "dosya var mi" ile degil, gercekten
+    # calistirarak anliyoruz. Ama PowerShell 5.1'de yerli bir programin
+    # stderr'i yonlendirilince her satir NativeCommandError'a donusuyor ve
+    # dosyanin basindaki $ErrorActionPreference="Stop" onu olumcul yapiyor -
+    # yani bozuk venv dogru tespit edilir, script tespit ANINDA olurdu.
+    # Tercihi bu cagri boyunca gevsetiyoruz.
+    if (-not (Test-Path -LiteralPath $exe)) { return $false }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $null = & $exe -c "import sys" 2>&1
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
 function Step([int]$n, [string]$msg) { Write-Host ""; Say "[$n/4] $msg" "Cyan" }
 
 Say "============================================" "Cyan"
@@ -78,22 +98,16 @@ Step 2 "Sanal ortam hazirlaniyor..."
 # olur: kullanici-kurulumu Python'dan tum-kullanicilar kurulumuna gecmek
 # (AppData\Local\Programs -> C:\Program Files), Python'u kaldirip yeniden
 # kurmak, ya da proje klasorunu baska bir makineye senkronlamak.
-$venvOk = $false
-if (Test-Path -LiteralPath $VenvPy) {
-    & $VenvPy -c "import sys" 2>$null
-    $venvOk = ($LASTEXITCODE -eq 0)
-    if ($venvOk) {
-        Say "  Zaten var ve calisiyor, atlaniyor." "Green"
-    } else {
-        Say "  Var ama bozuk (Python yolu degismis) - yeniden kuruluyor." "Yellow"
+$venvOk = Test-PythonRuns $VenvPy
+if ($venvOk) {
+    Say "  Zaten var ve calisiyor, atlaniyor." "Green"
+} else {
+    if (Test-Path -LiteralPath $Venv) {
+        Say "  Var ama bozuk (Python yolu degismis) - siliniyor." "Yellow"
         Remove-Item -LiteralPath $Venv -Recurse -Force -ErrorAction SilentlyContinue
     }
-}
-if (-not $venvOk) {
     & python -m venv $Venv
-    if (-not (Test-Path -LiteralPath $VenvPy)) { throw "Sanal ortam olusturulamadi: $Venv" }
-    & $VenvPy -c "import sys" 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "Sanal ortam kuruldu ama calismiyor: $VenvPy" }
+    if (-not (Test-PythonRuns $VenvPy)) { throw "Sanal ortam kurulamadi/calismiyor: $Venv" }
     Say "  Olusturuldu." "Green"
 }
 
