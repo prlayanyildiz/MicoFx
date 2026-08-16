@@ -291,15 +291,32 @@ kazanıyor, karşılaştırılmadı. Net R farkından daha önemli olan bu.
 beraberliğinde holdout işlem sayısına bakıyor. Küçük ama holdout'a dokunuyor;
 beraberliği validation ve deterministik ad sırasıyla çöz.
 
-**BT — evren taraması.** Broker'da 1729 sembol var, kitapta 10. Hepsini
-walk_forward'dan geçir, **holdout R/maxDD'ye (calmar) göre sırala**,
-`validated` işaretle. Sıralama ölçütü R/gün değil: LEV-1 onu geçersiz
-kıldı ve evrende pencere farkı kitaptakinden vahşi olacak.
+**BT — evren taraması. Ön eleme yapıldı, hipotezin yarısı çürüdü.**
 
-Ham tarama bu makinede **~104 saat** (10 sembol / 36 dk kalibrasyonundan;
-1729 × 36 sweep × ~6 sn). Tek hamlede koşulmaz. Sıra: ön eleme → sayım →
-bütçe kararı → tarama; her kademede durulur. İkinci bir `Optimizer.start`
-canlı botla MT5 üzerinde yarışır, tarama ayrı betik olmalı.
+Broker'da 1729 sembol. Grup dağılımı ilk kez ölçüldü: hisse 1496, forex 95,
+kripto 53, emtia 40, endeks 38, other 7. `trade_mode==full` → 1610.
+Maliyet kapısı (spread / H1 ATR14, eşik = kitabın en pahalısı FRA40 0,0897)
+→ 1040. Min lot 1R > 3×%0,8×bakiye veya marj > %45 → 1034. Seans
+örtüşmesi kimseyi elemedi.
+
+**Kalan 1034: forex 28, endeks 8, emtia 13, kripto 0, hisse 985.**
+
+- **"Tavan düşük çünkü üst sıradaki endeksler kitapta yok" — YANLIŞ.**
+  Maliyet kapısını geçen 8 endeksin **tamamı zaten kitapta**. AUS200, HK50,
+  EUSTX50, SPA35, VIX, USDX, CN50, US400 ve diğerleri kitabın en pahalı
+  üyesinden pahalı. Kitap, ucuz-yeterli endeks setinin kendisi.
+- **Kripto ölçümle de bitti:** 52 uygun isimden maliyet kapısını geçen 0.
+  DEVAM §4 ile aynı yön, artık sayısı da var.
+- **Açık kalan:** forex 28 (majors 6, çapraz 16, minor 6) ve emtia 13
+  (`SpotCrude`, `XAGUSD`, XAU/XAG çaprazları). İkisi de hiç taranmadı.
+- **Hisse 985 sürpriz:** "bu hesapta marj/seans uygun değil" varsayımı üç
+  kapıda da tutmadı — min lot 1R çoğu US hissesinde birkaç dolar, marj %45'i
+  geçmiyor, seans örtüşüyor. Kenar ölçülmedi. İçinde ~53 tarihli `*.US-24`
+  CFD çöp isim var.
+
+Bütçe: kalan 1034 × 36 sweep × 6 sn = **62 saat**. Hisse hariç 49 isim =
+**2,9 saat**. Sıralama `calmar`; R/gün değil, LEV-1 onu geçersiz kıldı.
+Ölçüm betiği `cursor/_bt0_measure.py`, çıktı `cursor/_bt0_result.json`.
 Hipotez: **tavan düşük çünkü üst sıradaki semboller kitapta yok.** FX'i
 atlama — "FX'te M5 pahalı" ölçüldü ve doğru, ama M15/M30 FX hiç ölçülmedi.
 
