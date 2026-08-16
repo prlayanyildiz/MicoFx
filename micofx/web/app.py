@@ -35,7 +35,7 @@ from ..models import (
 from ..mt5client import MT5Client
 from ..optimizer import Optimizer
 from ..paths import ROOT, WEB_DIR
-from ..sessions import describe
+from ..sessions import describe, session_clock_warning
 from ..store import Store
 from ..supervisor import DEFAULTS as AI_SETTINGS_DEFAULTS
 
@@ -719,10 +719,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 f"broker GMT{broker_utc:+d}, yerel GMT{local_utc:+d} - ayni, "
                 f"seans pencereleri enstrumanin gercek seansiyla hizali"
                 if drift == 0 else
-                f"broker GMT{broker_utc:+d}, yerel GMT{local_utc:+d} - "
-                f"{drift:+d} saat KAYMA. Seans pencereleri yerel saate gore "
-                f"yazildi, enstrumanin gercek seansi {drift:+d} saat kaydi - "
-                f"pencereleri buna gore guncelleyin"
+                (session_clock_warning(drift)
+                 or f"broker GMT{broker_utc:+d}, yerel GMT{local_utc:+d}")
             ),
         }
 

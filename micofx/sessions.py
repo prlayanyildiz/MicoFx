@@ -195,6 +195,51 @@ def _minutes_to_next_window(day: int, minute: int, windows: list[tuple[int, int]
     return best if best is not None else 0
 
 
+def local_utc_offset_seconds(epoch: float | None = None) -> int:
+    """This machine's UTC offset in seconds east of UTC, at ``epoch``."""
+    when = time.time() if epoch is None else float(epoch)
+    return -(time.altzone if time.daylight and time.localtime(when).tm_isdst
+             else time.timezone)
+
+
+def session_clock_skew_hours(
+    broker_now: float,
+    local_epoch: float | None = None,
+    *,
+    local_utc_offset_sec: int | None = None,
+) -> int | None:
+    """Whole hours between the broker wall clock and this machine's.
+
+    ``broker_now`` is the naive epoch MT5 stamps on ticks (wall clock encoded
+    as if it were UTC). ``local_epoch`` is a true epoch. Their difference
+    minus the machine UTC offset is the gap the session windows sit on: 0
+    while Pepperstone and Turkey are both UTC+3, -1 when the broker drops
+    to UTC+2 in October and Windows does not.
+
+    None when ``broker_now`` is unknown (0). Does not shift any gate - it
+    is the measurement the October drift needs before anyone picks a fix.
+    """
+    if not (float(broker_now) > 0):
+        return None
+    local_epoch = time.time() if local_epoch is None else float(local_epoch)
+    if local_utc_offset_sec is None:
+        local_utc_offset_sec = local_utc_offset_seconds(local_epoch)
+    broker_as_utc = int(round((float(broker_now) - local_epoch) / 3600.0))
+    local_h = int(round(int(local_utc_offset_sec) / 3600.0))
+    return broker_as_utc - local_h
+
+
+def session_clock_warning(skew_hours: int | None) -> str | None:
+    """Visible line when the two clocks disagree. None when equal or unknown."""
+    if skew_hours is None or int(skew_hours) == 0:
+        return None
+    n = int(skew_hours)
+    return (
+        f"broker saati yerel saatten {n:+d} saat farkli - "
+        f"seans pencereleri backtest ile ayni araligi gostermiyor"
+    )
+
+
 def describe(cfg: SymbolConfig) -> str:
     windows = cfg.session_windows()
     if not cfg.use_sessions or not windows:

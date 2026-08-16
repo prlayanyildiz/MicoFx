@@ -357,6 +357,13 @@ function renderTop() {
 
   $("#btn-start").disabled = !!bot.running;
   $("#btn-stop").disabled = !bot.running;
+
+  const clockWarn = (mt5.session_clock_warning || "").trim();
+  const banner = $("#clock-warn");
+  if (banner) {
+    banner.hidden = !clockWarn;
+    banner.textContent = clockWarn;
+  }
 }
 
 function renderCards() {

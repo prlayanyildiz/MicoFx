@@ -227,6 +227,9 @@ class Engine:
         self.last_cycle_at = 0.0
         self.last_cycle_ms = 0.0
         self.last_error = ""
+        # Last logged broker-vs-local hour gap. None until first read; a
+        # change to a non-zero value is the October DST leak becoming visible.
+        self._session_clock_skew: int | None = None
         self._day_cache: dict[str, Any] = {}
         self._day_cache_at = 0.0
         # ticket -> {"rungs": how many scale-out steps already banked,
@@ -571,6 +574,7 @@ class Engine:
             return
 
         server_now = self.client.server_now()
+        self._note_session_clock(server_now)
         self._handle_daily_rollover(server_now, account.get("balance", 0.0))
         # Must follow the rollover (which resets the figure) and precede the
         # guard.check() below, so the breaker never sees a deposit as profit.
@@ -2637,6 +2641,31 @@ class Engine:
             out[name] = row
         return out
 
+    def _session_clock_payload(self) -> dict[str, Any]:
+        broker_now = 0.0
+        getter = getattr(self.client, "broker_now", None)
+        if callable(getter):
+            broker_now = float(getter() or 0.0)
+        skew = sessions.session_clock_skew_hours(broker_now, self.client.server_now())
+        return {
+            "session_clock_skew_hours": skew,
+            "session_clock_warning": sessions.session_clock_warning(skew),
+        }
+
+    def _note_session_clock(self, server_now: float) -> None:
+        """Log once when broker wall clock leaves the machine's wall clock.
+
+        Measurement only. Does not rewrite session windows.
+        """
+        getter = getattr(self.client, "broker_now", None)
+        broker_now = float(getter() or 0.0) if callable(getter) else 0.0
+        skew = sessions.session_clock_skew_hours(broker_now, server_now)
+        warn = sessions.session_clock_warning(skew)
+        prev = getattr(self, "_session_clock_skew", None)
+        self._session_clock_skew = skew
+        if warn and skew != prev:
+            LOG.emit(warn, "WARN")
+
     def snapshot(self) -> dict[str, Any]:
         account = self.refresh_account()
         positions = self.positions_view()
@@ -2658,6 +2687,7 @@ class Engine:
                 "error": self.client.last_error,
                 "server_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.client.server_now())),
                 **self.client.terminal_flags(),
+                **self._session_clock_payload(),
             },
             "account": account,
             "day": {
