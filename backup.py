@@ -31,7 +31,15 @@ from micofx.store import Store
 # nightly archives went out carrying 23 of them - including seven scratch
 # copies of a settings DB (see _verify_archive for why that specifically is
 # dangerous).
-EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache", ".pytest_tmp", ".git"}
+# ``.tmp.driveupload`` / ``.tmp.drivedownload`` are the Google Drive desktop
+# client's contract: it creates both in every folder it syncs, filled with
+# numbered temp chunks (measured 16.08: one 3.4 MB). They are not project
+# files. .gitignore already lists them (b05d706); the archive walk must too,
+# or a future Drive re-bind silently packs the sync junk.
+EXCLUDE_DIRS = {
+    ".venv", "__pycache__", ".pytest_cache", ".pytest_tmp", ".git",
+    ".tmp.driveupload", ".tmp.drivedownload",
+}
 
 # Where the settings DB sits inside the project, resolved once at import
 # against the real paths. Everything below goes through ``ROOT / DB_REL``

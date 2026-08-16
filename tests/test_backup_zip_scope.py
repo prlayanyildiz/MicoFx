@@ -30,13 +30,22 @@ def test_exclude_dirs_includes_git():
     assert ".git" in backup.EXCLUDE_DIRS
 
 
-def test_pytest_tmp_is_excluded():
-    """A --basetemp=.pytest_tmp run leaves fixtures in the workspace.
+def test_drive_sync_temp_dirs_are_excluded():
+    """Google Drive desktop creates these in every folder it syncs."""
+    assert ".tmp.driveupload" in backup.EXCLUDE_DIRS
+    assert ".tmp.drivedownload" in backup.EXCLUDE_DIRS
 
-    That is not hypothetical: two nightly archives went out carrying 23 of
-    them, seven being scratch copies of a settings DB.
-    """
-    assert ".pytest_tmp" in backup.EXCLUDE_DIRS
+
+def test_walk_skips_drive_sync_temp_trees(tmp_path):
+    (tmp_path / "keep.txt").write_text("keep")
+    for name in (".tmp.driveupload", ".tmp.drivedownload"):
+        junk = tmp_path / name / "12345"
+        junk.mkdir(parents=True)
+        (junk / "chunk.bin").write_bytes(b"x" * 100)
+    found = {p.relative_to(tmp_path).as_posix() for p in backup._iter_files(tmp_path)}
+    assert "keep.txt" in found
+    assert not any(".tmp.driveupload" in f for f in found)
+    assert not any(".tmp.drivedownload" in f for f in found)
 
 
 def test_walk_skips_a_leftover_pytest_tmp_tree(tmp_path):
