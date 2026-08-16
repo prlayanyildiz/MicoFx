@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 import time
 from dataclasses import dataclass, field
@@ -13,6 +14,23 @@ from .sessions import WEEKEND_OPEN_GROUPS
 from .strategy import IndicatorCache, Params, compute
 
 _DAY = 24 * 60
+
+# Grid axis that is not a Params field: it only rewrites the entry mask.
+SESSION_GRID_FIELDS = frozenset({"blocked_entry_hours"})
+
+
+def _blocked_entry_hours(cfg: SymbolConfig) -> list[int]:
+    raw = getattr(cfg, "blocked_entry_hours", None) or []
+    return [int(h) for h in raw if isinstance(h, (int, float)) and 0 <= int(h) <= 23]
+
+
+def _drop_blocked_entry_hours(cfg: SymbolConfig, times: np.ndarray,
+                              mask: np.ndarray) -> np.ndarray:
+    hours = _blocked_entry_hours(cfg)
+    if not hours:
+        return mask
+    bar_hour = (np.asarray(times) % 86400) // 3600
+    return mask & ~np.isin(bar_hour, np.asarray(hours, dtype=np.int64))
 
 # Out-of-sample samples thinner than this are noise, not evidence.
 MIN_TEST_TRADES = 12
@@ -197,8 +215,8 @@ def session_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False) 
         # Verified against 1970 epoch: 1970-01-03 (Sat) -> 6, 1970-01-04 (Sun) -> 7.
         weekend = (days == 6) | (days == 7)
         if str(getattr(cfg, "group", "") or "").strip().lower() in WEEKEND_OPEN_GROUPS:
-            return np.ones(times.size, dtype=bool)
-        return ~weekend
+            return _drop_blocked_entry_hours(cfg, times, np.ones(times.size, dtype=bool))
+        return _drop_blocked_entry_hours(cfg, times, ~weekend)
 
     if not cfg.use_sessions:
         windows: list[tuple[int, int]] = []
@@ -208,7 +226,7 @@ def session_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False) 
     allowed_day = np.isin(days, np.array(cfg.trade_days or [1, 2, 3, 4, 5], dtype=np.int64))
 
     if not windows:
-        return allowed_day
+        return _drop_blocked_entry_hours(cfg, times, allowed_day)
 
     mask = np.zeros(times.size, dtype=bool)
     prev_days = np.where(days == 1, 7, days - 1)
@@ -226,7 +244,7 @@ def session_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False) 
                 morning &= minutes < (end - cfg.flat_before_close_min)
             inside = evening | morning
         mask |= inside
-    return mask
+    return _drop_blocked_entry_hours(cfg, times, mask)
 
 
 def imputed_spread_pts(spread: np.ndarray) -> np.ndarray:
@@ -571,6 +589,11 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if not is_buy and not bool(sell_flags[i]):
                     ptr += 1
                     continue
+                price_ref = float(open_[j0] + s) if is_buy else float(open_[j0])
+                if (p.min_atr_ratio > 0 and price_ref > 0
+                        and (atr_entry / price_ref) < p.min_atr_ratio):
+                    ptr += 1
+                    continue
                 if skip_after_loss and skip_next:
                     skip_next = False
                     ptr += 1
@@ -625,6 +648,11 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             continue
         is_buy = bool(buy_flags[i])
         if not is_buy and not bool(sell_flags[i]):
+            ptr += 1
+            continue
+        price_ref = float(open_[j0] + s) if is_buy else float(open_[j0])
+        if (p.min_atr_ratio > 0 and price_ref > 0
+                and (atr_entry / price_ref) < p.min_atr_ratio):
             ptr += 1
             continue
         if skip_after_loss and skip_next:
@@ -948,8 +976,24 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     windows = [(edges[i], edges[i + 1]) for i in range(segments)]
     selection, validation, holdout = windows[:-2], windows[-2], windows[-1]
 
-    tradable = session_mask(cfg, bars.time, all_hours)
     flatten = flatten_mask(cfg, bars.time, all_hours, day_end_flatten_min)
+    _tradable_by_hours: dict[tuple[int, ...], np.ndarray] = {}
+
+    def _hours_key(values: dict[str, Any] | None = None) -> tuple[int, ...]:
+        raw = (values or {}).get("blocked_entry_hours", cfg.blocked_entry_hours)
+        return tuple(sorted({int(h) for h in (raw or [])
+                             if str(h).lstrip("-").isdigit() and 0 <= int(h) <= 23}))
+
+    def tradable_for(values: dict[str, Any] | None = None) -> np.ndarray:
+        key = _hours_key(values)
+        hit = _tradable_by_hours.get(key)
+        if hit is None:
+            probe = copy.copy(cfg)
+            probe.blocked_entry_hours = list(key)
+            hit = session_mask(probe, bars.time, all_hours)
+            _tradable_by_hours[key] = hit
+        return hit
+
     if not (float(point) > 0):
         # This used to substitute 1e-5, which is not a conservative default -
         # it is a made-up price scale, and every cost in the sweep is measured
@@ -1051,17 +1095,20 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         return hit
 
     def run_window(p: Params, window: tuple[int, int], sig=None,
-                   entries: np.ndarray | None = None) -> Result:
+                   entries: np.ndarray | None = None,
+                   values: dict[str, Any] | None = None) -> Result:
         if sig is None:
             sig, entries = signals_for(p)
-        return simulate(cache, sig, bars.open, bars.spread, point, p, tradable,
+        return simulate(cache, sig, bars.open, bars.spread, point, p,
+                        tradable_for(values),
                         window[0], window[1], commission_price,
                         entries=entries, spread_price=spread_price,
                         min_stop=min_stop_series,
                         flatten=flatten)
 
     def evaluate(p: Params, sig=None, entries: np.ndarray | None = None,
-                 last: Result | None = None) -> tuple[list[Result], float, float]:
+                 last: Result | None = None,
+                 values: dict[str, Any] | None = None) -> tuple[list[Result], float, float]:
         """Score ``p`` on every selection segment.
 
         ``last`` is the already-simulated result for the final selection
@@ -1073,14 +1120,15 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         if sig is None:
             sig, entries = signals_for(p)
         windows = selection[:-1] if last is not None else selection
-        parts = [run_window(p, w, sig, entries) for w in windows]
+        parts = [run_window(p, w, sig, entries, values) for w in windows]
         if last is not None:
             parts.append(last)                      # keeps the segment order
         scored = [r.score(per_segment_trades) for r in parts]
         positive = sum(1 for r in parts if r.net_r > 0) / len(parts)
         return parts, (sum(scored) / len(scored)), positive
 
-    def prescreen(p: Params, sig, entries: np.ndarray) -> Result:
+    def prescreen(p: Params, sig, entries: np.ndarray,
+                  values: dict[str, Any] | None = None) -> Result:
         """Cheap first look: score the most recent selection segment only.
 
         Successive halving. A setting that cannot pay on one segment will never
@@ -1089,11 +1137,11 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         every number that reaches ranking or the apply gate is still the full
         multi-segment score - this only decides what is worth measuring.
         """
-        return run_window(p, selection[-1], sig, entries)
+        return run_window(p, selection[-1], sig, entries, values)
 
     def measure(values: dict[str, Any], window: tuple[int, int]) -> Result:
         p = Params.from_config(cfg, **values)
-        return run_window(p, window)
+        return run_window(p, window, values=values)
 
     baseline_p = Params.from_config(cfg)
     base_parts, _, _ = evaluate(baseline_p)
@@ -1140,7 +1188,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
 
                 last = None
                 if screen:
-                    last = prescreen(p, sig, entries)
+                    last = prescreen(p, sig, entries, values)
                     if last.score(per_segment_trades) <= 0.0:
                         # No edge on the most recent segment; record the dead
                         # spot for the plateau blend and move on without the
@@ -1151,7 +1199,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                             on_progress(offset + i, budget, max(raw.values(), default=None))
                         continue
 
-                parts, mean_score, positive = evaluate(p, sig, entries, last)
+                parts, mean_score, positive = evaluate(p, sig, entries, last, values)
                 pooled = _merge(parts)
                 evaluated += 1
                 pool[idx] = 0.0

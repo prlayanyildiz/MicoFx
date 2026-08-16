@@ -23,6 +23,7 @@ from ..models import (
     EXIT_PARAM_BOUNDS,
     EXIT_RISK_FIELDS,
     GROUPS,
+    OPT_FIELDS,
     READABLE_TIMEFRAMES,
     STRATEGIES,
     SWING_GRID_OVERLAY,
@@ -37,6 +38,7 @@ from ..optimizer import Optimizer
 from ..paths import ROOT, WEB_DIR
 from ..sessions import describe, session_clock_warning
 from ..store import Store
+from ..strategy import _FAMILIES, ENGINE_OPT_FIELDS, opt_fields_read
 from ..supervisor import DEFAULTS as AI_SETTINGS_DEFAULTS
 
 TEMPLATES = WEB_DIR / "templates"
@@ -641,6 +643,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             "symbols": symbol_payload(),
             "system": store.system.to_dict(),
             "opt": optimizer.status(),
+            "opt_fields": list(OPT_FIELDS),
+            "engine_opt_fields": sorted(ENGINE_OPT_FIELDS),
+            "strategy_opt_fields": {
+                name: sorted(opt_fields_read(name)) for name in _FAMILIES
+            },
         }
 
     @app.get("/api/symbols")

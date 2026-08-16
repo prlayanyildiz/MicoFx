@@ -262,6 +262,10 @@ class SymbolConfig:
     sessions: list = field(default_factory=list)
     trade_days: list = field(default_factory=lambda: [1, 2, 3, 4, 5])  # Mon..Sun = 1..7
     flat_before_close_min: int = 0   # close positions N min before the last window ends
+    # Clock hours (0-23) that refuse a NEW entry and leave an open trade alone.
+    # Empty = off. Not a session-window rewrite: shrinking windows would also
+    # flatten at the new edges when flat_before_close_min is set.
+    blocked_entry_hours: list = field(default_factory=list)
 
     # ---- optimizer bookkeeping ----
     opt_score: float = 0.0
@@ -323,6 +327,16 @@ class SymbolConfig:
         cfg.opt_summary = summary if isinstance(summary, dict) else {}
         pending = payload.get("pending_exit_patch")
         cfg.pending_exit_patch = pending if isinstance(pending, dict) else {}
+        hours = payload.get("blocked_entry_hours")
+        if hours is None:
+            cfg.blocked_entry_hours = []
+        elif isinstance(hours, list):
+            cfg.blocked_entry_hours = sorted({
+                int(h) for h in hours
+                if str(h).lstrip("-").isdigit() and 0 <= int(h) <= 23
+            })
+        else:
+            cfg.blocked_entry_hours = []
         return cfg
 
     def session_windows(self) -> list[tuple[int, int]]:

@@ -66,6 +66,24 @@ def _prev_day(day: int) -> int:
     return 7 if day == 1 else day - 1
 
 
+def _block_entry_hour(cfg: SymbolConfig, minute: int, state: SessionState) -> SessionState:
+    """Refuse a new entry in listed clock hours; do not start a flatten."""
+    if not state.open:
+        return state
+    hours = getattr(cfg, "blocked_entry_hours", None) or []
+    hour = minute // 60
+    blocked = {int(h) for h in hours
+               if str(h).lstrip("-").isdigit() and 0 <= int(h) <= 23}
+    if hour not in blocked:
+        return state
+    return SessionState(
+        open=False, reason="saat kapali",
+        minutes_to_close=None,
+        minutes_to_open=60 - (minute % 60),
+        window=state.window,
+    )
+
+
 def evaluate(cfg: SymbolConfig, server_epoch: float,
              all_hours: bool = False) -> SessionState:
     """Decide whether ``cfg`` may trade at the given broker time.
@@ -89,18 +107,20 @@ def evaluate(cfg: SymbolConfig, server_epoch: float,
         )
 
     if all_hours:
-        return SessionState(open=True, reason="", minutes_to_close=None,
-                            minutes_to_open=None, window="tum saatler")
+        state = SessionState(open=True, reason="", minutes_to_close=None,
+                             minutes_to_open=None, window="tum saatler")
+        return _block_entry_hour(cfg, minute, state)
 
     if not cfg.use_sessions or not windows:
         allowed = day in cfg.trade_days
-        return SessionState(
+        state = SessionState(
             open=allowed,
             reason="" if allowed else "gun kapali",
             minutes_to_close=None,
             minutes_to_open=None if allowed else _minutes_to_next_day(day, minute, cfg.trade_days),
             window="7/24" if allowed else "gun disi",
         )
+        return _block_entry_hour(cfg, minute, state) if allowed else state
 
     best_close: int | None = None
     active = ""
@@ -132,8 +152,9 @@ def evaluate(cfg: SymbolConfig, server_epoch: float,
                 active = f"{_fmt(start)}-{_fmt(end)}"
 
     if best_close is not None:
-        return SessionState(open=True, reason="", minutes_to_close=best_close,
-                            minutes_to_open=None, window=active)
+        state = SessionState(open=True, reason="", minutes_to_close=best_close,
+                             minutes_to_open=None, window=active)
+        return _block_entry_hour(cfg, minute, state)
 
     wait = _minutes_to_next_window(day, minute, windows, cfg.trade_days)
     nxt = min(windows, key=lambda w: w[0])

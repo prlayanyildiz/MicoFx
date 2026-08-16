@@ -29,6 +29,7 @@ from .models import (
 from .mt5client import Bars, MT5Client, timeframe_seconds
 from .spread_calibration import calibrate
 from .store import Store
+from .strategy import searchable_axes
 
 
 def _grid_axis_equal(left: Any, right: Any) -> bool:
@@ -329,10 +330,10 @@ class Optimizer:
         # has to sit between them: it widens what the shared grid proposes and
         # steps aside for any axis the family itself has an opinion about.
         variants = [{"key": name, "strategy": name,
-                     "own": {k: v for k, v in (family_grids.get(name) or {}).items()
-                             if isinstance(v, list) and v},
-                     "grid": {**shared, **{k: v for k, v in (family_grids.get(name) or {}).items()
-                                           if isinstance(v, list) and v}},
+                     "own": searchable_axes(name, {k: v for k, v in (family_grids.get(name) or {}).items()
+                             if isinstance(v, list) and v}),
+                     "grid": searchable_axes(name, {**shared, **{k: v for k, v in (family_grids.get(name) or {}).items()
+                                           if isinstance(v, list) and v}}),
                      # `_plan_symbol` is a different frame; `shared` here is
                      # not visible there. Without this the first job raised
                      # NameError and `_run` marked the scan done+error.
@@ -425,7 +426,7 @@ class Optimizer:
                 k: v for k, v in SWING_GRID_OVERLAY.items()
                 if k not in own and k not in owned
             })
-        return grid
+        return searchable_axes(family, grid)
 
     def _spread_scale(self, symbol: str) -> float:
         """Measured live-tick / bar spread median for this symbol, or 1.0.

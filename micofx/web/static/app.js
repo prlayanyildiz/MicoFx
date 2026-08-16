@@ -830,6 +830,15 @@ const SECTIONS = [
   },
 ];
 
+function optFieldVisible(cfg, k) {
+  if (k === "strategy" || k === "timeframe") return true;
+  const all = STATE.opt_fields;
+  if (!all || !all.includes(k)) return true;
+  const read = (STATE.strategy_opt_fields || {})[cfg.strategy] || [];
+  const eng = STATE.engine_opt_fields || [];
+  return read.includes(k) || eng.includes(k);
+}
+
 function buildField(cfg, spec) {
   let input;
   if (spec.t === "bool") {
@@ -973,9 +982,11 @@ function buildSymbolCard(cfg) {
   const advDetails = el("details", { class: "subgrid" });
   advDetails.appendChild(el("summary", { class: "title", text: "Ileri duzey / Strateji Parametreleri" }));
   SECTIONS.forEach((section) => {
+    const fields = section.fields.filter((f) => optFieldVisible(cfg, f.k));
+    if (!fields.length) return;
     const grid = el("div", { class: "subgrid" }, [
       el("div", { class: "title", text: section.title }),
-      el("div", { class: "form-grid" }, section.fields.map((f) => buildField(cfg, f))),
+      el("div", { class: "form-grid" }, fields.map((f) => buildField(cfg, f))),
     ]);
     advDetails.appendChild(grid);
   });

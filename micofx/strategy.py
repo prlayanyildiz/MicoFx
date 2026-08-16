@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import ast
+import inspect
+import textwrap
 from dataclasses import dataclass
 from typing import Any
 
@@ -7,7 +10,7 @@ import numpy as np
 
 from . import indicators as ind
 from .logbus import LOG
-from .models import SymbolConfig
+from .models import EXIT_RISK_FIELDS, OPT_FIELDS, SymbolConfig
 
 STOCH_MID = 50.0
 
@@ -1151,6 +1154,49 @@ _FAMILIES = {
     "parabolic_flip": _parabolic_flip,
     "aroon_flip": _aroon_flip,
 }
+
+# Exit / live-entry axes the family function never names. The search and the
+# panel still own them: they are enforced in simulate/engine, not in compute().
+ENGINE_OPT_FIELDS = frozenset(EXIT_RISK_FIELDS) | {"max_spread_atr", "min_atr_ratio"}
+
+
+def _p_fields_reachable(fn, seen: set | None = None) -> set[str]:
+    """``p.foo`` names this function and same-module callees actually read."""
+    seen = seen if seen is not None else set()
+    if fn in seen or not callable(fn):
+        return set()
+    seen.add(fn)
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    except (OSError, TypeError, SyntaxError):
+        return set()
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "p"):
+            found.add(node.attr)
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else None
+            callee = globals().get(name) if name else None
+            if callee is not None and getattr(callee, "__module__", "") == __name__:
+                found |= _p_fields_reachable(callee, seen)
+    return found
+
+
+def opt_fields_read(family: str) -> frozenset[str]:
+    """OPT_FIELDS this family's compute path reads. Derived, not a table."""
+    fn = _FAMILIES.get(family)
+    if fn is None:
+        return frozenset()
+    return frozenset(_p_fields_reachable(fn) & set(OPT_FIELDS))
+
+
+def searchable_axes(family: str, axes: dict[str, Any]) -> dict[str, Any]:
+    """Drop OPT axes the family never reads. Engine axes stay."""
+    allow = opt_fields_read(family) | ENGINE_OPT_FIELDS
+    return {k: v for k, v in axes.items()
+            if k in allow or k not in OPT_FIELDS}
 
 
 def required_bars(p: Params) -> int:
