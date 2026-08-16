@@ -1997,6 +1997,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # numeric axes inside {strategy: {param: [values...]}}, so this needs
         # the recursive check, not the flat top-level-only one.
         _reject_non_finite_deep(body)
+        metric = body.get("selection_metric")
+        if metric is not None and metric not in (
+                "score", "money_per_day", "gap_freq", "costed_e"):
+            raise HTTPException(400, "selection_metric gecersiz")
         # The grid is the upstream of every applied parameter: an axis holding
         # a 0 gets searched, can win on score, and is then written to a live
         # symbol by the auto-apply path. Optimizer.apply refuses it at the far

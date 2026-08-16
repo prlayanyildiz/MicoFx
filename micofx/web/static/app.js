@@ -1119,6 +1119,13 @@ const OPT_SETTING_FIELDS = [
   { k: "lookback_days", label: "Gecmis penceresi (gun)", step: 10, min: 20 },
   { k: "refine_rounds", label: "Yerel iyilestirme turu", step: 1, min: 0, max: 5 },
   { k: "max_combos", label: "Maks kombinasyon", step: 100, min: 20 },
+  { k: "selection_metric", label: "Secim metrigi", kind: "enum",
+    options: [
+      ["score", "score (net_r x ornek x dd)"],
+      ["money_per_day", "money_per_day (E x islem/gun)"],
+      ["gap_freq", "gap_freq ((wr-BE) x islem/gun)"],
+      ["costed_e", "costed_e (maliyetli E)"],
+    ] },
 ];
 
 const OPT_SETTING_FIELDS_ADVANCED = [
@@ -1143,8 +1150,19 @@ async function loadOptParams() {
 function renderOptForm() {
   $("#opt-settings").innerHTML = "";
   OPT_SETTING_FIELDS.forEach((f) => {
-    const input = el("input", { type: "number", step: f.step, min: f.min, max: f.max });
-    input.value = OPT_PARAMS[f.k];
+    let input;
+    if (f.kind === "enum") {
+      input = el("select", {});
+      (f.options || []).forEach(([value, label]) => {
+        const opt = el("option", { value, text: label });
+        if (String(OPT_PARAMS[f.k] || "score") === value) opt.selected = true;
+        input.appendChild(opt);
+      });
+      input.dataset.optKind = "enum";
+    } else {
+      input = el("input", { type: "number", step: f.step, min: f.min, max: f.max });
+      input.value = OPT_PARAMS[f.k];
+    }
     input.dataset.optKey = f.k;
     $("#opt-settings").appendChild(titled(
       el("div", { class: "field" }, [el("label", { text: f.label }), input]), f.k));
@@ -1232,6 +1250,11 @@ async function saveOptParams() {
   // server stored verbatim over a previously-valid default and crashed the
   // optimizer's background thread (int(None)) on the next run.
   $$("[data-opt-key]").forEach((i) => {
+    if (i.dataset.optKind === "enum") {
+      if (i.value) body[i.dataset.optKey] = i.value;
+      else skipped.push(i.dataset.optKey);
+      return;
+    }
     const value = parseFloat(i.value);
     if (isFinite(value)) body[i.dataset.optKey] = value;
     else skipped.push(i.dataset.optKey);

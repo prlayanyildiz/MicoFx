@@ -74,6 +74,8 @@ def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
             max_cost_share=float(payload.get("max_cost_share") or 0.0),
             spread_scale=float(payload.get("spread_scale") or 1.0),
             charge_costs=bool(payload.get("charge_costs", True)),
+            selection_metric=str(payload.get("selection_metric") or "score"),
+            risk_dollar=float(payload.get("risk_dollar") or 1.0),
         )
     except Exception as exc:                      # keep one bad sweep from killing the run
         outcome = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -547,6 +549,16 @@ class Optimizer:
         # switched off. See SystemConfig.charge_costs for why the default is
         # the other way.
         charge_costs = bool(getattr(sys_cfg, "charge_costs", True))
+        opt_blob = {}
+        if hasattr(self.store, "opt_params"):
+            try:
+                opt_blob = self.store.opt_params() or {}
+            except Exception:
+                opt_blob = {}
+        metric = str(opt_blob.get("selection_metric") or "score")
+        risk_dollar = 1.0
+        if str(getattr(cfg, "lot_mode", "") or "") == "risk":
+            risk_dollar = max(float(getattr(cfg, "risk_percent", 0) or 0), 0.01)
 
         # Timeframe and strategy family are both search dimensions; each pairing is
         # judged on its own held-out slice so they compete on equal terms.
@@ -644,6 +656,8 @@ class Optimizer:
                     # gate is actually switched on - otherwise 0 leaves the
                     # search unfiltered, exactly as before.
                     "max_cost_share": max_cost_share,
+                    "selection_metric": metric,
+                    "risk_dollar": risk_dollar,
                 })
         return plan
 

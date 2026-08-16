@@ -28,6 +28,12 @@ PF_NO_LOSSES = 99.0
 # so the UI never labels a candidate "validated" that auto-apply would reject.
 MIN_OOS_PF = 1.10
 
+# How the validation slice picks among candidates that already cleared the
+# gates. ``score`` is the shipped formula (net_r × sample × dd). The others
+# are measurement tools: they change which survivor wins, not whether a
+# survivor is valid.
+SELECTION_METRICS = ("score", "money_per_day", "gap_freq", "costed_e")
+
 
 @dataclass
 class Result:
@@ -112,6 +118,62 @@ class Result:
             "score_consistency": self.score_consistency(min_trades),
             "exits": {str(k): int(v) for k, v in self.exits.items()},
         }
+
+
+def _payoff_ratio(slice_dict: dict[str, Any]) -> float:
+    """avg win / avg loss from a Result.as_dict payload."""
+    wins = int(slice_dict.get("wins") or 0)
+    losses = int(slice_dict.get("losses") or 0)
+    pf = float(slice_dict.get("profit_factor") or 0)
+    if wins <= 0 or losses <= 0 or pf <= 0:
+        return 0.0
+    return pf * losses / wins
+
+
+def selection_value(slice_dict: dict[str, Any], metric: str, days: float, *,
+                    risk_dollar: float = 1.0, min_trades: int = 25) -> float:
+    """Rank key for one already-gated slice. Gates are applied elsewhere."""
+    metric = metric if metric in SELECTION_METRICS else "score"
+    if metric == "score":
+        return float(slice_dict.get("score") or 0.0)
+    n = int(slice_dict.get("trades") or 0)
+    e = float(slice_dict.get("expectancy") or 0.0)
+    span = max(float(days), 1e-9)
+    tpd = n / span
+    if metric == "money_per_day":
+        return e * tpd * float(risk_dollar)
+    if metric == "gap_freq":
+        ratio = _payoff_ratio(slice_dict)
+        if ratio <= 0:
+            return 0.0
+        be = 100.0 / (1.0 + ratio)
+        return (float(slice_dict.get("win_rate") or 0.0) - be) * tpd
+    # costed_e: holdout/validation E, but only once n clears the same
+    # min_trades the score formula uses as its sample floor. Below that the
+    # number is noise; returning 0 keeps the candidate behind any real edge.
+    if n < max(1, int(min_trades)):
+        return 0.0
+    return e
+
+
+def rank_for_selection(candidates: list[dict[str, Any]], metric: str,
+                       validation_days: float, *,
+                       risk_dollar: float = 1.0,
+                       min_trades: int = 25) -> list[dict[str, Any]]:
+    """Order gated candidates. Default metric reproduces the old tuple sort."""
+    metric = metric if metric in SELECTION_METRICS else "score"
+
+    def key(c: dict[str, Any]) -> tuple[float, float]:
+        valid = c.get("validation") or {}
+        if metric == "score":
+            return (float(valid.get("score") or 0.0), float(c.get("score") or 0.0))
+        return (
+            selection_value(valid, metric, validation_days,
+                            risk_dollar=risk_dollar, min_trades=min_trades),
+            float(c.get("score") or 0.0),
+        )
+
+    return sorted(candidates, key=key, reverse=True)
 
 
 def session_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False) -> np.ndarray:
@@ -863,7 +925,9 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                  day_end_flatten_min: int = 0,
                  max_cost_share: float = 0.0,
                  spread_scale: float = 1.0,
-                 charge_costs: bool = True) -> dict[str, Any]:
+                 charge_costs: bool = True,
+                 selection_metric: str = "score",
+                 risk_dollar: float = 1.0) -> dict[str, Any]:
     """Segmented walk-forward search over a three-way split of history.
 
     History is cut into equal segments and used for three separate jobs, because
@@ -1201,7 +1265,11 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
             # holdout is ranked at half weight vs a noisier 40-trade M5 run.
             "validation": valid.as_dict(MIN_TEST_TRADES),
         })
-    top.sort(key=lambda c: (c["validation"]["score"], c["score"]), reverse=True)
+    validation_days = round((int(bars.time[holdout[0]]) - int(bars.time[validation[0]]))
+                            / 86400.0, 1)
+    top = rank_for_selection(
+        top, selection_metric, validation_days,
+        risk_dollar=risk_dollar, min_trades=min_trades)
     for candidate in top:
         candidate["holdout"] = measure(candidate["params"], holdout).as_dict(MIN_TEST_TRADES)
     top = top[:10]
@@ -1230,10 +1298,11 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         # sweep - see Optimizer.apply's stamp.
         "charge_costs": bool(charge_costs),
         "min_positive_ratio": float(min_positive_ratio),
+        "selection_metric": (
+            selection_metric if selection_metric in SELECTION_METRICS else "score"),
         "holdout_bars": holdout[1] - holdout[0],
         "holdout_days": round((int(bars.time[-1]) - int(bars.time[holdout[0]])) / 86400.0, 1),
-        "validation_days": round((int(bars.time[holdout[0]]) - int(bars.time[validation[0]]))
-                                 / 86400.0, 1),
+        "validation_days": validation_days,
         "span_days": round((int(bars.time[-1]) - int(bars.time[0])) / 86400.0, 1),
         "from": int(bars.time[0]),
         "to": int(bars.time[-1]),
