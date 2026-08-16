@@ -12,65 +12,41 @@ verir.
 
 ## Kurulum
 
-Sifir Windows PC. Repo **ozel** oldugu icin `irm ... raw.githubusercontent`
-404 doner - scripti GitHub'dan cekemezsin. Asagidaki blogu oldugu gibi
-yapistir (Git yoksa onu da kurar, sonra klonlar; ozel depo icin GitHub
-girisi ister):
+**Gereken: Python 3.10 veya ustu** (kurulum 3.12.7 kurar - test edilen surum).
+Daha eskisi kurulumu gecer ama uygulama acilmaz: pydantic modelleri `X | None`
+sozdizimi kullaniyor ve 3.9 onu import aninda reddediyor.
 
-```powershell
-$ErrorActionPreference="Stop"
-function Refresh-Path { $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User"); if (Test-Path "C:\Program Files\Git\cmd\git.exe") { $env:Path = "C:\Program Files\Git\cmd;"+$env:Path } }
-Refresh-Path
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Start-Process "https://git-scm.com/download/win"; throw "Git ve winget yok" }
-  winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements
-  Refresh-Path
-  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Host "Pencereyi kapat, ayni blogu tekrar yapistir." -ForegroundColor Yellow; return }
-}
-$d="$env:USERPROFILE\MicoFx"
-if (Test-Path "$d\.git") { git -C $d pull } elseif (Test-Path $d) { throw "Klasor var ama git degil: $d" } else { git clone https://github.com/prlayanyildiz/MicoFx.git $d }
-cd $d; .\KUR.bat
-```
-
-Git kurulumundan sonra PATH icin pencereyi kapatip blogu bir kez daha
-yapistirman gerekebilir. Hem ilk kurulum hem guncelleme. Repo herkese
-aciksa `GETIR.ps1` tek satiri da olur:
+**Sifir Windows PC** - Python, Git, hicbir sey kurulu olmasa da calisir.
+PowerShell'i acip su tek satiri yapistir:
 
 ```powershell
 irm https://raw.githubusercontent.com/prlayanyildiz/MicoFx/main/GETIR.ps1 | iex
 ```
 
-Git zaten varsa eski tek satir da olur:
+`GETIR.ps1` sirayla: Python 3.12'yi kurar (winget yoksa python.org'dan
+dogrudan indirir - Windows Server'da winget cogu zaman yoktur), depoyu
+getirir (git varsa klonlar, yoksa ZIP indirir), sonra `KUR.bat` ile sanal
+ortami ve paketleri kurar.
 
+Python yeni kurulduysa PATH icin pencereyi bir kez kapatip acman ve ayni
+satiri tekrar yapistirman gerekebilir - script bunu ekranda soyler ve
+kaldigi yerden devam eder.
+
+Ayni satir **guncelleme** icin de kullanilir.
+
+### Git zaten varsa
 ```powershell
 $d="$env:USERPROFILE\MicoFx"; if (Test-Path "$d\.git") { git -C $d pull } else { git clone https://github.com/prlayanyildiz/MicoFx.git $d }; cd $d; .\KUR.bat
 ```
 
-Klasor zaten varsa yeniden klonlamak yerine `git pull` eder - `git clone`
-bos olmayan bir klasore yazmayi reddeder ve o hatadan sonra `.\KUR.bat` da
-bulunamaz.
+### ZIP ile (git istemiyorsan)
+```powershell
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $d="$env:USERPROFILE\MicoFx"; $z="$env:TEMP\micofx.zip"; $x="$env:TEMP\micofx_x"; Invoke-WebRequest "https://github.com/prlayanyildiz/MicoFx/archive/refs/heads/main.zip" -OutFile $z -UseBasicParsing; Remove-Item $x -Recurse -Force -ErrorAction SilentlyContinue; Expand-Archive $z $x -Force; if (Test-Path $d) { Copy-Item "$x\MicoFx-main\*" $d -Recurse -Force } else { Move-Item "$x\MicoFx-main" $d }; cd $d; .\KUR.bat
+```
 
-Hedefi mutlak yolla verir, bu yuzden nereden calistirildigi onemli degil.
-Goreli `MicoFx` kullanan bir surumu depo klasorunun ICINDEN calistirmak
-`MicoFx\MicoFx` diye ic ice bir klasor aciyordu.
-
-Klasor var ama depo degilse (yarim kalmis bir klonlama, elle acilmis bos
-klasor) once onu tasiyin ya da silin: `Remove-Item $env:USERPROFILE\MicoFx
--Recurse -Force`. Icinde eski bir kurulumun `data\` klasoru olabilecegi icin
-bu komut kasitli olarak tek satirin disinda birakildi.
-
-`KUR.bat` Python'u, sanal ortami, paketleri ve masaustu kisayollarini
-halleder. Bastan calistirmak guvenli - yapilmis adimlari atlar, bu yuzden
-`git pull` sonrasi tazeleme icin de ayni dosyayi kullanin.
-
-Sonra MetaTrader 5'te **Araclar > Secenekler > Uzman Danismanlar > Algoritmik
-alim satima izin ver** kutusunu isaretleyin ve masaustundeki **MicoFX Baslat**
-kisayoluna cift tiklayin.
-
-Panel: <http://127.0.0.1:8900> (`MICO_PORT` ile degistirilebilir).
-
-**Acilista sistem izleme modundadir.** Emir gonderilmesi icin panelden **Bot
-Baslat** demeniz gerekir. Ayni MT5 hesabinda ayni anda iki bot calistirmayin.
+ZIP yolu git deposu kurmaz; sonraki guncellemeler icin ya git kur ya ayni
+satiri tekrar calistir. `data/` ve `logs/` arsivde yok, yani mevcut
+veritabani ve gunlukler uzerine yazilmaz.
 
 ## Nasil calisir
 
