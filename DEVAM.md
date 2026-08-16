@@ -87,8 +87,10 @@ değerlidir. İyi haber üretmek için veriyi bükme.
 `~/.claude/.../memory/` boş geldi — eski Claude notları taşınmadı, kayıp.
 
 pytest bu makinede `sessionfinish`'te `WinError 1463` (sembolik bağlantı
-izlenemiyor) ile patlıyor. Testler bitiyor, özet satırı yutuluyor; çıktıyı
-dosyaya alıp `short test summary` bölümünü okumak gerek.
+izlenemiyor) ile patlıyor: exit 1 döner, testler bitmiş olsa bile özet
+satırı yutulur. `2ef2744` basetemp'i `.pytest_tmp`'e taşıdı ama sebebi
+çözmedi. Sonucu öğrenmek için çıktıyı dosyaya alıp ilerleme noktalarını
+saymak gerekiyor.
 
 ---
 
