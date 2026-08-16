@@ -298,7 +298,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              spread_price: np.ndarray | None = None,
              min_stop: float | np.ndarray | None = None,
              flatten: np.ndarray | None = None,
-             skip_after_loss: bool = False) -> Result:
+             skip_after_loss: bool = False,
+             max_open: int = 1) -> Result:
     """Replay one bar window using an already-computed signal set.
 
     ``entries`` and ``spread_price`` are optional precomputed views of values
@@ -370,6 +371,168 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     # book-magic deals: after a win WR 49.3%, after a loss 28%. N-bar wait
     # failed OOS; this is the form that split-replicated.
     skip_next = False
+    max_open = max(1, int(max_open or 1))
+
+    def _cooldown_bars() -> int:
+        cooldown_bars = 0
+        if p.cooldown_sec > 0 and cache.tf_seconds > 0:
+            from .models import is_scalp_strategy
+            max_bars_cd = 1 if (not is_scalp_strategy(p.strategy)
+                                and cache.tf_seconds >= 900) else 2
+            capped = min(int(p.cooldown_sec), max_bars_cd * int(cache.tf_seconds))
+            cooldown_bars = max(0, capped // int(cache.tf_seconds))
+        return cooldown_bars
+
+    def _record_trade(is_buy, entry, sl_dist, s, j0, exit_bar, exit_price, reason):
+        nonlocal equity, peak, streak, bar_total, skip_next
+        if exit_price is None:
+            exit_price = close[exit_bar] + (0.0 if is_buy else s)
+            reason = "time"
+        move = (exit_price - entry) if is_buy else (entry - exit_price)
+        r = float((move - commission_price) / sl_dist)
+        res.cost_r += float((commission_price + s) / sl_dist)
+        res.trades += 1
+        res.net_r += r
+        res.trade_rs.append(r)
+        res.trade_events.append((int(cache.times[j0]), int(cache.times[exit_bar]), r))
+        bar_total += exit_bar - j0 + 1
+        exits[reason] = exits.get(reason, 0) + 1
+        if r >= 0:
+            res.wins += 1
+            res.gross_win_r += r
+            streak = 0
+        else:
+            res.losses += 1
+            res.gross_loss_r += -r
+            streak += 1
+            res.longest_loss_streak = max(res.longest_loss_streak, streak)
+            if skip_after_loss:
+                skip_next = True
+        equity += r
+        peak = max(peak, equity)
+        res.max_dd_r = max(res.max_dd_r, peak - equity)
+
+    def _trail_one(is_buy, entry, sl, trailing, j, s):
+        c = close[j]
+        a = atr[j]
+        gain = (c - entry) if is_buy else (entry - c)
+        if not (a > 0 and gain > 0):
+            return sl, trailing
+        target = None
+        breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
+        if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
+            trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
+            trail = trail_atr
+            if structural and swing_lo is not None and swing_hi is not None:
+                struct_sl = (swing_lo[j] - a * 0.15) if is_buy \
+                    else (swing_hi[j] + a * 0.15)
+                if p.trail_mode == "hybrid":
+                    trail = max(trail_atr, struct_sl) if is_buy else min(trail_atr, struct_sl)
+                else:
+                    trail = struct_sl
+            if target is None or (trail > target if is_buy else trail < target):
+                target = trail
+        if target is None:
+            return sl, trailing
+        ms = float(min_stop_at[j])
+        step = trail_min_step(ms, a, p.trail_step_atr)
+        if is_buy and target > sl:
+            new_sl = min(target, c - ms)
+            if (new_sl - sl >= step
+                    and not (breakeven_locked and new_sl < entry)):
+                return new_sl, True
+        elif not is_buy and target < sl:
+            new_sl = max(target, c + ms)
+            if (sl - new_sl >= step
+                    and not (breakeven_locked and new_sl > entry)):
+                return new_sl, True
+        return sl, trailing
+
+    def _exit_check(is_buy, sl, trailing, j, s):
+        bar_high, bar_low = high[j], low[j]
+        if is_buy:
+            if bar_low <= sl:
+                return sl, ("trail" if trailing else "stop")
+        else:
+            if bar_high + s >= sl:
+                return sl, ("trail" if trailing else "stop")
+        if flatten is not None and flatten[j]:
+            return close[j] + (0.0 if is_buy else s), "flatten"
+        return None, None
+
+    if max_open > 1:
+        opens: list[dict] = []
+        cool_until = -1
+        for j in range(lo, n):
+            still: list[dict] = []
+            for pos in opens:
+                px, reason = _exit_check(pos["is_buy"], pos["sl"], pos["trailing"], j, pos["s"])
+                if px is not None:
+                    _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
+                                  pos["s"], pos["j0"], j, px, reason)
+                    continue
+                if j >= n - 1:
+                    _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
+                                  pos["s"], pos["j0"], j, None, "time")
+                    continue
+                sl, trailing = _trail_one(pos["is_buy"], pos["entry"], pos["sl"],
+                                          pos["trailing"], j, pos["s"])
+                pos["sl"] = sl
+                pos["trailing"] = trailing
+                still.append(pos)
+            opens = still
+
+            while ptr < entries.size and int(entries[ptr]) + 1 <= j:
+                i = int(entries[ptr])
+                j0 = i + 1
+                if j0 != j:
+                    ptr += 1
+                    continue
+                if j0 >= n - 1:
+                    ptr += 1
+                    break
+                if tradable is not None and not tradable[j0]:
+                    ptr += 1
+                    continue
+                atr_entry = atr[i]
+                if not math.isfinite(atr_entry) or atr_entry <= 0:
+                    ptr += 1
+                    continue
+                s = float(spread_price[j0])
+                if p.max_spread_atr > 0 and s > atr_entry * p.max_spread_atr:
+                    ptr += 1
+                    continue
+                if bool(buy_flags[i]) and bool(sell_flags[i]):
+                    ptr += 1
+                    continue
+                is_buy = bool(buy_flags[i])
+                if not is_buy and not bool(sell_flags[i]):
+                    ptr += 1
+                    continue
+                if skip_after_loss and skip_next:
+                    skip_next = False
+                    ptr += 1
+                    continue
+                if i <= cool_until:
+                    ptr += 1
+                    continue
+                if len(opens) >= max_open:
+                    ptr += 1
+                    continue
+                sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
+                entry = float(open_[j0] + s) if is_buy else float(open_[j0])
+                sl = entry - sl_dist if is_buy else entry + sl_dist
+                opens.append({
+                    "is_buy": is_buy, "entry": entry, "sl": sl,
+                    "sl_dist": sl_dist, "trailing": False, "j0": j0, "s": s,
+                })
+                cd = _cooldown_bars()
+                if cd:
+                    cool_until = max(cool_until, j0 + cd - 1)
+                ptr += 1
+        res.avg_bars = bar_total / res.trades if res.trades else 0.0
+        res.exits = exits
+        return res
 
     while ptr < entries.size and guard < 100000:
         guard += 1
