@@ -133,8 +133,8 @@ def test_a_vanishing_file_does_not_abort_the_backup(tmp_path, monkeypatch):
 
     real_iter = backup._iter_files
 
-    def _iter_then_delete(r):
-        for p in list(real_iter(r)):
+    def _iter_then_delete(r, skipped=None):
+        for p in list(real_iter(r, skipped)):
             if p == ghost:
                 p.unlink()          # disappears between the walk and the write
             yield p

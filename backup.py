@@ -13,6 +13,7 @@ be recovered from git, so it is the only one worth being careful about.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import sqlite3
 import sys
@@ -39,21 +40,75 @@ EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache", ".pytest_tmp", ".git"}
 DB_REL = DB_PATH.relative_to(ROOT)
 
 
-def _iter_files(root: Path):
+def _emit(msg: str) -> None:
+    """Write one operator line that must not die on a cp1252 console.
+
+    Windows task history captures stdout. Turkish OSError text carries
+    ``ğ`` (U+011F); ``print`` on cp1252 raises UnicodeEncodeError and
+    swallows the original failure. Measured 16.08 on this machine.
+    """
+    text = msg if msg.endswith("\n") else msg + "\n"
+    stream = sys.stdout
+    try:
+        stream.write(text)
+        stream.flush()
+    except UnicodeEncodeError:
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        buf = getattr(stream, "buffer", None)
+        if buf is not None:
+            buf.write(text.encode(encoding, errors="replace"))
+            buf.flush()
+            return
+        stream.write(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+        stream.flush()
+
+
+def _iter_files(root: Path, skipped: list[int] | None = None):
+    """Yield backup candidates. Unreadable paths are counted, not fatal.
+
+    Exclude-dirs are pruned before any ``stat``: ``Path.rglob`` + ``is_dir``
+    died on a ``.pytest_tmp\\*current`` junction (WinError 1463) before the
+    exclude list was consulted.
+    """
+    box = skipped if skipped is not None else [0]
     db = root / DB_REL
-    for path in root.rglob("*"):
-        if path.is_dir():
+
+    def onerror(_err: OSError) -> None:
+        box[0] += 1
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=onerror, followlinks=False):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDE_DIRS]
+        here = Path(dirpath)
+        try:
+            rel_dir = here.relative_to(root)
+        except ValueError:
             continue
-        if any(part in EXCLUDE_DIRS for part in path.relative_to(root).parts):
+        if any(part in EXCLUDE_DIRS for part in rel_dir.parts):
+            dirnames[:] = []
             continue
-        # The settings DB is added separately from a consistent snapshot (see
-        # _snapshot_db) - this task normally runs with the bot live, and
-        # zipfile reading the file page by page while the engine writes to it
-        # produces a torn copy. Its sidecar journal/WAL files would only ever
-        # describe the live database, never the snapshot, so they go too.
-        if path == db or path.name.startswith(db.name + "-"):
-            continue
-        yield path
+        for name in filenames:
+            path = here / name
+            try:
+                rel = path.relative_to(root)
+            except (OSError, ValueError):
+                box[0] += 1
+                continue
+            if any(part in EXCLUDE_DIRS for part in rel.parts):
+                continue
+            # The settings DB is added separately from a consistent snapshot (see
+            # _snapshot_db) - this task normally runs with the bot live, and
+            # zipfile reading the file page by page while the engine writes to it
+            # produces a torn copy. Its sidecar journal/WAL files would only ever
+            # describe the live database, never the snapshot, so they go too.
+            if path == db or path.name.startswith(db.name + "-"):
+                continue
+            try:
+                if path.is_dir():
+                    continue
+            except OSError:
+                box[0] += 1
+                continue
+            yield path
 
 
 def _snapshot_db(source: Path, workdir: Path) -> Path | None:
@@ -139,11 +194,11 @@ def _prune(folder: Path, keep: int) -> None:
         # Full path, not folder.name: both destinations are usually called
         # "MicoFX_Yedek", so the short form made the one line that says
         # something was DELETED unable to say from where.
-        print(f"Eski yedek siliniyor: {old}")
+        _emit(f"Eski yedek siliniyor: {old}")
         try:
             old.unlink()
         except OSError as exc:
-            print(f"UYARI: eski yedek silinemedi ({old}): {exc}")
+            _emit(f"UYARI: eski yedek silinemedi ({old}): {exc}")
 
 
 def main() -> int:
@@ -152,7 +207,7 @@ def main() -> int:
     except RuntimeError as exc:
         # Unattended scheduled task: a broken settings DB must produce a
         # readable line in the task history, not a traceback.
-        print(f"HATA: {exc}")
+        _emit(f"HATA: {exc}")
         return 1
     enabled = bool(getattr(store.system, "backup_enabled", True))
     raw_dir = str(store.system.backup_dir)
@@ -165,7 +220,7 @@ def main() -> int:
         # Deliberately off, so exit 0: the Windows task still fires nightly and
         # a non-zero result here would show up as a failing scheduled task
         # forever, which is exactly how a real failure later gets ignored.
-        print("Otomatik yedekleme kapali (Sistem > backup_enabled). Yedek alinmadi.")
+        _emit("Otomatik yedekleme kapali (Sistem > backup_enabled). Yedek alinmadi.")
         return 0
 
     # PATCH /api/system already refuses to WRITE a UNC backup_dir without
@@ -179,7 +234,7 @@ def main() -> int:
         return path.startswith("\\\\") or path.startswith("//")
 
     if _is_unc(raw_dir) and not allow_unc:
-        print(f"HATA: yedek konumu UNC ({raw_dir!r}) ama backup_dir_allow_unc kapali - "
+        _emit(f"HATA: yedek konumu UNC ({raw_dir!r}) ama backup_dir_allow_unc kapali - "
               f"yedek yazilmadi. Web panelinden System > backup_dir_allow_unc:true "
               f"yapin veya yerel bir yol secin.")
         return 1
@@ -187,7 +242,7 @@ def main() -> int:
     # trusted for being "just a copy" - it receives the identical archive,
     # settings DB included.
     if raw_second and _is_unc(raw_second) and not allow_unc:
-        print(f"UYARI: ikincil yedek konumu UNC ({raw_second!r}) ama "
+        _emit(f"UYARI: ikincil yedek konumu UNC ({raw_second!r}) ama "
               f"backup_dir_allow_unc kapali - ikincil kopya atlandi.")
         raw_second = ""
 
@@ -200,7 +255,7 @@ def main() -> int:
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        print(f"HATA: yedek konumu kullanilamiyor ({raw_dir}): {exc}\n"
+        _emit(f"HATA: yedek konumu kullanilamiyor ({raw_dir}): {exc}\n"
               f"Surucu takili degil veya yol yanlis olabilir. Web panelinden "
               f"Sistem > 'Yedek konumu' alanini bu makinede gercekten var olan "
               f"bir klasore ayarlayin (orn. C:\\MicoFX_Yedek), ya da otomatik "
@@ -231,24 +286,28 @@ def main() -> int:
     try:
         try:
             with zipfile.ZipFile(part_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for f in _iter_files(ROOT):
+                skipped = [0]
+                for f in _iter_files(ROOT, skipped):
                     try:
                         zf.write(f, f.relative_to(ROOT))
                     except (OSError, ValueError) as exc:
                         # A file that disappeared between the walk and the
                         # write (a log rotating, a temp file cleaned up) must
                         # not cost the whole backup - note it and carry on.
-                        print(f"UYARI: atlandi ({f}): {exc}")
+                        _emit(f"UYARI: atlandi ({f}): {exc}")
+                        skipped[0] += 1
+                if skipped[0]:
+                    _emit(f"UYARI: {skipped[0]} yol okunamadi, atlandi.")
                 snapshot = _snapshot_db(ROOT / DB_REL, workdir)
                 if snapshot is not None:
                     zf.write(snapshot, DB_REL)
-                    print(f"Ayar veritabani tutarli anlik goruntu olarak eklendi "
+                    _emit(f"Ayar veritabani tutarli anlik goruntu olarak eklendi "
                           f"({snapshot.stat().st_size} bayt).")
         except (OSError, sqlite3.Error) as exc:
             # Unattended task: a readable line, and no half-archive left
             # claiming to be a backup.
             part_path.unlink(missing_ok=True)
-            print(f"HATA: yedek olusturulamadi: {exc}\n"
+            _emit(f"HATA: yedek olusturulamadi: {exc}\n"
                   f"Onceki yedekler oldugu gibi birakildi.")
             return 1
     finally:
@@ -259,31 +318,31 @@ def main() -> int:
     # one's place there.
     if _database_missing(part_path):
         part_path.unlink(missing_ok=True)
-        print(f"HATA: arsivde '{DB_REL.as_posix()}' yok - bu bir yedek degil.")
-        print(f"  Kaynak veritabani beklenen yerde mi: {ROOT / DB_REL}")
-        print("  Onceki yedekler oldugu gibi birakildi.")
+        _emit(f"HATA: arsivde '{DB_REL.as_posix()}' yok - bu bir yedek degil.")
+        _emit(f"  Kaynak veritabani beklenen yerde mi: {ROOT / DB_REL}")
+        _emit("  Onceki yedekler oldugu gibi birakildi.")
         return 1
 
     try:
         part_path.replace(zip_path)
     except OSError as exc:
         part_path.unlink(missing_ok=True)
-        print(f"HATA: yedek adlandirilamadi ({zip_path}): {exc}")
+        _emit(f"HATA: yedek adlandirilamadi ({zip_path}): {exc}")
         return 1
 
-    print(f"Yedek olusturuldu: {zip_path}")
+    _emit(f"Yedek olusturuldu: {zip_path}")
 
     decoys = _verify_archive(zip_path)
     if decoys:
-        print(f"UYARI: arsivde {len(decoys)} adet fazladan '{DB_REL.name}' var - "
+        _emit(f"UYARI: arsivde {len(decoys)} adet fazladan '{DB_REL.name}' var - "
               f"geri yuklerken MUTLAKA '{DB_REL.as_posix()}' yolunu kullanin, "
               f"yol sonuna bakarak secmeyin:")
         for name in decoys[:5]:
-            print(f"  {name}")
+            _emit(f"  {name}")
         if len(decoys) > 5:
-            print(f"  ... ve {len(decoys) - 5} tane daha")
-        print(f"  Bunlar muhtemelen proje klasorunde kalmis gecici bir "
-              f"klasorden geliyor; EXCLUDE_DIRS'e ekleyin.")
+            _emit(f"  ... ve {len(decoys) - 5} tane daha")
+        _emit("  Bunlar muhtemelen proje klasorunde kalmis gecici bir "
+              "klasorden geliyor; EXCLUDE_DIRS'e ekleyin.")
 
     # Copy the finished archive rather than building it twice: a second walk
     # would snapshot the DB again a few seconds later, so the two "copies"
@@ -294,14 +353,14 @@ def main() -> int:
             second_dir.mkdir(parents=True, exist_ok=True)
             second_path = second_dir / zip_path.name
             shutil.copy2(zip_path, second_path)
-            print(f"Ikincil kopya: {second_path}")
+            _emit(f"Ikincil kopya: {second_path}")
             _prune(second_dir, keep)
         except OSError as exc:
             # Never fatal - see backup_dir_secondary's note in models.py.
-            print(f"UYARI: ikincil kopya yazilamadi ({raw_second}): {exc}")
+            _emit(f"UYARI: ikincil kopya yazilamadi ({raw_second}): {exc}")
 
     _prune(dest_dir, keep)
-    print(f"Tamamlandi. Guncel yedek sayisi: {len(list(dest_dir.glob('MicoFX_*.zip')))}")
+    _emit(f"Tamamlandi. Guncel yedek sayisi: {len(list(dest_dir.glob('MicoFX_*.zip')))}")
     return 0
 
 
