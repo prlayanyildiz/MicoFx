@@ -93,5 +93,7 @@ def test_the_fills_really_do_use_the_spread():
         encoding="utf-8")
     assert "entry = float(open_[j0] + s) if is_buy else float(open_[j0] - s)" in src
     assert 'exit_price = close[j] + (0.0 if is_buy else s)' in src
-    assert "if bar_high >= sl:" in src
-    assert "bar_high + s >= sl" not in src
+    # Short stop trigger is ask (high + pad), not a second fill charge.
+    # Exit price on that path is still the SL.
+    assert "bar_high + float(trigger_pad[j]) >= sl" in src
+    assert "return sl, (\"trail\" if trailing else \"stop\")" in src

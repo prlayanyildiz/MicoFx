@@ -411,6 +411,12 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
 
     if spread_price is None:
         spread_price = spread_pts * point
+    # Live short stops fire on the ASK. Paper OHLC is bid, so the trigger is
+    # high + this bar's spread. That pad is a price reference, not a cost:
+    # charge_costs may zero ``spread_price`` (the fill), but the broker still
+    # covers a short when ask trades through the SL. Exit price stays the SL.
+    trigger_pad = (imputed_spread_pts(np.asarray(spread_pts, dtype=np.float64))
+                   * float(point)).tolist()
     # Falls back to the old flat approximation when the caller doesn't know the
     # symbol's real broker floor (``mt5client.min_stop_distance`` - stops_level,
     # freeze_level, current spread) - live can legally require a wider stop than
@@ -529,12 +535,17 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         return sl, trailing
 
     def _exit_check(is_buy, sl, trailing, j, s):
+        # Four corners, live:
+        #   long stop / long trail  — bid vs SL  → bar_low <= sl
+        #   short stop / short trail — ask vs SL  → bar_high + pad >= sl
+        # There is no separate TP; flatten is a market cover (close, +pad on
+        # a short) and is not a stop trigger.
         bar_high, bar_low = high[j], low[j]
         if is_buy:
             if bar_low <= sl:
                 return sl, ("trail" if trailing else "stop")
         else:
-            if bar_high >= sl:
+            if bar_high + float(trigger_pad[j]) >= sl:
                 return sl, ("trail" if trailing else "stop")
         if flatten is not None and flatten[j]:
             return close[j] + (0.0 if is_buy else s), "flatten"
@@ -686,7 +697,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if bar_low <= sl:
                     exit_price, reason = sl, ("trail" if trailing else "stop")
             else:
-                if bar_high >= sl:
+                if bar_high + float(trigger_pad[j]) >= sl:
                     exit_price, reason = sl, ("trail" if trailing else "stop")
             if exit_price is not None:
                 exit_bar = j
