@@ -64,3 +64,23 @@ def test_the_step_counter_matches_the_steps():
     assert f"/{declared}]" in src, (
         f"{declared} Step calls but the counter does not say /{declared}"
     )
+
+
+def test_pytest_keeps_its_temp_tree_out_of_the_shared_one():
+    """The suite must not depend on Windows symlink policy to exit zero.
+
+    pytest's default layout writes a "pytest-current" symlink beside its
+    numbered run directories and resolves it during teardown. The laptop
+    refuses with WinError 5 and Windows Server with WinError 1463 (symlink
+    following disabled by policy). Every test passes and pytest then raises on
+    the way out, exiting non-zero - indistinguishable from a failing suite to
+    KUR.ps1's install check, which reported exactly that on a healthy machine.
+    """
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    addopts = cfg.get("tool", {}).get("pytest", {}).get("ini_options", {}).get("addopts", "")
+    assert "--basetemp" in addopts, (
+        "without an explicit basetemp the suite exits non-zero on machines that "
+        "disable symlink evaluation, even when every test passes"
+    )
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert ".pytest_tmp" in ignored, "pytest clears basetemp at startup; keep it untracked"

@@ -5,6 +5,23 @@
 # means "something new is wrong" rather than "the backlog is still there". A
 # checker that always fails is a checker nobody reads.
 
+[tool.pytest.ini_options]
+# Keep the temp tree inside the project instead of the shared Windows one.
+#
+# Under its default layout pytest writes a "pytest-current" SYMLINK beside the
+# numbered run directories and resolves it during session teardown. Both
+# machines this project runs on refuse that: the laptop returns WinError 5
+# (access denied) and Windows Server returns WinError 1463 (symbolic link
+# cannot be followed, its type is disabled by policy). Every test passes, then
+# pytest itself raises on the way out and exits non-zero - which reads exactly
+# like a failing suite to anything checking the exit code, and KUR.ps1's
+# install check duly reported "TESTLER GECMEDI" on a machine where nothing was
+# wrong.
+#
+# An explicit basetemp skips the numbered/symlink scheme entirely. It lives in
+# .gitignore, and pytest clears it at session start, so nothing else may use it.
+addopts = "--basetemp=.pytest_tmp"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
