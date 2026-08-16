@@ -15,9 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx.optimizer import Optimizer
 
 
-def _row(strategy: str, val_n: int, hold_n: int, score: float = 10.0) -> dict:
+def _row(strategy: str, val_n: int, hold_n: int, score: float = 10.0,
+         timeframe: str = "M15") -> dict:
     return {
         "strategy": strategy,
+        "timeframe": timeframe,
         "validated": True,
         "best": {
             "validation": {"score": score, "trades": val_n},
@@ -37,3 +39,27 @@ def test_swapping_holdout_n_does_not_change_a_validation_tie():
     right = opt._pick_by_validation([a_lo, b_hi])["strategy"]
     assert left == right, (
         f"holdout n flipped the tie: {left} vs {right} — untouched slice leaked")
+
+
+def test_two_scalp_peers_also_ignore_holdout_n():
+    """micro_rev vs burst share the scalp flag, so holdout cannot hide behind it."""
+    opt = Optimizer.__new__(Optimizer)
+    a_hi = _row("micro_rev", 20, 999)
+    b_lo = _row("burst", 20, 1)
+    a_lo = _row("micro_rev", 20, 1)
+    b_hi = _row("burst", 20, 999)
+    left = opt._pick_by_validation([a_hi, b_lo])["strategy"]
+    right = opt._pick_by_validation([a_lo, b_hi])["strategy"]
+    assert left == right, (
+        f"holdout n flipped a scalp/scalp tie: {left} vs {right}")
+
+
+def test_timeframe_name_breaks_a_validation_tie_not_list_order():
+    """Same family, same validation: winner must not follow whoever was first."""
+    opt = Optimizer.__new__(Optimizer)
+    h1 = _row("t3_stoch", 20, 1, timeframe="H1")
+    m15 = _row("t3_stoch", 20, 999, timeframe="M15")
+    first = opt._pick_by_validation([h1, m15])
+    second = opt._pick_by_validation([m15, h1])
+    # max() on the name, not list order. Holdout n differs on purpose.
+    assert first["timeframe"] == second["timeframe"] == "M15"

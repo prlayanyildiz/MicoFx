@@ -686,6 +686,41 @@ class Store:
         self.set_setting("opt_params", {})
         return self.opt_params()
 
+    def stamp_opt_run_apply(self, run_id: int, force: bool, previous: dict[str, Any] | None,
+                            applied_at: float) -> bool:
+        """Merge G11's apply-path fields into an existing search row.
+
+        The panel's history/results apply does not go through
+        ``Optimizer._finish_symbol``, so without this the search row stayed
+        ``applied=0`` and key-less while the live book changed. Updating the
+        row keeps one candidate as one identity; a second insert would
+        double-count ``applied`` and split what the panel already shows.
+
+        Returns False when ``run_id`` is gone (retention already trimmed it)
+        so the caller can insert instead of pretending the stamp landed.
+        """
+        with self._lock:
+            row = self._db.execute(
+                "SELECT payload FROM opt_runs WHERE id=?", (int(run_id),)
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                blob = json.loads(row["payload"]) if row["payload"] else {}
+            except json.JSONDecodeError:
+                blob = {}
+            if not isinstance(blob, dict):
+                blob = {}
+            blob["force"] = bool(force)
+            blob["applied_at"] = float(applied_at)
+            blob["previous"] = previous
+            self._db.execute(
+                "UPDATE opt_runs SET payload=?, applied=1 WHERE id=?",
+                (json.dumps(blob, ensure_ascii=False), int(run_id)),
+            )
+            self._db.commit()
+            return True
+
     def record_opt_run(self, symbol: str, score: float, payload: dict[str, Any], applied: bool) -> int:
         blob = json.dumps(payload, ensure_ascii=False)
         with self._lock:

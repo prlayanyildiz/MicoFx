@@ -2166,9 +2166,42 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             raise HTTPException(
                 400, f"bu sonuc dogrulanmadi ({detail.get('keep_reason', '')}) - "
                      f"uygulamak icin force:true gonderin")
+        # Snapshot before apply() mutates the live row. Same three keys
+        # _finish_symbol writes: a later read of cfg would report the
+        # candidate as its own predecessor.
+        live = store.symbols.get(body.symbol)
+        previous = ({"strategy": live.strategy, "timeframe": live.timeframe}
+                    if live is not None else None)
         result = optimizer.apply(body.symbol, params, float(score), detail, timeframe, strategy)
         if not result.get("ok"):
             raise HTTPException(400, result.get("error", "uygulanamadi"))
+        applied_at = time.time()
+        run_id = None
+        if isinstance(detail, dict) and detail.get("id") is not None:
+            try:
+                run_id = int(detail["id"])
+            except (TypeError, ValueError):
+                run_id = None
+        stamped = False
+        if run_id is not None and hasattr(store, "stamp_opt_run_apply"):
+            stamped = bool(store.stamp_opt_run_apply(
+                run_id, bool(body.force), previous, applied_at))
+        if not stamped and hasattr(store, "record_opt_run"):
+            # Hand-typed params, or the matched row was already trimmed.
+            # A new row is the only way this door leaves the same trace
+            # search-apply does. Search rows with an id were updated above.
+            store.record_opt_run(
+                body.symbol, float(score),
+                {
+                    "timeframe": timeframe or (live.timeframe if live is not None else ""),
+                    "strategy": strategy or (live.strategy if live is not None else ""),
+                    "params": params,
+                    "force": bool(body.force),
+                    "applied_at": applied_at,
+                    "previous": previous,
+                },
+                applied=True,
+            )
 
         # force stays ALLOWED - it is a deliberate override - but it used to
         # leave no trace: it logged the same success line a fully-validated

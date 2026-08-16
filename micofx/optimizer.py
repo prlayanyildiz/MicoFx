@@ -1041,12 +1041,14 @@ class Optimizer:
             return top
         # Both OOS slices already gated the candidate; trade-count tiebreak
         # is validation only. Holdout n here leaked the untouched slice into
-        # family/TF choice (BS-2d). Name last so equal validation n is stable.
+        # family/TF choice (BS-2d). Name last so equal validation n is stable
+        # across list order (strategy, then timeframe).
         return max(peers, key=lambda a: (
             1 if is_scalp_strategy(a["strategy"]) else 0,
             int(a["best"]["validation"].get("trades", 0) or 0),
             float(a["best"]["validation"]["score"]),
             str(a.get("strategy") or ""),
+            str(a.get("timeframe") or ""),
         ))
 
     @staticmethod
