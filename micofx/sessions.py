@@ -223,6 +223,15 @@ def local_utc_offset_seconds(epoch: float | None = None) -> int:
              else time.timezone)
 
 
+# No two wall clocks on earth sit more than this far apart. A larger figure
+# never means "the broker moved timezone" - it means the reading is stale,
+# which is what a closed market produces: MetaTrader5's Python API exposes no
+# TimeCurrent(), so the only broker clock available is the newest tick stamp,
+# and over a weekend that is two days old. The first version of this check
+# lacked the bound and spent Sunday reporting "-42 hours".
+MAX_CLOCK_SKEW_HOURS = 14
+
+
 def session_clock_skew_hours(
     broker_now: float,
     local_epoch: float | None = None,
@@ -237,8 +246,10 @@ def session_clock_skew_hours(
     while Pepperstone and Turkey are both UTC+3, -1 when the broker drops
     to UTC+2 in October and Windows does not.
 
-    None when ``broker_now`` is unknown (0). Does not shift any gate - it
-    is the measurement the October drift needs before anyone picks a fix.
+    None when ``broker_now`` is unknown (0) or when the answer exceeds
+    ``MAX_CLOCK_SKEW_HOURS``, which says the reading is stale rather than
+    shifted. Callers that can tell staleness directly should still gate on
+    that - this bound is the backstop, not the test. Does not shift any gate.
     """
     if not (float(broker_now) > 0):
         return None
@@ -247,7 +258,8 @@ def session_clock_skew_hours(
         local_utc_offset_sec = local_utc_offset_seconds(local_epoch)
     broker_as_utc = int(round((float(broker_now) - local_epoch) / 3600.0))
     local_h = int(round(int(local_utc_offset_sec) / 3600.0))
-    return broker_as_utc - local_h
+    skew = broker_as_utc - local_h
+    return None if abs(skew) > MAX_CLOCK_SKEW_HOURS else skew
 
 
 def session_clock_warning(skew_hours: int | None) -> str | None:

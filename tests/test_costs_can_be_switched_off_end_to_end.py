@@ -8,9 +8,9 @@ result on what was bought and sold.
 The naive version of that change is to stop adding ``cost_r``. It would not be
 the same thing. In ``simulate`` the spread moves the fills themselves:
 
-    entry      = open[j0] + s   on a buy
-    exit_price = close[j] + s   on a sell
-    stop check = bar_high + s >= sl
+    entry      = open[j0] + s   on a buy, open[j0] - s on a sell
+    exit_price = close[j] + s   on a sell (cover pays the ask)
+    stop check = raw high/low vs SL
 
 so a run with ``cost_r`` suppressed but the series intact still buys the ask
 and sells the bid, and still stops out on a wick that only the spread reached.
@@ -91,5 +91,7 @@ def test_the_fills_really_do_use_the_spread():
     become a cosmetic change and this whole switch would need rethinking."""
     src = (Path(__file__).resolve().parents[1] / "micofx" / "backtest.py").read_text(
         encoding="utf-8")
-    assert "entry = float(open_[j0] + s) if is_buy else float(open_[j0])" in src
+    assert "entry = float(open_[j0] + s) if is_buy else float(open_[j0] - s)" in src
     assert 'exit_price = close[j] + (0.0 if is_buy else s)' in src
+    assert "if bar_high >= sl:" in src
+    assert "bar_high + s >= sl" not in src

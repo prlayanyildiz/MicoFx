@@ -534,7 +534,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             if bar_low <= sl:
                 return sl, ("trail" if trailing else "stop")
         else:
-            if bar_high + s >= sl:
+            if bar_high >= sl:
                 return sl, ("trail" if trailing else "stop")
         if flatten is not None and flatten[j]:
             return close[j] + (0.0 if is_buy else s), "flatten"
@@ -589,7 +589,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if not is_buy and not bool(sell_flags[i]):
                     ptr += 1
                     continue
-                price_ref = float(open_[j0] + s) if is_buy else float(open_[j0])
+                price_ref = float(open_[j0] + s) if is_buy else float(open_[j0] - s)
                 if (p.min_atr_ratio > 0 and price_ref > 0
                         and (atr_entry / price_ref) < p.min_atr_ratio):
                     ptr += 1
@@ -605,7 +605,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                     ptr += 1
                     continue
                 sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
-                entry = float(open_[j0] + s) if is_buy else float(open_[j0])
+                entry = float(open_[j0] + s) if is_buy else float(open_[j0] - s)
                 sl = entry - sl_dist if is_buy else entry + sl_dist
                 opens.append({
                     "is_buy": is_buy, "entry": entry, "sl": sl,
@@ -650,7 +650,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         if not is_buy and not bool(sell_flags[i]):
             ptr += 1
             continue
-        price_ref = float(open_[j0] + s) if is_buy else float(open_[j0])
+        price_ref = float(open_[j0] + s) if is_buy else float(open_[j0] - s)
         if (p.min_atr_ratio > 0 and price_ref > 0
                 and (atr_entry / price_ref) < p.min_atr_ratio):
             ptr += 1
@@ -660,7 +660,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             ptr += 1
             continue
         sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
-        entry = float(open_[j0] + s) if is_buy else float(open_[j0])
+        entry = float(open_[j0] + s) if is_buy else float(open_[j0] - s)
         sl = entry - sl_dist if is_buy else entry + sl_dist
         # No take-profit level exists in this model, so the only way out is the
         # stop - hard at first, trailing once the move has paid for it. See
@@ -686,7 +686,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if bar_low <= sl:
                     exit_price, reason = sl, ("trail" if trailing else "stop")
             else:
-                if bar_high + s >= sl:
+                if bar_high >= sl:
                     exit_price, reason = sl, ("trail" if trailing else "stop")
             if exit_price is not None:
                 exit_bar = j

@@ -45,6 +45,12 @@ def _round_or_none(value: float | None, digits: int) -> float | None:
 # plus a final overflow bucket for anything above.
 SPREAD_RATIO_STEP = 0.1
 SPREAD_RATIO_BUCKETS = 51
+
+# Past this, the newest tick stamp is no longer evidence of what time it is at
+# the broker. Generous on purpose: ticks thin out overnight, and the case this
+# has to catch is a shut market, which is hours away from this bound, not
+# minutes.
+BROKER_CLOCK_MAX_AGE_SEC = 600.0
 # Below this many samples the ratio is not reported or applied - a handful of
 # ticks from one hour is exactly the reading that misled us once already.
 SPREAD_RATIO_MIN_SAMPLES = 400
@@ -1657,6 +1663,13 @@ class Engine:
             state.entry_block = "ikincil_cozulemedi_acik"
             return
         if not result.get("ok"):
+            if result.get("invalid_stops_retry_failed"):
+                try:
+                    n = int(self.store.get_setting("invalid_stops_retry_fail", 0) or 0)
+                    self.store.set_setting("invalid_stops_retry_fail", n + 1)
+                    LOG.emit(f"INVALID_STOPS ikinci ret (sayac {n + 1})", "WARN", cfg.symbol)
+                except Exception:
+                    pass
             state.note = result.get("error", "emir hatasi")
             state.entry_block = "emir_hatasi"
             # Park on any verified-flat link refusal, not only TRADE_RETCODE_*
@@ -2641,12 +2654,25 @@ class Engine:
             out[name] = row
         return out
 
-    def _session_clock_payload(self) -> dict[str, Any]:
-        broker_now = 0.0
+    def _measured_clock_skew(self, server_now: float) -> int | None:
+        """Broker-vs-machine hour gap, or None when it cannot be measured.
+
+        The broker clock is only knowable while ticks flow - MetaTrader5's
+        Python API exposes no TimeCurrent() - so a shut market freezes it and
+        the difference stops being an offset and becomes "how long since the
+        close". Reading a stale stamp as the current broker time is what put
+        "broker saati yerel saatten -42 saat farkli" in the log all weekend.
+        """
         getter = getattr(self.client, "broker_now", None)
-        if callable(getter):
-            broker_now = float(getter() or 0.0)
-        skew = sessions.session_clock_skew_hours(broker_now, self.client.server_now())
+        broker_now = float(getter() or 0.0) if callable(getter) else 0.0
+        ager = getattr(self.client, "broker_now_age", None)
+        age = ager() if callable(ager) else None
+        if age is None or age > BROKER_CLOCK_MAX_AGE_SEC:
+            return None
+        return sessions.session_clock_skew_hours(broker_now, server_now)
+
+    def _session_clock_payload(self) -> dict[str, Any]:
+        skew = self._measured_clock_skew(self.client.server_now())
         return {
             "session_clock_skew_hours": skew,
             "session_clock_warning": sessions.session_clock_warning(skew),
@@ -2657,9 +2683,7 @@ class Engine:
 
         Measurement only. Does not rewrite session windows.
         """
-        getter = getattr(self.client, "broker_now", None)
-        broker_now = float(getter() or 0.0) if callable(getter) else 0.0
-        skew = sessions.session_clock_skew_hours(broker_now, server_now)
+        skew = self._measured_clock_skew(server_now)
         warn = sessions.session_clock_warning(skew)
         prev = getattr(self, "_session_clock_skew", None)
         self._session_clock_skew = skew

@@ -1032,13 +1032,14 @@ class Optimizer:
                  if float(a["best"]["validation"]["score"]) >= ceiling * (1.0 - self.TIE_BAND)]
         if len(peers) < 2:
             return top
-        # Both OOS slices count, so a candidate cannot win the tiebreak on a
-        # validation window that simply happened to be busier.
+        # Both OOS slices already gated the candidate; trade-count tiebreak
+        # is validation only. Holdout n here leaked the untouched slice into
+        # family/TF choice (BS-2d). Name last so equal validation n is stable.
         return max(peers, key=lambda a: (
             1 if is_scalp_strategy(a["strategy"]) else 0,
-            int(a["best"]["validation"].get("trades", 0) or 0)
-            + int(a["best"]["holdout"].get("trades", 0) or 0),
+            int(a["best"]["validation"].get("trades", 0) or 0),
             float(a["best"]["validation"]["score"]),
+            str(a.get("strategy") or ""),
         ))
 
     @staticmethod

@@ -176,6 +176,11 @@ class MT5Client:
         # than the wall clock, so the broker's UTC offset cancels instead of
         # landing in the answer.
         self._broker_now: float = 0.0
+        # This machine's epoch when _broker_now last advanced. Without it the
+        # broker clock cannot be told apart from a frozen one: over a weekend
+        # _broker_now keeps returning Friday's close, and anything that reads
+        # it as "now" is wrong by however long the market has been shut.
+        self._broker_seen_at: float = 0.0
         self._name_map: dict[str, str] = {}
         self._overrides: dict[str, str] = {}
         self._symbol_names_cache: list[str] = []
@@ -639,7 +644,9 @@ class MT5Client:
         self._tick_cache[symbol] = (now, data)
         # Newest broker-clock reading seen anywhere in the book - see
         # market_open() for why this, and not the wall clock, is the yardstick.
-        self._broker_now = max(self._broker_now, data["time"])
+        if data["time"] > self._broker_now:
+            self._broker_now = data["time"]
+            self._broker_seen_at = time.time()
         return data
 
     def market_open(self, symbol: str, max_age_sec: int = 180) -> bool:
@@ -684,6 +691,23 @@ class MT5Client:
         and fall back, never as "the epoch began".
         """
         return float(self._broker_now)
+
+    def broker_now_age(self) -> float | None:
+        """Seconds of this machine's time since the broker clock last moved.
+
+        MetaTrader5's Python API has no TimeCurrent(): there is no way to ask
+        the server what time it is. The newest tick stamp is the only broker
+        clock available, so while the market is shut it stands still, and
+        anyone treating ``broker_now()`` as the current broker time is wrong
+        by exactly this number. Weekends make that ~40 hours.
+
+        None until the first tick. Age is measured on the local clock on
+        purpose - the two clocks' offset is the unknown being tested, so it
+        cannot appear in the test.
+        """
+        if self._broker_seen_at <= 0:
+            return None
+        return max(0.0, time.time() - self._broker_seen_at)
 
     def broker_utc_offset_hours(self, symbols: list[str]) -> int | None:
         """The broker server's own UTC offset in whole hours, or None.
@@ -1126,6 +1150,9 @@ class MT5Client:
                 request["tp"] = self.normalize_price(symbol, price - tp_dist) if tp > 0 else 0.0
             with self._lock:
                 result = mt5.order_send(request)
+            stops_widened = True
+        else:
+            stops_widened = False
 
         if result is not None and result.retcode == mt5.TRADE_RETCODE_INVALID_FILL:
             # _filling() reads symbol_info().filling_mode; a transient miss on
@@ -1169,7 +1196,9 @@ class MT5Client:
                     # the widened pair is what the broker actually holds.
                     side=side, req_sl=request["sl"], req_tp=request["tp"],
                     retcode=code)
-            return {"ok": False, "retcode": code, "error": f"{symbol}: emir reddedildi ({code} {text})"}
+            return {"ok": False, "retcode": code, "error": f"{symbol}: emir reddedildi ({code} {text})",
+                    "invalid_stops_retry_failed": bool(
+                        stops_widened and code == getattr(mt5, "TRADE_RETCODE_INVALID_STOPS", -1))}
         # DONE_PARTIAL (IOC took less than the requested volume) is a real
         # fill, not a rejection - treating it as ok:False here left a live
         # position on the broker while the caller, seeing ok:False, kept the
