@@ -31,3 +31,7 @@ antigravity/
 .bridge/
 .codex/
 CLAUDE_ONERILERI.md
+# Google Drive masaustu istemcisi bu iki klasoru senkronladigi her klasorde
+# acar. Depoda isleri yok; git status onlarla kirlenmesin.
+.tmp.driveupload/
+.tmp.drivedownload/
