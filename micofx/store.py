@@ -439,6 +439,10 @@ class Store:
         payload.update(presets.get(group, {}))
         payload["symbol"] = name
         payload["group"] = group
+        # Risk-based sizing is the live product. A missing/preset-less
+        # ``lot_mode`` used to inherit SymbolConfig's old "fixed" default, so
+        # every operator-added name sized 0.1 lot and ignored risk_percent.
+        payload.setdefault("lot_mode", "risk")
         # Preset / caller True is ignored - same force seed_symbols uses.
         payload["enabled"] = False
         payload["broker_symbol"] = str(broker_symbol or "").strip()
@@ -525,6 +529,7 @@ class Store:
             payload: dict[str, Any] = {"symbol": symbol, "group": group, "enabled": True}
             payload.update(presets.get(group, {}))
             payload.update({k: v for k, v in entry.items() if k != "group"})
+            payload.setdefault("lot_mode", "risk")
             # A seeded symbol has no searched config, whatever the template
             # says about ``enabled``. defaults.json carries symbol, group,
             # magic, sessions and the enabled flag; strategy, timeframe and
@@ -569,6 +574,7 @@ class Store:
             "broker_symbol": cfg.broker_symbol if cfg else "",
         }
         payload.update(self.defaults.get("group_presets", {}).get(group, {}))
+        payload.setdefault("lot_mode", "risk")
         if entry:
             payload.update({k: v for k, v in entry.items() if k != "group"})
         payload["symbol"] = symbol

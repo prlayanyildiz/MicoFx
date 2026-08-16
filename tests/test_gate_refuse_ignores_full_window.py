@@ -22,7 +22,8 @@ from micofx.supervisor import Supervisor, SymbolVerdict
 
 class _Store:
     def get_setting(self, key, default=None):
-        return {"enabled": True, "prefer_strong_on_dd": True, "min_trades": 25}
+        return {"enabled": True, "prefer_strong_on_dd": True, "min_trades": 25,
+                "hard_block_only_quarantine": False}
 
 
 def _sup(risk_scale: float = 0.4) -> Supervisor:

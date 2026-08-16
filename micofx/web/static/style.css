@@ -218,6 +218,9 @@ table.grid .empty { color: var(--dim); text-align: center; padding: 18px; font-s
 }
 .btn:hover { background: #1f2c3c; border-color: #2e4055; }
 .btn:disabled { opacity: .4; cursor: not-allowed; }
+.field input:disabled, .field select:disabled {
+  opacity: .45; cursor: not-allowed;
+}
 .btn-sm { padding: 5px 10px; font-size: 11px; }
 .btn-go { background: var(--green-dim); border-color: #1d8455; color: #79ffbe; }
 .btn-go:hover { background: #196b45; }

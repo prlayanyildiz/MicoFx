@@ -547,6 +547,7 @@ class RiskManager:
                 "open_volume": round(sum(p["volume"] for p in open_now), 2),
                 "open_profit": round(sum(p["profit"] + p["swap"] for p in open_now), 2),
                 "risk_per_trade": round(r_value, 2),
+                "risk_sizing": "risk %" if cfg.lot_mode == "risk" else "sabit",
                 "cost_per_trade": round(cost, 2),
                 "cost_pct_of_risk": round(cost / r_value * 100.0, 1) if r_value > 0 else 0.0,
                 # What the walk-forward measured this config costing per trade,

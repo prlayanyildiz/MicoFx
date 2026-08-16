@@ -502,7 +502,7 @@ function renderCapacity() {
       <td class="num dim">${r.max_positions}</td>
       <td class="num ${r.free_slots > 0 ? "pos" : "neg"}"><b>${r.free_slots}</b></td>
       <td class="num">${num(r.margin_per_trade)}</td>
-      <td class="num">${r.risk_per_trade ? num(r.risk_per_trade) : "-"}</td>
+      <td class="num">${r.risk_per_trade ? `${num(r.risk_per_trade)} <span class="dim">${esc(r.risk_sizing || (r.lot_mode === "risk" ? "risk %" : "sabit"))}</span>` : "-"}</td>
       <td class="num ${costCls(r)}" title="${costTitle(r)}">${costCell(r)}</td>
       <td class="num ${cls(r.expected_per_trade)}">${r.expectancy_r ? signed(r.expected_per_trade, 3) : '<span class="dim">-</span>'}</td>
       <td class="num ${cls(r.open_profit)}">${r.open_positions ? signed(r.open_profit) : "-"}</td>`;
@@ -849,6 +849,14 @@ function buildField(cfg, spec) {
   }
   input.dataset.key = spec.k;
   input.value = cfg[spec.k];
+  if (spec.k === "risk_percent" && cfg.lot_mode === "fixed") {
+    input.disabled = true;
+    spec = { ...spec, label: spec.label + " (fixed modda kullanilmiyor)" };
+  }
+  if (spec.k === "fixed_lot" && cfg.lot_mode === "risk") {
+    input.disabled = true;
+    spec = { ...spec, label: spec.label + " (risk modda kullanilmiyor)" };
+  }
   input.addEventListener("change", () => {
     const raw = input.value;
     const value = spec.t === "select" ? raw : (spec.t === "int" ? parseInt(raw, 10) : parseFloat(raw));
@@ -1448,6 +1456,7 @@ const AI_SETTING_FIELDS = [
   { k: "auto_reoptimize", label: "Bozulanlari otomatik optimize et", t: "bool" },
   { k: "reopt_on_decay", label: "Kenari dusenleri de yeniden optimize et", t: "bool" },
   { k: "prefer_strong_on_dd", label: "Gunluk kayipta guclu sembole oncelik", t: "bool" },
+  { k: "hard_block_only_quarantine", label: "Sert ret yalniz karantina (watch/saat lot kisar)", t: "bool" },
 ];
 
 function renderAI() {

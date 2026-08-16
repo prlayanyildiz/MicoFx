@@ -410,6 +410,21 @@ _ENUM_FIELDS = {"group": (GROUPS, False), "strategy": (STRATEGIES, False),
                 "trail_mode": (("atr", "structure", "hybrid"), False)}
 
 
+def _reject_risk_percent_when_fixed(patch: dict[str, Any], current: Any) -> None:
+    """``risk_percent`` is dead under fixed lots; do not accept it as a live write.
+
+    The book sat on ``lot_mode=fixed`` while the panel still offered
+    risk_percent. PATCH returned ok:true; ``lot_for`` never read the field.
+    """
+    if "risk_percent" not in patch:
+        return
+    mode = patch.get("lot_mode")
+    if mode is None:
+        mode = getattr(current, "lot_mode", None) or "risk"
+    if mode == "fixed":
+        raise HTTPException(400, "bu ayar fixed modda kullanilmiyor")
+
+
 _NON_FINITE_TOKENS = {"nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}
 
 
@@ -889,6 +904,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _validate_risk_bounds(patch, _INDICATOR_PERIOD_BOUNDS)
         _validate_sessions(patch)
         current = store.symbols.get(symbol)
+        _reject_risk_percent_when_fixed(patch, current)
         _require_optimised_before_enabling(patch, current)
         _require_current_cost_basis_before_enabling(patch, current, optimizer)
         # Same hazard as DELETE: the magic number is the only thing that maps
@@ -1694,6 +1710,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # per-symbol route does. Checked before the lock: nothing is written
         # yet, and refusing the whole batch is right when part of it is unsafe.
         for target in targets:
+            _reject_risk_percent_when_fixed(body.patch, store.symbols.get(target))
             _require_optimised_before_enabling(body.patch, store.symbols.get(target))
             _require_current_cost_basis_before_enabling(
                 body.patch, store.symbols.get(target), optimizer)

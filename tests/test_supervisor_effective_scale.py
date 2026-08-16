@@ -43,7 +43,8 @@ def _sup(enabled: bool, risk_scale: float = 0.4) -> Supervisor:
     # ``enabled``/``settings`` are read-only properties over the store, so the
     # switch is set where the real one lives rather than shadowed on the
     # instance. Only keys present in supervisor.DEFAULTS survive the merge.
-    sup.store = _Store(cfgs, {"enabled": enabled, "prefer_strong_on_dd": False})
+    sup.store = _Store(cfgs, {"enabled": enabled, "prefer_strong_on_dd": False,
+                             "hard_block_only_quarantine": False})
     sup.risk_scale = risk_scale
     sup.verdicts = {}
     sup.notes = []

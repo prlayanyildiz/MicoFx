@@ -60,6 +60,11 @@ DEFAULTS: dict[str, Any] = {
     "dd_hard_pct": 3.0,              # ...and where it reaches the floor
     "risk_scale_floor": 0.4,
     "prefer_strong_on_dd": True,     # under daily stress, only let strong symbols enter
+    # Search never sees this gate. A hard refuse (ai_gate) therefore cuts
+    # fills the walk-forward already counted. Default: only quarantine may
+    # refuse; watch / idle / blocked hours / prefer_strong_on_dd only scale.
+    # False restores the old refusals. AX: 156 signals, 34 died on ai_gate.
+    "hard_block_only_quarantine": True,
     "auto_reoptimize": True,
     "reopt_min_age_hours": 48,
     "reopt_on_decay": True,          # also re-opt when live edge decays vs backtest
@@ -345,7 +350,8 @@ class Supervisor:
         # with no offset applied, so gmtime() here would compare against true
         # UTC instead and silently gate the wrong hour of day.
         hour = time.localtime(server_now).tm_hour
-        if hour in (verdict.blocked_hours or []):
+        hard_only = bool(self.settings.get("hard_block_only_quarantine", True))
+        if hour in (verdict.blocked_hours or []) and not hard_only:
             return False, f"AI: {hour:02d}:00 saati zararli", 0.0
 
         # Soft drawdown: keep watching every symbol, but only let the stronger
@@ -372,7 +378,8 @@ class Supervisor:
         # count reset to 0, and the old configs' 30-day labels then held eight
         # of them shut - so the book could never earn the evidence that would
         # open it. The 0.6x cut below still applies; only the refusal waits.
-        if (self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
+        if (not hard_only
+                and self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
                 and verdict.state in blocked_states
                 and (verdict.state != "watch" or verdict.judged_trades > 0)):
             return False, "AI: gunluk kayipta zayif/ispatlanmamis sembol bekliyor", 0.0
@@ -384,7 +391,8 @@ class Supervisor:
         # config that would have taken the entry. Read the evidence epoch
         # instead, at the bar the quarantine decision already uses; judged_pf
         # under 1.0 is the same statement about the same trades.
-        if (self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
+        if (not hard_only
+                and self.settings.get("prefer_strong_on_dd") and self.risk_scale < 1.0
                 and verdict.judged_trades >= int(self.settings["min_trades"])
                 and verdict.judged_pf < 1.0):
             return False, "AI: gunluk kayipta negatif sembol bekliyor", 0.0

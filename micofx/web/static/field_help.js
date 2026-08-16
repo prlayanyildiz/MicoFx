@@ -3,7 +3,7 @@
 const FIELD_HELP = {
   "lot_mode": "Sabit lot mu, bakiye yuzdesi mi. Risk modunda lot SL mesafesine gore hesaplanir.",
   "fixed_lot": "Her giriste bu lot. Risk modunda kullanilmaz.",
-  "risk_percent": "Bir islemin SL'ye giderse bakiyenin bu yuzdesini kaybetmesi hedeflenir. Lot = risk / (SL mesafesi x pip degeri).",
+  "risk_percent": "Bir islemin SL'ye giderse bakiyenin bu yuzdesini kaybetmesi hedeflenir. Lot = risk / (SL mesafesi x pip degeri). lot_mode=fixed iken okunmaz; panel alani kilitli, API reddeder.",
   "max_lot": "Hesaplanan lot bu tavanin ustune cikamaz.",
   "max_positions": "Bu sembolde ayni anda acik kalabilecek bot pozisyonu. Doluysa yeni giris reddedilir.",
   "symbol_daily_loss_pct": "Bu sembol bugun bakiyenin bu kadarini kaybedince, hesabin genel gunluk limiti dolmasa bile sadece bu sembolde yeni giris durur. 0 = kapali.",
@@ -82,7 +82,8 @@ const FIELD_HELP = {
   "reopt_min_age_hours": "Bir konfig uygulaninca en az bu kadar saat calismadan auto-apply yerine gecmez. Force bunu atlar.",
   "auto_reoptimize": "Karantinaya dusenleri kuyruga alir.",
   "reopt_on_decay": "Kenari dusenleri de yeniden arama kuyruguna alir.",
-  "prefer_strong_on_dd": "Gunluk zarar lotu kismissa yalniz kaniti guclu semboller girer.",
+  "prefer_strong_on_dd": "Gunluk zarar lotu kismissa yalniz kaniti guclu semboller girer. Sert ret kapaliysa (varsayilan) bu sadece oncelik/olcektir, girisi kesmez.",
+  "hard_block_only_quarantine": "Acikken (varsayilan) AI yalniz karantinada emri reddeder. Watch, bos saat ve gunluk kayip kurali sadece lotu kisar. Arama bu kapilari gormedigi icin kapaliyken ayni sinyaller canlida ai_gate ile oluyordu.",
 
   "max_total_positions": "Hesapta ayni anda acik bot pozisyonu tavani. Sembol basi limitten sonra ikinci kapi.",
   "lot_multiplier": "Butun lotlara carpilan global carpan. 2 = her sey iki kat.",

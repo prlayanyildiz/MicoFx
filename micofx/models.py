@@ -183,7 +183,7 @@ class SymbolConfig:
     aroon_length: int = 14
 
     # ---- position sizing ----
-    lot_mode: str = "fixed"          # "fixed" | "risk"
+    lot_mode: str = "risk"           # "fixed" | "risk"
     fixed_lot: float = 0.01          # broker micro lot: 0.01 FX/commodity, 0.10 index
     risk_percent: float = 0.5        # used when lot_mode == "risk"
     max_lot: float = 0.10            # hard ceiling for risk-based sizing
