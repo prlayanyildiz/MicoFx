@@ -287,9 +287,25 @@ olurdu; çıkmıyorlar. Yaşayan konfig bile kâğıdın söylediğinden kötü
 bitiriyor. Çalkantı gerçek ama açığın sebebi değil.
 
 Uygulama kalitesi (EX-1) ve stop kayması (EX-2) bu 3,4 puanı taşımıyor.
-**Geriye kalan tek aday: kâğıt kenarın kendisi — özellikle bar-fill
-varsayımı.** Ödeme oranı karşılaştırması yapıldı ama $ ile R karıştığı için
-bulgu sayılmadı; her tenure `n<30`, popülasyon olarak sunuldu.
+Ödeme oranı karşılaştırması yapıldı ama $ ile R karıştığı için bulgu
+sayılmadı; her tenure `n<30`, popülasyon olarak sunuldu.
+
+**EX-4 — bar-fill varsayımı da elendi (17.08).** Kâğıt sinyal barının
+ertesi barının açılışından giriyor (`open±s`); canlı sinyali bar kapanınca
+görüp sonraki tick'ten giriyor. 192 canlı giriş, 11.08 21:00 – 14.08 22:25
+UTC: ortalama aleyhte fark **−0,00875 R**, yani canlı fill kâğıdınkinden
+hafif **daha iyi**. Aleyhte pay %47,4 — simetrik gürültü. Eşik 0,03 R'ydi;
+altında ve işareti ters. Gecikme medyan 28 sn, p90 294 sn (bar sonu
+kuyruğu). Giriş tarafı temiz, `backtest.py`'nin giriş varsayımı
+değişmeyecek.
+
+**Geriye çıkış tarafı kaldı (EX-5).** İki şüpheli: (1) trail kadansı —
+kâğıt bar başına, canlı `poll_interval_sec` başına günceller; (2) bar içi
+sıralama — kâğıt trail'i barın kendi `high`/`low`'uyla güncelleyip stop'u
+aynı barda kontrol ediyorsa, koruduğu barın bilgisini kullanmış olur ve
+kazanma oranını sistematik olarak abartır. Canlı ödeme oranı 1,48 (\$),
+holdout ~2,75 (R) — birimler farklı ama yön aynı: **canlı kazançlar
+kâğıttakinden kısa kesiliyor**, ki bu tam olarak trail davranışıdır.
 
 **BS-3 — konfig çalkantısı.** `opt_runs`'ta 58
 uygulanmış konfig var, 11.08 19:09 – 16.08 09:00 UTC arası. Medyan ömür
