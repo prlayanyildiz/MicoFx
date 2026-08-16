@@ -86,11 +86,19 @@ değerlidir. İyi haber üretmek için veriyi bükme.
 `cursor/_bp.json`, `cursor/_universe_live01.json`) artık sadece bu makinede.
 `~/.claude/.../memory/` boş geldi — eski Claude notları taşınmadı, kayıp.
 
-pytest bu makinede `sessionfinish`'te `WinError 1463` (sembolik bağlantı
-izlenemiyor) ile patlıyor: exit 1 döner, testler bitmiş olsa bile özet
-satırı yutulur. `2ef2744` basetemp'i `.pytest_tmp`'e taşıdı ama sebebi
-çözmedi. Sonucu öğrenmek için çıktıyı dosyaya alıp ilerleme noktalarını
-saymak gerekiyor.
+**pytest `WinError 1463` — çözüldü.** Bu makinede sembolik bağlantı takibi
+politika gereği kapalı. `tmp_path` her test için `<ad>0` klasörü ve yanına
+`<ad>current` bağlantısı üretiyor; pytest oturum sonunda hepsini `resolve()`
+ediyor ve orada patlıyordu. Testlerin hepsi geçtiği hâlde exit 1 dönüyor,
+özet satırı yutuluyordu — ve `KUR.ps1` adım 7 bunu "testler geçmedi" diye
+okuyordu.
+
+Bağlantıyı **oluşturmak** serbest, **izlemek** yasak; o yüzden `2ef2744`'ün
+basetemp'i taşıması çökmenin yerini değiştirdi, kendisini değil.
+`tests/conftest.py` artık o tek temizlik yürüyüşünü `OSError`'a karşı
+toleranslı yapıyor — koşu bittikten sonra, iki modül referansında birden
+(`_pytest.tmpdir` fonksiyonu import anında isimle alıyor). Gerçek hatalar
+hâlâ hata veriyor.
 
 ---
 
