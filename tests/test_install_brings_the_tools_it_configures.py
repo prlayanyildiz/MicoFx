@@ -84,3 +84,22 @@ def test_pytest_keeps_its_temp_tree_out_of_the_shared_one():
     )
     ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert ".pytest_tmp" in ignored, "pytest clears basetemp at startup; keep it untracked"
+
+
+def test_symlink_cleanup_survives_a_refused_resolve():
+    """conftest must neutralise the teardown walk on both module references.
+
+    _pytest.tmpdir binds cleanup_dead_symlinks by name at import time, so
+    patching _pytest.pathlib alone leaves the session-finish call pointing at
+    the original - which is the version that raised WinError 1463 on the
+    server after every test had already passed.
+    """
+    from _pytest import pathlib as _pl
+    from _pytest import tmpdir as _tmp
+
+    class RefusesToResolve:
+        def iterdir(self):
+            raise OSError(1463, "symlink evaluation is disabled by policy")
+
+    _pl.cleanup_dead_symlinks(RefusesToResolve())
+    _tmp.cleanup_dead_symlinks(RefusesToResolve())

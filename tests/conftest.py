@@ -31,6 +31,49 @@ class TestClient(_ftc.TestClient):
 _ftc.TestClient = TestClient
 
 
+def _survive_unreadable_symlinks() -> None:
+    """Stop pytest's own temp housekeeping from failing a passing suite.
+
+    ``tmp_path`` names each per-test directory ``<name>0`` and drops a
+    ``<name>current`` symlink beside it. At session end pytest walks those and
+    calls ``resolve()`` on each, which is where two of the machines this runs
+    on refuse: Windows Server raises WinError 1463 (symlink evaluation
+    disabled by policy) and the laptop WinError 5. Creating the link is
+    allowed on both - only following it is not - so no basetemp, temp root or
+    cleanup setting avoids it; the call is simply not permitted here.
+
+    The cost was not cosmetic. Every test passed, pytest raised on the way out,
+    the process exited non-zero, and KUR.ps1's install check read that as a
+    failing suite on a machine where nothing was wrong.
+
+    Only OSError from the housekeeping walk is swallowed, and only after the
+    run is over, so a real failure still fails. Both module references are
+    patched: _pytest.tmpdir imported the function by name at import time, so
+    patching _pytest.pathlib alone would leave the session-finish call bound
+    to the original.
+    """
+    try:
+        from _pytest import pathlib as _pl
+        from _pytest import tmpdir as _tmp
+    except ImportError:                      # pragma: no cover - pytest internals moved
+        return
+
+    original = _pl.cleanup_dead_symlinks
+
+    def tolerant(root) -> None:
+        try:
+            original(root)
+        except OSError:
+            pass
+
+    _pl.cleanup_dead_symlinks = tolerant
+    if hasattr(_tmp, "cleanup_dead_symlinks"):
+        _tmp.cleanup_dead_symlinks = tolerant
+
+
+_survive_unreadable_symlinks()
+
+
 @pytest.fixture(autouse=True)
 def no_real_log_file(monkeypatch):
     # LOG is a module-level singleton imported directly by engine/risk/
