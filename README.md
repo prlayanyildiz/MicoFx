@@ -12,15 +12,33 @@ verir.
 
 ## Kurulum
 
-Sifir Windows PC. PowerShell'e yapistir (Git yoksa onu da kurar, sonra
-klonlar, sonra `KUR.ps1`):
+Sifir Windows PC. Repo **ozel** oldugu icin `irm ... raw.githubusercontent`
+404 doner - scripti GitHub'dan cekemezsin. Asagidaki blogu oldugu gibi
+yapistir (Git yoksa onu da kurar, sonra klonlar; ozel depo icin GitHub
+girisi ister):
+
+```powershell
+$ErrorActionPreference="Stop"
+function Refresh-Path { $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine")+";"+[Environment]::GetEnvironmentVariable("Path","User"); if (Test-Path "C:\Program Files\Git\cmd\git.exe") { $env:Path = "C:\Program Files\Git\cmd;"+$env:Path } }
+Refresh-Path
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Start-Process "https://git-scm.com/download/win"; throw "Git ve winget yok" }
+  winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements
+  Refresh-Path
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Host "Pencereyi kapat, ayni blogu tekrar yapistir." -ForegroundColor Yellow; return }
+}
+$d="$env:USERPROFILE\MicoFx"
+if (Test-Path "$d\.git") { git -C $d pull } elseif (Test-Path $d) { throw "Klasor var ama git degil: $d" } else { git clone https://github.com/prlayanyildiz/MicoFx.git $d }
+cd $d; .\KUR.bat
+```
+
+Git kurulumundan sonra PATH icin pencereyi kapatip blogu bir kez daha
+yapistirman gerekebilir. Hem ilk kurulum hem guncelleme. Repo herkese
+aciksa `GETIR.ps1` tek satiri da olur:
 
 ```powershell
 irm https://raw.githubusercontent.com/prlayanyildiz/MicoFx/main/GETIR.ps1 | iex
 ```
-
-Git kurulumundan sonra PATH icin pencereyi kapatmaniz gerekirse ayni satiri
-bir kez daha yapistirin. Hem ilk kurulum hem guncelleme.
 
 Git zaten varsa eski tek satir da olur:
 
