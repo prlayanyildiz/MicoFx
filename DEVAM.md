@@ -199,11 +199,20 @@ uygulanmış konfig var, 11.08 19:09 – 16.08 09:00 UTC arası. Medyan ömür
 **12,8 saat**; %68,8'i 24 saatten kısa yaşamış; en kısası 24 dakika. XAUUSD
 dört günde sekiz kez strateji değiştirdi. Holdout aylarca barda ölçülüyor,
 canlı yarım günde değiştiriliyor — **ölçülen şey ile işletilen şey aynı
-değil.** +640/−986 farkının en güçlü açıklaması bu. Çalkantı freni
-(`reopt_min_age_hours=48`, `supervisor.py:69`) 15.08 civarında geldi, yani
-bu 58 değişimin çoğu frensiz dönemin ürünü. Ölç: her konfigin uygulandığı
-andan bir sonrakine kadar canlıda ne kazandığı, ve önceki konfig
-bırakılsaydı kâğıtta ne kazanacağı. Fark, çalkantının faturası.
+değil.** +640/−986 farkının en güçlü açıklaması bu.
+
+**Mekanizma ölçüldü: fren var, elle aşılıyor.** Apply freni (`c9bd21e`,
+12.08 13:34 UTC) 54 aramayı reddetti. Ama fren sonrası 46 apply'ın **40'ı
+force ile geçti**, ve `auto_reopt=False` olduğu için force'un tek yolu
+panel `/api/opt/run` + `body.force` — yani "zorla uygula" düğmesi.
+Çalkantı bir yazılım kusuru değil, bir kullanım örüntüsü.
+
+**Bedel ölçülemedi, n yetersiz.** 10 sembol / ~3,2 gün canlı ufuk / 39
+geçiş; hepsi `n<30`. Canlı −40,46 $, kâğıtta önceki konfig (−14,20 R) yeni
+konfigden (−41,02 R) daha az negatif — ama örnek ince ve canlı $ ile kâğıt
+R aynı birim değil. Hipotez ayakta, kaldıraç değil. Canlı ufuk 14.08
+23:50'de bitiyor: o tarihten sonra hiç işlem açılmadı, çünkü gün freni
+yanlışlıkla kilitliydi (bkz. `5e18869`).
 
 **BS-1 — ölçüldü, iki kez kapandı.** Canlı sayaçta portföy kapıları
 (`max_concurrent_risk_pct`, `max_margin_usage_pct`, `max_total_positions`)
