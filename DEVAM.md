@@ -186,13 +186,13 @@ teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 
 ## 7. Açık işler, öncelik sırasıyla
 
-**BUG — gün çıpası hesap bilmiyor.** Hesap değişince bakiye farkını zarar
-sanıyor: demo çıpası 2.113 $ iken live 0.51 $'a geçilince fren "%99.98 zarar"
-deyip kilitlendi ve diske yazdı. Çıpa hesap numarasıyla birlikte tutulmalı.
-
-**BUG — boş kilit gerçek para hesabını otomatik bağlıyor.** Boş kilit ilk
-bağlanan hesabı yazıyor; o hesap yanlışlıkla live ise kilit live'a kurulur.
-Boş kilit `trade_mode == 2` gördüğünde otomatik bağlamamalı, onay istemeli.
+**BUG — gece yedeği hiç çalışmıyor.** `backup.py:45` proje kökünü tararken
+`.pytest_tmp` altındaki `*current` bağlantılarına `stat()` atıp `WinError
+1463` ile ölüyor; `backup.py:251` hatayı basmaya çalışırken cp1252
+konsolunda `UnicodeEncodeError` verip hatanın kendisini yutuyor. Zamanlanmış
+görev `Ready` görünüyor ama tek bir arşiv üretmedi. Yürüyüş okunamayan yolu
+atlamalı ve sayısını raporlamalı; hata mesajı konsol kod sayfasından
+bağımsız basılmalı.
 
 **BS-1 — en büyük kalem.** `risk.py` portföy kapıları canlıda var,
 `backtest.py`'de yok: `max_concurrent_risk_pct`, `max_margin_usage_pct`,
@@ -234,7 +234,32 @@ gerekçesiyle yazılmalı ki ruff yeniden "temiz = yeşil" olsun.
 
 ---
 
-## 8. Operatör tercihleri
+## 8. Yedekleme politikası — iki ayrı kanal
+
+İki farklı şey yedekleniyor ve **aynı yere gitmiyorlar**. Karıştırma:
+
+**Sistem → GitHub.** Kod, testler, `DEVAM.md`. Her değişiklikten sonra
+commit + push. `.gitignore` `data/*.db`'yi bilerek dışarıda tutuyor: bu depo
+sistemdir, hesap değildir. Klonlayan biri temiz bir kurulum almalı, bizim
+bakiyemizi değil. Bu kural değişmez.
+
+**Hesap → C:\MicoFX_Yedek → Google Drive.** Kitap (`data/micofx.db`),
+loglar, `cursor/_bp.json`, `cursor/_universe_live01.json`. Bunlar git'in
+getirmediği tek nüsha dosyalar; makine giderse gider. `backup.py` bunları
+`C:\MicoFX_Yedek`'e yazar, Drive oradan senkronlar.
+
+`backup_dir_secondary` boş bırakıldı. Eskiden `D:/MicoFX_Yedek`'ti; bu
+makinede `D:` bir **DVD sürücüsü** (DriveType 5), yani ölü hedef. Drive
+masaüstü istemcisi kurulunca ikincil hedef onun klasörü olur — mekanizma
+zaten var, sadece yolu doğru olmalı.
+
+Drive'a yükleme sohbet üzerinden yapılmaz: 1,2 MB'lık kitap sıkışınca 139 KB,
+base64'e çevrilince 186 KB tutuyor ve her yedekte bunu bağlamdan geçirmek
+sürdürülebilir değil. Senkron istemcinin işi.
+
+---
+
+## 9. Operatör tercihleri
 
 Türkçe konuş, kısa yaz. Commit mesajları, kod yorumları ve test docstring'leri
 İngilizce kalır. Her değişiklikten sonra commit + push — sormaya gerek yok.
