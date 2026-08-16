@@ -1457,6 +1457,8 @@ const AI_SETTING_FIELDS = [
   { k: "reopt_on_decay", label: "Kenari dusenleri de yeniden optimize et", t: "bool" },
   { k: "prefer_strong_on_dd", label: "Gunluk kayipta guclu sembole oncelik", t: "bool" },
   { k: "hard_block_only_quarantine", label: "Sert ret yalniz karantina (watch/saat lot kisar)", t: "bool" },
+  { k: "edge_decay_min_trades", label: "Kenar dususu: min toplam islem", t: "int", min: 20, max: 200 },
+  { k: "edge_decay_min_half", label: "Kenar dususu: her yari min islem", t: "int", min: 10, max: 100 },
 ];
 
 function renderAI() {

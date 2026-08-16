@@ -84,6 +84,8 @@ const FIELD_HELP = {
   "reopt_on_decay": "Kenari dusenleri de yeniden arama kuyruguna alir.",
   "prefer_strong_on_dd": "Gunluk zarar lotu kismissa yalniz kaniti guclu semboller girer. Sert ret kapaliysa (varsayilan) bu sadece oncelik/olcektir, girisi kesmez.",
   "hard_block_only_quarantine": "Acikken (varsayilan) AI yalniz karantinada emri reddeder. Watch, bos saat ve gunluk kayip kurali sadece lotu kisar. Arama bu kapilari gormedigi icin kapaliyken ayni sinyaller canlida ai_gate ile oluyordu.",
+  "edge_decay_min_trades": "Kenar dususu kurali icin pencerenin toplam islem tabani. Altinda yarilar karsilastirilmaz.",
+  "edge_decay_min_half": "Her yari bu kadar islem olmadan PF karsilastirilmaz. 15-15 GER40'i +65$ iken 0.5x yapmisti.",
 
   "max_total_positions": "Hesapta ayni anda acik bot pozisyonu tavani. Sembol basi limitten sonra ikinci kapi.",
   "lot_multiplier": "Butun lotlara carpilan global carpan. 2 = her sey iki kat.",

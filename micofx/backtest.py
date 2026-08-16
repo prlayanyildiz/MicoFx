@@ -43,6 +43,7 @@ class Result:
     cost_r: float = 0.0              # total spread+commission drag, in R
     exits: dict[str, int] = field(default_factory=dict)
     trade_rs: list = field(default_factory=list)  # per-trade R, for diagnostics only
+    trade_events: list = field(default_factory=list)  # (entry_ts, exit_ts, r)
 
     @property
     def win_rate(self) -> float:
@@ -296,7 +297,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              entries: np.ndarray | None = None,
              spread_price: np.ndarray | None = None,
              min_stop: float | np.ndarray | None = None,
-             flatten: np.ndarray | None = None) -> Result:
+             flatten: np.ndarray | None = None,
+             skip_after_loss: bool = False) -> Result:
     """Replay one bar window using an already-computed signal set.
 
     ``entries`` and ``spread_price`` are optional precomputed views of values
@@ -364,6 +366,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     bar_total = 0
     ptr = 0
     guard = 0
+    # One skipped signal after a losing close — event, not N bars. Live 417
+    # book-magic deals: after a win WR 49.3%, after a loss 28%. N-bar wait
+    # failed OOS; this is the form that split-replicated.
+    skip_next = False
 
     while ptr < entries.size and guard < 100000:
         guard += 1
@@ -394,6 +400,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             continue
         is_buy = bool(buy_flags[i])
         if not is_buy and not bool(sell_flags[i]):
+            ptr += 1
+            continue
+        if skip_after_loss and skip_next:
+            skip_next = False
             ptr += 1
             continue
         sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
@@ -510,6 +520,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         res.trades += 1
         res.net_r += r
         res.trade_rs.append(r)
+        res.trade_events.append((int(cache.times[j0]), int(cache.times[exit_bar]), r))
         bar_total += exit_bar - j0 + 1
         exits[reason] = exits.get(reason, 0) + 1
         if r >= 0:
@@ -521,6 +532,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             res.gross_loss_r += -r
             streak += 1
             res.longest_loss_streak = max(res.longest_loss_streak, streak)
+            if skip_after_loss:
+                skip_next = True
 
         equity += r
         peak = max(peak, equity)

@@ -88,7 +88,10 @@ DEFAULTS: dict[str, Any] = {
     # at this book's frequency 30 trades is about a month, not a quarter, and
     # US30 was sitting at half size off 21 trades while carrying the most
     # precisely measured holdout in the portfolio - 407 trades.
-    "edge_decay_min_trades": 30,
+    "edge_decay_min_trades": 50,
+    # Each half of the split must stand on its own. The total bar used to
+    # allow 15-vs-15 (GER40: PF 2.53→0.92, still +65$ / PF 1.39, cut to 0.5x).
+    "edge_decay_min_half": 25,
     # A re-opt that finds nothing better than the current config never updates
     # opt_updated_at, so without this a "watch" symbol whose decay is a genuine
     # regime shift (not a stale parameter) gets re-queued and re-run in full
@@ -733,18 +736,39 @@ class Supervisor:
         # turned inside its last ~10-15 trades, well before 30 would accumulate -
         # waiting the extra week+ to react cost more than the noisier smaller
         # halves below cost in false positives).
-        if v.state == "ok" and len(nets) >= int(cfgs["edge_decay_min_trades"]):
+        if v.state == "ok" and self.edge_decay_fires(nets, v.profit_factor, cfgs):
             mid = len(nets) // 2
-            older, recent = nets[:mid], nets[mid:]
-            older_pf = self._pf(older)
-            recent_pf = self._pf(recent)
-            if older_pf > 0 and recent_pf < older_pf * 0.5 and recent_pf < 1.0:
-                v.state = "watch"
-                v.risk_scale = min(v.risk_scale, 0.5)
-                v.reason = f"kenar zayifliyor (PF {older_pf:.2f} -> {recent_pf:.2f})"
+            older_pf = self._pf(nets[:mid])
+            recent_pf = self._pf(nets[mid:])
+            v.state = "watch"
+            v.risk_scale = min(v.risk_scale, 0.5)
+            v.reason = f"kenar zayifliyor (PF {older_pf:.2f} -> {recent_pf:.2f})"
 
         v.priority = self.priority(cfg, v)
         return v
+
+    @staticmethod
+    def edge_decay_fires(nets: list[float], total_pf: float,
+                         cfgs: dict[str, Any]) -> bool:
+        """True only when both halves are large and the book is absolutely red.
+
+        GER40 had PF 1.39 and +65$ and still tripped: the split compared two
+        15-trade PFs (2.53 vs 0.92) and ignored that the whole window was
+        winning. A half shorter than ``edge_decay_min_half`` is noise; a
+        total PF at or above ``watch_pf`` is "still good", not a penalty.
+        """
+        if len(nets) < int(cfgs.get("edge_decay_min_trades", 50)):
+            return False
+        mid = len(nets) // 2
+        older, recent = nets[:mid], nets[mid:]
+        half_min = int(cfgs.get("edge_decay_min_half", 25))
+        if len(older) < half_min or len(recent) < half_min:
+            return False
+        if float(total_pf) >= float(cfgs.get("watch_pf", 1.0)):
+            return False
+        older_pf = Supervisor._pf(older)
+        recent_pf = Supervisor._pf(recent)
+        return older_pf > 0 and recent_pf < older_pf * 0.5 and recent_pf < 1.0
 
     @staticmethod
     def _pf(nets: list[float]) -> float:
