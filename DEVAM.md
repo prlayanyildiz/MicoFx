@@ -137,6 +137,15 @@ DOM (bu CFD'lerde yok); min lot marj şişmesi (ölçüldü, ~1.00x, yok);
 öldü: net R toplamı 534.43 → 220.36 (dört saat kapalı) / 313.02 (optimizer
 kendi arasa), `validated` 6/10 → 3/10 → 0/10. Gömüldü.
 
+**Skorun holdout'u öngörmediği iddiası** — ölçüldü, yanlış çıktı. 262
+koşuda skor ↔ holdout net R Pearson 0,67 (uygulanan 58'de 0,81); validation
+net R ile 0,72 / 0,81. İlişki zayıf değil. Ama bileşen kırılımı bir şey
+öğretti: skorun taşıdığı holdout bilgisi **hacimli net R**; işlem başı
+kalite holdout ile **negatif** korele (selection expectancy −0,36, PF −0,39,
+validation expectancy −0,35, PF −0,36). Yani seçim çok işlemli toplam R'yi
+ödüllendiriyor, işlem başı kaliteyi değil. Ağırlık ölçütü tasarlarken bu
+bilinsin.
+
 **Flip ailelerine ADX/body kapısı bağlamak** — sezginin tersi çıktı. GER40'ta
 engellenecek kova +20.1R, geçen kova −7.5R. Bağlamak parayı atardı.
 
