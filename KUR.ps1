@@ -18,6 +18,20 @@ $VenvPy = Join-Path $Venv "Scripts\python.exe"
 
 function Say([string]$msg, [string]$colour = "Gray") { Write-Host $msg -ForegroundColor $colour }
 
+function Invoke-Native([scriptblock]$block) {
+    # PowerShell 5.1'de yerli bir programin stderr'i (yonlendirilse de,
+    # yonlendirilmese de) NativeCommandError'a donusur ve dosyanin basindaki
+    # $ErrorActionPreference="Stop" onu olumcul yapar. schtasks gorevi
+    # bulamayinca stderr'e yazar - yani "gorev henuz yok" gibi TAMAMEN normal
+    # bir durum kurulumu oldururdu. Tercihi cagri boyunca gevsetip cikis
+    # kodunu geri veriyoruz; karar cagirana ait.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $block 2>&1 | Out-Null; return $LASTEXITCODE }
+    catch { return 1 }
+    finally { $ErrorActionPreference = $prev }
+}
+
 function Test-PythonRuns([string]$exe) {
     # Bir venv'in calisip calismadigini "dosya var mi" ile degil, gercekten
     # calistirarak anliyoruz. Ama PowerShell 5.1'de yerli bir programin
@@ -26,18 +40,9 @@ function Test-PythonRuns([string]$exe) {
     # yani bozuk venv dogru tespit edilir, script tespit ANINDA olurdu.
     # Tercihi bu cagri boyunca gevsetiyoruz.
     if (-not (Test-Path -LiteralPath $exe)) { return $false }
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $null = & $exe -c "import sys" 2>&1
-        return ($LASTEXITCODE -eq 0)
-    } catch {
-        return $false
-    } finally {
-        $ErrorActionPreference = $prev
-    }
+    return ((Invoke-Native { & $exe -c "import sys" }) -eq 0)
 }
-function Step([int]$n, [string]$msg) { Write-Host ""; Say "[$n/4] $msg" "Cyan" }
+function Step([int]$n, [string]$msg) { Write-Host ""; Say "[$n/5] $msg" "Cyan" }
 
 Say "============================================" "Cyan"
 Say "  MicoFX kurulum" "Cyan"
@@ -75,8 +80,8 @@ Say ("  " + (& python --version 2>&1))
 # venv kurulur, pip install da basarili olur (numpy 1.26 3.9'u destekler) -
 # kurulum "basarili" der, uygulama hic acilmaz. run.py ayni sayiyi kendi
 # basina da uyguluyor; ikisinin ayrismasini bir test engelliyor.
-& python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
-if ($LASTEXITCODE -ne 0) {
+$pyOldRc = Invoke-Native { & python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" }
+if ($pyOldRc -ne 0) {
     Say "  Bu Python cok eski - MicoFX 3.10 veya ustunu gerektiriyor." "Yellow"
     Say "  PATH'teki python bu: $python" "Yellow"
     if (Get-Command winget -ErrorAction SilentlyContinue) {
@@ -250,8 +255,8 @@ Step 5 "Aksam yedegi gorevi kuruluyor..."
 # Interactive olarak kurulur (README bunu boyle tarif ediyor): yonetici hakki
 # istemez, kilit ekraninda calisir, oturum tamamen kapaliysa o gece atlar.
 $TaskName = "MicoFX Aksam Yedegi"
-$existing = schtasks /query /tn "$TaskName" 2>$null
-if ($LASTEXITCODE -eq 0) {
+$queryRc = Invoke-Native { schtasks /query /tn "$TaskName" }
+if ($queryRc -eq 0) {
     Say "  Zaten var, atlaniyor." "Green"
 } else {
     # Ayni yorumlayici, ayni gerekce: konsolsuz olan, ki gece bir pencere
@@ -259,8 +264,8 @@ if ($LASTEXITCODE -eq 0) {
     $backupExe = Join-Path $Venv "Scripts\pythonw.exe"
     if (-not (Test-Path -LiteralPath $backupExe)) { $backupExe = $VenvPy }
     $action = '"' + $backupExe + '" "' + (Join-Path $Root "backup.py") + '"'
-    schtasks /create /tn "$TaskName" /tr $action /sc daily /st 22:00 /f 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    $createRc = Invoke-Native { schtasks /create /tn "$TaskName" /tr $action /sc daily /st 22:00 /f }
+    if ($createRc -eq 0) {
         Say "  Kuruldu - her aksam 22:00." "Green"
         Say "  Hedef klasor ve ana anahtar panelden (Sistem sekmesi) degistirilir."
     } else {
