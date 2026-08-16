@@ -271,6 +271,10 @@ class SymbolConfig:
     opt_score: float = 0.0
     opt_updated_at: float = 0.0
     opt_summary: dict = field(default_factory=dict)
+    # Walk-forward accept flag. None = never written (old rows, or a symbol
+    # that has not been through apply() since this field existed). False is
+    # a real rejection. Missing and False are not the same thing.
+    validated: bool | None = None
     # Exit/risk fields from the most recent apply() that were held back
     # because a position was open under this symbol's magic at the time -
     # applied automatically (by the engine) the moment that magic is next
@@ -327,6 +331,14 @@ class SymbolConfig:
         cfg.opt_summary = summary if isinstance(summary, dict) else {}
         pending = payload.get("pending_exit_patch")
         cfg.pending_exit_patch = pending if isinstance(pending, dict) else {}
+        # Explicit so JSON null and a missing key both stay None, and a stored
+        # false does not collapse into that. _coerce skips None values, which
+        # is the right default, but bool|None is a UnionType whose name is
+        # not "bool" so a JSON false would otherwise land in the else-branch
+        # anyway — this keeps the three-way distinction in one place.
+        if "validated" in payload:
+            flag = payload.get("validated")
+            cfg.validated = None if flag is None else bool(flag)
         hours = payload.get("blocked_entry_hours")
         if hours is None:
             cfg.blocked_entry_hours = []

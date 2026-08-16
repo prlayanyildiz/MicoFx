@@ -1101,7 +1101,11 @@ function updateSymbolCards() {
       <span><b>lot</b> ${num(cfg.lot_mode === "risk" ? cfg.max_lot : cfg.fixed_lot, 2)}${cfg.lot_mode === "risk" ? " (risk)" : ""}</span>
       <span><b>T3</b> ${(!st.bars_ready || st.t3_rising == null) ? "-" : (st.t3_rising ? '<span class="pos">yukari</span>' : '<span class="neg">asagi</span>')}</span>
       <span><b>K/D</b> ${st.k != null ? num(st.k, 0) + "/" + num(st.d, 0) : "-"}</span>
-      <span><b>opt</b> <span class="opt-badge ${cfg.opt_score > 0 ? "pos" : "dim"}">${num(cfg.opt_score, 1)}</span> <span class="dim">${optAge}</span></span>
+      <span><b>opt</b> <span class="opt-badge ${cfg.opt_score > 0 ? "pos" : "dim"}">${num(cfg.opt_score, 1)}</span> <span class="dim">${optAge}</span> ${
+        cfg.validated === true ? '<span class="pill on">dogrulandi</span>'
+          : cfg.validated === false ? '<span class="pill bad">dogrulanmadi</span>'
+            : '<span class="dim" title="henuz yazilmadi">-</span>'
+      }</span>
       ${sig}
       <span class="dim">${esc(st.note || "")}</span>`;
   });

@@ -1567,6 +1567,11 @@ class Optimizer:
                 else float((self.store.opt_params() if self.store is not None else {})
                            .get("min_positive_ratio", 0.6) or 0.6),
             }
+            if "validated" in detail:
+                flag = detail.get("validated")
+                if flag is not None:
+                    patch["validated"] = bool(flag)
+                    patch["opt_summary"]["validated"] = bool(flag)
             # Search regime is the stamp above. Same charged look that
             # already gated the apply; force still stamps the flag.
             if costed is not None:
