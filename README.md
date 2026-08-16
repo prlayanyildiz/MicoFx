@@ -12,16 +12,25 @@ verir.
 
 ## Kurulum
 
-Tek dosya. [Git](https://git-scm.com/download/win) kurulu degilse once onu
-kurun ve PowerShell'i kapatip yeniden acin.
+Sifir Windows PC. PowerShell'e yapistir (Git yoksa onu da kurar, sonra
+klonlar, sonra `KUR.ps1`):
+
+```powershell
+irm https://raw.githubusercontent.com/prlayanyildiz/MicoFx/main/GETIR.ps1 | iex
+```
+
+Git kurulumundan sonra PATH icin pencereyi kapatmaniz gerekirse ayni satiri
+bir kez daha yapistirin. Hem ilk kurulum hem guncelleme.
+
+Git zaten varsa eski tek satir da olur:
 
 ```powershell
 $d="$env:USERPROFILE\MicoFx"; if (Test-Path "$d\.git") { git -C $d pull } else { git clone https://github.com/prlayanyildiz/MicoFx.git $d }; cd $d; .\KUR.bat
 ```
 
-Tek satir, hem ilk kurulum hem guncelleme icin. Klasor zaten varsa yeniden
-klonlamak yerine `git pull` eder - `git clone` bos olmayan bir klasore
-yazmayi reddeder ve o hatadan sonra `.\KUR.bat` da bulunamaz.
+Klasor zaten varsa yeniden klonlamak yerine `git pull` eder - `git clone`
+bos olmayan bir klasore yazmayi reddeder ve o hatadan sonra `.\KUR.bat` da
+bulunamaz.
 
 Hedefi mutlak yolla verir, bu yuzden nereden calistirildigi onemli degil.
 Goreli `MicoFx` kullanan bir surumu depo klasorunun ICINDEN calistirmak
