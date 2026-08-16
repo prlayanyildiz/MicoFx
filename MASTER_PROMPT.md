@@ -36,7 +36,7 @@ trade's logic, not of the system:
 | Weekend | `sessions.weekend_closed` | on (crypto exempt) |
 
 With near-24h session windows the first two mean **no position survives the
-local day**, so an H1 trend follower cannot hold a multi-day move.
+local day**, so a trend follower cannot hold a multi-day move.
 
 **This is a settled decision, confirmed by the owner on 2026-08-09: keep it.**
 The reasoning is overnight gap risk on a small account — an index or commodity
@@ -240,13 +240,14 @@ Bars where both `buy` and `sell` are True must be **dropped** (neither side). Do
 
 ## 7. Strategy families (shared)
 
-`STRATEGIES = ["t3_stoch", "flow_rev", "mtf_pullback", "micro_rev", "burst",
-"dual_t3", "st_trend", "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
-"parabolic_flip", "trix_flip", "aroon_flip"]` — 14 aile.
+`STRATEGIES = ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3", "st_trend", "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip", "parabolic_flip", "aroon_flip"]` — 12 aile.
+
+`flow_rev` ve `trix_flip` 14.08 emekli edildi; gostergeleri de silindi ve
+`test_retired_indicators_stay_gone.py` geri gelmelerini engelliyor.
 
 > `orb`, `vwap_rev`, `donchian`, `squeeze_brk`, `t3_ribbon` ve `liq_sweep`
-> **kaldirildi** (12.08): optimizer'in `strategies` listesi zaten 14'tu, arama
-> bunlari hicbir zaman onermiyordu. Asagidaki aile bolumleri **tam liste
+> **kaldirildi** (12.08): optimizer'in `strategies` listesi onlari zaten
+> tasimiyordu, arama hicbir zaman onermiyordu. Asagidaki aile bolumleri **tam liste
 > degildir** — kaynak `models.STRATEGIES`, ve
 > `test_the_strategy_lists_cannot_drift_apart.py` ikisinin ayrismasini
 > engelliyor.
@@ -315,7 +316,7 @@ File: `optimizer.py` + `backtest.walk_forward`.
 ### Calendar window
 Same lookback for every TF:  
 `want = min(max_bars, lookback_days * 86400 / timeframe_seconds(tf))`  
-so H1 is not judged on years while M5 is judged on days.
+so a 30-minute config is not judged on years while M5 is judged on days.
 
 ### Segment split (`segments` clamped 4–8; defaults often 5)
 Equal bar edges:
