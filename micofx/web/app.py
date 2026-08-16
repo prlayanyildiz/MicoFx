@@ -25,6 +25,7 @@ from ..models import (
     GROUPS,
     READABLE_TIMEFRAMES,
     STRATEGIES,
+    SWING_GRID_OVERLAY,
     TIMEFRAMES,
     SymbolConfig,
     SystemConfig,
@@ -1957,7 +1958,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.get("/api/opt/params")
     def opt_params() -> dict[str, Any]:
-        return {"ok": True, "params": store.opt_params()}
+        params = store.opt_params()
+        defaults = getattr(store, "defaults", None) or {}
+        factory = (defaults.get("optimizer") or {}).get("grid") or {}
+        shared = params.get("grid") or {}
+        owned = (
+            Optimizer.overlay_axes_operator_owns(shared, factory)
+            if factory else set()
+        )
+        return {
+            "ok": True,
+            "params": params,
+            "swing_overlay": {k: (k not in owned) for k in SWING_GRID_OVERLAY},
+        }
 
     @app.post("/api/opt/params")
     def set_opt_params(body: dict[str, Any]) -> dict[str, Any]:

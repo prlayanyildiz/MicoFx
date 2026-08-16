@@ -1121,9 +1121,12 @@ const OPT_SETTING_FIELDS_ADVANCED = [
   { k: "plateau_weight", label: "Plato agirligi", step: 0.05, min: 0, max: 0.8 },
 ];
 
+let SWING_OVERLAY = {};
+
 async function loadOptParams() {
   const res = await api("/api/opt/params");
   OPT_PARAMS = res.params;
+  SWING_OVERLAY = res.swing_overlay || {};
   renderOptForm();
   renderOptPicker();
   renderOptTfPicker();
@@ -1153,8 +1156,10 @@ function renderOptForm() {
   Object.keys(grid).forEach((key) => {
     const input = el("input", { type: "text", value: (grid[key] || []).join(", ") });
     input.dataset.gridKey = key;
+    const overlayOn = SWING_OVERLAY[key] === true;
+    const label = overlayOn ? key + " (M15/M30 swing overlay etkin)" : key;
     $("#opt-grid").appendChild(titled(
-      el("div", { class: "field" }, [el("label", { text: key }), input]), key));
+      el("div", { class: "field" }, [el("label", { text: label }), input]), key));
   });
 }
 
@@ -1303,7 +1308,11 @@ function renderOptJob() {
     // as if the running configuration is bleeding money.
     const inc = r.incumbent;
     const kept = !r.applied && inc && inc.net_r != null;
-    const incText = kept
+    const closedCand = !!r.closed_candidate;
+    const incText = closedCand
+      ? `Kapali sembol icin aday bulundu. Canli ayar yazilmadi; acma karari operatorde. `
+        + `Soldaki rakamlar adayin backtest sonucudur.`
+      : kept
       ? `Uygulanmadi${r.keep_reason ? ": " + esc(r.keep_reason) : ""}. Canli ayar degismedi `
         + `(${esc(inc.strategy || "-")}/${esc(inc.timeframe || "-")}, test ${signed(inc.net_r, 1)}R`
         + `${inc.profit_factor != null ? ", PF " + num(inc.profit_factor, 2) : ""}). `
@@ -1318,6 +1327,7 @@ function renderOptJob() {
       : "Test beklentisi, secim/dogrulamanin zayifinin " + num(ret * 100, 0)
         + "%'ini koruyor" + (ret < 0.25 ? " - dusuk, asiri uyum isareti olabilir" : "");
     const status = r.applied ? '<span class="pill on">uygulandi</span>'
+      : closedCand ? `<span class="pill warn" title="${incText}">kapali sembol icin aday bulundu</span>`
       : kept ? `<span class="pill warn" title="${incText}">mevcut ayar korundu</span>`
       : r.validated ? `<span class="pill warn" title="${incText}">dogrulandi, uygulanmadi</span>`
       : `<span class="pill bad" title="${incText}">dogrulanmadi</span>`;

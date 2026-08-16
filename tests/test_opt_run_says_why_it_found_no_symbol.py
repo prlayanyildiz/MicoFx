@@ -113,12 +113,12 @@ def test_a_book_with_everything_switched_off_searches_all_of_it():
     assert res["job"]["symbols"] == ["GER40", "NAS100"]
 
 
-def test_the_exclusion_still_holds_once_anything_is_enabled():
-    """An off symbol beside an on one is a deliberate exclusion, not a fresh
-    install - the full scan must not spend itself on it."""
+def test_a_closed_symbol_beside_an_open_one_is_still_searched():
+    """Closing is a decision, not a death sentence - the full scan must
+    re-score the off name so a later grid can still produce a candidate."""
     opt = _opt([_cfg("GER40"), _cfg("NAS100", enabled=False)])
     opt._run = lambda *a, **k: None
-    assert opt.start()["job"]["symbols"] == ["GER40"]
+    assert set(opt.start()["job"]["symbols"]) == {"GER40", "NAS100"}
 
 
 # --------------------------------------------------- what must keep working
@@ -137,12 +137,12 @@ def test_a_partly_stale_selection_still_runs_the_names_it_knows():
     assert res["job"]["symbols"] == ["GER40"]
 
 
-def test_no_selection_runs_the_enabled_book():
+def test_no_selection_runs_the_whole_book():
     opt = _opt(BOOK + [_cfg("USDCHF", enabled=False)])
     opt._run = lambda *a, **k: None
     res = opt.start()
     assert res["ok"] is True
-    assert res["job"]["symbols"] == ["GER40", "NAS100", "US30"]
+    assert set(res["job"]["symbols"]) == {"GER40", "NAS100", "US30", "USDCHF"}
 
 
 def test_naming_a_disabled_symbol_still_searches_it():

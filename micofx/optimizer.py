@@ -31,6 +31,22 @@ from .spread_calibration import calibrate
 from .store import Store
 
 
+def _grid_axis_equal(left: Any, right: Any) -> bool:
+    """Numeric search lists compare equal across int/float spelling."""
+    if not isinstance(left, list) or not isinstance(right, list):
+        return False
+    if len(left) != len(right):
+        return False
+    for a, b in zip(left, right, strict=True):
+        try:
+            if float(a) != float(b):
+                return False
+        except (TypeError, ValueError):
+            if a != b:
+                return False
+    return True
+
+
 def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
     """Run one timeframe x strategy walk-forward in a separate process.
 
@@ -187,43 +203,16 @@ class Optimizer:
             # only. Instance state rather than a threaded argument because a
             # run is exclusive - the busy check above is the guarantee.
             self._force_apply = bool(force)
-            # "Everything" means the book, not the symbols already switched
-            # off. supervisor._maybe_reoptimize skips a disabled symbol
-            # outright; this path took list(store.symbols) and did not, so a
-            # full scan spent part of every run on them and could apply a
-            # config to a symbol that is not trading. EURUSD was searched seven
-            # times in one day while off, and read as an anomaly each time
-            # someone looked at the log.
-            #
-            # Naming a symbol still searches it: "optimise this before I turn
-            # it on" is a real thing to want, and asking by name says so.
+            # Closing a symbol is a decision, not a death sentence. A full
+            # scan used to drop disabled names, so a charged-negative close
+            # (JPN225 / SpotBrent / UK100) could never be re-scored after the
+            # grid moved - the operator had to type every name. Disabled
+            # symbols stay in targets; _finish_symbol will not apply or enable
+            # them. Weekly auto-reopt still queues by enabled name only.
             if symbols:
                 targets = [s for s in symbols if s in self.store.symbols]
             else:
-                targets = [s for s, c in self.store.symbols.items() if c.enabled]
-                if not targets and self.store.symbols:
-                    # Bootstrap. A fresh install is a closed loop otherwise:
-                    # seed_symbols forces every seeded symbol disabled (a
-                    # seeded config is the dataclass default, not one the
-                    # search chose), _require_optimised_before_enabling then
-                    # refuses to switch any of them on until it has been
-                    # searched - and "optimise everything" resolved to the
-                    # enabled ones, of which there are none. Naming all ten by
-                    # hand was the only way through, which is what the VDS
-                    # install had to do.
-                    #
-                    # The exclusion above is still right whenever something IS
-                    # enabled: an off symbol is then a deliberate exclusion and
-                    # a full scan should not spend itself on it. With nothing
-                    # enabled there is no such intent to respect, and this
-                    # grants nothing new - naming the same symbols already runs
-                    # exactly this, and a search applies a config without
-                    # trading anything.
-                    targets = list(self.store.symbols)
-                    LOG.emit(f"Etkin sembol yok - kurulum taramasi: kitabin "
-                             f"tamami ({len(targets)}) aranacak. Aramanin sectigi "
-                             f"konfigi alan sembol acilabilir hale gelir.",
-                             "INFO")
+                targets = list(self.store.symbols)
             if not targets:
                 # "Sembol secilmedi" was the answer to three different
                 # situations, and it was the wrong answer to two of them.
@@ -341,7 +330,11 @@ class Optimizer:
                      "own": {k: v for k, v in (family_grids.get(name) or {}).items()
                              if isinstance(v, list) and v},
                      "grid": {**shared, **{k: v for k, v in (family_grids.get(name) or {}).items()
-                                           if isinstance(v, list) and v}}}
+                                           if isinstance(v, list) and v}},
+                     # `_plan_symbol` is a different frame; `shared` here is
+                     # not visible there. Without this the first job raised
+                     # NameError and `_run` marked the scan done+error.
+                     "shared": shared}
                     for name in families]
         # Optional override of the shipped family→TF map (empty list = inherit).
         tf_allow = params.get("strategy_timeframes")
@@ -377,11 +370,33 @@ class Optimizer:
                      f"uygulanmayan {len(rejected)}{rejected_txt}", "OPT")
 
     @staticmethod
+    def overlay_axes_operator_owns(shared: dict[str, Any],
+                                   factory: dict[str, Any]) -> set[str]:
+        """Axes the operator changed away from the shipped search grid.
+
+        The swing overlay must not overwrite those: a panel ``sl_atr_mult`` of
+        [1.5, 2, 3, 4] is the measurement that flipped SpotBrent/JPN225, and
+        stamping ``SWING_GRID_OVERLAY`` back on top re-introduced 1.0 on every
+        M15/M30 symbol. Axes still equal to the factory list keep the overlay
+        (the FRA40 0.5-on-M30 leak).
+        """
+        owned: set[str] = set()
+        for key in SWING_GRID_OVERLAY:
+            if key not in shared:
+                continue
+            if not _grid_axis_equal(shared[key], factory.get(key)):
+                owned.add(key)
+        return owned
+
+    @staticmethod
     def _exit_grid_for(merged: dict[str, Any], own: dict[str, Any],
-                       family: str, timeframe: str) -> dict[str, Any]:
+                       family: str, timeframe: str,
+                       shared: dict[str, Any] | None = None,
+                       factory: dict[str, Any] | None = None) -> dict[str, Any]:
         """Search grid for one family/timeframe pairing.
 
-        Precedence is shared -> swing overlay -> the family's own statement.
+        Precedence is shared -> swing overlay -> the family's own statement,
+        except an operator-touched shared axis beats the overlay.
 
         It used to be written the other way round - overlay first, then
         ``merged`` on top - with the intent "a family that states its own
@@ -398,10 +413,16 @@ class Optimizer:
         """
         grid = dict(merged)
         if uses_swing_exits(family, timeframe):
-            # Widen what the shared grid proposed, but never over an axis the
-            # family itself has an opinion about - that is the part the old
-            # comment got right.
-            grid.update({k: v for k, v in SWING_GRID_OVERLAY.items() if k not in own})
+            # Widen factory-default shared axes. Skip any axis the family named
+            # and any axis the operator moved off the shipped list.
+            owned = (
+                Optimizer.overlay_axes_operator_owns(shared or {}, factory)
+                if factory is not None else set()
+            )
+            grid.update({
+                k: v for k, v in SWING_GRID_OVERLAY.items()
+                if k not in own and k not in owned
+            })
         return grid
 
     def _spread_scale(self, symbol: str) -> float:
@@ -594,7 +615,14 @@ class Optimizer:
                          "order": len(plan["jobs"]) + len(plan["attempts"]),
                          "error": f"veri yetersiz ({len(bars) if bars else 0} bar)"})
                     continue
-                grid = self._exit_grid_for(variant["grid"], variant["own"], family, tf)
+                factory = None
+                if self.store is not None:
+                    raw = (self.store.defaults.get("optimizer") or {}).get("grid")
+                    if isinstance(raw, dict) and raw:
+                        factory = raw
+                grid = self._exit_grid_for(
+                    variant["grid"], variant["own"], family, tf,
+                    shared=variant.get("shared"), factory=factory)
                 plan["jobs"].append({
                     "symbol": cfg.symbol, "timeframe": tf, "strategy": family,
                     "order": len(plan["jobs"]) + len(plan["attempts"]),
@@ -822,7 +850,14 @@ class Optimizer:
             "updated_at": float(getattr(cfg, "opt_updated_at", 0.0) or 0.0),
         } if incumbent else None
         applied = False
-        if apply_best and report.get("validated") and not reason:
+        closed = not bool(getattr(cfg, "enabled", True))
+        if closed and apply_best and report.get("validated") and not reason:
+            # Report-only: the candidate is real, the live book is not theirs
+            # to rewrite, and enabled stays False. Opening is the operator's.
+            reason = "kapali sembol icin aday bulundu"
+            report["keep_reason"] = reason
+            report["closed_candidate"] = True
+        elif apply_best and report.get("validated") and not reason:
             apply_result = self.apply(cfg.symbol, best["params"], score,
                        {**best, "holdout_days": report.get("holdout_days", 0.0),
                         "charge_costs": report.get("charge_costs"),
@@ -864,7 +899,7 @@ class Optimizer:
             "validation_days": report.get("validation_days", 0.0),
             "validated": bool(report.get("validated")),
             "holdout_retention": report["holdout_retention"],
-            "keep_reason": reason,
+            "keep_reason": report.get("keep_reason") or reason,
             "charge_costs": report.get("charge_costs"),
         }, applied)
 

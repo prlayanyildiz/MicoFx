@@ -22,3 +22,5 @@ _probe_*.py
 cursor/
 .vscode/
 claude/
+.bridge/spool.md
+.bridge/seen.txt
