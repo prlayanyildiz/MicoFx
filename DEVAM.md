@@ -254,7 +254,25 @@ kesilir ve BS-3'ün fatura yarısı yine ölçülemez. Bu bir arıza değil, ger
 alma. Ölçüm penceresi kapandığında düşürülecek — demo hesapta bile %22
 günlük zarar, 2.113 $ üzerinde 465 $ demek.
 
-Kitap: 10 sembol, hepsi açık, `lot_mode=risk`, sembol başına `max_positions=2`.
+**UK100 ve US2000 kapatıldı (17.08).** Spread kapısı ikisini de boğuyordu
+ve SPR-1 taraması (M15/M30, M5 kapalı) bir çıkış yolu bulamadı:
+
+| sembol | kitap calmar | aday calmar | kapı geçen % (kitap → aday) |
+|---|---:|---:|---|
+| US500 | 0,41 | **0,76** | %68,5 → **%100** (taşındı) |
+| UK100 | 1,58 | 1,99 | %50,2 → **%30,9** (kapı kötüleşti) |
+| US2000 | 0,99 | 0,80 | %7,2 → %9,3 (hâlâ günde ~1 saat) |
+| SpotBrent | 1,82 | 0,84 | %11 → %93 (kapı açıldı, kenar kapandı) |
+
+UK100'ün canlı profili ayrıca yapısal olarak kırıktı: 24 işlem, ödeme oranı
+**0,77** (kazançları kayıplarından küçük), başabaş için %56,5 kazanma oranı
+gerekiyor. Üst zaman dilimi de yok — zaten M30'da ve H1 `ea8d888` ile
+emekli edildi.
+
+SpotBrent M5'te bırakıldı: M15 kapıyı açıyor ama net R aynı kalıp (12,7 →
+11,7) drawdown ikiye katlanıyor — kapı açılıyor, kenar açılmıyor.
+
+Kitap: 10 sembol (8'i açık), `lot_mode=risk`, sembol başına `max_positions=2`.
 Risk yüzdeleri 0.2 (SpotBrent, XAUUSD, US500) ve 0.8 (diğer yedi). Hepsi dolsa
 teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 
