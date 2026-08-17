@@ -145,6 +145,24 @@ DOM (bu CFD'lerde yok); min lot marj şişmesi (ölçüldü, ~1.00x, yok);
 öldü: net R toplamı 534.43 → 220.36 (dört saat kapalı) / 313.02 (optimizer
 kendi arasa), `validated` 6/10 → 3/10 → 0/10. Gömüldü.
 
+**Seçim ölçütüne calmar bağlamak (SEL-1)** — ölçüldü, `score`'dan
+**ayırt edilebilir şekilde daha kötü**. Zamansal bölme (ilk 2/3 eğitim, son
+1/3 karar; n=88 test), tüm sıralama anahtarları validation diliminden,
+holdout'a hiç dokunulmadan. Test diliminde holdout net R ile Pearson:
+`score` +0,739, validation `net_r` +0,788 (GA'lar örtüşüyor),
+**validation calmar +0,115**, expectancy −0,293, PF −0,318. Calmar kendi
+hedefini (holdout calmar) bile öngörmüyor: +0,106.
+
+Sebep anlaşıldı: `score` içinde yumuşak bir DD terimi var
+(`net_r / (net_r + max_dd)`) ve hacimli net R'yi koruyor; `net_r / max_dd`
+onu siliyor, holdout bilgisini de beraberinde götürüyor. **LEV-1'deki
+calmar kazancı boyutlandırmaya özgü, seçime taşınmıyor.**
+
+Ayrıca bu arşiv daha ince soruları **cevaplayamaz**: `score` ile validation
+`net_r` arasındaki ~0,05'lik farkı görmek ~1482 bağımsız koşu ister; elde
+262 var ve bağımsız değil (11 sembol, 5 gün). Metrik yarışı bu veriyle
+kapandı.
+
 **Skorun holdout'u öngörmediği iddiası** — ölçüldü, yanlış çıktı. 262
 koşuda skor ↔ holdout net R Pearson 0,67 (uygulanan 58'de 0,81); validation
 net R ile 0,72 / 0,81. İlişki zayıf değil. Ama bileşen kırılımı bir şey
@@ -243,6 +261,21 @@ teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 ---
 
 ## 7. Açık işler, öncelik sırasıyla
+
+**BUG — canlı SL/TP güncellemesi sessizce başarısız (OPS-1, 17.08).**
+`WARN [JPN225] SL/TP guncellenemedi #359440001 (0)` beş dakikada bir
+tekrarlıyor; 17.08 sabahı 18 kez, XAUUSD (8) ve JPN225 (10) üzerinde.
+Etkilenen pozisyonlar **kârda** ve trail ilerlemiyor: JPN225 #359440001 /
+#359440015 her biri +39 $, SL hâlâ açılıştaki 69039,6'da.
+
+Broker mesafesi sebep **değil**: `trade_stops_level = 0`,
+`trade_freeze_level = 0`, SL bid'in 107,7 puan altında. Yani yer var,
+istek yine de geçmiyor.
+
+Ayrıca teşhis kapalı: log `(0)` yazıyor. MT5'te 0 bir hata kodu değil —
+`order_send` `None` döndüğünde `getattr(result, "retcode", 0)` böyle
+okunur. `mt5.last_error()` yazılmadığı için sebep kayıtta yok. Kazanan
+pozisyonun stopu ilerlemiyorsa bu doğrudan paradır.
 
 **BUG — gece yedeği hiç çalışmıyor.** `backup.py:45` proje kökünü tararken
 `.pytest_tmp` altındaki `*current` bağlantılarına `stat()` atıp `WinError
