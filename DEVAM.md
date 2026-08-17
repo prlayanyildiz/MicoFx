@@ -301,7 +301,27 @@ SpotBrent M5'te bırakıldı: M15 kapıyı açıyor ama net R aynı kalıp (12,7
 11,7) drawdown ikiye katlanıyor — kapı açılıyor, kenar açılmıyor.
 
 İkisi 17.08'de kitaptan **tamamen silindi** (operatör onayı). Kitap 8
-sembol. Yerine ekleme **bugün yapılmayacak**: sabah altı gerçek onarım indi
+sembol.
+
+**NAS100 silinmedi, taşındı — ve kendi kuralımı bilerek çiğnedim.**
+Kurala göre (calmar **ve** ödeme oranı birlikte iyileşmeli) taşınmamalıydı:
+holdout calmar 1,33 → **1,95** geçiyor ama ödeme 2,78 → 2,61 geçmiyor.
+Yine de `mtf_pullback/M30`'a taşıdım. Gerekçe:
+
+- Kural UK100 için yazılmıştı; oradaki ödeme **0,77** idi, yani yapısal
+  olarak kaybettiren. Burada iki aday da 2,6–2,8 aralığında; %6'lık fark
+  bu iki konfig arasında ayırt edici değil.
+- Aday holdout'ta net R +60,8 → **+92,0**, işlem 960 → 1045, calmar %47
+  daha iyi. Boyutlandırma ölçütümüz zaten calmar (LEV-1).
+- **Asıl mesele konfig değil.** Kâğıt zaten 2,78 ödeme diyor, canlı 1,12
+  veriyor. Bu, bütün kitabı kapsayan açıklanmamış canlı/kâğıt farkı; NAS100'ü
+  bunun için silmek, sırayla her sembolü silmek demek olurdu.
+- Canlı sicil (n=72, −11,1 puan) bugünün altı onarımından **önce** toplandı.
+  Ayrıca güç: n=72'de standart hata 5,9 puan, yani 11,1 puanlık fark ~1,9
+  SE (p≈0,06) — sınırda, kesin değil.
+
+**Gözden geçirme şartı:** onarılmış motorla en az 50 işlem sonra NAS100 hâlâ
+başabaşın 5 puandan fazla altındaysa silinir. Kural esnetildi, unutulmadı. Yerine ekleme **bugün yapılmayacak**: sabah altı gerçek onarım indi
 (giriş yolu başarı kontrolü, SL/TP başarı kontrolü, VWAP stop puanlaması,
 short stop tetiği, calmar boyutlandırma, saat çivisi) ve temiz ölçüm
 penceresi daha bir günlük. Yeni sembol, açıklanmamış bir farkın üstüne yeni
