@@ -36,7 +36,7 @@ from ..models import (
 from ..mt5client import MT5Client
 from ..optimizer import Optimizer
 from ..paths import ROOT, WEB_DIR
-from ..sessions import describe, session_clock_warning
+from ..sessions import describe, server_datetime, session_clock_warning
 from ..store import Store
 from ..strategy import _FAMILIES, ENGINE_OPT_FIELDS, opt_fields_read
 from ..supervisor import DEFAULTS as AI_SETTINGS_DEFAULTS
@@ -879,7 +879,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         day_start = engine._day_start_epoch()
         for deal in client.deals_since(day_start):
             if int(deal.get("magic", 0)) == int(new_magic):
-                when = time.strftime("%H:%M", time.localtime(deal.get("time", 0)))
+                when = server_datetime(float(deal.get("time", 0) or 0)).strftime("%H:%M")
                 return (f"magic {new_magic} bugun {when}'de kapanmis bir isleme ait "
                         f"(silinmis bir sembolden kalmis olabilir) - bu numara "
                         f"verilirse o islemin kâr/zarari yeni sembole yazilir; "

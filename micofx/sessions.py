@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
 from .models import SymbolConfig
 
@@ -33,6 +34,23 @@ def server_clock(server_epoch: float) -> tuple[int, int]:
     st = time.gmtime(server_epoch)
     weekday = st.tm_wday + 1  # tm_wday: Monday == 0
     return weekday, st.tm_hour * 60 + st.tm_min
+
+
+def server_datetime(server_epoch: float) -> datetime:
+    """Naive datetime of the broker's wall clock from a naive broker epoch.
+
+    Same encoding as ``server_clock``: the number looks like Unix time but
+    its calendar fields are the broker's clock, recovered with ``gmtime``.
+    ``datetime.fromtimestamp`` (this machine's TZ) and ``time.localtime``
+    add the Windows offset on top — +3h here, and a different hour after
+    European DST — and read every stamp late. Do not use those on MT5
+    bar, tick, or deal times. The returned datetime is naive on purpose:
+    the broker has no tzinfo in this encoding, and attaching UTC would
+    lie about what the number meant.
+    """
+    st = time.gmtime(server_epoch)
+    return datetime(st.tm_year, st.tm_mon, st.tm_mday,
+                    st.tm_hour, st.tm_min, st.tm_sec)
 
 
 def weekend_closed(cfg: SymbolConfig, server_epoch: float) -> bool:
