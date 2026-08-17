@@ -348,7 +348,44 @@ short stop tetiği, calmar boyutlandırma, saat çivisi) ve temiz ölçüm
 penceresi daha bir günlük. Yeni sembol, açıklanmamış bir farkın üstüne yeni
 değişken koymak olur.
 
-Kitap: 8 sembol, `lot_mode=risk`, sembol başına `max_positions=2`.
+**FRA40 ve US500 silindi (18.08), kitap 6 sembole indi.** GAP-5, her sembol
+için hem canlı konfigin onarılmış holdout'unu hem aramanın kazananını
+verdi; aday barı 1,94 (onarım sonrası medyan):
+
+| sembol | canlı konfig | aramanın kazananı |
+|---|---:|---:|
+| GER40 | **5,30** | 2,10 |
+| SpotBrent | **4,03** | 0,76 |
+| JPN225 | **3,74** | 1,68 |
+| US30 | **2,00** | 0,72 |
+| NAS100 | 1,98 | 1,98 |
+| XAUUSD | 1,49 | **2,05** |
+| ~~FRA40~~ | 0,44 | 0,82 |
+| ~~US500~~ | 0,54 | 0,54 |
+
+FRA40 ve US500'ün ne mevcut konfigi ne de aramanın en iyisi barı geçiyor.
+İkisi de daha iyi bir enstrümanın pahalı ve korele ikizi (FRA40–GER40 ρ0,83
+ve 4,2 kat pahalı; US500–NAS100 ρ0,92 ve 2,9 kat pahalı). Dört bağımsız
+ölçüm aynı yeri gösterdi.
+
+**Damgalar yenilendi.** `opt_summary.holdout` altı sembol için GAP-5
+replay'inden yazıldı (`stamp_source` alanı ile işaretli). Boyutlandırma
+artık gerçek sayıdan okuyor; toplam teorik eşzamanlı risk **%9,84 → %7,43**
+(kapı %15). FRA40'ın 1,8 kat şişkinliği kendiliğinden gitti.
+
+**Kayda değer örüntü: mevcut konfigler aramayı yeniyor.** Sekiz sembolün
+altısında canlı konfig, taze aramanın kazananından iyi ya da eşit. Bu,
+16.08 turunda da görülmüştü (adaylar holdout'ta toplam 130,7 R daha kötü).
+Çalkantı freni ölçülebilir biçimde para kazandırıyor: hayatta kalan konfig
+bir eleme geçmiş, aday ise her seferinde seçim dilimine yeniden uyuyor.
+
+**XAUUSD taşınmadı** — aramanın kazananı calmar'da öne geçiyor (1,49→2,05)
+ama ödeme oranı 3,43'ten 1,58'e düşüyor, ve altı sembolde arama kaybederken
+iki istisnadan birine güvenmek için sebep yok. Kitabın canlıda en çok işlem
+yapan sembolü; ölçüm penceresi dolarken karakterini değiştirmiyorum. Bir
+sonraki gözden geçirmede canlı veriyle yeniden bakılacak.
+
+Kitap: 6 sembol, `lot_mode=risk`, sembol başına `max_positions=2`.
 Risk yüzdeleri 0.2 (SpotBrent, XAUUSD, US500) ve 0.8 (diğer yedi). Hepsi dolsa
 teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 
