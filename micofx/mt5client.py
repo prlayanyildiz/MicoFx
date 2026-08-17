@@ -61,36 +61,37 @@ _AMBIGUOUS_RETCODES: frozenset[int] = frozenset(
 AMBIGUOUS_RETCODES = _AMBIGUOUS_RETCODES
 
 
-def _sltp_modify_succeeded(result: Any) -> bool:
-    """Did this TRADE_ACTION_SLTP actually land?
+def _broker_send_succeeded(result: Any) -> bool:
+    """Did this ``order_send`` actually land (DEAL, SLTP, or close)?
 
-    Pepperstone-Demo does not return TRADE_RETCODE_DONE (10009) for a
-    successful stop modify. Live 17.08.2026 09:40, after the diagnosis log
-    landed:
+    Pepperstone-Demo does not return TRADE_RETCODE_DONE (10009) on success.
+    Live 17.08.2026, both paths came back the same shape:
 
-        retcode=0 comment=Done last_error=(1, 'Success')
-        request=TradeRequest(action=6, ..., sl=69062.0, tp=0.0,
-                             position=359440001)
+        TRADE_ACTION_SLTP  retcode=0 comment=Done  (OPS-2, JPN225 09:40)
+        TRADE_ACTION_DEAL  retcode=0 comment=Done  (OPS-3, GER40 11:00)
 
-    The broker's SL was 69062.0. Treating only 10009 as success marked that
-    request a failure, left the engine book on the old stop, and reprinted
-    a WARN every M5 bar.
+    Treating only 10009 as a fill marked the DEAL a reject, so the engine
+    never wrote cooldown or the filled-bar lock and the next poll sent a
+    second order on top of a position that already existed.
 
     ``retcode=0`` on a missing result is the old hole:
     ``getattr(None, "retcode", 0)``. None is still a failure. A result
-    object with retcode 0 counts only when comment is ``Done``. 10009 and
-    10010 stay success so a broker that speaks the documented codes is
-    unchanged.
+    object with retcode 0 counts only when comment is ``Done``. Codes in
+    ``_FILL_RETCODES`` (10009/10010, and whatever a test patches in) stay
+    success so a broker that speaks the documented codes is unchanged.
     """
     if result is None:
         return False
     retcode = getattr(result, "retcode", None)
-    done = getattr(mt5, "TRADE_RETCODE_DONE", 10009)
-    partial = getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)
-    if retcode in (done, partial):
+    if retcode in _FILL_RETCODES:
         return True
     comment = str(getattr(result, "comment", "") or "").strip()
     return retcode == 0 and comment == "Done"
+
+
+def _sltp_modify_succeeded(result: Any) -> bool:
+    """SLTP uses the same broker-success rule as DEAL/close. Do not fork."""
+    return _broker_send_succeeded(result)
 
 
 _INFO_TTL = 120.0
@@ -1235,10 +1236,10 @@ class MT5Client:
                 request["type_filling"] = mode
                 with self._lock:
                     result = mt5.order_send(request)
-                if result is not None and result.retcode in _FILL_RETCODES:
+                if _broker_send_succeeded(result):
                     break
 
-        if result is None or result.retcode not in _FILL_RETCODES:
+        if not _broker_send_succeeded(result):
             code = getattr(result, "retcode", -1)
             text = getattr(result, "comment", "?")
             # A retry inside the INVALID_STOPS/INVALID_FILL ladders above can
@@ -1635,9 +1636,9 @@ class MT5Client:
                 request["type_filling"] = mode
                 with self._lock:
                     result = mt5.order_send(request)
-                if result is not None and result.retcode in _FILL_RETCODES:
+                if _broker_send_succeeded(result):
                     break
-        if result is None or result.retcode not in _FILL_RETCODES:
+        if not _broker_send_succeeded(result):
             code = getattr(result, "retcode", -1)
             LOG.emit(f"Pozisyon kapatilamadi #{ticket} ({code})", "ERROR", p.symbol)
             return False
