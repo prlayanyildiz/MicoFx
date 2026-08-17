@@ -1,34 +1,27 @@
-"""An apply that carries no evidence must not leave the previous evidence standing.
+"""An apply that carries no evidence must not change what trades.
 
-``Optimizer.apply`` writes the strategy, the timeframe, the parameters, the
-score and the timestamp unconditionally, but writes ``opt_summary`` only
-``if detail:``. Applying without a detail block therefore changes what trades
-while leaving behind a summary measured on the configuration that no longer
-exists.
+``Optimizer.apply`` used to write strategy, timeframe, params, score and
+timestamp unconditionally, and write ``opt_summary`` only ``if detail:``.
+Applying without a detail block therefore changed the live configuration
+while leaving behind a summary measured on what no longer trades.
 
-The summary is not decoration. Three separate consumers read it as the record
-of what this configuration proved:
+The summary is not decoration. Three consumers read it as current:
 
   * ``/api/analysis/portfolio-gates`` takes ``holdout.trades``,
-    ``holdout.expectancy`` and ``holdout.cost_per_trade_r`` straight out of it
-    to decide measurability, the cost gate and which review layer the symbol
-    lands in - the panel the hourly review reads before cutting a symbol.
+    ``holdout.expectancy`` and ``holdout.cost_per_trade_r`` straight out of it.
   * ``risk._edge_metric`` sizes the position from ``holdout.net_r`` over
-    ``holdout.max_dd_r``.
+    ``holdout.max_dd_r`` — never from ``holdout_costed``.
   * ``_beats_incumbent`` compares the next candidate's score against
     ``holdout``, and its spread assumption against ``spread_scale``.
 
-All three would be reading numbers earned by different parameters, on a
-different strategy, possibly on a different timeframe - and reading them as
-current, because nothing in the row says otherwise.
+NAS100 traded ``mtf_pullback`` sized as ``t3_flip`` because a family swap
+with overlapping OPT_FIELDS (sl/trail) looked like "same params" and kept
+the previous family's holdout. Voiding the summary when recorded params
+disagreed was not enough: strategy/timeframe are not in those params.
 
-Reachable from the panel: the results-table apply posts params without a
-run_id, and ``detail is None`` on that path is explicitly documented in
-web/app.py as indistinguishable from a hand-typed apply. It happened today -
-EURUSD was applied flow_rev/H1 at 11:26:58, fifteen seconds after the
-auto-apply gate had refused the same candidate, and its opt_summary is empty.
-Empty is the visible half of this: the symbol had no earlier summary to keep.
-A symbol that has one keeps it, which is the half that misleads.
+GAP-4: unstamped apply is refused. The row does not move. A complete stamp
+(holdout, validated, holdout_days) is written from the applied config's
+search output, including on a family swap whose OPT_FIELDS overlap.
 """
 from __future__ import annotations
 
@@ -39,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import SymbolConfig
 from micofx.optimizer import Optimizer
+from micofx.risk import RiskManager
 
 
 class _Store:
@@ -69,82 +63,119 @@ class _Client:
 
 
 EARLIER = {
-    "holdout": {"trades": 300, "expectancy": 0.31, "net_r": 92.0,
-                "cost_per_trade_r": 0.04},
+    "holdout": {"trades": 300, "expectancy": 0.31, "net_r": 60.8,
+                "max_dd_r": 45.7, "cost_per_trade_r": 0.04},
     "holdout_days": 120.0,
+    "validated": True,
     "params": {"sl_atr_mult": 1.0, "trail_step_atr": 0.6},
+    "spread_scale": 1.05,
+}
+
+NEW = {
+    "holdout": {"trades": 80, "expectancy": 0.15, "net_r": 92.0,
+                "max_dd_r": 48.0, "cost_per_trade_r": 0.03, "score": 8.0},
+    "validation": {"trades": 60, "expectancy": 0.12, "net_r": 7.0},
+    "selection": {"trades": 200, "expectancy": 0.18},
+    "holdout_days": 90.0,
+    "validated": True,
+    "positive_ratio": 0.8,
     "spread_scale": 1.05,
 }
 
 
 def _cfg() -> SymbolConfig:
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, strategy="t3_stoch",
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, strategy="t3_flip",
                        timeframe="M15", sl_atr_mult=1.0, trail_step_atr=0.6)
     cfg.opt_summary = dict(EARLIER)
+    cfg.validated = True
     return cfg
 
 
-def _apply(**kw):
-    cfg = _cfg()
+def _opt(cfg=None):
+    cfg = cfg or _cfg()
     store = _Store(cfg)
     opt = Optimizer(store=store, client=_Client())
-    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.4}, score=9.9, **kw)
-    assert result["ok"] is True, result
-    return cfg
+    opt._holdout_costed = lambda *a, **k: None
+    return opt, store, cfg
 
 
 # ------------------------------------------------------- the defect
 
-def test_a_summary_measured_on_other_parameters_is_not_kept():
-    cfg = _apply()
-    assert cfg.sl_atr_mult == 2.4, "yeni parametre yazilmis olmali"
-    summary = cfg.opt_summary or {}
-    kept = (summary.get("params") or {}).get("sl_atr_mult")
-    assert kept != 1.0, (
-        "damga hala eski parametreye ait: konfig 2.4 ile isliyor, "
-        "ozet 1.0 ile olculmus")
+def test_unstamped_apply_is_refused_and_the_row_does_not_move():
+    opt, store, cfg = _opt()
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.4}, score=9.9)
+    assert result["ok"] is False, result
+    assert "damga" in (result.get("error") or "").lower()
+    assert store.updated_with is None
+    assert cfg.sl_atr_mult == 1.0
+    assert cfg.strategy == "t3_flip"
+    assert (cfg.opt_summary or {}).get("holdout", {}).get("net_r") == 60.8
 
 
-def test_the_gate_panel_does_not_read_a_stale_holdout():
-    """portfolio-gates takes trades/expectancy/cost straight from here."""
-    hold = (_apply().opt_summary or {}).get("holdout") or {}
-    assert hold.get("expectancy") != 0.31, (
-        "kapi paneli baska parametrelerle kazanilmis 0.31R'yi guncel saniyor")
+def test_apply_without_holdout_is_refused():
+    opt, store, cfg = _opt()
+    detail = {k: v for k, v in NEW.items() if k != "holdout"}
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.4}, score=9.9, detail=detail)
+    assert result["ok"] is False, result
+    assert "holdout" in (result.get("error") or "")
+    assert cfg.sl_atr_mult == 1.0
+    assert store.updated_with is None
 
 
-def test_the_spread_stamp_does_not_outlive_its_configuration():
-    """_beats_incumbent compares the next candidate against this assumption."""
-    assert (_apply().opt_summary or {}).get("spread_scale") != 1.05
+def test_apply_without_holdout_days_is_refused():
+    opt, store, cfg = _opt()
+    detail = {k: v for k, v in NEW.items() if k != "holdout_days"}
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.4}, score=9.9, detail=detail)
+    assert result["ok"] is False, result
+    assert "holdout_days" in (result.get("error") or "")
+    assert cfg.sl_atr_mult == 1.0
 
 
-def test_a_family_swap_does_not_keep_the_previous_families_record():
-    cfg = _apply(strategy="burst", timeframe="M5")
-    assert cfg.strategy == "burst" and cfg.timeframe == "M5"
+def test_apply_without_validated_is_refused():
+    opt, store, cfg = _opt()
+    detail = {k: v for k, v in NEW.items() if k != "validated"}
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.4}, score=9.9, detail=detail)
+    assert result["ok"] is False, result
+    assert "validated" in (result.get("error") or "")
+    assert cfg.sl_atr_mult == 1.0
+    assert cfg.validated is True
+
+
+def test_family_swap_with_overlapping_opt_fields_writes_the_new_holdout():
+    """NAS100: mtf_pullback applied, t3_flip 60.8R stamp kept. Overlapping sl."""
+    opt, store, cfg = _opt()
+    result = opt.apply(
+        "XAUUSD", {"sl_atr_mult": 1.0, "trail_step_atr": 0.6}, score=9.9,
+        detail=NEW, strategy="mtf_pullback", timeframe="M30")
+    assert result["ok"] is True, result
+    assert cfg.strategy == "mtf_pullback"
+    assert cfg.timeframe == "M30"
     hold = (cfg.opt_summary or {}).get("holdout") or {}
-    assert hold.get("trades") != 300, (
-        "burst/M5 calisiyor ama ozet t3_stoch/M15'in 300 islemini gosteriyor")
+    assert hold.get("net_r") == 92.0
+    assert hold.get("trades") == 80
+    assert (cfg.opt_summary or {}).get("holdout_days") == 90.0
+    assert cfg.validated is True
+    assert (cfg.opt_summary or {}).get("validated") is True
+
+
+def test_edge_scale_reads_holdout_not_holdout_costed():
+    """risk._edge_metric is the number LEV-1 sizes from. Write that field."""
+    cfg = _cfg()
+    cfg.opt_summary = {
+        "holdout": {"net_r": 10.0, "max_dd_r": 5.0},
+        "holdout_costed": {"net_r": 999.0, "max_dd_r": 1.0},
+    }
+    assert RiskManager._edge_metric(cfg) == 2.0
 
 
 # --------------------------------------------- what must keep working
 
 def test_an_apply_with_evidence_records_it():
-    cfg = _cfg()
-    store = _Store(cfg)
-    opt = Optimizer(store=store, client=_Client())
-    detail = {"holdout": {"trades": 44, "expectancy": 0.2, "net_r": 8.8},
-              "validation": {}, "selection": {}, "holdout_days": 30.0,
-              "positive_ratio": 1.0}
-    assert opt.apply("XAUUSD", {"sl_atr_mult": 2.4}, score=9.9, detail=detail)["ok"]
+    opt, store, cfg = _opt()
+    assert opt.apply("XAUUSD", {"sl_atr_mult": 2.4}, score=9.9, detail=NEW)["ok"]
     hold = (cfg.opt_summary or {}).get("holdout") or {}
-    assert hold.get("trades") == 44
-    assert (cfg.opt_summary or {}).get("holdout_days") == 30.0
+    assert hold.get("trades") == 80
+    assert (cfg.opt_summary or {}).get("holdout_days") == 90.0
+    assert cfg.validated is True
     assert "spread_scale" in (cfg.opt_summary or {})
-
-
-def test_the_configuration_itself_is_still_applied():
-    """Only the stale record goes; the apply keeps working."""
-    cfg = _apply(strategy="burst", timeframe="M5")
     assert cfg.sl_atr_mult == 2.4
-    assert cfg.strategy == "burst"
-    assert cfg.timeframe == "M5"
-    assert cfg.opt_score == 9.9

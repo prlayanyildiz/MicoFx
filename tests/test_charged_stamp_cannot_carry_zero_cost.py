@@ -63,6 +63,7 @@ def _detail(**over):
         "selection": {"trades": 800, "expectancy": 0.09, "profit_factor": 1.3},
         "positive_ratio": 0.8,
         "holdout_days": 40.0,
+        "validated": True,
     }
     d.update(over)
     return d

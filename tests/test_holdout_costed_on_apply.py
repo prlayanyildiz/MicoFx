@@ -54,6 +54,7 @@ def _detail(paper_e=0.049):
         "selection": {"trades": 800, "expectancy": 0.07, "profit_factor": 1.3},
         "positive_ratio": 0.8,
         "holdout_days": 40.0,
+        "validated": True,
         "charge_costs": False,
     }
 

@@ -54,13 +54,30 @@ def _cfg():
                         sl_atr_mult=1.0, trail_step_atr=0.6)
 
 
+STAMP = {
+    "holdout": {"trades": 40, "expectancy": 0.2, "net_r": 8.0, "max_dd_r": 4.0},
+    "holdout_days": 30.0,
+    "validated": True,
+    "validation": {},
+    "selection": {},
+    "positive_ratio": 1.0,
+}
+
+
+def _make_opt(store, client):
+    opt = Optimizer(store=store, client=client)
+    opt._holdout_costed = lambda *a, **k: None
+    return opt
+
+
 def test_apply_holds_back_exit_fields_when_orphan_scan_pending_and_no_visible_position():
     cfg = _cfg()
     store = _Store(cfg, orphan_scan={"XAUUSD": {"magic": 1, "known": [], "since": 0.0}})
     client = _Client(positions=[])  # nothing visible - exactly why the scan exists
-    opt = Optimizer(store=store, client=client)
+    opt = _make_opt(store, client)
 
-    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0, "t3_length": 10}, score=1.0)
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0, "t3_length": 10}, score=1.0,
+                       detail=STAMP)
 
     assert result["ok"] is True
     assert store.updated_with["pending_exit_patch"] == {"sl_atr_mult": 2.0}
@@ -73,9 +90,10 @@ def test_apply_refuses_family_swap_when_orphan_scan_pending():
     cfg = _cfg()
     store = _Store(cfg, orphan_scan={"XAUUSD": {"magic": 1, "known": [], "since": 0.0}})
     client = _Client(positions=[])
-    opt = Optimizer(store=store, client=client)
+    opt = _make_opt(store, client)
 
-    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0, strategy="burst", timeframe="M5")
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0, detail=STAMP,
+                       strategy="burst", timeframe="M5")
 
     assert result["ok"] is False
     assert cfg.strategy == "t3_stoch"  # unchanged
@@ -85,9 +103,9 @@ def test_apply_unaffected_by_orphan_scan_for_other_symbol():
     cfg = _cfg()
     store = _Store(cfg, orphan_scan={"EURUSD": {"magic": 2, "known": [], "since": 0.0}})
     client = _Client(positions=[])
-    opt = Optimizer(store=store, client=client)
+    opt = _make_opt(store, client)
 
-    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0)
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0, detail=STAMP)
 
     assert result["ok"] is True
     assert store.updated_with["sl_atr_mult"] == 2.0  # applied immediately, no holdback
@@ -97,9 +115,9 @@ def test_apply_clean_when_no_orphan_scan_and_no_position():
     cfg = _cfg()
     store = _Store(cfg)
     client = _Client(positions=[])
-    opt = Optimizer(store=store, client=client)
+    opt = _make_opt(store, client)
 
-    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0)
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0, detail=STAMP)
 
     assert result["ok"] is True
     assert store.updated_with["sl_atr_mult"] == 2.0
@@ -110,9 +128,9 @@ def test_apply_refuses_when_disconnected_before_positions():
     store = _Store(cfg)
     client = _Client(positions=[])
     client.connected = False
-    opt = Optimizer(store=store, client=client)
+    opt = _make_opt(store, client)
 
-    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0)
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0, detail=STAMP)
 
     assert result["ok"] is False
     assert store.updated_with is None
@@ -129,8 +147,8 @@ def test_apply_refuses_mid_call_disconnect_after_positions():
             self.connected = False
             return []
 
-    opt = Optimizer(store=store, client=_Flip())
-    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0)
+    opt = _make_opt(store, _Flip())
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0, detail=STAMP)
 
     assert result["ok"] is False
     assert store.updated_with is None
@@ -148,9 +166,9 @@ def test_apply_family_swap_does_not_depend_on_secondary_clear():
         symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15", sl_atr_mult=1.0, trail_step_atr=0.6,
     )
     store = _Store(cfg)
-    opt = Optimizer(store=store, client=_Client(positions=[]))
+    opt = _make_opt(store, _Client(positions=[]))
 
-    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0,
+    result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0, detail=STAMP,
                        strategy="burst", timeframe="M5")
 
     assert result["ok"] is True

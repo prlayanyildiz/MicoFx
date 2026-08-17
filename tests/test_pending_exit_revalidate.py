@@ -155,8 +155,17 @@ def test_optimizer_apply_itself_refuses_poisoned_params(params, ok):
     opt.store = store
     opt.entry_lock = None
     opt.client = _C()
+    opt._holdout_costed = lambda *a, **k: None
+    stamp = {
+        "holdout": {"trades": 40, "expectancy": 0.2, "net_r": 8.0, "max_dd_r": 4.0},
+        "holdout_days": 30.0,
+        "validated": True,
+        "validation": {},
+        "selection": {},
+        "positive_ratio": 1.0,
+    }
 
-    result = opt.apply("XAUUSD", params, score=1.0, detail=None,
+    result = opt.apply("XAUUSD", params, score=1.0, detail=stamp,
                        timeframe="M15", strategy="t3_stoch")
     assert result.get("ok") is ok, result
     if not ok:

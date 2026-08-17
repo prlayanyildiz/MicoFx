@@ -879,6 +879,7 @@ class Optimizer:
         elif apply_best and report.get("validated") and not reason:
             apply_result = self.apply(cfg.symbol, best["params"], score,
                        {**best, "holdout_days": report.get("holdout_days", 0.0),
+                        "validated": bool(report.get("validated")),
                         "charge_costs": report.get("charge_costs"),
                         "spread_scale": report.get("spread_scale"),
                         "min_positive_ratio": report.get("min_positive_ratio")},
@@ -1459,6 +1460,28 @@ class Optimizer:
             return False
         return claimed
 
+    @staticmethod
+    def _apply_stamp_missing(detail: dict[str, Any] | None) -> str:
+        """Refuse an apply that would change the live row without its evidence.
+
+        ``opt_summary.holdout`` is what ``risk._edge_metric`` sizes from, and
+        what the gate panel reads as current. A family swap whose OPT_FIELDS
+        overlap the previous row used to look like "same params" and keep the
+        previous family's holdout — NAS100 traded mtf_pullback sized as
+        t3_flip. No fallback: missing holdout, holdout_days or validated
+        is a refusal, not an empty summary.
+        """
+        if not isinstance(detail, dict):
+            return "uygulama damgasi yok (holdout/validated/holdout_days)"
+        hold = detail.get("holdout")
+        if not isinstance(hold, dict) or not hold:
+            return "uygulama damgasi eksik: holdout"
+        if detail.get("holdout_days") is None:
+            return "uygulama damgasi eksik: holdout_days"
+        if "validated" not in detail or detail.get("validated") is None:
+            return "uygulama damgasi eksik: validated"
+        return ""
+
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,
               timeframe: str | None = None, strategy: str | None = None) -> dict[str, Any]:
@@ -1501,6 +1524,9 @@ class Optimizer:
         if bad:
             LOG.emit(f"Cikis parametresi reddedildi: {bad}", "OPT", symbol)
             return {"ok": False, "error": f"cikis parametresi gecersiz: {bad}"}
+        missing = self._apply_stamp_missing(detail)
+        if missing:
+            return {"ok": False, "error": missing}
         # Charged same-slice look used to stamp costed_negative and still
         # apply (#50). UK100/SpotBrent/JPN225 were the bill: paper-positive
         # winners that lose once spread is paid. A measurement that cannot
@@ -1523,15 +1549,17 @@ class Optimizer:
             patch["strategy"] = strategy
         patch["opt_score"] = float(score)
         patch["opt_updated_at"] = time.time()
-        if detail:
-            patch["opt_summary"] = {
-                "holdout_retention": round(self.holdout_retention(detail), 3),
-                "holdout": detail.get("holdout", {}),
-                "validation": detail.get("validation", {}),
-                "selection": detail.get("selection", {}),
-                "holdout_days": detail.get("holdout_days", 0.0),
-                "positive_ratio": detail.get("positive_ratio", 0.0),
-                "params": applied_params,
+        # Stamp is required above. Write holdout from this config's search
+        # output — the same field risk._edge_metric reads. holdout_costed is
+        # a separate charged replay, added below when that look exists.
+        patch["opt_summary"] = {
+            "holdout_retention": round(self.holdout_retention(detail), 3),
+            "holdout": detail.get("holdout") or {},
+            "validation": detail.get("validation", {}),
+            "selection": detail.get("selection", {}),
+            "holdout_days": float(detail["holdout_days"]),
+            "positive_ratio": detail.get("positive_ratio", 0.0),
+            "params": applied_params,
                 # The spread scale this candidate was measured under. Every
                 # number beside it - score, expectancy, cost_per_trade_r - is
                 # only meaningful against that assumption, and _beats_incumbent
@@ -1539,9 +1567,9 @@ class Optimizer:
                 # while the search still charged the raw bar spread would be
                 # compared, as though like for like, against one measured at
                 # the tick spread the live gate actually enforces.
-                "spread_scale": round(float(detail["spread_scale"]), 3)
-                if detail.get("spread_scale") is not None
-                else round(self._spread_scale(symbol), 3),
+            "spread_scale": round(float(detail["spread_scale"]), 3)
+            if detail.get("spread_scale") is not None
+            else round(self._spread_scale(symbol), 3),
                 # Same argument, one assumption over. charge_costs=False makes
                 # the sweep fill at the printed price and charge nothing, so a
                 # score earned that way is not comparable with one earned while
@@ -1561,50 +1589,28 @@ class Optimizer:
                 #
                 # AV1: the store fallback is still a lie when detail omits the
                 # key (opt_history apply) and holdout.cost_per_trade_r is 0.
-                "charge_costs": self._charge_costs_stamp(detail),
-                "min_positive_ratio": float(detail["min_positive_ratio"])
-                if detail.get("min_positive_ratio") is not None
-                else float((self.store.opt_params() if self.store is not None else {})
-                           .get("min_positive_ratio", 0.6) or 0.6),
-            }
-            if "validated" in detail:
-                flag = detail.get("validated")
-                if flag is not None:
-                    patch["validated"] = bool(flag)
-                    patch["opt_summary"]["validated"] = bool(flag)
-            # Search regime is the stamp above. Same charged look that
-            # already gated the apply; force still stamps the flag.
-            if costed is not None:
-                patch["opt_summary"]["holdout_costed"] = costed
-                paper = float((detail.get("holdout") or {}).get("expectancy") or 0.0)
-                charged = float(costed.get("expectancy") or 0.0)
-                if charged < 0:
-                    patch["opt_summary"]["costed_negative"] = True
-                    LOG.emit(
-                        f"{symbol}: maliyetsiz kâğıt {paper:+.3f}, "
-                        f"maliyetli ayni dilim {charged:+.3f} - "
-                        f"canli bu konfigi odeyerek isletecek.",
-                        "OPT", symbol)
-        else:
-            # No evidence came with this apply, so the evidence already on the
-            # row may no longer describe what trades. Everything else here is
-            # written unconditionally - strategy, timeframe, params, score - so
-            # without this the summary quietly outlives its own configuration.
-            #
-            # It is not decoration: portfolio-gates decides measurability, the
-            # cost gate and the review layer from holdout.trades/expectancy/
-            # cost_per_trade_r, risk._edge_metric sizes from holdout.net_r over
-            # holdout.max_dd_r, and _beats_incumbent compares the next candidate
-            # against holdout and spread_scale. All three would read numbers
-            # earned by different parameters as current.
-            #
-            # Only dropped when it provably disagrees. Re-applying the same
-            # numbers keeps its record; the summary is void when the config it
-            # measured is not the config that results.
-            recorded = (getattr(cfg, "opt_summary", None) or {}).get("params")
-            if isinstance(recorded, dict) and any(
-                    recorded.get(k) != v for k, v in patch.items() if k in recorded):
-                patch["opt_summary"] = {}
+            "charge_costs": self._charge_costs_stamp(detail),
+            "min_positive_ratio": float(detail["min_positive_ratio"])
+            if detail.get("min_positive_ratio") is not None
+            else float((self.store.opt_params() if self.store is not None else {})
+                       .get("min_positive_ratio", 0.6) or 0.6),
+        }
+        flag = bool(detail.get("validated"))
+        patch["validated"] = flag
+        patch["opt_summary"]["validated"] = flag
+        # Search regime is the stamp above. Same charged look that
+        # already gated the apply; force still stamps the flag.
+        if costed is not None:
+            patch["opt_summary"]["holdout_costed"] = costed
+            paper = float((detail.get("holdout") or {}).get("expectancy") or 0.0)
+            charged = float(costed.get("expectancy") or 0.0)
+            if charged < 0:
+                patch["opt_summary"]["costed_negative"] = True
+                LOG.emit(
+                    f"{symbol}: maliyetsiz kâğıt {paper:+.3f}, "
+                    f"maliyetli ayni dilim {charged:+.3f} - "
+                    f"canli bu konfigi odeyerek isletecek.",
+                    "OPT", symbol)
         # Held across the open-position check + the write so the engine's
         # own entry path (same lock; see Engine.entry_lock) cannot land a
         # fresh fill under cfg.magic in the gap between "nothing open yet"
