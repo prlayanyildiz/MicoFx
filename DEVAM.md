@@ -262,20 +262,28 @@ teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 
 ## 7. Açık işler, öncelik sırasıyla
 
-**BUG — canlı SL/TP güncellemesi sessizce başarısız (OPS-1, 17.08).**
-`WARN [JPN225] SL/TP guncellenemedi #359440001 (0)` beş dakikada bir
-tekrarlıyor; 17.08 sabahı 18 kez, XAUUSD (8) ve JPN225 (10) üzerinde.
-Etkilenen pozisyonlar **kârda** ve trail ilerlemiyor: JPN225 #359440001 /
-#359440015 her biri +39 $, SL hâlâ açılıştaki 69039,6'da.
+**BUG — SL/TP başarı kontrolü bu broker'da yanlış (OPS-1, 17.08).**
+Teşhis logu (`726364d`) açılır açılmaz sebep göründü ve ilk teşhisim
+**yanlıştı**:
 
-Broker mesafesi sebep **değil**: `trade_stops_level = 0`,
-`trade_freeze_level = 0`, SL bid'in 107,7 puan altında. Yani yer var,
-istek yine de geçmiyor.
+```
+retcode=0 comment=Done last_error=(1, 'Success')
+request=TradeRequest(action=6, ..., sl=69062.0, tp=0.0, position=359440001)
+```
 
-Ayrıca teşhis kapalı: log `(0)` yazıyor. MT5'te 0 bir hata kodu değil —
-`order_send` `None` döndüğünde `getattr(result, "retcode", 0)` böyle
-okunur. `mt5.last_error()` yazılmadığı için sebep kayıtta yok. Kazanan
-pozisyonun stopu ilerlemiyorsa bu doğrudan paradır.
+Pepperstone-Demo, başarılı bir `TRADE_ACTION_SLTP` için **`retcode=0` ve
+`comment="Done"`** dönüyor; `TRADE_RETCODE_DONE` (10009) değil. Kod yalnız
+10009'u başarı sayıyor, dolayısıyla **geçen isteği başarısız sanıyor**.
+
+Doğrulandı: "başarısız" denen istek `sl=69062.0` istedi, pozisyonun SL'i
+şu an **69062,0**. Trail çalışıyor. "Kazanan pozisyonun stopu ilerlemiyor,
+bu doğrudan paradır" cümlesi hatalıydı — para kaybı yok.
+
+Gerçek zararı ikisi: (1) log gürültüsü, (2) **motorun kendi kitabındaki SL
+bayat kalıyor** — modify'ı başarısız sayınca yeni seviyeyi yazmıyor. Bu
+sadece kozmetik değil: `execution.py` stop kaymasını `book["sl"]`'e karşı
+ölçüyor, yani EX-2'nin "stop bacağı tam sıfır" bulgusu bayat referansla
+alınmış olabilir. Onarımdan sonra EX-2 yeniden koşulmalı.
 
 **BUG — gece yedeği hiç çalışmıyor.** `backup.py:45` proje kökünü tararken
 `.pytest_tmp` altındaki `*current` bağlantılarına `stat()` atıp `WinError
