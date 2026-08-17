@@ -140,6 +140,13 @@ spread kapıları; kayıptan sonra atla kuralı; kripto semboller; FX'te M5;
 DOM (bu CFD'lerde yok); min lot marj şişmesi (ölçüldü, ~1.00x, yok);
 `size_by_edge` (zaten açık).
 
+**Min lot marj şişmesi artık "yok" değil.** O ölçüm ~1,00x demişti; 17.08'de
+XAUUSD **1,31x** — minimum lotta bile hedeflenen riskin %131'ini taşıyor ve
+aşağı inemiyor. Kat, bakiye düştükçe büyüyor (2.113 → 2.019 $ arasında 1,13
+→ 1,31). Kitabın geri kalanı 0,06–0,42 aralığında, yani sorun XAUUSD'ye
+özgü. `lot_multiplier` artırılırsa XAUUSD zaten aşırı riskli taraftan daha
+da büyür — o gün ayrı ele alınacak.
+
 **Gece saatleri kapısı (01/04/05/22)** — canlı geçmişte 474 işlem, net
 −479.66 $, toplam zararın %78'i, beş sembolde birden görünüyordu. Holdout'ta
 öldü: net R toplamı 534.43 → 220.36 (dört saat kapalı) / 313.02 (optimizer
@@ -171,6 +178,27 @@ kalite holdout ile **negatif** korele (selection expectancy −0,36, PF −0,39,
 validation expectancy −0,35, PF −0,36). Yani seçim çok işlemli toplam R'yi
 ödüllendiriyor, işlem başı kaliteyi değil. Ağırlık ölçütü tasarlarken bu
 bilinsin.
+
+**Broker'ın diğer endeksleri** — 17.08'de canlı fiyatla, üç zaman diliminde,
+tek tek ölçüldü. Kitabın M30 spread/ATR aralığı 0,019 (GER40) – 0,084
+(FRA40). Kitapta olmayan **en ucuz aday HK50 0,122** — kitabın en
+pahalısından %45, GER40'tan 6,4 kat pahalı. Sonrası: NETH25 0,140, AUS200
+0,141, TWN 0,159, EUSTX50 0,165, SWI20 0,200, CA60 0,246, SPA35 0,250,
+SCI25 0,434, CN50 0,445, HSTECH 0,604, US400 0,757, CHINAH 0,769. En oynak
+adaylar (TWN, HSTECH %0,22) JPN225'i geçmiyor ve maliyetleri kat kat fazla.
+**Bu broker'da işlem edilebilir endeks seti kitabın kendisi** — aynı sonuç
+iki ayrı yöntemle ölçüldü.
+
+**XAGUSD** — marj değil, spread eliyor. M5 spread/ATR **0,495** (ATR'nin
+yarısı spread'e gidiyor), M30 0,147; XAUUSD sırasıyla 0,022 ve 0,011, yani
+**13–22 kat** pahalı. Min lot marjı 163,24 $ (özkaynağın %8'i) teknik olarak
+sığıyor ama aynı marjı GER40'a koymak açık ara iyi takas.
+
+**SpotCrude, SpotBrent'ten ucuz** (M5 0,102 vs 0,125, M30 0,041 vs 0,053,
+ATR%% 0,700 vs 0,666, marj 2,08 vs 0,90 $) — ama ikisi de ham petrol.
+Eklemek çeşitlendirme değil aynı pozisyonu iki kez almak; portföy kapıları
+korelasyon bilmiyor. **Ekleme değil, değiştirme sorusu:** SpotBrent bir
+sonraki aramaya girdiğinde SpotCrude aynı arama uzayına konsun.
 
 **Flip ailelerine ADX/body kapısı bağlamak** — sezginin tersi çıktı. GER40'ta
 engellenecek kova +20.1R, geçen kova −7.5R. Bağlamak parayı atardı.
