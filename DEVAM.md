@@ -179,6 +179,27 @@ validation expectancy −0,35, PF −0,36). Yani seçim çok işlemli toplam R'y
 ödüllendiriyor, işlem başı kaliteyi değil. Ağırlık ölçütü tasarlarken bu
 bilinsin.
 
+**Korelasyon için pozisyon bölmek** — ölçüldü, takas kötü. Kitabın M30
+korelasyon matrisi (son 90 gün, 1777 ortak bar): hisse endeksleri arası
+ortalama **0,66**, ama üç çift pratikte tek pozisyon — **NAS100–US500 0,92**,
+GER40–FRA40 0,83, JPN225–NAS100 0,82. XAUUSD hisselerle **0,46** (altın bu
+pencerede güvenli liman değil), **SpotBrent −0,37** — kitabın tek gerçek
+çeşitlendiricisi.
+
+2 birimi 1+1 bölmenin iğne/spike koruması gerçek ama küçük: NAS100+US500'de
+**%2,1**, GER40+FRA40'ta %4,3 daha az dalgalanma. Bedeli ise yarım
+pozisyonun pahalı ikize kayması — işlem başına **%93** ve **%162** daha
+fazla sürtünme. Bölme yapılmayacak.
+
+**Kapı zaten muhafazakâr, düzeltme:** `risk.py:666` `concurrent_risk`
+riskleri **topluyor** (ρ=1 varsayımı), bağımsız saymıyor. "Kapılar
+korelasyon bilmiyor, riski olduğundan az görüyor" cümlesi yanlıştı.
+
+Korelasyonun kattığı şey yeni bir kapı değil, **bağımsız ikinci kanıt**:
+FRA40 (calmar 0,44, GER40'tan 4,2 kat pahalı, ρ 0,83) ve US500 (calmar
+0,54, NAS100'den 2,9 kat pahalı, ρ 0,92) daha iyi bir enstrümanın pahalı
+ikizi. Yerlerini kendi calmar'larıyla hak etmeliler.
+
 **Broker'ın diğer endeksleri** — 17.08'de canlı fiyatla, üç zaman diliminde,
 tek tek ölçüldü. Kitabın M30 spread/ATR aralığı 0,019 (GER40) – 0,084
 (FRA40). Kitapta olmayan **en ucuz aday HK50 0,122** — kitabın en
