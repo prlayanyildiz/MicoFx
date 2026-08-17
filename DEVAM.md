@@ -272,7 +272,14 @@ emekli edildi.
 SpotBrent M5'te bırakıldı: M15 kapıyı açıyor ama net R aynı kalıp (12,7 →
 11,7) drawdown ikiye katlanıyor — kapı açılıyor, kenar açılmıyor.
 
-Kitap: 10 sembol (8'i açık), `lot_mode=risk`, sembol başına `max_positions=2`.
+İkisi 17.08'de kitaptan **tamamen silindi** (operatör onayı). Kitap 8
+sembol. Yerine ekleme **bugün yapılmayacak**: sabah altı gerçek onarım indi
+(giriş yolu başarı kontrolü, SL/TP başarı kontrolü, VWAP stop puanlaması,
+short stop tetiği, calmar boyutlandırma, saat çivisi) ve temiz ölçüm
+penceresi daha bir günlük. Yeni sembol, açıklanmamış bir farkın üstüne yeni
+değişken koymak olur.
+
+Kitap: 8 sembol, `lot_mode=risk`, sembol başına `max_positions=2`.
 Risk yüzdeleri 0.2 (SpotBrent, XAUUSD, US500) ve 0.8 (diğer yedi). Hepsi dolsa
 teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 
@@ -468,8 +475,15 @@ Maliyet kapısı (spread / H1 ATR14, eşik = kitabın en pahalısı FRA40 0,0897
   (`SpotCrude`, `XAGUSD`, XAU/XAG çaprazları). İkisi de hiç taranmadı.
 - **Hisse 985 sürpriz:** "bu hesapta marj/seans uygun değil" varsayımı üç
   kapıda da tutmadı — min lot 1R çoğu US hissesinde birkaç dolar, marj %45'i
-  geçmiyor, seans örtüşüyor. Kenar ölçülmedi. İçinde ~53 tarihli `*.US-24`
-  CFD çöp isim var.
+  geçmiyor, seans örtüşüyor. Kenar ölçülmedi.
+
+**`*.US-24` çöp değil — 24 saat işlem gören US hisseleri.** İlk elemede
+"tarihli CFD" sanıp attırdım, yanlıştı. Broker yolu
+`Markets\Stocks\USA\24 Hour\`, açıklama "(24 Hours)", **117 isim**
+(AAPL, AMZN, GOOG, NVDA, TSLA, AMD, BABA, BAC, CAT, CVX…). Normal
+versiyonlarından biraz pahalılar — TSLA 6 vs 4 puan, AAPL 18 vs 13, NVDA
+5 vs 3 — bu 24 saat erişimin bedeli. Sürekli çalışan bir bot için seans
+boşluğu olmaması gerçek bir avantaj; kenar hâlâ ölçülmedi.
 
 **FX kapandı — ölçüldü, kitabı geçmiyor.** 21 FX ismi M5/M15/M30'da
 tarandı, 11'i `n>=30`. En iyi yeterli isim **AUDJPY M30 calmar 1,96**;
