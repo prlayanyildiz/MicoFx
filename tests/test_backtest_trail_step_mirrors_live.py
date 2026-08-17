@@ -37,13 +37,22 @@ def _creep_then_collapse(peak_atr: float, creep_bars: int = 60):
     close[ENTRY_BAR + 1:up_end] = np.linspace(100.0, 100.0 + peak_atr,
                                               up_end - ENTRY_BAR - 1)
     close[up_end:] = np.linspace(100.0 + peak_atr, 80.0, N - up_end)
-    return close, close + 0.5, close - 0.5      # bar span 1.0 -> ATR ~= 1.0
+    open_ = np.empty(N)
+    open_[0] = close[0]
+    open_[1:] = close[:-1]
+    high = close + 0.5
+    low = close - 0.5
+    # Keep the bar span at 1.0 (ATR ≈ 1) while the open follows the previous
+    # close. A constant open of 100 made every collapse bar a gap through the
+    # trailed SL; live would fill that at the open, which is not what these
+    # tests are measuring.
+    open_ = np.clip(open_, low, high)
+    return close, high, low, open_
 
 
 def _run(peak_atr: float, trail_step: float, sl_mult: float = 1.0,
          trail_start: float = 0.5):
-    close, high, low = _creep_then_collapse(peak_atr)
-    open_ = np.full(N, 100.0)
+    close, high, low, open_ = _creep_then_collapse(peak_atr)
     buy = np.zeros(N, dtype=bool)
     buy[ENTRY_BAR] = True
     sig = Signals(t3=close, k=close, d=close, atr=np.full(N, 1.0), adx=np.zeros(N),

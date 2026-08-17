@@ -127,6 +127,12 @@ def test_simulate_exits_a_long_on_the_trail_not_a_target():
     open_ = np.full(n, 100.0)
     high[12] = 110.0
     close[12] = 105.0
+    # Bar 13 opens at the previous close (no gap) and wicks through the trail.
+    # Opening at 100 would be a gap through the trailed SL and fill at open.
+    open_[13] = 105.0
+    high[13] = 105.0
+    low[13] = 100.0
+    close[13] = 100.0
 
     from micofx.strategy import IndicatorCache, Params, Signals
     atr = np.full(n, 1.0)
@@ -139,9 +145,9 @@ def test_simulate_exits_a_long_on_the_trail_not_a_target():
     cache = IndicatorCache(high, low, close, times=np.arange(n) * 300, tf_seconds=300,
                            open_=open_, volume=np.ones(n))
     # Bar 12 runs 5 ATR into profit and closes at 105, so the trail arms and
-    # ratchets the stop to 104.5. Bar 13 falls back to 100 and takes it out
-    # there. The win is banked by the TRAIL - there is no take-profit level in
-    # this system, and a spike to 110 must not close anything by itself.
+    # ratchets the stop to 104.5. Bar 13 opens at that close and wicks to 100,
+    # filling the trail at 104.5. A spike to 110 must not close anything by
+    # itself — there is no take-profit level in this system.
     p = Params(sl_atr_mult=1.0, trail_start_atr=1.0, trail_step_atr=0.5)
     res = backtest.simulate(cache, sig, open_, np.zeros(n), point=0.01, p=p,
                             entries=np.array([10]))

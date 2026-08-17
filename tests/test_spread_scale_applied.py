@@ -35,9 +35,14 @@ class _Bars:
         step = rng.normal(0.0, 0.35, n) + 0.02 * np.sin(np.arange(n) / 40.0)
         close = (100 + np.cumsum(step)).astype(np.float64)
         self.close = close
-        self.open = close
-        self.high = close + np.abs(rng.normal(0.25, 0.1, n))
-        self.low = close - np.abs(rng.normal(0.25, 0.1, n))
+        open_ = np.empty_like(close)
+        open_[0] = close[0]
+        open_[1:] = close[:-1]
+        self.open = open_
+        hi = np.maximum(open_, close) + np.abs(rng.normal(0.25, 0.1, n))
+        lo = np.minimum(open_, close) - np.abs(rng.normal(0.25, 0.1, n))
+        self.high = hi
+        self.low = lo
         self.volume = np.full(n, 100.0)
         self.spread = np.full(n, spread)
         self.time = (np.arange(n) * 300 + 1_700_000_000).astype(np.int64)
@@ -52,7 +57,7 @@ GRID = {"t3_length": [5, 8], "sl_atr_mult": [1.5, 2.0]}
 def _run(**kw):
     args = {"cfg": SymbolConfig(symbol="FRA40", magic=1), "bars": _Bars(),
                 "point": 1e-4, "tf_seconds": 300, "grid": GRID, "min_trades": 10,
-                "segments": 4, "max_combos": 8}
+                "segments": 4, "max_combos": 8, "min_positive_ratio": 0.0}
     args.update(kw)
     return bt.walk_forward(**args)
 

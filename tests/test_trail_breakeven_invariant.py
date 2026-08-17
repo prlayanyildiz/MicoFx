@@ -38,12 +38,17 @@ def _ramp_then_collapse(peak_atr: float):
     close[ENTRY_BAR + 1:up_end] = np.linspace(100.0, 100.0 + peak_atr,
                                               up_end - ENTRY_BAR - 1)
     close[up_end:] = np.linspace(100.0 + peak_atr, 80.0, N - up_end)
-    return close, close + 0.5, close - 0.5      # bar span 1.0 -> ATR ~= 1.0
+    open_ = np.empty(N)
+    open_[0] = close[0]
+    open_[1:] = close[:-1]
+    high = close + 0.5
+    low = close - 0.5
+    open_ = np.clip(open_, low, high)
+    return close, high, low, open_
 
 
 def _run(sl_mult: float, start: float, step: float, peak_atr: float):
-    close, high, low = _ramp_then_collapse(peak_atr)
-    open_ = np.full(N, 100.0)
+    close, high, low, open_ = _ramp_then_collapse(peak_atr)
     buy = np.zeros(N, dtype=bool)
     buy[ENTRY_BAR] = True
     sig = Signals(t3=close, k=close, d=close, atr=np.full(N, 1.0), adx=np.zeros(N),
@@ -61,9 +66,9 @@ def _run(sl_mult: float, start: float, step: float, peak_atr: float):
 
 def test_atr_fixture_is_one_price_unit():
     """Guard the fixture itself - every threshold below is stated in ATR."""
-    close, high, low = _ramp_then_collapse(5.0)
+    close, high, low, open_ = _ramp_then_collapse(5.0)
     cache = IndicatorCache(high, low, close, times=np.arange(N) * 300,
-                           tf_seconds=300, open_=np.full(N, 100.0), volume=np.ones(N))
+                           tf_seconds=300, open_=open_, volume=np.ones(N))
     assert 0.95 <= cache.atr_list(14)[ENTRY_BAR] <= 1.05
 
 

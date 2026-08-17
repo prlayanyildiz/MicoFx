@@ -371,6 +371,30 @@ def stop_floor_const(min_stop: float | None, point: float) -> float:
     return value
 
 
+def stop_fill_price(is_buy: bool, sl: float, bar_open: float,
+                    bar_high: float, bar_low: float,
+                    trigger_pad: float = 0.0) -> float | None:
+    """Stop/trail fill price, or None if this bar did not trigger the stop.
+
+    Trigger is the live one: long on ``bar_low <= sl``, short on
+    ``bar_high + trigger_pad >= sl`` (the pad is the bar's spread so a short
+    covers on the ask). Fill used to be the SL even when the bar *opened*
+    through it — paper then booked a clean −1R on a gap that live fills near
+    the open. GAP-1 measured that gift at 8% of book holdout net R.
+
+    When the open is already through the SL, fill is the open. The trigger
+    pad stays a trigger, not a second charge. Flatten/time are not this
+    function; they already exit at close.
+    """
+    if is_buy:
+        if bar_low > sl:
+            return None
+        return float(bar_open) if bar_open < sl else float(sl)
+    if bar_high + float(trigger_pad) < sl:
+        return None
+    return float(bar_open) if bar_open > sl else float(sl)
+
+
 def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarray,
              point: float, p: Params, tradable: np.ndarray | None = None,
              lo: int = 0, hi: int | None = None, commission_price: float = 0.0,
@@ -538,15 +562,13 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # Four corners, live:
         #   long stop / long trail  — bid vs SL  → bar_low <= sl
         #   short stop / short trail — ask vs SL  → bar_high + pad >= sl
-        # There is no separate TP; flatten is a market cover (close, +pad on
-        # a short) and is not a stop trigger.
+        # Fill is the SL unless the bar opened through it (then the open).
+        # Flatten is a market cover (close, +pad on a short), not a stop.
         bar_high, bar_low = high[j], low[j]
-        if is_buy:
-            if bar_low <= sl:
-                return sl, ("trail" if trailing else "stop")
-        else:
-            if bar_high + float(trigger_pad[j]) >= sl:
-                return sl, ("trail" if trailing else "stop")
+        fill = stop_fill_price(is_buy, sl, open_l[j], bar_high, bar_low,
+                               float(trigger_pad[j]))
+        if fill is not None:
+            return fill, ("trail" if trailing else "stop")
         if flatten is not None and flatten[j]:
             return close[j] + (0.0 if is_buy else s), "flatten"
         return None, None
@@ -693,12 +715,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # each bar at most once per pass.
         for j in range(j0, n):
             bar_high, bar_low = high[j], low[j]
-            if is_buy:
-                if bar_low <= sl:
-                    exit_price, reason = sl, ("trail" if trailing else "stop")
-            else:
-                if bar_high + float(trigger_pad[j]) >= sl:
-                    exit_price, reason = sl, ("trail" if trailing else "stop")
+            fill = stop_fill_price(is_buy, sl, open_l[j], bar_high, bar_low,
+                                   float(trigger_pad[j]))
+            if fill is not None:
+                exit_price, reason = fill, ("trail" if trailing else "stop")
             if exit_price is not None:
                 exit_bar = j
                 break
