@@ -439,6 +439,36 @@ altında ve işareti ters. Gecikme medyan 28 sn, p90 294 sn (bar sonu
 kuyruğu). Giriş tarafı temiz, `backtest.py`'nin giriş varsayımı
 değişmeyecek.
 
+**GAP-1 — kâğıt, boşluğun tamamını hediye ediyor (17.08, ÖLÇÜLDÜ).**
+`backtest.py` `_exit_check` stop dalında çıkışı **SL fiyatına** yazıyor.
+Bar açılışı zaten SL'nin ötesindeyse canlı fill açılışa yakın olur; aradaki
+fark kâğıdın hediyesidir. Kitabın 8 sembolünde holdout dilimi üzerinde
+ölçüldü (replay `simulate` ile 8/8 net R eşleşti):
+
+| sembol | hediye n | extraR | holdout net R'nin %'si |
+|---|---:|---:|---:|
+| **FRA40** | 27 | 18,41 | **%48,73** |
+| **GER40** | 19 | 21,12 | %10,41 |
+| NAS100 | 4 | 2,28 | %2,48 |
+| US30 | 2 | 0,65 | %1,45 |
+| US500 / SpotBrent / JPN225 | 1 | ≤0,06 | <%0,6 |
+| XAUUSD | 0 | 0 | %0 |
+| **toplam** | | **42,54 / 527,06** | **%8,07** |
+
+Eşik %5'ti; **geçti, onarılacak**: stop dalında açılış SL'nin ötesindeyse
+fill `open` olmalı (short'ta pad ile), SL değil.
+
+Hediyenin neredeyse tamamı **Avrupa endeks seans açılışı** (FRA40 09:00,
+GER40 02:00 sunucu saati) — hafta sonu boşluğu değil. Canlı sicilin en
+kötüleri (NAS100, JPN225) bu tablonun başında **değil**; yani boşluk
+hediyesi 3,42 puanlık farkın tamamını açıklamıyor, ama **FRA40'ın kâğıt
+kenarının yarısı** bu iyimserlikten geliyor.
+
+**Yan bulgu, ayrı ve rahatsız edici:** FRA40'ın kayıtlı `opt_summary`
+holdout net R'si **102,53**, aynı konfigin replay'i **37,78** — 2,7 kat.
+`edge_scale` (LEV-1) boyutlandırmayı bu kayıtlı sayıdan okuyor, yani FRA40
+şişik bir calmar ile boyutlandırılıyor olabilir. Ölçülmeden dokunulmayacak.
+
 **Geriye çıkış tarafı kaldı (EX-5).** İki şüpheli: (1) trail kadansı —
 kâğıt bar başına, canlı `poll_interval_sec` başına günceller; (2) bar içi
 sıralama — kâğıt trail'i barın kendi `high`/`low`'uyla güncelleyip stop'u
