@@ -60,6 +60,39 @@ _AMBIGUOUS_RETCODES: frozenset[int] = frozenset(
 
 AMBIGUOUS_RETCODES = _AMBIGUOUS_RETCODES
 
+
+def _sltp_modify_succeeded(result: Any) -> bool:
+    """Did this TRADE_ACTION_SLTP actually land?
+
+    Pepperstone-Demo does not return TRADE_RETCODE_DONE (10009) for a
+    successful stop modify. Live 17.08.2026 09:40, after the diagnosis log
+    landed:
+
+        retcode=0 comment=Done last_error=(1, 'Success')
+        request=TradeRequest(action=6, ..., sl=69062.0, tp=0.0,
+                             position=359440001)
+
+    The broker's SL was 69062.0. Treating only 10009 as success marked that
+    request a failure, left the engine book on the old stop, and reprinted
+    a WARN every M5 bar.
+
+    ``retcode=0`` on a missing result is the old hole:
+    ``getattr(None, "retcode", 0)``. None is still a failure. A result
+    object with retcode 0 counts only when comment is ``Done``. 10009 and
+    10010 stay success so a broker that speaks the documented codes is
+    unchanged.
+    """
+    if result is None:
+        return False
+    retcode = getattr(result, "retcode", None)
+    done = getattr(mt5, "TRADE_RETCODE_DONE", 10009)
+    partial = getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)
+    if retcode in (done, partial):
+        return True
+    comment = str(getattr(result, "comment", "") or "").strip()
+    return retcode == 0 and comment == "Done"
+
+
 _INFO_TTL = 120.0
 _TICK_TTL = 0.5
 
@@ -1497,7 +1530,7 @@ class MT5Client:
         }
         with self._lock:
             result = mt5.order_send(request)
-        if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+        if _sltp_modify_succeeded(result):
             seen = getattr(self, "_sltp_fail_seen", None)
             if seen:
                 seen.pop(int(ticket), None)

@@ -123,3 +123,35 @@ def test_no_changes_is_still_silent(monkeypatch):
     ok = MT5Client.modify_position(_client(), TICKET, 69039.6, 0.0, "JPN225")
     assert ok is False
     assert _warns()[before:] == []
+
+
+def test_pepperstone_done_zero_is_success_not_a_warning(monkeypatch):
+    """Live 17.08 09:40: retcode=0 comment=Done, SL actually moved to 69062.
+
+    Today's check only accepts TRADE_RETCODE_DONE (10009), so this warns and
+    returns False — the engine then leaves its book on the old SL.
+    """
+    def send(request):
+        return types.SimpleNamespace(retcode=0, comment="Done", request=request)
+
+    monkeypatch.setattr("micofx.mt5client.mt5", _mt5(send=send))
+    client = _client()
+    before = len(_warns())
+    ok = MT5Client.modify_position(client, TICKET, 69062.0, 0.0, "JPN225")
+    assert ok is True
+    assert _warns()[before:] == []
+
+
+def test_a_bare_zero_without_done_is_still_a_failure(monkeypatch):
+    def send(request):
+        return types.SimpleNamespace(retcode=0, comment="", request=request)
+
+    monkeypatch.setattr(
+        "micofx.mt5client.mt5",
+        _mt5(send=send, last_error=(1, "Success")),
+    )
+    before = len(_warns())
+    ok = MT5Client.modify_position(_client(), TICKET, 69062.0, 0.0, "JPN225")
+    assert ok is False
+    assert _warns()[before:], "retcode=0 without comment=Done must still warn"
+

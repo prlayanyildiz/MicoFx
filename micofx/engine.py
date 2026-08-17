@@ -2590,6 +2590,13 @@ class Engine:
             return settled
 
         if self.client.modify_position(pos["ticket"], target, pos["tp"], cfg.symbol):
+            # Write the level we just placed onto this cycle's position dict.
+            # execution.track copies pos["sl"] into the slippage book; if we
+            # leave it stale until the next positions_get, a stop that fires
+            # in the same poll is scored against the old stop. Pepperstone
+            # returning retcode=0/Done used to make modify_position False
+            # here even when the broker had already moved — same hole.
+            pos["sl"] = float(target)
             # The ticket, for the same reason the entry line carries one:
             # JPN225 held five positions today and logged two trail moves in
             # the same second. Without it a trail move cannot be paired with

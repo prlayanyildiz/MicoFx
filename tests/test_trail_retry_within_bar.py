@@ -109,8 +109,10 @@ def test_a_clamped_but_still_improving_update_is_placed_and_settles():
     # rather than waiting for a quote that may never come back.
     client = _Client(bid=102.5)
     eng = _engine(client)
-    assert eng._update_stop(_Cfg(), _pos(sl=100.5), ATR, _Bars(103.0)) is True
+    pos = _pos(sl=100.5)
+    assert eng._update_stop(_Cfg(), pos, ATR, _Bars(103.0)) is True
     assert client.modifies == [pytest.approx(101.5)]
+    assert pos["sl"] == pytest.approx(101.5)
 
 
 def test_a_stop_pinned_behind_breakeven_by_the_quote_stays_retryable():
@@ -135,7 +137,9 @@ def test_a_rejected_modify_does_not_burn_the_bar():
     client = _Client(bid=104.0)
     client.modify_ok = False
     eng = _engine(client)
-    assert eng._update_stop(_Cfg(), _pos(sl=100.5), ATR, _Bars(103.0)) is False
+    pos = _pos(sl=100.5)
+    assert eng._update_stop(_Cfg(), pos, ATR, _Bars(103.0)) is False
+    assert pos["sl"] == 100.5
 
 
 def test_a_bar_level_refusal_is_final_for_the_bar():
