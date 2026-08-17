@@ -189,6 +189,9 @@ class MT5Client:
         self._overrides: dict[str, str] = {}
         self._symbol_names_cache: list[str] = []
         self._symbol_names_at: float = 0.0
+        # Last SL/TP-modify failure per ticket, so a stuck trail does not
+        # reprint the same WARN every bar. Cleared on a successful modify.
+        self._sltp_fail_seen: dict[int, str] = {}
 
     def set_terminal_path(self, path: str) -> None:
         """Pin this process to one terminal64.exe; empty means refuse auto-attach."""
@@ -1494,12 +1497,52 @@ class MT5Client:
         }
         with self._lock:
             result = mt5.order_send(request)
-        if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            code = getattr(result, "retcode", -1)
-            if code != mt5.TRADE_RETCODE_NO_CHANGES:
-                LOG.emit(f"SL/TP guncellenemedi #{ticket} ({code})", "WARN", symbol)
+        if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+            seen = getattr(self, "_sltp_fail_seen", None)
+            if seen:
+                seen.pop(int(ticket), None)
+            return True
+        no_changes = getattr(mt5, "TRADE_RETCODE_NO_CHANGES", 10025)
+        if result is not None and result.retcode == no_changes:
             return False
-        return True
+        self._emit_sltp_fail(int(ticket), symbol, *self._sltp_fail_parts(result, request))
+        return False
+
+    def _sltp_fail_parts(self, result: Any, request: dict[str, Any]) -> tuple[str, str]:
+        """Silence key, then the full WARN body.
+
+        Live printed ``(0)`` because ``getattr(result, "retcode", 0)`` on None
+        is not an MT5 retcode and ``last_error`` never reached the log. The
+        key ignores sl/tp so a stuck trail does not re-warn every bar; the
+        body still carries the levels that were sent.
+        """
+        tail = f"sl={request.get('sl')} tp={request.get('tp')}"
+        if result is None:
+            err = mt5.last_error() if mt5 is not None else None
+            key = f"order_send=None last_error={err}"
+            return key, f"{key} {tail}"
+        retcode = getattr(result, "retcode", None)
+        comment = getattr(result, "comment", "") or ""
+        key_bits = [f"retcode={retcode}"]
+        if comment:
+            key_bits.append(f"comment={comment}")
+        if not retcode:
+            err = mt5.last_error() if mt5 is not None else None
+            key_bits.append(f"last_error={err}")
+        key = " ".join(str(b) for b in key_bits)
+        sent = getattr(result, "request", None)
+        extra = f" request={sent}" if sent is not None else ""
+        return key, f"{key}{extra} {tail}"
+
+    def _emit_sltp_fail(self, ticket: int, symbol: str, key: str, detail: str) -> None:
+        seen = getattr(self, "_sltp_fail_seen", None)
+        if seen is None:
+            self._sltp_fail_seen = {}
+            seen = self._sltp_fail_seen
+        if seen.get(ticket) == key:
+            return
+        seen[ticket] = key
+        LOG.emit(f"SL/TP guncellenemedi #{ticket} ({detail})", "WARN", symbol)
 
     def close_position(self, ticket: int, slippage: int = 20, comment: str = "MicoFX close",
                        volume: float | None = None, fill: dict | None = None) -> bool:
