@@ -82,6 +82,27 @@ güven aralığını **raporun içine yaz**. Ayırt etmek istediğin fark
 biliniyorsa gereken n'i de yaz. `n>=30` kuralı bir taban, bir yeterlilik
 kanıtı değil.
 
+**Tek saat referansı: SUNUCU.** Makine saatine geçilmeyecek. Sebep ölçüldü:
+sunucu ABD DST'siyle birlikte kayıyor (ABD nakit açılışı beş yıl boyunca
+her ay 16:30 sunucu), makine ise Türkiye — 2016'dan beri sabit UTC+3.
+Bugün ikisi eşit (UTC+3), **1 Kasım 2026'dan itibaren bir saat ayrışıyor**.
+Makine saatine geçmek üçüncü bir saat eklemek olur.
+
+Motor zaten doğru: bar damgasını sunucunun kendi çerçevesinde okuyup aynı
+çerçevede tanımlı seans penceresiyle karşılaştırıyor, iki taraf birlikte
+kaydığı için DST'ye dayanıklı. Kırılgan olan **analiz betikleri**:
+`datetime.fromtimestamp` makinenin offsetini ekler ve sessizce üç saat
+kaydırır. 18.08'de bu hata iki kez yapıldı — biri operatörün mobil ekranıyla
+yakalandı, biri "onarım sonrası zarardayız" diye yanlış bir sonuç üretti
+(doğrusu +63,94 $ kârdı).
+
+**Kasım'da tek sembol etkilenecek: GER40.** Günün ilk barı sunucu
+çerçevesinde Kasım–Şubat arası **02:00**, Mart–Ekim arası **03:00** —
+Avrupa borsası Avrupa DST'sini, sunucu ABD'ninkini izlediği için. Diğer beş
+sembol yıl boyunca sabit (JPN225/NAS100/US30/XAUUSD 01:00, SpotBrent 03:00).
+GER40 seansı bugün **03:15–22:59**; 1 Kasım'dan sonra ilk 75 dakika
+kaçırılacak.
+
 **Zaman dilimini ve pencereyi de yaz.** Bu projede aynı sayı farklı zaman
 diliminde farklı şey demek: bar çekme sınırı sabit olduğu için M5 ~95 gün,
 M30 ~610 gün görüyor. Gün başına ifade edilen her ölçüt (R/gün, işlem/gün)
