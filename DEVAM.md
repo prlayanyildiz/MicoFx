@@ -875,6 +875,48 @@ yeniden arama kendi kendine ayar değiştirmiyor.
 
 ---
 
+## 4l. Kâr kuyrukta — kâğıtta da (L2c), ve skor sonucu öngörmüyor (L2b)
+
+**L2c: LOSS-1'in teşhisi canlıya özgü değil.** Altı canlı konfigin arama
+holdout diliminde, işlemler tutma süresine göre kovalandı:
+
+| sembol | n | net R | **120+ dk kovası** |
+|---|---:|---:|---|
+| GER40 | 1247 | +185 | **732 işlem / +680 R** (0–5: −193, 30–120: −302) |
+| NAS100 | 1040 | +107 | +537 R |
+| US30 | 405 | +45 | +206 R |
+| JPN225 | 314 | +66 | 156 işlem / +137 R |
+| XAUUSD | 505 | +87 | 125 işlem / +96 R |
+| SpotBrent | 119 | +21 | 56 işlem / +7,5 R |
+
+Altıda altı. Kâğıt da canlı da parayı kuyruktan kazanıyor — **sistemin
+doğası**, uygulama farkı değil. "Fark çıkışta mı" sorusu kapandı.
+
+(M30'da 5–30 kovası boş: bar 30 dk, aynı-bar çıkış 0–5'e düşer.)
+
+**L2b: seçim skoru dokunulmamış testle ilişkisiz.**
+
+| | skor ilk 5 ort. sl | holdout ilk 5 ort. sl | ρ(skor↔holdout) | ρ(holdout↔sl) |
+|---|---:|---:|---:|---:|
+| US30 `t3_stoch` | 0,72 | 0,76 | −0,02 | +0,47 |
+| NAS100 `mtf_pullback` | **0,70** | **0,94** | −0,08 | **+0,85** |
+
+NAS100'de skorun ilk 5'inin **hepsi** sl=0,7; holdout'un ilk 3'ü sl=1,0 ve
++113/+113/+105 R veriyor. Skorun birincisi +69 R ile holdout sırasında 5.
+**44 R fark, tek sembolde.** US30'da bu yanlılık yok.
+
+Ama asıl sayı ρ(skor↔holdout) ≈ **0**: finalistler arasında skor, sonucu
+öngörmüyor.
+
+**Düzeltme holdout'la yapılamaz.** "Adayları holdout'a göre sırala" refleksi
+holdout'u testlikten çıkarır ve elimizde bağımsız ölçü kalmaz. Doğru soru
+L2d'de: **doğrulama dilimi** (seçimde zaten kullanılıyor, holdout'a
+dokunmuyor) skordan daha iyi öngörüyor mu? İyiyse düzeltme küçük: finalistleri
+doğrulama metriğiyle sırala. Değilse hiçbir iç metrik dışarıyı öngörmüyor
+demektir — çok daha büyük bir bulgu.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
