@@ -515,6 +515,50 @@ canlı işaret şu an negatif (−986 $/ay). Karar kuralı: **canlı edge'in
 işareti pozitife dönmeden toplam risk artırılmaz**; artırılacaksa da
 düzeltilmiş ölçütle ve tek seferde değil.
 
+**TF-2 — projenin en keskin ölçümü (18.08). Aynı konfig, aynı pencere.**
+
+Altı canlı konfig, ortak 92 günlük pencerede (18.05 12:10 → 18.08 12:10
+sunucu), onarılmış simülatörle koşuldu ve canlı sicille yan yana konuldu:
+
+| sembol | canlı n | canlı ~R | kâğıt R | fark |
+|---|---:|---:|---:|---:|
+| JPN225 | 66 | +7,9 | +64,4 | −56,5 |
+| XAUUSD | 99 | −9,9 | +43,1 | −53,0 |
+| GER40 | 66 | −13,7 | +27,2 | −40,9 |
+| NAS100 | 75 | −14,8 | +21,0 | −35,8 |
+| SpotBrent | 40 | −0,2 | +20,6 | −20,8 |
+| US30 | 47 | +1,2 | +13,0 | −11,8 |
+| **toplam** | **393** | **−29,4 R** | **+189,3 R** | **−218,7 R** |
+
+**Altı sembolün altısı da kâğıdının altında.** Tek sembole ya da tek yöne
+toplanmamış: long %36,3, short %36,5 kazanma oranı — ikisi de kaybediyor.
+
+Bu iki hipotezi birden öldürüyor:
+
+- **"Son 92 gün kötü rejim"** — hayır, kâğıt aynı pencerede +189 R diyor.
+  (TF-1'deki eksi hücreler *aramanın kazananlarıydı*, kitapta çalışan
+  konfigler değil.)
+- **"Uygulama kusuru"** — kayma, spread, stop fill'i, giriş fiyatı, bar
+  sırası, trail kadansı, boşluk hediyesi hepsi ölçüldü ve toplamı bu farkın
+  yanında küçük kaldı.
+
+**Kalan tek büyük konfound: çalkantı.** Kâğıttaki +189 R "bu konfigi 92 gün
+tut" demek. Canlıda hiçbir konfig 92 gün tutulmadı — BS-3: medyan ömür
+**12,8 saat**, %68,8'i 24 saatin altında, 11–16.08'de 58 uygulama.
+Karşılaştırma "konfig A vs konfig A" değil, **"bir konfig 92 gün" vs
+"onlarca konfig 13'er saat"**.
+
+BS-3'ü "sebep değil" diye kaydetmiştim; o karar n=173'lük güçsüz bir
+karşılaştırmaya dayanıyordu ve bu ölçüm onu geçersiz kılıyor.
+
+**İleriye dönük test kuruldu.** 16.08'den beri zorla uygulama yok, fren 48
+saatte duruyor, kitap sabit. Çalkantı sebepse canlı sicil kâğıda
+yaklaşmalı. Yaklaşmazsa çalkantı da elenir ve geriye kâğıdın kendisi kalır.
+
+**TF taşıması yok:** canlı konfigler aramanın her önerisini yeniyor —
+GER40 +27,2 vs M15 −0,04; NAS100 +21,0/1,50 vs M15 +7,8/0,75; US30 calmar
+1,75 vs M5 0,68. Dördüncü bağımsız doğrulama.
+
 **EX-3 — sorunun adı kondu: kâğıt kendi konfiginin kazanma oranını
 abartıyor.** 58 tenure / 173 işlem / 6,1 gün, 11.08 19:09 UTC sonrası.
 Her tenure için canlı sonuç, **o konfigin kendi holdout'uyla** yan yana
