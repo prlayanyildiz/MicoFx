@@ -645,15 +645,49 @@ olarak dar stop mu seçiyor.
 | JPN225 | 2,5 | [1 .. 4] n=6 | iç |
 | SpotBrent | 4,0 | [1 .. 4] n=6 | **ÜST KENAR** |
 
-**Altı sembolün dördü tabanda, hepsi tam olarak aynı değerde.** Gerçek
-optimumlar dağınık olsaydı bu yığılma olmazdı; arama daha dar stop isteyip
-soramıyor gibi duruyor.
+**Altı sembolün dördü tabanda, hepsi tam olarak aynı değerde.**
+
+İlk okumam "arama daha darını isteyip soramıyor" idi; **yanlıştı ve aynı gün
+düzeltildi.** Saklanmış 174 opt koşusunun stop dağılımı: `0,5` → 14 koşu,
+`0,9` → 28, **`1,0` → 100**, `1,2` → 5, `1,5` → 15, `2+` → 12. Yani ızgara
+geçmişte 1,0'ın altını sunmuş ve arama 42 koşuda onu seçmiş. Sorabildiği
+yerde çoğunlukla yine 1,0'ı seçiyor — taban bir artefakt değil, tercih.
 
 Bu, 4g ile **ters yöne bakıyor**: kârın tamamı 120+ dakika yaşayan
 işlemlerden geliyor, ama arama kazananları erken kesen stopu seçiyor. Aynı
 sistemin iki ucu çelişiyorsa aradaki şey **seçim skorudur** — skorun düşüş
 terimi dar stop satın alıyor olabilir. LOSS-2 bunu ölçüyor (L2a sınır
 bağlayıcı mı, L2b skor vs holdout sıralaması, L2c kâğıtta da kuyruk mu).
+
+### Skor ile holdout, stop genişliği konusunda aynı şeyi istemiyor
+
+174 koşuda, kazananın `sl_atr_mult`'ı ile iki sıralama arasındaki Spearman
+(aile içi, popülasyon düzeyi):
+
+| aile | n | ρ(stop, holdout net_r) | ρ(stop, **skor**) |
+|---|---:|---:|---:|
+| micro_rev | 11 | −0,43 | **−0,88** |
+| dual_t3 | 12 | −0,21 | **−0,80** |
+| macd_flip | 7 | −0,43 | **−0,75** |
+| t3_flip | 18 | −0,45 | −0,64 |
+| burst | 26 | −0,28 | −0,58 |
+| stoch_flip | 27 | **+0,45** | +0,16 |
+| st_trend | 8 | +0,57 | +0,52 |
+| aroon_flip | 6 | +0,37 | +0,31 |
+| mtf_pullback | 15 | +0,14 | −0,02 |
+| t3_stoch | 21 | +0,03 | +0,37 |
+| wavetrend_flip | 19 | −0,12 | +0,24 |
+
+**11 ailenin 9'unda ρ(net_r) > ρ(skor)** — skor geniş stopu, dokunulmamış
+testin cezalandırdığından daha sert cezalandırıyor. `dual_t3`'te holdout
+neredeyse ilgisiz (−0,21), skor sert negatif (−0,80). `stoch_flip`'te tersi:
+geniş stop holdout'u iyileştirmiş (+0,45), skor bunu ödüllendirmemiş (+0,16).
+
+**Bu kanıt değil, gerekçe.** Bunlar ayrı koşuların kazananları (yoğun
+seçilmiş), farklı dönemlerden, ızgaralar zamanla değişmiş, ve n aile başına
+6–27. Tek yönlü 9/11 binom p≈0,03 — dikkat çeker, karar taşımaz. Karar
+L2b'de: **tek bir koşunun ranked adaylarında** skor sıralaması ile holdout
+sıralamasının stop sütunu.
 
 Kenarda duran başka eksenler: JPN225 `trail_start` 3 / `trail_step` 2,5 /
 `max_spread_atr` 0,18 (üçü de tavan), GER40 `trail_step` 2,2 (tavan).
