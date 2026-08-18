@@ -61,8 +61,10 @@ class _Store:
         self.data[key] = value
 
 
-def _sup() -> Supervisor:
+def _sup(holdout_wr=None) -> Supervisor:
     cfg = SymbolConfig(symbol="TEST", magic=900001)
+    if holdout_wr is not None:
+        cfg.opt_summary = {"holdout": {"win_rate": holdout_wr, "trades": 400}}
     sup = Supervisor.__new__(Supervisor)
     sup._lock = threading.RLock()
     sup.store = _Store(cfg)
@@ -81,8 +83,8 @@ def _sup() -> Supervisor:
 LIVE = dict(DEFAULTS, watch_min_trades=25)
 
 
-def _judge(nets: list[float], cfgs: dict | None = None):
-    sup = _sup()
+def _judge(nets: list[float], cfgs: dict | None = None, holdout_wr=None):
+    sup = _sup(holdout_wr)
     trades = [{"profit": float(n), "commission": 0.0, "swap": 0.0,
                "time": float(1_700_000_000 + i * 3600), "symbol": "TEST"}
               for i, n in enumerate(nets)]
@@ -112,14 +114,16 @@ def _mix(wins: int, losses: int, win_size: float = 1.0, loss_size: float = 3.0):
 # ------------------------------------------------------------- the live cases
 
 def test_usdchf_one_win_in_eleven_is_throttled():
-    v = _judge(_mix(1, 10))
+    # Holdout 50%: the original coin-flip null, now stamped rather than
+    # hardcoded. Without a stamp the count branch is silent (SUP-1).
+    v = _judge(_mix(1, 10), holdout_wr=50.0)
     assert v.trades == 11 and v.wins == 1
     assert v.state == "watch", f"11 islemde 1 kazanc hala tam olcekle isliyor: {v.reason}"
     assert v.risk_scale == LIVE["watch_risk_scale"]
 
 
 def test_us500_two_wins_in_fifteen_is_throttled():
-    v = _judge(_mix(2, 13))
+    v = _judge(_mix(2, 13), holdout_wr=50.0)
     assert v.trades == 15 and v.wins == 2
     assert v.state == "watch"
 

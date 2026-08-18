@@ -652,21 +652,18 @@ class Supervisor:
         # be long enough to read.
         #
         # The trade-count bar is right for an AVERAGE: profit factor over a
-        # handful of trades is noise. It is the wrong bar for a COUNT. One win
-        # in eleven is not a noisy average, it is an unlikely sequence - under a
-        # coin-flip win rate the odds of one or fewer wins in eleven are about
-        # six in a thousand. Between quarantine_losses, which is
-        # count-independent but wants the losses consecutive, and this bar,
-        # which wants twenty-five trades, "few trades and overwhelmingly bad"
-        # fell through: USDCHF sat at one win in eleven, PF 0.35, -16.09, four
-        # consecutive, trading at full scale, and would not have reached
-        # twenty-five trades for another thirty-eight days.
+        # handful of trades is noise. It is the wrong bar for a COUNT. Between
+        # quarantine_losses (consecutive) and watch_min_trades, "few trades and
+        # overwhelmingly bad" fell through: USDCHF sat at one win in eleven,
+        # PF 0.35, four consecutive, trading at full scale.
         #
-        # So the win count is read against its own sampling noise, the way
-        # portfolio-gates already reads expectancy against 2*1.2/sqrt(n). Under
-        # a break-even record the win count's standard deviation is sqrt(n)/2,
-        # so two sigma below even is n/2 - sqrt(n). Under that, the record is
-        # not thin - it is damning.
+        # The first patch compared the win count to a coin-flip
+        # (``n/2 - sqrt(n)``). That is the wrong null here. This book's trend
+        # followers win 25-37% by design and make the money on payoff, so a
+        # healthy GER40 at two wins in eleven - expected ~3 under its own
+        # holdout 27% - tripped watch. The reference is the symbol's stamped
+        # holdout win rate; the tail is binomial at 5%. No stamp, no count
+        # verdict - a made-up 50% is how GER40 got judged as a coin.
         #
         # profit_factor still has to be under watch_pf either way: a symbol
         # whose few wins are large enough to carry it is not losing money, and
@@ -685,7 +682,8 @@ class Supervisor:
         # since it - which is usually none, and none is not a record.
         elif (watch_n > 0 and watch_pf_val < float(cfgs["watch_pf"])
                 and (watch_n >= int(cfgs.get("watch_min_trades", cfgs["min_trades"]))
-                     or watch_wins < watch_n / 2.0 - math.sqrt(watch_n))):
+                     or self.count_is_damning(
+                         watch_wins, watch_n, self.holdout_win_prob(cfg)))):
             v.state = "watch"
             v.risk_scale = float(cfgs["watch_risk_scale"])
             # Same PF gate as watch; richer reason when backtest still promised edge
@@ -798,6 +796,83 @@ class Supervisor:
         if loss > 0:
             return win / loss
         return PF_NO_LOSSES if win > 0 else 0.0
+
+    # Left-tail size for the thin-record count branch. Discrete, so the
+    # realised false-alarm rate is <= this, often a bit under.
+    DAMNING_ALPHA = 0.05
+
+    @staticmethod
+    def holdout_win_prob(cfg: SymbolConfig) -> float | None:
+        """Stamped holdout win rate as a probability, or None if unusable.
+
+        The store writes percent (27.43). A fraction in (0, 1] is accepted too.
+        Missing, zero, or 100% is not a null we will judge a live count against.
+        """
+        hold = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
+        raw = hold.get("win_rate")
+        if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+            return None
+        p = float(raw)
+        if p > 1.0:
+            p = p / 100.0
+        if not (0.0 < p < 1.0):
+            return None
+        return p
+
+    @staticmethod
+    def _binom_cdf_le(k: int, n: int, p: float) -> float:
+        """P(X <= k) for X ~ Binomial(n, p)."""
+        if n <= 0:
+            return 1.0
+        if k < 0:
+            return 0.0
+        if k >= n:
+            return 1.0
+        p = min(max(float(p), 1e-15), 1.0 - 1e-15)
+        log_term = n * math.log(1.0 - p)
+        total = 0.0
+        for i in range(0, k + 1):
+            total += math.exp(log_term)
+            if i < n:
+                log_term += (
+                    math.log(n - i) - math.log(i + 1)
+                    + math.log(p) - math.log(1.0 - p)
+                )
+        return min(1.0, total)
+
+    @staticmethod
+    def damning_max_wins(n: int, p: float, alpha: float = DAMNING_ALPHA) -> int:
+        """Largest win count that still fires at this n and null p.
+
+        -1 means the left tail never reaches ``alpha``: even zero wins is
+        ordinary, so the count branch stays silent.
+        """
+        if n <= 0 or not (0.0 < p < 1.0):
+            return -1
+        k = -1
+        for wins in range(0, n + 1):
+            if Supervisor._binom_cdf_le(wins, n, p) <= alpha:
+                k = wins
+            else:
+                break
+        return k
+
+    @staticmethod
+    def count_is_damning(wins: int, n: int, p: float | None,
+                         alpha: float = DAMNING_ALPHA) -> bool:
+        """True when ``wins`` is in the binomial left tail of holdout p.
+
+        ``p`` is a probability, or a percent > 1 (27.43). None / unusable:
+        do not fire. That is the PLTR-empty-stamp case.
+        """
+        if p is None or n <= 0:
+            return False
+        prob = float(p)
+        if prob > 1.0:
+            prob = prob / 100.0
+        if not (0.0 < prob < 1.0):
+            return False
+        return Supervisor._binom_cdf_le(int(wins), int(n), prob) <= alpha
 
     def _hour_risk_scales(self, trades: list[dict[str, Any]], nets: list[float],
                           cfgs: dict[str, Any]) -> dict[int, float]:
