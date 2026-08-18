@@ -178,6 +178,26 @@ nakit 16–22 (sunucu): trail'e ulaşma **+8,9 puan (z=2,40)**, stop olma
 güçle görmek kova başı n≈174 ister; sığ kovada 161 var. "Göremedik" ile
 "yok" ayrı şeyler.
 
+**Drawdown ölçekleyici parayı yiyordu (DD-1/DD-2, 18.08).** `dd_soft=1,5`
+6 sembollük kitapta 92 günlük kâğıtta **67 günün 50'sinde** lot kesiyordu
+(%75), bunların **34'ü günü −%1,5'in üstünde bitiriyordu**. Izgara (soft ×
+hard × floor, aynı 6 konfig, aynı pencere):
+
+| soft/hard/floor | kesilen | gereksiz | tam yol neti | 10.07 en kötü gün |
+|---|---:|---:|---:|---:|
+| **1,5 / 3 / 0,4** (eski) | 50 | 34 | **−1.248 $** | −8,89 → −5,22% |
+| 2,5 / 5 / 0,6 | 32 | 21 | −366 $ | −7,06% |
+| **3,5 / 7 / 0,6** (yeni) | 23 | 15 | **−123 $** | −7,69% |
+| 5,0 / 7 / 0,6 | 8 | 5 | −52 $ | −7,95% |
+| 5,0 / 5 (kesme yok) | 0 | 0 | 0 $ | −8,89% |
+
+Eski ayar gridin **en pahalısıydı**: 1.248 $ ödeyip en kötü günü 3,67 puan
+yumuşatıyordu. Yeni ayar aynı korumanın çoğunu **onda bir fiyata** veriyor.
+
+Tamamen kapatmadım (5/5 = 0 maliyet) çünkü kuyruk riski gerçek; ölçekleyici
+kötü günü hâlâ 1,2 puan yumuşatıyor ve merdiven tutarlı kalıyor:
+**ölçekleyici %3,5 → %7 (taban ×0,6), günlük fren %22.**
+
 **Gece saatleri kapısı (01/04/05/22)** — canlı geçmişte 474 işlem, net
 −479.66 $, toplam zararın %78'i, beş sembolde birden görünüyordu. Holdout'ta
 öldü: net R toplamı 534.43 → 220.36 (dört saat kapalı) / 313.02 (optimizer
