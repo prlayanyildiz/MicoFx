@@ -547,6 +547,32 @@ kilitli.
 
 ---
 
+## 4f. Yapılandırılmış ama çalıştırılmayan denetleyici (18.08)
+
+`pyproject.toml`'da `[tool.mypy]` var. **Onu koşturan hiçbir şey yok** —
+`KUR.ps1` 8. adımda ruff çağrılıyor, mypy çağrılmıyor; CI yok; testte yok.
+Kayda "28 bulgu, baseline" diye geçmiş sayı hiç uygulanmadı ve sessizce
+**57**'ye çıktı.
+
+Bu, §5'in birinci arıza sınıfının araç versiyonu: panelde/dosyada duran ama
+etkisi olmayan ayar. Operatöre "tip kontrolü var" diye görünüyor.
+
+**57'nin tamamı daralma körlüğü; gerçek hata yok.** Üç küme tek tek izlendi:
+
+| yer | n | hüküm |
+|---|---:|---|
+| `optimizer.py:1562-1627` | 21 | `_apply_stamp_missing` `detail=None`'ı reddediyor, `apply` erken dönüyor | 
+| `web/app.py:1764-1768` | 4 | 1753'teki `if guarded and current is None: continue` sonraki kullanımları güvenli kılıyor |
+| `web/app.py:2167/2221/2223` | 3 | `rejected` ara değişkeni; mypy takip edemiyor |
+| `web/app.py:56/909/1850` | 5 | pydantic dinamik model üretimi |
+| `web/app.py:1467` | 2 | gerçek eksik anotasyon, zararsız |
+
+Yani araç şu an **sıfır hata bulup 57 satır gürültü üretiyor**, ki bu bir daha
+bakılmayacak araç demektir. Gürültüyü `# type: ignore` ile bastırmak yanlış
+yön; daralmayı koda görünür kılmak gerekiyor (AUDIT-E1).
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
