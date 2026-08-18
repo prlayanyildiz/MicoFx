@@ -882,7 +882,10 @@ class Optimizer:
                         "validated": bool(report.get("validated")),
                         "charge_costs": report.get("charge_costs"),
                         "spread_scale": report.get("spread_scale"),
-                        "min_positive_ratio": report.get("min_positive_ratio")},
+                        "min_positive_ratio": report.get("min_positive_ratio"),
+                        "grid_total": report.get("grid_total"),
+                        "max_combos": report.get("max_combos"),
+                        "coverage": report.get("coverage")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok"))
             if not applied:
@@ -921,6 +924,9 @@ class Optimizer:
             "holdout_retention": report["holdout_retention"],
             "keep_reason": report.get("keep_reason") or reason,
             "charge_costs": report.get("charge_costs"),
+            "grid_total": report.get("grid_total"),
+            "max_combos": report.get("max_combos"),
+            "coverage": report.get("coverage"),
             "force": bool(getattr(self, "_force_apply", False)),
             "applied_at": time.time() if applied else None,
             "previous": previous if applied else None,
@@ -1594,6 +1600,22 @@ class Optimizer:
             if detail.get("min_positive_ratio") is not None
             else float((self.store.opt_params() if self.store is not None else {})
                        .get("min_positive_ratio", 0.6) or 0.6),
+            # D1c: search-budget coverage. Old stamps omit these; apply still
+            # succeeds and writes None. New writes fill them. coverage is
+            # max_combos / grid_total capped at 1, not evaluated / grid.
+            "grid_total": None if detail.get("grid_total") is None
+            else int(detail["grid_total"]),
+            "max_combos": None if detail.get("max_combos") is None
+            else int(detail["max_combos"]),
+            "coverage": (
+                float(detail["coverage"])
+                if detail.get("coverage") is not None
+                else backtest.coverage_of(
+                    int(detail["grid_total"]), int(detail["max_combos"]))
+                if detail.get("grid_total") is not None
+                and detail.get("max_combos") is not None
+                else None
+            ),
         }
         flag = bool(detail.get("validated"))
         patch["validated"] = flag

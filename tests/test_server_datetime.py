@@ -140,6 +140,17 @@ def _utc_datetime_names(tree: ast.AST) -> set[str]:
     return bound
 
 
+def _is_utc_replace(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    if not _call_path(node).endswith("replace"):
+        return False
+    for kw in node.keywords:
+        if kw.arg == "tzinfo" and _tz_is_utc(kw.value):
+            return True
+    return False
+
+
 def _is_utc_datetime_timestamp(node: ast.Call, bound: set[str]) -> bool:
     """datetime(..., tzinfo=UTC).timestamp() used as if it were an MT5 epoch."""
     if not _call_path(node).endswith("timestamp"):
@@ -149,6 +160,8 @@ def _is_utc_datetime_timestamp(node: ast.Call, bound: set[str]) -> bool:
         return False
     recv = _unwrap_int_float(func.value)
     if _is_datetime_ctor(recv) and _ctor_tzinfo_is_utc(recv):
+        return True
+    if _is_utc_replace(recv):
         return True
     if isinstance(recv, ast.Name) and recv.id in bound:
         return True
@@ -216,10 +229,11 @@ def test_scan_roots_include_bridge_dirs_when_present():
 def test_micofx_does_not_decode_mt5_stamps_with_localtime_or_naive_fromtimestamp():
     hits: list[str] = []
     for root in _iter_scan_roots():
-        hits.extend(_scan_tree(root, timestamps=False))
+        hits.extend(_scan_tree(root, timestamps=True))
     assert hits == [], (
         "MT5 bar/tick/deal times are naive broker epochs; decode with "
-        "sessions.server_datetime / gmtime, not fromtimestamp or localtime:\n"
+        "sessions.server_datetime / gmtime / broker_epoch, not "
+        "fromtimestamp, localtime, or datetime(...UTC).timestamp():\n"
         + "\n".join(hits)
     )
 
@@ -229,6 +243,8 @@ from datetime import datetime, timezone
 CUT = datetime(2026, 8, 16, 15, 13, tzinfo=timezone.utc).timestamp()
 START_UTC = datetime(2026, 8, 16, 18, 34, tzinfo=timezone.utc)
 START_UNIX = int(START_UTC.timestamp())
+HS = datetime.strptime("2026-05-14 17:55", "%Y-%m-%d %H:%M").replace(
+    tzinfo=timezone.utc).timestamp()
 """
 
 
@@ -239,5 +255,5 @@ def test_utc_datetime_timestamp_as_mt5_epoch_is_caught():
     31 trades +$63.94; the bug-loop -$84.46 sat in the wrong bucket.
     """
     hits = _scan_source(_EXAMPLE_18AUG_CUT, "example.py", timestamps=True)
-    assert len(hits) >= 2, hits
-    assert any("CUT" in h or "timestamp()" in h for h in hits)
+    assert len(hits) >= 3, hits
+    assert any("timestamp()" in h for h in hits)

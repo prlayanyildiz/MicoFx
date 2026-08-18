@@ -871,6 +871,27 @@ def combos_from_grid(grid: dict[str, list], max_combos: int,
     return keys, sorted(seen)
 
 
+def grid_total_of(grid: dict[str, Any]) -> int:
+    """Cartesian size of the list-valued axes. Empty axes do not count."""
+    keys = [k for k, v in grid.items() if isinstance(v, list) and v]
+    if not keys:
+        return 0
+    return int(math.prod(len(grid[k]) for k in keys))
+
+
+def coverage_of(grid_total: int, max_combos: int) -> float | None:
+    """Search budget against the family grid, capped at 1.
+
+    This is ``max_combos / grid_total``, not evaluated-combos / grid. A
+    sparse sample that happened to finish early must not look like full
+    coverage. Unknown or empty grids are None, not 0.
+    """
+    total = int(grid_total)
+    if total <= 0:
+        return None
+    return min(1.0, float(int(max_combos)) / float(total))
+
+
 def _values(keys: list[str], grid: dict[str, list], idx: tuple[int, ...]) -> dict[str, Any]:
     return {k: grid[k][i] for k, i in zip(keys, idx, strict=True)}
 
@@ -1098,6 +1119,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     cache = IndicatorCache(bars.high, bars.low, bars.close, bars.time, tf_seconds,
                            bars.open, bars.volume, cost_price)
     keys, combos = combos_from_grid(grid, max_combos)
+    grid_total = int(math.prod(len(grid[k]) for k in keys)) if keys else 0
+    coverage = coverage_of(grid_total, max_combos)
 
     # ``selection`` is windows[:-2], i.e. segments-2 windows (validation and
     # holdout are held out) - the discount below divided by segments-1,
@@ -1310,6 +1333,9 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         return {"ok": False, "combos": evaluated, "baseline": baseline,
                 "rejected_inconsistent": rejected_inconsistent,
                 "rejected_costly": rejected_costly,
+                "grid_total": grid_total,
+                "max_combos": int(max_combos),
+                "coverage": coverage,
                 "error": f"tutarli kazanan parametre bulunamadi ({why})"}
 
     blended, neighbours = _plateau_scores(keys, grid, raw,
@@ -1386,5 +1412,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         "from": int(bars.time[0]),
         "to": int(bars.time[-1]),
         "finished_at": time.time(),
+        "grid_total": grid_total,
+        "max_combos": int(max_combos),
+        "coverage": coverage,
         "spread_scale": float(scale),
     }
