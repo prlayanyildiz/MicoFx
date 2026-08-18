@@ -22,12 +22,11 @@ DEFAULTS: dict[str, Any] = {
     "enabled": True,
     "review_interval_sec": 120,
     "lookback_days": 14,
-    # Evidence needed before SUSPENDING a symbol. Quarantine is a 12-hour hard
-    # stop, so it has to be paid for with samples: measured against this
-    # portfolio's own validated win rates (26-79%) and profit factors, judging
-    # on 8 trades false-quarantined a healthy symbol 23% of the time while
-    # catching a genuinely broken one only 72% - at 25 it is 11% against 87%,
-    # better on both counts.
+    # Evidence needed before SUSPENDING a symbol when it has no holdout stamp.
+    # With a stamp, quarantine_min_trades() derives the bar so FA stays at 5%
+    # for that symbol's own wr and PF (SUP-5). The number below is the fallback
+    # and the shipped default: at 25, a healthy book false-quarantined ~11%
+    # of the time vs ~23% at 8.
     "min_trades": 25,
     # Evidence needed to merely SIZE A SYMBOL DOWN. A watch costs 40% of one
     # symbol's lot and reverses itself the moment the numbers recover, so it
@@ -599,9 +598,12 @@ class Supervisor:
         # operator "Serbest birak" could not release them either: the same
         # history re-quarantined them within one review cycle.
         #
-        # The bar itself is unchanged (min_trades). A replacement is judged on
-        # its own record at the same price - deliberately not a cheaper one, so
-        # a healthy config is not suspended on a handful of noisy trades.
+        # The bar itself is unchanged in settings (min_trades is the no-stamp
+        # fallback). A replacement is judged on its own record at the same
+        # price - deliberately not a cheaper one, so a healthy config is not
+        # suspended on a handful of noisy trades. When a holdout stamp exists,
+        # the bar is the smallest n that keeps false alarms at 5% for this
+        # symbol's own wr and PF (SUP-5).
         if since_cfg > 0:
             own = [x for d, x in zip(trades, nets, strict=True)
                    if float(d.get("time", 0.0)) >= since_cfg]
@@ -624,9 +626,10 @@ class Supervisor:
         else:
             watch_n, watch_pf_val, watch_wins = v.trades, v.profit_factor, v.wins
 
+        q_n = self.quarantine_min_trades(cfg, cfgs)
         if streak >= int(cfgs["quarantine_losses"]):
             self._quarantine(v, f"{streak} ust uste zarar", quarantine_secs, now)
-        elif judged_n >= int(cfgs["min_trades"]) and judged_pf < float(cfgs["quarantine_pf"]):
+        elif judged_n >= q_n and judged_pf < float(cfgs["quarantine_pf"]):
             self._quarantine(v, f"PF {judged_pf:.2f} cok dusuk ({judged_n} islem)",
                              quarantine_secs, now)
         elif v.quarantine_until > now and since_cfg <= v.quarantined_at:
@@ -800,6 +803,11 @@ class Supervisor:
     # Left-tail size for the thin-record count branch. Discrete, so the
     # realised false-alarm rate is <= this, often a bit under.
     DAMNING_ALPHA = 0.05
+    # Hard cap on the derived quarantine PF bar. SUP-4: XAUUSD (lowest wr in
+    # the book) needs 127 trades for FA 5% at cap 0.80. 150 is ~20% headroom.
+    # Uncapped, a 10% wr / 1.05 PF stamp would demand hundreds of trades
+    # before a genuinely broken book could be suspended.
+    QUARANTINE_N_CAP = 150
 
     @staticmethod
     def holdout_win_prob(cfg: SymbolConfig) -> float | None:
@@ -818,6 +826,59 @@ class Supervisor:
         if not (0.0 < p < 1.0):
             return None
         return p
+
+    @staticmethod
+    def holdout_profit_factor(cfg: SymbolConfig) -> float | None:
+        """Stamped holdout PF, or None if unusable. No stamp, no derived bar."""
+        hold = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
+        raw = hold.get("profit_factor")
+        if not isinstance(raw, (int, float)) or isinstance(raw, bool):
+            return None
+        pf = float(raw)
+        if pf <= 0.0 or not math.isfinite(pf):
+            return None
+        return pf
+
+    @staticmethod
+    def pf_false_alarm(n: int, wr: float, pf: float, cap: float) -> float:
+        """P(PF_hat < cap) under i.i.d. wins of size payoff, losses of size 1.
+
+        Same model as SUP-2/4 Monte Carlo. Closed form: W ~ Binomial(n, wr),
+        PF_hat = (W * win_r) / (n - W) when there is a loss, else the
+        no-loss sentinel which never fires the ``< cap`` gate. So
+        ``PF_hat < cap`` iff ``W < cap * n / (win_r + cap)``.
+        """
+        if n <= 0 or not (0.0 < wr < 1.0) or pf <= 0.0 or cap <= 0.0:
+            return 0.0
+        win_r = float(pf) * (1.0 - wr) / wr
+        thresh = float(cap) * n / (win_r + float(cap))
+        max_w = min(n - 1, math.floor(thresh - 1e-12))
+        if max_w < 0:
+            return 0.0
+        return Supervisor._binom_cdf_le(max_w, n, wr)
+
+    @classmethod
+    def quarantine_min_trades(cls, cfg: SymbolConfig, cfgs: dict[str, Any]) -> int:
+        """Smallest n with FA <= 5% at this symbol's stamp, else global min_trades.
+
+        Analytic, not a table: the binomial CDF already lives here for the
+        damning-count arm, and the i.i.d. fixed-payoff model is the one SUP-4
+        measured. A lookup table would drift the moment a stamp changes.
+        """
+        fallback = int(cfgs.get("min_trades") or DEFAULTS["min_trades"])
+        wr = cls.holdout_win_prob(cfg)
+        pf = cls.holdout_profit_factor(cfg)
+        try:
+            cap = float(cfgs.get("quarantine_pf") or DEFAULTS["quarantine_pf"])
+        except (TypeError, ValueError):
+            cap = float(DEFAULTS["quarantine_pf"])
+        if wr is None or pf is None or cap <= 0.0:
+            return fallback
+        limit = int(cls.QUARANTINE_N_CAP)
+        for n in range(1, limit + 1):
+            if cls.pf_false_alarm(n, wr, pf, cap) <= cls.DAMNING_ALPHA:
+                return n
+        return limit
 
     @staticmethod
     def _binom_cdf_le(k: int, n: int, p: float) -> float:
