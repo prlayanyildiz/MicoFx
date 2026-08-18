@@ -53,7 +53,9 @@ def _dataclass_patch(name: str, src: type, extra_fields: dict | None = None) -> 
     extra=forbid makes that a 422 at the door. ``patch`` is an optional
     wrapper so the bulk envelope still works on the single-symbol route.
     """
-    fields: dict[str, Any] = dict.fromkeys(src.__dataclass_fields__, (Any | None, None))
+    # src is a dataclass by contract; mypy only sees ``type``.
+    fields: dict[str, Any] = dict.fromkeys(
+        src.__dataclass_fields__, (Any | None, None))  # type: ignore[attr-defined]
     if extra_fields:
         fields.update(extra_fields)
     return create_model(name, __config__=ConfigDict(extra="forbid"), **fields)
@@ -906,8 +908,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                      "baglanin veya orphan ticket listesinin temizlenmesini bekleyin")
 
     @app.post("/api/symbols/{symbol}")
-    def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:
-        patch = _coerce_symbol_patch(body.model_dump(exclude_unset=True))
+    def patch_symbol(symbol: str, body: SymbolPatch) -> dict[str, Any]:  # type: ignore[valid-type]
+        patch = _coerce_symbol_patch(
+            body.model_dump(exclude_unset=True))  # type: ignore[attr-defined]
         _reject_internal_fields(patch)
         _reject_non_finite_values(patch)
         _validate_enum_fields(patch)
@@ -1464,7 +1467,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
         live = {c.symbol for c in list(store.symbols.values()) if c.enabled}
         groups = {c.symbol: c.group for c in list(store.symbols.values())}
-        same, cross = [], []
+        same: list[float] = []
+        cross: list[float] = []
         for p in pairs:
             (same if groups.get(p["a"]) == groups.get(p["b"]) else cross).append(p["r"])
         high = [p for p in pairs if abs(p["r"]) >= 0.7]
@@ -1746,8 +1750,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             # Historical settings key; the scan is for any unresolved fill.
             orphan_scan = store.get_setting("secondary_orphan_scan", {}) or {} if guarded else {}
             for symbol in targets:
-                current = store.symbols.get(symbol) if guarded else None
-                if guarded and current is None:
+                current = store.symbols.get(symbol)
+                if current is None:
                     continue
                 if needs_tf_check and current is not None:
                     next_strat = body.patch.get("strategy", current.strategy)
@@ -1847,8 +1851,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         return {"ok": True, "system": store.system.to_dict()}
 
     @app.post("/api/system")
-    def patch_system(body: SystemPatch) -> dict[str, Any]:
-        patch = body.model_dump(exclude_unset=True)
+    def patch_system(body: SystemPatch) -> dict[str, Any]:  # type: ignore[valid-type]
+        patch = body.model_dump(exclude_unset=True)  # type: ignore[attr-defined]
         patch.pop("running", None)  # bot state is owned by start/stop
         lock_keys = [k for k in ("account_lock_login", "account_lock_server") if k in patch]
         if lock_keys:
@@ -2161,8 +2165,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # explicitly overrides. Hand-typed params (no run_id, no detail) are
         # a different, pre-existing use case - unrelated to any optimizer
         # run - and are not gated here.
-        rejected = detail is not None and detail.get("validated") is False
-        if rejected and not body.force:
+        if detail is not None and detail.get("validated") is False and not body.force:
             raise HTTPException(
                 400, f"bu sonuc dogrulanmadi ({detail.get('keep_reason', '')}) - "
                      f"uygulamak icin force:true gonderin")
@@ -2216,7 +2219,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # without a run_id, so every ordinary apply from that table would
         # warn. A real hand-typed call is indistinguishable from it here, and
         # a warning that fires on the normal path teaches people to ignore it.
-        if rejected:
+        if detail is not None and detail.get("validated") is False:
             warning = (f"dogrulanmamis sonuc force ile uygulandi "
                        f"({detail.get('keep_reason', 'sebep yok')})")
             LOG.emit(f"OPT parametreleri DOGRULANMADAN uygulandi (force, skor {score:.2f}): "

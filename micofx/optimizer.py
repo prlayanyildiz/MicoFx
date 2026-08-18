@@ -31,6 +31,8 @@ from .spread_calibration import calibrate
 from .store import Store
 from .strategy import searchable_axes
 
+APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
+
 
 def _grid_axis_equal(left: Any, right: Any) -> bool:
     """Numeric search lists compare equal across int/float spelling."""
@@ -1478,7 +1480,7 @@ class Optimizer:
         is a refusal, not an empty summary.
         """
         if not isinstance(detail, dict):
-            return "uygulama damgasi yok (holdout/validated/holdout_days)"
+            return APPLY_STAMP_MISSING
         hold = detail.get("holdout")
         if not isinstance(hold, dict) or not hold:
             return "uygulama damgasi eksik: holdout"
@@ -1533,6 +1535,8 @@ class Optimizer:
         missing = self._apply_stamp_missing(detail)
         if missing:
             return {"ok": False, "error": missing}
+        if not isinstance(detail, dict):
+            return {"ok": False, "error": APPLY_STAMP_MISSING}
         # Charged same-slice look used to stamp costed_negative and still
         # apply (#50). UK100/SpotBrent/JPN225 were the bill: paper-positive
         # winners that lose once spread is paid. A measurement that cannot
