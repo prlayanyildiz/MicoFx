@@ -782,6 +782,43 @@ düşmüştüm — yanlış. Geçen hücre 11/32k ve `sl_atr_mult=1,0`; 1,5 olan
 
 ---
 
+## 4j. Damganın `params` alanı replay'i değil, öncesini taşıyor (19.08)
+
+Canlı konfig bugün **iki kez** damgasından ayrıştı (GER40 seansı, kitap
+`max_positions`) ve ikisi de tesadüfen yakalandı. Basit bir denetim koşuldu:
+her sembolün canlı satırı, kendi damgasının `params` sözlüğüyle uyuşuyor mu?
+
+| sembol | alan | damga | canlı |
+|---|---|---:|---:|
+| SpotBrent | `max_spread_atr` | 0,18 | 0,15 |
+| XAUUSD | `max_spread_atr` | 0,05 | 0,25 |
+| GER40 | `max_spread_atr` | 0,05 | 0,08 |
+| **NAS100** | `trail_start_atr` | 0,8 | 1,0 |
+| **NAS100** | `trail_step_atr` | 2,2 | 1,8 |
+| JPN225 / US30 | — | eşleşiyor | |
+
+**Çoğu gerçek sürüklenme değil.** Beş sembolün damgası GAP-5 replay'inden
+yeniden yazıldı ve SpotBrent'in damgası kendi içinde çelişiyor:
+`stamp_source` metni "cap 0.15" diyor, `params` sözlüğü 0,18, canlı 0,15.
+Yani yeniden yazımda **holdout metrikleri güncellendi, `params` eski
+bırakıldı** — beş replay damgasında bu alan, replay'in koştuğu konfigi değil
+ondan önceki apply'ınkini taşıyor.
+
+Tek gerçek apply damgası XAUUSD (`stamp_source=None`, `validated=True`);
+onun tek ayrışması makas kalibrasyonunun log'da gerekçelendirilmiş
+müdahalesi — tutarlı.
+
+**NAS100'ün trail farkı belirsiz kova:** ya stale `params`, ya gerçek
+sürüklenme. Trail çıkışı yönetiyor ve kâr kuyrukta olduğu için (4g) ikisini
+ayırmak gerekiyor — STAMP-1c.
+
+Ders: damga "bu konfig şunu ölçtü" iddiasıdır; `params` yalan söylerse iddia
+doğrulanamaz hâle gelir ve **bugünkü bütün arıza sınıfı budur**. Damga yeniden
+yazan her yol, replay'in gerçekte kullandığı params'ı yazmalı (STAMP-1a), ve
+canlı–damga ayrışması elle değil sürekli kontrol edilmeli (STAMP-1b).
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
