@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -51,6 +52,20 @@ def server_datetime(server_epoch: float) -> datetime:
     st = time.gmtime(server_epoch)
     return datetime(st.tm_year, st.tm_mon, st.tm_mday,
                     st.tm_hour, st.tm_min, st.tm_sec)
+
+
+def broker_epoch(year: int, month: int, day: int,
+                 hour: int = 0, minute: int = 0, second: int = 0) -> int:
+    """Inverse of ``server_datetime``: naive broker wall as the MT5 integer.
+
+    Bar, tick and deal stamps are the broker's clock fields stuffed into a
+    Unix-looking number. ``calendar.timegm`` of those fields is that number.
+    ``datetime(..., tzinfo=UTC).timestamp()`` is a real UTC instant — the
+    18.08 analysis cut that compared the two and put the repair-loop loss
+    in the wrong bucket. After 1 Nov the two diverge another hour.
+    """
+    return int(calendar.timegm(
+        (year, month, day, hour, minute, second, 0, 0, 0)))
 
 
 def weekend_closed(cfg: SymbolConfig, server_epoch: float) -> bool:
