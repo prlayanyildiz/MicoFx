@@ -699,6 +699,41 @@ konfig ile canlı o eksende ayrışıyor; GER40 seansıyla aynı sınıf, acil d
 
 ---
 
+## 4i. Arama bütçesi değil, tekrarlanabilirlik (18.08) — D1b kapandı
+
+US30 / `t3_stoch` / M30, tek donmuş pencere (90000 bar, 557 g holdout),
+`combo_seed` dört tohum × iki bütçe:
+
+| bütçe | holdout net R | ortalama | sapma | SE |
+|---|---|---:|---:|---:|
+| 2.000 | +11,03 / −7,44 / −27,34 / +5,32 | −4,61 | 17,01 | 8,50 |
+| 32.000 | +12,09 / +36,01 / +19,67 / −58,05 | +2,43 | **41,54** | 20,77 |
+
+Fark **+7,04 R**, SE(fark) 22,44 → **0,31 SE, ayırt edilemez**. Kilitli kural
+gereği `max_combos` **2000'de kalıyor**. Bu ip kapandı.
+
+**Asıl sonuç ikinci ölçütte** (18.08'de eklenen kural: bir bütçenin tohumlar
+arası sapması kendi |ortalaması|'ndan büyükse o bütçe ayar seçmek için
+yetersizdir): **her iki bütçe de düşüyor**, ve 32k daha kötü — tek bir tohum
+(97) −58 R getirip sapmayı ikiye katlıyor.
+
+Yani `t3_stoch`/US30 için arama **ödeyebileceğimiz hiçbir bütçede
+tekrarlanabilir değil**. Damgadaki holdout sayısı o konfigin değeri değil, o
+gün çekilen biletin değeri — ve `risk._edge_metric` lotu o sayıdan türetiyor.
+US30'un pozisyon boyutu bir çekilişe bağlı.
+
+Karar D1b-e'ye bağlandı: ızgarayı küçültmek tekrarlanabilirliği getiriyorsa
+çözüm orada ve bedava; getirmiyorsa US30 `t3_stoch`'tan çıkar ve kapsamı
+ölçülebilir bir aileye taşınır. D1b-e **dört tohumla** koşulacak; aranan sayı
+ortalama değil **sapma**.
+
+**Düzeltme:** "kapıdan geçen konfig daha geniş stop seçiyor" diye not
+düşmüştüm — yanlış. Geçen hücre 11/32k ve `sl_atr_mult=1,0`; 1,5 olan
+11/2k, yani kaybeden. 4h'deki skor hipotezi bundan bağımsız ayakta (dayanağı
+174 koşudaki ρ asimetrisi), ama motive ederken yanlış bir destek kullanılmıştı.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
