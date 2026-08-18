@@ -535,6 +535,47 @@ canlı işaret şu an negatif (−986 $/ay). Karar kuralı: **canlı edge'in
 işareti pozitife dönmeden toplam risk artırılmaz**; artırılacaksa da
 düzeltilmiş ölçütle ve tek seferde değil.
 
+**MATCH-1 — soruşturma kapandı: uygulama farkı yok (18.08).**
+
+FWD-1 ve MATCH-1 birlikte zinciri tamamladı.
+
+**Aynı sinyalleri alıyor muyuz?** Evet. Kitap 16.08'den beri sabit; o
+tarihten bugüne kâğıt 34 işlem, canlı 51, eşleşen 27 → eşleşme **%79,4**
+(SE %6,9), sayı oranı **%150**. Kaçan işlemlerin kâğıt net R'si +2,76
+(SE 0,55, sıfırdan ayırt edilemez) — kapılar kârlı işlemi kesmiyor.
+
+Tarihsel "canlı kâğıdın %28'ini alıyor" bulgusu **çalkantı artefaktıydı**:
+92 günde canlı onlarca konfig çalıştırdı, tek sabit konfigin 1399 işlemiyle
+kıyaslamak baştan geçersizdi. BS-1 kapandı.
+
+**Aynı sonuçları mı alıyoruz?** Evet. 27 eşleşen işlem bar bar
+karşılaştırıldı — giriş fiyatı, çıkış fiyatı, 1R mesafesi, çıkış sebebi,
+sonuç R, tutma süresi:
+
+| | değer |
+|---|---|
+| ΔR ortalama (n=25, aykırı hariç) | **−0,009 R** |
+| ΔR toplam | −0,21 R — sıfırdan ayırt edilemez |
+| trail/SL çiftleri (n=6) | ΔR −0,17 … +0,12 |
+| XAUUSD −1R satırları | canlı sistematik **~0,02 R** kötü (maliyet) |
+
+Tek aykırı: NAS100 17.08 19:00, kâğıt `time` ile **örneklem sonunda**
+çıkmış (+11,02 R, 21 saat), canlı seans sonu flatten yapmış (+3,41 R,
+4,9 saat). ΔR −7,61 — bu bir uygulama farkı değil, **örneklem sınırı
+artefaktı**.
+
+**Sonuç: motor, backtest'in modellediği şeyi sadakatle uyguluyor.**
+Kalan gerçek uygulama maliyeti ~0,02 R/işlem — EX-1'in bağımsız ölçtüğü
+0,00145 R ile aynı mertebede.
+
+Dolayısıyla tarihsel **−218,7 R**'lik fark ne sinyalden ne uygulamadan
+geliyor. Geriye tek açıklama kalıyor: **canlıda çalışan konfigler, ölçtüğümüz
+konfigler değildi.** Çalkantı. Ve bu artık çıkarım değil, iki bağımsız
+ölçümün dışladığı tek seçenek.
+
+**İleriye dönük test zaten koşuyor:** 16.08'den beri zorla uygulama yok,
+fren 48 saatte, kitap sabit. FWD-1/MATCH-1 iskeleti günlük koşulabilir.
+
 **TF-2 — projenin en keskin ölçümü (18.08). Aynı konfig, aynı pencere.**
 
 Altı canlı konfig, ortak 92 günlük pencerede (18.05 12:10 → 18.08 12:10
