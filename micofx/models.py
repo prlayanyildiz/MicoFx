@@ -51,8 +51,9 @@ def _coerce(cls, payload: dict[str, Any]):
             or getattr(f.type, "_name", None)
             or getattr(getattr(f.type, "__origin__", None), "__name__", "")
         )
+        name = t if isinstance(t, str) else ""
         try:
-            if t.startswith("bool"):
+            if name.startswith("bool"):
                 # bool("false") is True in Python - this only ever receives
                 # real JSON booleans through the FastAPI routes today (pydantic
                 # preserves the type), but this function is also the landing
@@ -61,11 +62,11 @@ def _coerce(cls, payload: dict[str, Any]):
                 # footgun is worth closing here rather than trusting callers.
                 kwargs[key] = value.strip().lower() not in ("false", "0", "", "no")  \
                     if isinstance(value, str) else bool(value)
-            elif t.startswith("int"):
+            elif name.startswith("int"):
                 kwargs[key] = int(value)
-            elif t.startswith("float"):
+            elif name.startswith("float"):
                 kwargs[key] = float(value)
-            elif t.startswith("str"):
+            elif name.startswith("str"):
                 kwargs[key] = str(value)
             else:
                 kwargs[key] = value

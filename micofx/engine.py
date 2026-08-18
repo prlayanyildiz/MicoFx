@@ -21,6 +21,7 @@ from .mt5client import (
     AMBIGUOUS_RETCODES,
     DECISION_CLOCK_MAX_AGE_SEC,
     NON_RETRYABLE_RETCODES,
+    Bars,
     MT5Client,
     timeframe_seconds,
 )
@@ -204,14 +205,14 @@ class SymbolState:
         self.bars_ready = 0
         self.cooldown_until = 0.0
         self.note = ""
-        self.session = {}
+        self.session: dict[str, Any] = {}
         self.spread = 0.0
         self.spread_atr = 0.0
         self.last_signal_at = 0.0
-        self.bars = None  # most recent Bars snapshot, for structure-based trailing
+        self.bars: Bars | None = None  # most recent Bars snapshot, for structure-based trailing
         # and not yet filled - lets _evaluate retry a signal a transient block
         # (spread/slot/AI gate) ate earlier in the same bar. (0, 0) means none.
-        self.pending_bar_key = (0, 0)
+        self.pending_bar_key: tuple[str | int, int] = (0, 0)
         # Which gate refused THIS cycle's entry attempt, as a stable key rather
         # than the display note. Only meaningful right after _try_entry ran;
         # _cycle reads it once and tallies it. See Engine._entry_blocks.
@@ -473,22 +474,22 @@ class Engine:
         # precisely the double entry this record exists to stop.
         self._filled_bars: dict[str, dict[str, int]] = {}
         for sym, value in (as_dict(store.get_setting("filled_bars"), "filled_bars")).items():
-            legs: dict[str, int] = {}
+            by_leg: dict[str, int] = {}
             # The bar timestamp has to be a number, not merely present: a bare
             # length check let ["sig", "yok"] through to int(), which raises
             # inside __init__ and takes the whole start-up with it.
             def _ok(bar: Any) -> bool:
                 return isinstance(bar, (int, float)) and not isinstance(bar, bool)
             if isinstance(value, dict):
-                legs = {str(k): int(v) for k, v in value.items() if _ok(v)}
+                by_leg = {str(k): int(v) for k, v in value.items() if _ok(v)}
             elif (isinstance(value, (list, tuple)) and len(value) == 2
                   and _ok(value[1])):
                 # The single-slot shape this replaced. Migrated rather than
                 # dropped so the guard keeps covering the leg it did record
                 # across the restart that installs this change.
-                legs = {str(value[0]): int(value[1])}
-            if legs:
-                self._filled_bars[str(sym)] = legs
+                by_leg = {str(value[0]): int(value[1])}
+            if by_leg:
+                self._filled_bars[str(sym)] = by_leg
 
     # ------------------------------------------------------------- lifecycle
 
@@ -868,7 +869,7 @@ class Engine:
 
     def spread_ratio(self) -> dict[str, Any]:
         """Per-symbol median and 90th percentile of tick spread / bar spread."""
-        rows = []
+        rows: list[dict[str, Any]] = []
         for symbol, counts in sorted(list(self._spread_ratio.items())):
             counts = list(counts)
             total = sum(counts)
@@ -1089,7 +1090,7 @@ class Engine:
         # symbol changes, so: normally) raised "dictionary changed size during
         # iteration" and 500'd the view. Same defence list(self.states.items())
         # already uses at the two other cross-thread reads.
-        rows = []
+        rows: list[dict[str, Any]] = []
         for symbol, legs in sorted(list(self._entry_blocks.items())):
             if not isinstance(legs, dict):
                 continue
@@ -1233,7 +1234,7 @@ class Engine:
     # ------------------------------------------------------------ evaluation
 
     def _evaluate_disabled(self, cfg: SymbolConfig, state: SymbolState,
-                           server_now: float, account: dict[str, Any]) -> None:
+                           server_now: float | None, account: dict[str, Any]) -> None:
         """Handle one ``cfg.enabled == False`` symbol for this cycle.
 
         A position can still be open under this magic (the user paused a
@@ -1859,8 +1860,10 @@ class Engine:
             # symbol parked. WARN so fault scans do not treat a successful
             # refuse as a live Error (same reason pending-drop went WARN).
             # Still ERROR when the book itself is unreadable (ambiguous).
-            _lvl = "WARN" if result.get("verified_unfilled") else "ERROR"
-            LOG.emit(result.get("error", "emir hatasi"), _lvl, cfg.symbol)
+            if result.get("verified_unfilled"):
+                LOG.emit(result.get("error", "emir hatasi"), "WARN", cfg.symbol)
+            else:
+                LOG.emit(result.get("error", "emir hatasi"), "ERROR", cfg.symbol)
             if result.get("ambiguous"):
                 # open_market() could not establish whether the order filled
                 # (timeout plus an unreadable position book, or several new
@@ -2140,7 +2143,9 @@ class Engine:
             # weekend_closed() already gated new entries; it never touched a
             # position that was already open going into the weekend. Crypto
             # is exempt (weekend_closed() itself returns False for it).
-            if sessions.weekend_closed(cfg, server_now) and pos["ticket"] not in self._weekend_pending:
+            if (server_now is not None
+                    and sessions.weekend_closed(cfg, server_now)
+                    and pos["ticket"] not in self._weekend_pending):
                 self._weekend_pending.add(pos["ticket"])
                 self.store.set_setting("weekend_pending_tickets", sorted(self._weekend_pending))
             if pos["ticket"] in self._weekend_pending:
@@ -2157,9 +2162,9 @@ class Engine:
                 # freshly re-queried self._positions) is what actually
                 # confirms the ticket is gone, and clears it correctly either
                 # way - full close this pass, or a later one after retries.
-                fill: dict[str, Any] = {}
-                if self._close_tracked(pos, "MicoFX hafta sonu", "exit", fill=fill):
-                    filled = float(fill.get("volume", pos["volume"]))
+                weekend_fill: dict[str, Any] = {}
+                if self._close_tracked(pos, "MicoFX hafta sonu", "exit", fill=weekend_fill):
+                    filled = float(weekend_fill.get("volume", pos["volume"]))
                     if filled + 1e-9 >= float(pos["volume"]):
                         LOG.emit("Hafta sonu: pozisyon kapatildi.", "TRADE", cfg.symbol)
                     else:

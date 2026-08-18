@@ -15,7 +15,7 @@ from .logbus import LOG
 try:
     import MetaTrader5 as mt5
 except ImportError:  # pragma: no cover - the package is Windows only
-    mt5 = None  # type: ignore
+    mt5 = None
 
 _FALLBACK_PATHS: list[str] = []  # never auto-pick; path must be set in Sistem
 

@@ -398,6 +398,8 @@ if ($testRc -eq 0) {
 }
 $lintRc = Invoke-Native { & $VenvPy -m ruff check (Join-Path $Root "micofx") (Join-Path $Root "tests") }
 if ($lintRc -eq 0) { Say "  Ruff temiz." "Green" } else { Say "  Ruff uyari verdi (engelleyici degil)." "Yellow" }
+$mypyRc = Invoke-Native { & $VenvPy -m mypy (Join-Path $Root "micofx") }
+if ($mypyRc -eq 0) { Say "  Mypy temiz." "Green" } else { Say "  Mypy uyari verdi (engelleyici degil)." "Yellow" }
 
 # ------------------------------------------------------------------- bitti
 Write-Host ""

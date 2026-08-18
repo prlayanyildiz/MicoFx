@@ -781,7 +781,7 @@ class Optimizer:
                 if block:
                     done, _ = futures_wait(list(inflight), return_when=FIRST_COMPLETED)
                 else:
-                    done = [f for f in inflight if f.done()]
+                    done = {f for f in inflight if f.done()}
                 for future in list(done):
                     job = inflight.pop(future)
                     try:
@@ -1144,7 +1144,7 @@ class Optimizer:
                 # Read from the store rather than hardcoded: the operator's own
                 # number, same as min_positive_ratio below. 48.0 is the shipped
                 # default and only stands in when the row is absent entirely.
-                sup = {}
+                sup: dict[str, Any] = {}
                 if self.store is not None:
                     sup = self.store.get_setting("supervisor", {}) or {}
                 try:
@@ -1370,7 +1370,7 @@ class Optimizer:
         got = snap.get((symbol, timeframe))
         if got is not None:
             return got
-        opt = {}
+        opt: dict[str, Any] = {}
         store = getattr(self, "store", None)
         if store is not None:
             try:

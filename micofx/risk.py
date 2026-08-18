@@ -533,13 +533,13 @@ class RiskManager:
             if projected > sys_cfg.max_margin_usage_pct:
                 return Verdict(False, f"marj kullanimi limiti (%{projected:.1f} > %{sys_cfg.max_margin_usage_pct:g})")
 
-        cap = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
-        if cap > 0 and equity > 0:
+        risk_cap = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
+        if risk_cap > 0 and equity > 0:
             open_r = sum(self.remaining_position_risk(p) for p in mine)
             new_r = self.risk_dollars(cfg.symbol, lot, sl_distance)
             projected_r = (open_r + new_r) / equity * 100.0
-            if projected_r > cap:
-                return Verdict(False, f"eszamanli risk limiti (%{projected_r:.1f} > %{cap:g})")
+            if projected_r > risk_cap:
+                return Verdict(False, f"eszamanli risk limiti (%{projected_r:.1f} > %{risk_cap:g})")
 
         return Verdict(True)
 

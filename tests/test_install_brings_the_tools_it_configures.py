@@ -44,6 +44,13 @@ def test_the_installer_runs_the_suite_before_claiming_success():
     assert "TESTLER GECMEDI" in src, "a failing suite must be reported, not swallowed"
 
 
+def test_the_installer_runs_the_static_checkers_it_configures():
+    """pyproject.toml named ruff and mypy; a green install must actually invoke them."""
+    src = _installer()
+    assert "-m ruff" in src, "KUR.ps1 never runs ruff"
+    assert "-m mypy" in src, "KUR.ps1 never runs mypy"
+
+
 def test_the_installer_sets_a_git_identity():
     """Without user.name/user.email git refuses to commit, and it fails later."""
     src = _installer()

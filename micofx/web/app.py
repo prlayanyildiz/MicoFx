@@ -993,7 +993,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             if primary_changing:
                 tf_allow = store.opt_params().get("strategy_timeframes")
                 allow = tf_allow if isinstance(tf_allow, dict) else None
-                if not strategy_allows_timeframe(next_strat, next_tf, allow):
+                # patch.get("strategy") can be None; the allows table takes str.
+                # None already failed the old call (table.get(None) then
+                # `None in READABLE_TIMEFRAMES` is False) and 400'd. Keep that.
+                if not (isinstance(next_strat, str) and isinstance(next_tf, str)
+                        and strategy_allows_timeframe(next_strat, next_tf, allow)):
                     raise HTTPException(
                         400, f"{next_strat}/{next_tf} eslesmesi yasak "
                              f"(scalp yalnizca M5; uzun TF swing ailelerine ait) - "
