@@ -1007,7 +1007,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                  spread_scale: float = 1.0,
                  charge_costs: bool = True,
                  selection_metric: str = "score",
-                 risk_dollar: float = 1.0) -> dict[str, Any]:
+                 risk_dollar: float = 1.0,
+                 combo_seed: int = 7) -> dict[str, Any]:
     """Segmented walk-forward search over a three-way split of history.
 
     History is cut into equal segments and used for three separate jobs, because
@@ -1118,7 +1119,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
 
     cache = IndicatorCache(bars.high, bars.low, bars.close, bars.time, tf_seconds,
                            bars.open, bars.volume, cost_price)
-    keys, combos = combos_from_grid(grid, max_combos)
+    combo_seed = int(combo_seed)
+    keys, combos = combos_from_grid(grid, max_combos, seed=combo_seed)
     # Same helper the stamp test checks, rather than a second copy of the
     # formula: the two drifting apart would make coverage quietly wrong
     # in the stamp while every test still passed.
@@ -1339,6 +1341,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                 "grid_total": grid_total,
                 "max_combos": int(max_combos),
                 "coverage": coverage,
+                "combo_seed": combo_seed,
                 "error": f"tutarli kazanan parametre bulunamadi ({why})"}
 
     blended, neighbours = _plateau_scores(keys, grid, raw,
@@ -1418,5 +1421,6 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         "grid_total": grid_total,
         "max_combos": int(max_combos),
         "coverage": coverage,
+        "combo_seed": combo_seed,
         "spread_scale": float(scale),
     }

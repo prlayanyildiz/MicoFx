@@ -79,6 +79,7 @@ def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
             charge_costs=bool(payload.get("charge_costs", True)),
             selection_metric=str(payload.get("selection_metric") or "score"),
             risk_dollar=float(payload.get("risk_dollar") or 1.0),
+            combo_seed=int(payload["combo_seed"]) if payload.get("combo_seed") is not None else 7,
         )
     except Exception as exc:                      # keep one bad sweep from killing the run
         outcome = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -559,6 +560,10 @@ class Optimizer:
             except Exception:
                 opt_blob = {}
         metric = str(opt_blob.get("selection_metric") or "score")
+        try:
+            combo_seed = int(opt_blob.get("combo_seed", 7))
+        except (TypeError, ValueError):
+            combo_seed = 7
         risk_dollar = 1.0
         if str(getattr(cfg, "lot_mode", "") or "") == "risk":
             risk_dollar = max(float(getattr(cfg, "risk_percent", 0) or 0), 0.01)
@@ -661,6 +666,7 @@ class Optimizer:
                     "max_cost_share": max_cost_share,
                     "selection_metric": metric,
                     "risk_dollar": risk_dollar,
+                    "combo_seed": combo_seed,
                 })
         return plan
 
@@ -887,7 +893,8 @@ class Optimizer:
                         "min_positive_ratio": report.get("min_positive_ratio"),
                         "grid_total": report.get("grid_total"),
                         "max_combos": report.get("max_combos"),
-                        "coverage": report.get("coverage")},
+                        "coverage": report.get("coverage"),
+                        "combo_seed": report.get("combo_seed")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok"))
             if not applied:
@@ -929,6 +936,7 @@ class Optimizer:
             "grid_total": report.get("grid_total"),
             "max_combos": report.get("max_combos"),
             "coverage": report.get("coverage"),
+            "combo_seed": report.get("combo_seed"),
             "force": bool(getattr(self, "_force_apply", False)),
             "applied_at": time.time() if applied else None,
             "previous": previous if applied else None,
@@ -1620,6 +1628,8 @@ class Optimizer:
                 and detail.get("max_combos") is not None
                 else None
             ),
+            "combo_seed": None if detail.get("combo_seed") is None
+            else int(detail["combo_seed"]),
         }
         flag = bool(detail.get("validated"))
         patch["validated"] = flag
