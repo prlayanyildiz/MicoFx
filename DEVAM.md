@@ -100,23 +100,34 @@ yakalandı, biri "onarım sonrası zarardayız" diye yanlış bir sonuç üretti
 çerçevesinde Kasım–Şubat arası **02:00**, Mart–Ekim arası **03:00** —
 Avrupa borsası Avrupa DST'sini, sunucu ABD'ninkini izlediği için. Diğer beş
 sembol yıl boyunca sabit (JPN225/NAS100/US30/XAUUSD 01:00, SpotBrent 03:00).
-**Çözüm takvim değil, kapı.** GER40 seansı **02:00–22:59** yapıldı ve
-yıl boyu öyle kalacak. Gerekçe ölçüldü — GER40 M30, kapı 0,08, sunucu
-saati:
 
-| dilim | KIŞ (Kas–Şub) kapı geçen | YAZ (May–Ağu) |
-|---|---:|---:|
-| 02:00 | **%39,6** | **%0,7** |
-| 02:30 | %36,4 | %0,7 |
-| 03:00 | %34,4 | %39,4 |
-| 22:00 | %90 | %84 |
-| 23:00 | %24 | %15 |
+**GER40 seansı 03:15–22:59 kalıyor** — 18.08'de kısa süre 02:00'ye açıldı ve
+aynı gün geri alındı. Gerekçesi burada, çünkü iki kez yanlış yapıldı:
 
-Yazın 02:00–03:00 barlarının maliyeti 0,354 (kapının 4,4 katı) — spread
-kapısı onları zaten geçirmiyor. Kışın aynı dilim 0,114'e düşüyor ve
-açılıyor. **Pencereyi geniş bırakmak güvenli: mevsimi kapı kendisi
-ayarlıyor.** 1 Kasım'da elle değiştirilecek bir şey yok; takvime bağlı
-müdahale, unutulacak müdahaledir.
+1. *Yanlış ölçüm.* Seansı açarken buraya bir spread tablosu yazılmıştı —
+   "yazın 02:00 barının maliyeti kapının 4,4 katı, kapı kendisi eliyor".
+   **O tablo yanlıştı.** Aynı feed sayıldığında GER40'ın yaz aylarında
+   02:00 ve 02:30 barı **hiç yok** (kış 160 bar, yaz 0). Var olmayan barın
+   maliyeti ölçülemez. Kışın o dilim kapıyı zaten geçiyor (%96,7, medyan
+   spread/ATR 0,053) — yani "kapı mevsimi kendi ayarlıyor" hikâyesinin iki
+   yarısı da gerçek değildi.
+2. *Damga eşleşmesi.* Asıl kural bu. GER40'ın damgası (17.08 22:22) seansı
+   03:15 iken ölçüldü; seans 18.08 17:24'te elle 02:00 yapıldı. O andan
+   itibaren canlı, **damganın ölçmediği bir konfig** koşuyordu — bu oturumun
+   bütün soruşturmasının üzerine yığıldığı arıza sınıfının ta kendisi. Damga
+   hem boyutlandırmayı hem denetçinin eşiklerini besliyor.
+
+Ölçüm ne diyor: kış replay'inde (Kas 2025 – Şub 2026, 116,85 gün) geniş seans
++60,73 R / calmar 2,04, eski seans +47,95 R / calmar 1,81. Ama erken kova
+**n=20, +0,095 R, SE 0,305** — sıfırdan ayırt edilemiyor. Farkın çoğu erken
+barların kazanması değil, `max_positions=2` altında **sonraki 31 işlemi
+yerinden etmesi** (o 31 işlem −10,88 R idi). Erken kova (0,095) ile geri
+kalan (0,303) arasındaki fark da ayırt edilemez (farkın SE'si 0,34). Yani
+veri iki yöne de kural taşımıyor; taşımadığında ölçülmüş konfige dönülür.
+
+**Kasım'da yapılacak bir şey yok.** Kışın ilk 75 dakikayı kaçırmak, kazancı
+gösterilmemiş bir dilimi kaçırmaktır. 02:00 istenirse elle seans düzenlemesiyle
+değil, aramanın kendisiyle gelmeli — ve yeni damgasıyla.
 
 Diğer beş sembolün pencereleri zaten yıl boyu doğru (seans başları sunucu
 çerçevesinde sabit).
@@ -148,6 +159,15 @@ değerlidir. İyi haber üretmek için veriyi bükme.
 | test/ruff | `C:\MicoFX-venv\Scripts\python.exe -m pytest -q` ve `... -m ruff check .` |
 | panel portu | 8900 (`MICO_PORT` ile değişir) |
 | MT5 | `C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe` |
+| **botu başlat** | `C:\MicoFX-venv\Scripts\pythonw.exe run.py` (cwd = proje) |
+
+**Botu `C:\Program Files\Python312` ile başlatmayın.** O yorumlayıcıda
+`uvicorn`/`fastapi` yok; `pythonw` ile başlatılınca hata da görünmez, süreç
+sessizce ölür. 18.08'de seans düzeltmesi için bot durdurulup yanlış
+yorumlayıcıyla başlatıldı ve **üç açık pozisyon birkaç dakika takipsiz
+kaldı** (stoplar broker'da duruyordu, ilerlemiyordu). Durdurup başlattıktan
+sonra **her zaman portu doğrula**: dinleyen PID yoksa bot ayakta değildir.
+
 
 `MicoFxOld` silindi. Git'in getirmediği ne varsa (`data/micofx.db`,
 `cursor/_bp.json`, `cursor/_universe_live01.json`) artık sadece bu makinede.
