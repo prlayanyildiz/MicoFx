@@ -527,10 +527,16 @@ Kanıt:
 | terminal log'unda takvim/haber senkronu | **tek satır yok** |
 
 900 günü tek çağrıda istemek de, 45 ve 30 günlük parçalara bölmek de aynı
-sonucu verdi. Yani sorun sorgu genişliği değil: takvim veritabanı hiç
-dolmamış ve besleme gelmiyor. Terminal ticaret sunucusuna bağlı
-(`bagli=1`, Pepperstone-Demo, build 6116) — bağlantı sorunu değil, **takvim
-beslemesi bu kuruluma ulaşmıyor**.
+sonucu verdi. Yani sorun sorgu genişliği değil.
+
+**Ağ engeli de değil** — makineden 443 ile denendi: `mql5.com` 99 ms,
+`forge.mql5.io` 135 ms, broker 120 ms, hepsi açık. "MetaQuotes altyapısı
+bloke" hipotezi ölçüldü ve öldü.
+
+Geriye kalan tek makul açıklama: **broker takvimi dağıtmıyor.** MT5 takvimi
+ticaret sunucusu bağlantısı üzerinden gelir; broker kapattığında terminalde
+`[CalendarList]` boş kalır ve çağrılar zaman aşımına düşer — gözlenen tablonun
+tamamı bu. Bizim tarafımızdan çözülecek bir şey yok.
 
 **Tekrar denemeyin** — betikler repoda duruyor ve yeni bir makinede
 kendiliğinden derleniyor; orada besleme varsa çalışır. Bu makinede yok.
