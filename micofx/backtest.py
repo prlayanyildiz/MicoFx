@@ -1119,7 +1119,10 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     cache = IndicatorCache(bars.high, bars.low, bars.close, bars.time, tf_seconds,
                            bars.open, bars.volume, cost_price)
     keys, combos = combos_from_grid(grid, max_combos)
-    grid_total = int(math.prod(len(grid[k]) for k in keys)) if keys else 0
+    # Same helper the stamp test checks, rather than a second copy of the
+    # formula: the two drifting apart would make coverage quietly wrong
+    # in the stamp while every test still passed.
+    grid_total = grid_total_of(grid)
     coverage = coverage_of(grid_total, max_combos)
 
     # ``selection`` is windows[:-2], i.e. segments-2 windows (validation and
