@@ -1,53 +1,52 @@
 //+------------------------------------------------------------------+
 //| MicoTakvimTeshis.mq5                                             |
-//| The export came back with a header and no rows, which means      |
-//| CalendarValueHistory returned nothing. That has several possible |
-//| causes and they need different fixes, so ask the calendar what   |
-//| it actually has before guessing.                                 |
+//| The export keeps returning 5401 (calendar timeout). That has     |
+//| several causes needing different fixes, so ask the calendar what |
+//| it holds before guessing. Writes no file; prints and stops.      |
 //+------------------------------------------------------------------+
 #property script_show_inputs
 #property strict
 
 void OnStart()
 {
-   PrintFormat("--- MicoTakvim teshis | terminal %s build %d",
-               TerminalInfoString(TERMINAL_NAME), TerminalInfoInteger(TERMINAL_BUILD));
-   PrintFormat("bagli=%s  sunucu=%s",
-               (string)TerminalInfoInteger(TERMINAL_CONNECTED),
+   PrintFormat("--- MicoTakvim teshis | build %d | bagli=%d | sunucu=%s",
+               (int)TerminalInfoInteger(TERMINAL_BUILD),
+               (int)TerminalInfoInteger(TERMINAL_CONNECTED),
                AccountInfoString(ACCOUNT_SERVER));
 
-   // Does the calendar database exist at all? Countries come from the same
-   // store as values; empty here means nothing was ever downloaded.
+   // Countries come from the same local store as values. Zero here means the
+   // calendar database is empty, which is a download problem, not a query one.
    MqlCalendarCountry ulkeler[];
    ResetLastError();
-   int nu = CalendarCountryById(0, ulkeler[0]) ? 1 : 0;
-   nu = 0;
-   MqlCalendarCountry liste[];
-   ResetLastError();
-   int toplamUlke = CalendarCountries(liste);
-   PrintFormat("CalendarCountries -> %d (hata %d)", toplamUlke, GetLastError());
+   int nUlke = CalendarCountries(ulkeler);
+   PrintFormat("CalendarCountries -> %d (hata %d)", nUlke, GetLastError());
 
-   // Events for one big currency, no time filter.
    MqlCalendarEvent olaylar[];
    ResetLastError();
    int nOlay = CalendarEventByCurrency("USD", olaylar);
    PrintFormat("CalendarEventByCurrency(USD) -> %d (hata %d)", nOlay, GetLastError());
 
-   // Values across a narrow recent window, then a wide one.
    datetime simdi = TimeCurrent();
-   MqlCalendarValue dar[];
-   ResetLastError();
-   int nDar = CalendarValueHistory(dar, simdi - 14 * 24 * 60 * 60, simdi + 7 * 24 * 60 * 60, NULL, NULL);
-   PrintFormat("CalendarValueHistory(son 14g) -> %d (hata %d)", nDar, GetLastError());
+   int pencereler[] = {1, 7, 30, 180};
+   for(int i = 0; i < ArraySize(pencereler); i++)
+   {
+      MqlCalendarValue v[];
+      ResetLastError();
+      int n = CalendarValueHistory(v, simdi - (datetime)pencereler[i] * 24 * 60 * 60, simdi, NULL, NULL);
+      PrintFormat("CalendarValueHistory(son %d gun) -> %d (hata %d)",
+                  pencereler[i], n, GetLastError());
+   }
 
-   MqlCalendarValue genis[];
+   // Same query narrowed to one country: a per-country request is smaller and
+   // sometimes answers when the unfiltered one times out.
+   MqlCalendarValue us[];
    ResetLastError();
-   int nGenis = CalendarValueHistory(genis, simdi - 400 * 24 * 60 * 60, simdi + 30 * 24 * 60 * 60, NULL, NULL);
-   PrintFormat("CalendarValueHistory(400g) -> %d (hata %d)", nGenis, GetLastError());
+   int nUs = CalendarValueHistoryByEvent(840000013, us, simdi - 180 * 24 * 60 * 60, simdi);
+   PrintFormat("CalendarValueHistoryByEvent(ABD ornek) -> %d (hata %d)", nUs, GetLastError());
 
-   PrintFormat("TimeCurrent=%s  TimeLocal=%s",
+   PrintFormat("TimeCurrent=%s TimeLocal=%s",
                TimeToString(simdi, TIME_DATE | TIME_MINUTES),
                TimeToString(TimeLocal(), TIME_DATE | TIME_MINUTES));
-   Print("--- teshis bitti. Hata 4014 = takvim kapali/desteklenmiyor.");
+   Print("--- bitti. 5401=zaman asimi, 5402=veri yok, 4014=desteklenmiyor.");
 }
 //+------------------------------------------------------------------+
