@@ -955,6 +955,53 @@ bütçe (BUDGET-1) olmadan uygulanamaz.
 
 ---
 
+## 4n. Hiçbir iç ölçü dışarıyı öngörmüyor (19.08) — L2 zinciri kapandı
+
+| sıralayan | US30 ρ(holdout) | NAS100 ρ(holdout) |
+|---|---:|---:|
+| arama blend'i (`score`) | −0,02 | −0,08 |
+| doğrulama `net_r` | +0,44 | **−0,64** |
+| doğrulama PF | +0,58 | −0,29 |
+| doğrulama expectancy | +0,63 | **−0,62** |
+
+İki sembol **ters yön**; n=10, SE 0,33, farklar 1,2–1,4 SE → **ayırt
+edilemedi**. Sıralamayı doğrulamaya çevirme önerisi düştü.
+
+**Kavram hatası düzeltildi:** `rank_for_selection` finalistleri **zaten**
+doğrulama skoruyla sıralıyor; `score` alanı arama blend'i, seçimi yapan değil.
+"Skor yerine doğrulama kullanalım" önerisi NAS100'de zaten canlıydı ve
+dar-stop tuzağını **üreten şeyin kendisi** (doğrulama birincisi sl=0,7 /
+val +148 / holdout +69; holdout birincisi sl=1,0 / val +82 / holdout +113).
+
+### Dört bağımsız gözlem, tek yön
+
+1. ρ(arama blend ↔ holdout) ≈ 0
+2. NAS100'de seçim 44 R daha kötü adayı alıyor
+3. GER40'ta kapı, beş adayın **en kötüsünü** geçiriyor (4m)
+4. Doğrulama da öngörmüyor, iki sembolde ters işaret
+
+**Kanıtlandı demiyoruz** — her biri n≈10 ve finalistlerle sınırlı, menzil
+daralmış. Ama dört kesitte tek karşı örnek yok.
+
+### Bundan çıkan yön: daha iyi seçmek değil, daha az seçmek
+
+Seçim gürültüyse çözüm daha iyi bir seçici değil, **seçim sayısını
+azaltmak**. Üç kaldıraç:
+
+* **BUDGET-1** — aile başına tam tarama; aynı girdiye aynı çıktı, rastgele
+  yeniden seçim silinir (4m).
+* **FAM-1** — aile/TF değişimine ayrı ve yüksek eşik; aile değişimi biriken
+  kanıtı yakıyor, gürültüyle yakılmamalı.
+* **churn freni** (`reopt_min_age_hours=48`) — zaten var, gerekçesi artık
+  ölçülmüş.
+
+Bu yol, "daha iyi skor bul" yolundan sağlam: skorun düzeltilebilir olduğunu
+varsaymıyor.
+
+**L2 zinciri kapandı**, genişletilmeyecek.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
