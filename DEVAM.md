@@ -1032,6 +1032,46 @@ teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 
 ## 7. Açık işler, öncelik sırasıyla
 
+### 18.08 gece — güncel kuyruk (altındaki eski maddeler tarihî)
+
+Kapanan gün: **2.074,33 → 2.106,47, +32,14 (+%1,55)**, 20 işlem, kitap
+gece düz, marj 0, günlük fren tetiklenmedi.
+
+**Koşan / sıradaki ölçümler:**
+
+| iş | soru |
+|---|---|
+| D1b-e (koşuyor) | budanmış `t3_stoch` ızgarası **tekrarlanabilirlik** getiriyor mu? 4 tohum, aranan sayı sapma |
+| L2b | tek koşunun adaylarında skorun ilk 5'i, holdout'un ilk 5'inden sistematik daha **dar stopta** mı? |
+| L2c | kâğıtta da kâr 120+ dk'da mı toplanıyor? Değilse fark **çıkışta** ve MATCH-1 yeniden okunur |
+| D1b-f | budanmış ızgara, budamanın türetilmediği sembolde (NAS100/GER40) tutuyor mu? |
+| FAM-1 | aile/TF değişimi sonrası canlı performans, yalnız parametre değişiminden ayrılıyor mu? |
+| FWD-2 | her sabah bir kez; kitap sabit + `max_positions=1` + arama `max_open=1` penceresi büyüyor |
+| M1-1 | XAUUSD M1 ailesi taraması (tek M1 kapısını geçen sembol) |
+
+**Kapanan sorular (yeniden açma):** arama bütçesi (`max_combos` 2000'de
+kalır, 0,31 SE) · yön filtresi (12 hücre, hiçbiri ayakta kalmıyor) · aile
+eklemek (12 aile zaten ayırt edilemiyor, değişim oranı %40–75) · MT5 takvimi
+(broker dağıtmıyor) · damga iyimserliği (yalnız GER40) · ölü ayar (yok).
+
+**Karara bağlı bekleyenler:**
+* **US30** — D1b-e tekrarlanabilirlik getirmezse `t3_stoch`'tan çıkar;
+  kapsamı ölçülebilir bir aileye taşınır.
+* **XAUUSD** — 50 işlem sonra: kasa onu boyutlandıramıyor (min lot niyetin
+  1,1–2,2 katı), calmar kitabın en düşüğü. R/işlem sıfırdan ayırt
+  edilemiyorsa silinir.
+* **NAS100** — 50 işlem sonra: başabaşın 5 puan altındaysa silinir.
+* **Lot çarpanı** — 100 işlem sonra: gerçekleşen R/işlem GA sıfırı
+  dışlıyorsa 1,0 → 1,25. Tavanı risk kapısı koyuyor (×2,02), marj değil.
+* **`daily_loss_pct` 22** — ölçüm penceresi kapanınca düşürülecek.
+* **Aile/TF değişim eşiği** — FAM-1 destekliyorsa parametre değişiminden
+  ayrı ve yüksek bir bar (aile değişimi biriken kanıtı yakar).
+
+---
+
+### Tarihî maddeler (çoğu 17–18.08'de kapandı)
+
+
 **BUG — SL/TP başarı kontrolü bu broker'da yanlış (OPS-1, 17.08).**
 Teşhis logu (`726364d`) açılır açılmaz sebep göründü ve ilk teşhisim
 **yanlıştı**:
