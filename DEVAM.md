@@ -376,6 +376,79 @@ sağlıyor, yani plato kontrolü tohumun etrafındaki birkaç adımdan ibaret.
 
 ---
 
+## 4c. Arama tek pozisyon ölçtü, kitap iki tuttu (18.08) — SORUŞTURMA YENİDEN AÇILDI
+
+`backtest.simulate` imzası `max_open: int = 1`. Dört çağrı yerinin hiçbiri
+onu geçmiyor; `optimizer.py`'de `max_open` kelimesi **hiç geçmiyor**. Kitaptaki
+altı sembol ise `max_positions=2` ile koşuyordu.
+
+Yani **her damga, koşturduğumuzdan farklı bir portföy süreciyle ölçüldü** —
+tek sembolde değil, hepsinde ve baştan beri.
+
+**Teorik değil.** Canlı deal'lerden occupancy (3–15.08, kitap sihriyle
+eşleşen 341 pozisyon, 207 ikinci-slot fill):
+
+| sembol | 2. slot fill | açık zamanın %'si ≥2 pozisyon |
+|---|---:|---:|
+| GER40 | 33 | **92,0** |
+| XAUUSD | 48 | 64,1 |
+| JPN225 | 32 | 60,3 |
+| SpotBrent | 28 | 59,4 |
+| US30 | 26 | 57,5 |
+| NAS100 | 40 | 29,0 |
+
+Medyan **%59,8**. GER40 açıkken neredeyse sürekli iki pozisyonda.
+
+### Aynı konfig, aynı pencere, tek fark `max_open`
+
+| sembol | n (1→2) | net_r (1→2) | max_dd_r (1→2) | calmar (1→2) | oran |
+|---|---|---|---|---|---:|
+| GER40 | 1247→2679 | +177,8→+248,4 | 44,9→81,7 | 3,96→3,04 | 0,77 |
+| JPN225 | 314→433 | +67,1→+56,2 | 16,9→16,4 | 3,98→3,43 | 0,86 |
+| NAS100 | 1041→1550 | +106,8→+115,4 | 47,2→85,5 | 2,26→1,35 | 0,60 |
+| US30 | 404→488 | +46,2→+39,9 | 22,8→47,6 | 2,03→0,84 | **0,41** |
+| SpotBrent | 119→137 | +21,6→+24,8 | 5,0→3,8 | 4,30→6,60 | **1,53** |
+| XAUUSD | 506→655 | +86,3→+69,6 | 43,6→55,7 | 1,98→1,25 | 0,63 |
+
+Net R her yerde düşmüyor; **düşüş kalitesi değil derinliği**: n artıyor, DD
+daha hızlı artıyor. Boyutlandırma calmar'a bağlı olduğu için önemli olan bu.
+
+### Neden soruşturma yeniden açıldı
+
+Son 92 günün ortak penceresinde GER40: `max_open=1` **n=185 net +27,82 R**
+calmar 1,91 → `max_open=2` **n=410 net −8,95 R** calmar −0,31. **İşaret
+değişiyor.**
+
+TF-2'nin "aynı konfig, aynı pencere → kâğıt +189,3 R, canlı −29,4 R, fark
+−218,7 R" tablosu **kâğıt tarafını max_open=1 ile** koştu, canlı 2'deydi. Yani
+bütün oturum boyunca elemeyle daralttığımız o fark, **yapısal olarak eşleşmeyen
+iki süreci** karşılaştırıyordu. "Tek kalan açıklama çalkantı" hükmü erkendi;
+çalkantı artık **tek aday değil, ikinci aday**.
+
+MATCH-1 hâlâ geçerli ve mekanizmayı da açıklıyor: eşleşen işlemlerde ΔR≈0
+(ikisi de aynı işlemi aldığında sonuç aynı). Fark eşleşen işlemlerde değil,
+**canlının kâğıdın hiç almadığı işlemleri alması**nda — FWD-1'in %150 take
+rate'i tam olarak bu. `max_open=1`'de açık pozisyon sonraki sinyalleri bloke
+eder, 2'de etmez, ve marjinal işlemler ortalamayı aşağı çeker.
+
+### Karar: kitap 1'e indi (18.08 18:36)
+
+Altı sembolde `max_positions` 2 → **1**. İki yön vardı:
+
+* aramayı `max_open=cfg.max_positions` yapmak → **bütün damgalar geçersiz**,
+  altı sembol yeniden aranır;
+* kitabı 1'e indirmek → **canlı, ölçülmüş olana eşitlenir**, yeniden arama yok.
+
+İkincisi seçildi. Aynı gün GER40 seansı için verilen kuralın aynısı: veri
+kural taşımıyorsa ölçülmüş konfige dönülür. SpotBrent 2'de daha iyi (calmar
+6,60 vs 4,30) ama bu tek sembolün tek gözlemi ve kendi damgası yok; istenirse
+`max_open=2` ile **aranıp kendi damgasıyla** gelir.
+
+Damgaların ayrıca ikinci bir iyimserlik katmanı var: GER40 damga calmar 5,30,
+aynı konfigin max_open=1 replay'i 3,96 (DD 34 vs 45). Bu ayrı iş.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
