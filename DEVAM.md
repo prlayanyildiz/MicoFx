@@ -100,8 +100,26 @@ yakalandı, biri "onarım sonrası zarardayız" diye yanlış bir sonuç üretti
 çerçevesinde Kasım–Şubat arası **02:00**, Mart–Ekim arası **03:00** —
 Avrupa borsası Avrupa DST'sini, sunucu ABD'ninkini izlediği için. Diğer beş
 sembol yıl boyunca sabit (JPN225/NAS100/US30/XAUUSD 01:00, SpotBrent 03:00).
-GER40 seansı bugün **03:15–22:59**; 1 Kasım'dan sonra ilk 75 dakika
-kaçırılacak.
+**Çözüm takvim değil, kapı.** GER40 seansı **02:00–22:59** yapıldı ve
+yıl boyu öyle kalacak. Gerekçe ölçüldü — GER40 M30, kapı 0,08, sunucu
+saati:
+
+| dilim | KIŞ (Kas–Şub) kapı geçen | YAZ (May–Ağu) |
+|---|---:|---:|
+| 02:00 | **%39,6** | **%0,7** |
+| 02:30 | %36,4 | %0,7 |
+| 03:00 | %34,4 | %39,4 |
+| 22:00 | %90 | %84 |
+| 23:00 | %24 | %15 |
+
+Yazın 02:00–03:00 barlarının maliyeti 0,354 (kapının 4,4 katı) — spread
+kapısı onları zaten geçirmiyor. Kışın aynı dilim 0,114'e düşüyor ve
+açılıyor. **Pencereyi geniş bırakmak güvenli: mevsimi kapı kendisi
+ayarlıyor.** 1 Kasım'da elle değiştirilecek bir şey yok; takvime bağlı
+müdahale, unutulacak müdahaledir.
+
+Diğer beş sembolün pencereleri zaten yıl boyu doğru (seans başları sunucu
+çerçevesinde sabit).
 
 **Zaman dilimini ve pencereyi de yaz.** Bu projede aynı sayı farklı zaman
 diliminde farklı şey demek: bar çekme sınırı sabit olduğu için M5 ~95 gün,
