@@ -819,6 +819,54 @@ canlı–damga ayrışması elle değil sürekli kontrol edilmeli (STAMP-1b).
 
 ---
 
+## 4k. Eşik `max_combos`'un kendisi — hiçbir konfig deterministik değil (19.08)
+
+D1b-e budanmış ızgarayı (1944 kombinasyon) dört tohumla koştu ve sapma **0**
+çıktı. Sebep tekrarlanabilirlik değil: 1944 ≤ 2000 olduğu için
+`combos_from_grid` **tam çarpımı** döndürüyor, tohum hiç kullanılmıyor.
+
+| | holdout | sapma |
+|---|---:|---:|
+| küçük ızgara, tam taranmış | +50,46 (üst sınır) | **0** |
+| tam ızgara, %0,00014 örneklenmiş | −4,61 | 17,01 |
+
+**Eşik ızgaranın küçüklüğü değil, `max_combos`'un altına inmesi.**
+
+Tam tarama maliyeti (37 ms/kombinasyon, gerçek 32k koşusundan):
+
+| aile | ızgara | tam tarama |
+|---|---:|---:|
+| aroon_flip | 2.880 | 1,8 dk |
+| parabolic_flip / wavetrend_flip | 8.640 | 5,4 dk |
+| stoch_flip | 28.800 | **17,8 dk** |
+| macd_flip | 46.080 | 28,5 dk |
+| st_trend | 57.600 | 35,7 dk |
+| t3_flip | 144.000 | 89 dk |
+| mtf_pullback | 622.080 | 6,4 saat |
+| burst / micro_rev / dual_t3 | 1,2–2,1 M | 13–21 saat |
+| t3_stoch | 1,43 G | imkânsız |
+
+**Altı aile yarım saatin altında tam taranabilir**, ama `max_combos=2000`
+hepsinin altında olduğu için **kitaptaki altı konfigin altısı da bir
+çekilişin sonucu.** Deterministik aramadan gelen tek bir ayarımız yok.
+
+Bu, aile kararsızlığıyla (4? apply başına %40–75 aile değişimi) aynı şeyin
+iki yüzü: çekilişler arasında seçim yapıyoruz, konfigler arasında değil — ve
+bütün oturum boyunca "çalkantı" dediğimiz şey bu.
+
+**Önerilen tasarım:** `max_combos` aile başına, ızgara boyutuna kadar,
+karşılanabildiğinde. Tek küresel sayı küçük ızgaralı aileleri gereksiz yere
+çekilişe mahkûm ediyor — `aroon_flip`'in 2.880'ini 2.000 ile örneklemek
+anlamsız. Kitapta bugün bunu karşılayabilen tek sembol GER40 (`stoch_flip`,
+17,8 dk); ölçüm oradan başlıyor.
+
+**Determinizm daha iyi sonuç demek değildir.** Tam tarama o ızgaranın gerçek
+optimumunu bulur; şanslı bir çekiliş daha yüksek sayı verebilir. Alınan şey
+**damganın anlamı ve çalkantının bitmesi**: aynı girdiyle aynı çıktı, ve
+yeniden arama kendi kendine ayar değiştirmiyor.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
