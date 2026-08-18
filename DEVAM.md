@@ -150,6 +150,24 @@ değerlidir. İyi haber üretmek için veriyi bükme.
 
 ---
 
+### Ölçüm için bir şeyi değiştirdiysen, değiştiğini doğrula
+
+18.08: D1b'nin tohum tekrarı, `combos_from_grid`'in tohumunu ana süreçte
+monkeypatch ile değiştirdi. Arama `ProcessPoolExecutor` ile **alt süreçlerde**
+koşuyor (`optimizer.py:774`); yama pickle sınırını geçmez. Altı hücre de
+varsayılan tohumla çekti ve "tohum gürültüsü" diye okunan fark aslında bar
+penceresinin bir M30 kaymasıydı.
+
+Kural: **manipülasyonun ölçülen şeye ulaştığını ölçümden önce kanıtla.**
+En ucuzu, manipülasyonun gözlenebilir bir izini kontrol etmek (farklı tohum →
+farklı örneklem). Bu doğrulanmadan üretilen sayı, ölçtüğünü sandığın şeyi
+ölçmüyor olabilir.
+
+Süreç sınırını geçmesi gereken her şey **veri** olarak geçmeli
+(`combo_seed` artık iş sözlüğünde ve damgada, `762547e`), yama olarak değil.
+
+---
+
 ## 3. Ortam (yeni makine, 16.08.2026)
 
 | ne | nerede |
