@@ -531,7 +531,49 @@ sayılmaz.
 
 ---
 
-## 6. Nerede duruyoruz (16.08.2026)
+## 6. Nerede duruyoruz
+
+### 18.08.2026 akşamı — güncel
+
+Hesap: Pepperstone demo **61562752**, bakiye **2.066 $**, özkaynak 2.143 $,
+1:100. Marj 62,64 $ (seviye %3421) — kaldıraç neredeyse hiç kullanılmıyor,
+çünkü lot SL mesafesinden çıkıyor, marjdan değil.
+
+| sembol | aile | TF | risk % | max_positions |
+|---|---|---|---:|---:|
+| GER40 | stoch_flip | M30 | 0,80 | 1 |
+| JPN225 | dual_t3 | M5 | 0,80 | 1 |
+| NAS100 | mtf_pullback | M30 | 0,80 | 1 |
+| US30 | t3_stoch | M30 | 0,80 | 1 |
+| SpotBrent | dual_t3 | M5 | 0,20 | 1 |
+| XAUUSD | burst | M15 | 0,20 | 1 |
+
+Nominal toplam risk **%3,6**, eşzamanlı risk kapısı %15. Kitap 6 sembolde
+sabit (operatör kararı); Asya–Avrupa–ABD–emtia dağılımı kasıtlı.
+
+**Bugün değişenler:** hesap kilidi demoya alındı · emir yolu onarıldı (0/Done
+kabulü) · short stop tetiği ASK'e · boşluklu stop fill'i açılıştan · saat
+referansı sunucuya · GER40 seansı 03:15'e geri · **`max_positions` 6 sembolde
+2 → 1** · damgalar kapsam taşıyor.
+
+**Soruşturmanın durumu.** "Tek kalan açıklama çalkantı" hükmü **geri
+alındı** — bkz. 4c/4d. `max_open` uyumsuzluğu boşluğun %21'ini açıklıyor,
+kalanı sembole göre farklı mekanizma. 92 günlük karşılaştırma çalkantıyla
+kirlenmiş durumda ve kovalanmıyor; yerine 16.08'den itibaren büyüyen temiz
+pencere (FWD-2) var.
+
+**Açık tetikleyiciler:**
+* NAS100 — 50 işlem sonra: başabaşın 5 puan altındaysa sil.
+* Lot çarpanı — 100 işlem sonra: gerçekleşen R/işlem güven aralığı sıfırı
+  dışlıyorsa 1,0 → 1,25. Tavan ×2,02, sınırı risk kapısı koyuyor, marj değil.
+* `daily_loss_pct` 22 — ölçüm penceresi kapanınca düşürülecek.
+* `max_positions` — FWD-2, limit yüzünden düşen sinyallerin kâğıtta kârlı
+  olup olmadığını söyleyecek. Kârlıysa bu ayrı bir arama ekseni olmalı.
+
+---
+
+### 16.08.2026 — aşağıdaki rakamlar o günün, bulgular hâlâ geçerli
+
 
 Hesap: Pepperstone demo 61562752, 2.113,60 $, 1:100.
 
