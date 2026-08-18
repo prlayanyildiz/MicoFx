@@ -281,6 +281,33 @@ if ($queryRc -eq 0) {
     }
 }
 
+# Gorevin var olmasi ile is yapmasi ayri seyler - 8. adim test suite icin ayni
+# ayrimi yapiyor. 17-18.08'de gorev "Ready" gorunuyor, her gece koşuyor ve 1
+# donuyordu: pythonw altinda stdout yok, ilk operator satiri betikten disari
+# hata firlatiyordu. Tek kayit gorev cikis koduydu, ona da kimse bakmiyordu.
+# Bir kez calistirip logdan dogrulamak bunu kurulum aninda yakalar.
+$backupLog = Join-Path $Root "logs\yedek.log"
+$before = if (Test-Path -LiteralPath $backupLog) { (Get-Item -LiteralPath $backupLog).Length } else { -1 }
+$runRc = Invoke-Native { schtasks /run /tn "$TaskName" }
+if ($runRc -ne 0) {
+    Say "  Gorev elle baslatilamadi - yedegi bir kez kendiniz calistirip bakin." "Yellow"
+} else {
+    $ok = $false
+    foreach ($i in 1..30) {
+        Start-Sleep -Seconds 2
+        if (Test-Path -LiteralPath $backupLog) {
+            if ((Get-Item -LiteralPath $backupLog).Length -gt $before) { $ok = $true; break }
+        }
+    }
+    if ($ok) {
+        Say "  Dogrulandi: gorev calisti ve loga yazdi." "Green"
+    } else {
+        Say "  GOREV KOSTU AMA LOGA YAZMADI - yedek alinmiyor olabilir." "Yellow"
+        Say "  Elle calistirip ciktiya bakin:" "Yellow"
+        Say ("    " + $VenvPy + " " + (Join-Path $Root "backup.py")) "Yellow"
+    }
+}
+
 # ------------------------------------------------------------------ [6] Git
 Step 6 "Git kimligi ve GitHub erisimi..."
 # Without a name and an email git refuses to commit at all, and the failure

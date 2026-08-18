@@ -48,6 +48,36 @@ EXCLUDE_DIRS = {
 DB_REL = DB_PATH.relative_to(ROOT)
 
 
+LOG_FILE = ROOT / "logs" / "yedek.log"
+
+
+def _stamp() -> str:
+    """Archive-name timestamp, seconds included so two runs in one minute
+    cannot land on the same file name.
+
+    Its own function rather than a bare ``time.strftime`` call because the
+    log line needs a timestamp too, and a test that patched the shared
+    ``time.strftime`` to control this one starved the other.
+    """
+    return time.strftime("%Y-%m-%d_%H%M%S")
+
+
+def _log_line(text: str) -> None:
+    """Append to the backup log, the only witness when there is no console.
+
+    The scheduled task runs pythonw, so a job whose sole record was the
+    task exit code failed quietly for two nights before anyone looked.
+    Best effort: a backup must not fail because its log could not be
+    written.
+    """
+    try:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG_FILE, "a", encoding="utf-8", errors="replace") as fh:
+            fh.write(time.strftime("%Y-%m-%d %H:%M:%S ") + text)
+    except Exception:
+        pass
+
+
 def _emit(msg: str) -> None:
     """Write one operator line that must not die on a cp1252 console.
 
@@ -56,11 +86,20 @@ def _emit(msg: str) -> None:
     swallows the original failure. Measured 16.08 on this machine.
     """
     text = msg if msg.endswith("\n") else msg + "\n"
+    _log_line(text)
     stream = sys.stdout
+    if stream is None:
+        # pythonw: no console exists. The write used to raise
+        # AttributeError straight out of the script, which is why the
+        # task returned 1 on 17.08 while running it by hand worked.
+        return
     try:
         stream.write(text)
         stream.flush()
     except UnicodeEncodeError:
+        # Listed before the broad clause below on purpose: UnicodeEncodeError
+        # is a ValueError, so catching ValueError first would swallow it and
+        # skip the buffer fallback the cp1252 console needs.
         encoding = getattr(stream, "encoding", None) or "utf-8"
         buf = getattr(stream, "buffer", None)
         if buf is not None:
@@ -69,6 +108,10 @@ def _emit(msg: str) -> None:
             return
         stream.write(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
         stream.flush()
+    except (AttributeError, ValueError, OSError):
+        # A stream that exists but cannot be written: closed handle, dropped
+        # redirection. The line is already in the log.
+        return
 
 
 def _iter_files(root: Path, skipped: list[int] | None = None):
@@ -273,7 +316,7 @@ def main() -> int:
     # Seconds in the stamp, not just minutes. The archive is opened "w", so two
     # runs landing in the same minute silently truncated the first one - which
     # is exactly what a manual re-run after a failed attempt looks like.
-    stamp = time.strftime("%Y-%m-%d_%H%M%S")
+    stamp = _stamp()
     zip_path = dest_dir / f"MicoFX_{stamp}.zip"
     # Built under a name _prune does not match, and renamed only once the
     # archive is complete. Anything that goes wrong partway - the DB locked

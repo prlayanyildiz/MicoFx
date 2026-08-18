@@ -154,7 +154,7 @@ def test_two_runs_in_the_same_minute_do_not_overwrite_each_other(tmp_path, monke
     _wire(monkeypatch, root, dest)
 
     stamps = iter(["2026-08-11_020101", "2026-08-11_020102"])
-    monkeypatch.setattr(backup.time, "strftime", lambda fmt: next(stamps))
+    monkeypatch.setattr(backup, "_stamp", lambda: next(stamps))
 
     assert backup.main() == 0
     assert backup.main() == 0
