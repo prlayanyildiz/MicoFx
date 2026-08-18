@@ -808,9 +808,17 @@ Tek gerçek apply damgası XAUUSD (`stamp_source=None`, `validated=True`);
 onun tek ayrışması makas kalibrasyonunun log'da gerekçelendirilmiş
 müdahalesi — tutarlı.
 
-**NAS100'ün trail farkı belirsiz kova:** ya stale `params`, ya gerçek
-sürüklenme. Trail çıkışı yönetiyor ve kâr kuyrukta olduğu için (4g) ikisini
-ayırmak gerekiyor — STAMP-1c.
+**NAS100 çözüldü (STAMP-1c):** GAP-5 replay kaydına bakıldı —
+`_gap5_run.py` `getattr(cfg, k)` ile o anki canlı satırı kullanmış ve
+`trail_start=1,0 / trail_step=1,8` koşmuş. Canlı bugün de **1,0 / 1,8**.
+Yani canlı, replay'in ölçtüğü çıkışla eşleşiyor; yalan söyleyen damganın
+`params` alanı (0,8 / 2,2 = önceki apply). **Canlıda düzeltilecek bir şey
+yok**, sürüklenme yok.
+
+Yani bulunan beş ayrışmanın hepsi ya stale `params` ya da gerekçelendirilmiş
+makas kalibrasyonu. **Denetim çalıştı, alarm gerçek değildi** — ve tam da bu
+yüzden `params` düzeltilmeli: bu alan güvenilmez olduğu sürece denetim her
+seferinde elle kovalanacak bir yanlış pozitif üretir.
 
 Ders: damga "bu konfig şunu ölçtü" iddiasıdır; `params` yalan söylerse iddia
 doğrulanamaz hâle gelir ve **bugünkü bütün arıza sınıfı budur**. Damga yeniden
