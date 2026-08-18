@@ -385,7 +385,32 @@ iki istisnadan birine güvenmek için sebep yok. Kitabın canlıda en çok işle
 yapan sembolü; ölçüm penceresi dolarken karakterini değiştirmiyorum. Bir
 sonraki gözden geçirmede canlı veriyle yeniden bakılacak.
 
-Kitap: 6 sembol, `lot_mode=risk`, sembol başına `max_positions=2`.
+**PLTR.US-24 eklendi (18.08).** Evren taramasının tek hayatta kalanı:
+1729 sembol → 1034 → 117 `.US-24` → 10 → **1**. İlk sonucu (ST-1B) onarım
+öncesi simülatörle alındığı için geçersiz sayıldı ve yeniden ölçüldü;
+ST-1C'de calmar **6,12 → 6,17**, boşluk hediyesi **sıfır**. Kitabın en
+iyisi GER40 5,30; PLTR onu geçiyor ve maxDD'si 10,08 — kitapta o kadar
+temiz düşüş profili yok.
+
+Ön kayıtlı blokajların hepsi kapandı: temettü/split izi **yok** (M5/M30/D1
+üç ayrı kontrol), `.US-24` ile `.US` fiyat seviyesi **birebir** (1089
+örtüşen barda medyan oran 1,000000), NAS100 korelasyonu **0,356** — ortak
+faktör var ama klon değil.
+
+**"24 saat" iddiası 117 ismin hepsinde sahte.** Geçen barlar US nakit
+saati; PLTR kendi kapısını (`max_spread_atr=0,08`) M5'te **%38,7** geçiyor,
+yalnız 17–22 sunucu saatlerinde. Bu SpotBrent'in %29,7'siyle aynı sınıf —
+dar pencerede iyi kenar. Seansı 16:00–23:00 olarak kuruldu.
+
+Küçük ağırlıkla girdi: `risk_percent` 0,2 (en düşük kademe), calmar
+ölçeğiyle etkin **%0,257**. Toplam teorik eşzamanlı risk %7,02 — dünkü
+%9,84'ün altında, yani kitap büyüdü ama maruziyet küçüldü.
+
+**Gözden geçirme:** 50 işlem sonra başabaşın 5 puandan fazla altındaysa
+silinir. Tek isim riski (bilanço boşluğu) kitapta ilk kez var; D1
+holdout'ta ≥0,5 ATR boşluk sayısı 0 çıktı ama bu şans olabilir.
+
+Kitap: 7 sembol, `lot_mode=risk`, sembol başına `max_positions=2`.
 Risk yüzdeleri 0.2 (SpotBrent, XAUUSD, US500) ve 0.8 (diğer yedi). Hepsi dolsa
 teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 
