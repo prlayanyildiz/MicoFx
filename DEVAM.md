@@ -147,6 +147,37 @@ aşağı inemiyor. Kat, bakiye düştükçe büyüyor (2.113 → 2.019 $ arasın
 özgü. `lot_multiplier` artırılırsa XAUUSD zaten aşırı riskli taraftan daha
 da büyür — o gün ayrı ele alınacak.
 
+**Supervisor eşikleri gürültüyle ateşliyordu (HR-2/3, 18.08).** Kodda
+yalnız `edge_decay_min_trades` doğrulanmıştı (20.000 MC, 20 işlemde %12–17
+yanlış alarm → 100'e çıkarılmış). Aynı test diğerlerine uygulandı; kenarı
+**hiç değişmeyen** sembolde yanlış ateşleme oranları:
+
+| eşik | eski bar | yanlış alarm | yeni bar |
+|---|---:|---|---:|
+| `bad_hour_min_trades` | 12 | %12,8–**39,6** (XAUUSD) | **80** |
+| `min_trades` (quarantine_pf) | 25 | %0,9–**23,6** (US30) | **80** |
+| `watch_min_trades` | 25 | %2,4–**38,6** (XAUUSD) | **80** |
+| `quarantine_losses` | 10 | %5,95 (XAUUSD) | **11** (→%4,4) |
+
+Tavanlar (`quarantine_pf 0,80`, `watch_pf 1,00`) **değişmedi** — 0,40'a
+çekmek kuralı körleştirir. Kanıt barı yükseltildi, kural değil.
+
+`watch_pf=1,00` bu kitapta %5'e kalibre **edilemiyor**: XAUUSD'nin gerçek
+PF'si 1,13, n=120'de bile örneklem PF'sinin 1'in altına düşme olasılığı
+üçte bir. Yumuşak ipucu olarak bırakıldı (yalnız 0,6× ölçekler, blok değil).
+
+**Ve bir kural yanlış kurulmuş: damning-count.** `wins < n/2 − √n` null'ı
+**yazı-tura %50** varsayıyor; bu kitabın kazanma oranı %25–37 ve parayı
+ödeme oranından kazanıyor. Sağlıklı sembolde n=11'de ateşleme: XAUUSD
+**%46,4**, GER40 **%38,3**. Eşik ayarı değil, yanlış hipotez — sembolün
+kendi holdout kazanma oranına bağlanacak (SUP-1).
+
+**Sığ saat hipotezi (HR-1) — yarısı duruyor, bağlanmadı.** Sığ 08–10 vs
+nakit 16–22 (sunucu): trail'e ulaşma **+8,9 puan (z=2,40)**, stop olma
++1,5 puan (z=0,31), mean R ayırt edilemez. 15 puanlık stop farkını %80
+güçle görmek kova başı n≈174 ister; sığ kovada 161 var. "Göremedik" ile
+"yok" ayrı şeyler.
+
 **Gece saatleri kapısı (01/04/05/22)** — canlı geçmişte 474 işlem, net
 −479.66 $, toplam zararın %78'i, beş sembolde birden görünüyordu. Holdout'ta
 öldü: net R toplamı 534.43 → 220.36 (dört saat kapalı) / 313.02 (optimizer
