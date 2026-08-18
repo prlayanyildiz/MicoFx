@@ -4,19 +4,35 @@ MT5'in ekonomik takvimi **yalnız MQL5 dilinden** okunabiliyor; Python
 paketinde (`MetaTrader5==5.0.6090`) karşılığı yok. Bu klasör o boşluğu
 geçmek için.
 
-## Kurulum
+## Kurulum — `KUR.ps1` adım 7 yapıyor
 
-Betik terminalin veri klasöründe derli duruyor. Yeni bir makinede:
-
-```
-copy mql5\MicoTakvimDisaAktar.mq5 ^
-  "%APPDATA%\MetaQuotes\Terminal\<ID>\MQL5\Scripts\"
-"C:\Program Files\Pepperstone MetaTrader 5\MetaEditor64.exe" ^
-  /compile:"...\MQL5\Scripts\MicoTakvimDisaAktar.mq5" /log
-```
+Kurulum betiği bu klasördeki bütün `.mq5` dosyalarını bulduğu her MT5 veri
+klasörüne kopyalayıp `MetaEditor64.exe /compile` ile derliyor. Terminal
+klasörünün adı kurulum yolunun hash'i olduğu için makineden makineye değişir;
+elle yol yazılmıyor, taranıyor.
 
 Derleme komut satırından olur, **çalıştırmak olmaz** — betiğin bir grafiğe
-iliştirilmesi gerekiyor. Gezgin (Ctrl+N) → Betikler → grafiğe sürükle.
+iliştirilmesi gerekiyor:
+
+**Gezgin (Ctrl+N) → Komut Dosyaları → `MicoTakvimDisaAktar` → çift tık.**
+
+("Betikler" değil; MT5'in Türkçesinde bölümün adı **Komut Dosyaları**.)
+
+## Ön koşul: takvim açık olmalı
+
+**Araçlar → Seçenekler → Sunucu → "Haberleri etkinleştir"**, ve **Araç Kutusu
+→ Takvim** sekmesi bir kez açılmalı — terminal takvimi talep üzerine indiriyor.
+
+## Zaman aşımı (hata 5401)
+
+İlk sürüm 900 günü tek çağrıda istedi ve `5401` ile döndü: terminal aralığı
+sunucudan çekerken zaman aşımına uğruyor. Betik artık aralığı **45 günlük
+parçalara** bölüyor ve her parçayı **6 kez** deniyor. Boş parça (tatil,
+tarih öncesi) hatasız 0 döner ve beklemeden geçilir; alınamayan parça
+adıyla birlikte raporlanır, sessizce düşmez.
+
+`MicoTakvimTeshis` takvimin ne durumda olduğunu söyler: ülke sayısı, USD olay
+sayısı, dar ve geniş pencere sonuçları, hata kodlarıyla. Dosya yazmaz.
 
 ## Çıktı
 
