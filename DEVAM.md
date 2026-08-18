@@ -634,6 +634,37 @@ olarak dar stop mu seçiyor.
 
 ---
 
+## 4h. Stop çarpanı ızgaranın tabanına yığılmış (18.08)
+
+| sembol | `sl_atr_mult` | ızgara | konum |
+|---|---:|---|---|
+| XAUUSD | 1,0 | [1 .. 4] n=6 | **ALT KENAR** |
+| GER40 | 1,0 | [1 .. 3] n=5 | **ALT KENAR** |
+| NAS100 | 1,0 | [1 .. 4] n=6 | **ALT KENAR** |
+| US30 | 1,0 | [1 .. 4] n=6 | **ALT KENAR** |
+| JPN225 | 2,5 | [1 .. 4] n=6 | iç |
+| SpotBrent | 4,0 | [1 .. 4] n=6 | **ÜST KENAR** |
+
+**Altı sembolün dördü tabanda, hepsi tam olarak aynı değerde.** Gerçek
+optimumlar dağınık olsaydı bu yığılma olmazdı; arama daha dar stop isteyip
+soramıyor gibi duruyor.
+
+Bu, 4g ile **ters yöne bakıyor**: kârın tamamı 120+ dakika yaşayan
+işlemlerden geliyor, ama arama kazananları erken kesen stopu seçiyor. Aynı
+sistemin iki ucu çelişiyorsa aradaki şey **seçim skorudur** — skorun düşüş
+terimi dar stop satın alıyor olabilir. LOSS-2 bunu ölçüyor (L2a sınır
+bağlayıcı mı, L2b skor vs holdout sıralaması, L2c kâğıtta da kuyruk mu).
+
+Kenarda duran başka eksenler: JPN225 `trail_start` 3 / `trail_step` 2,5 /
+`max_spread_atr` 0,18 (üçü de tavan), GER40 `trail_step` 2,2 (tavan).
+
+**Ayrı not:** XAUUSD `max_spread_atr` canlıda **0,25**, ızgara tavanı 0,18 —
+ızgarada olmayan bir değer. 17:20 apply'ından sonra makas kalibrasyonu
+değiştirmiş (log'da gerekçesiyle). Tasarlanmış davranış ama damganın ölçtüğü
+konfig ile canlı o eksende ayrışıyor; GER40 seansıyla aynı sınıf, acil değil.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
