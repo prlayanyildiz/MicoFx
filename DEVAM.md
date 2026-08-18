@@ -336,6 +336,46 @@ engellenecek kova +20.1R, geçen kova −7.5R. Bağlamak parayı atardı.
 
 ---
 
+## 4b. Arama bütçesi ailelere eşit dağılmıyor (18.08)
+
+`combos_from_grid`: ızgara `max_combos`'tan küçükse tam ürün, büyükse
+**tekdüze rastgele örnek** (seed 7); ardından top-12 tohumdan ±1 komşu ile
+`refine_rounds` tur. Bütçe her aileye aynı (`max_combos=2000`), ızgaralar
+aynı değil:
+
+| aile | eksen | ızgara | kapsam |
+|---|---:|---:|---:|
+| aroon_flip | 5 | 2.880 | %69,4 |
+| parabolic_flip / wavetrend_flip | 6 | 8.640 | %23,1 |
+| stoch_flip | 7 | 28.800 | %6,9 |
+| macd_flip | 7 | 46.080 | %4,3 |
+| st_trend | 7 | 57.600 | %3,5 |
+| t3_flip | 7 | 144.000 | %1,4 |
+| mtf_pullback | 10 | 622.080 | %0,32 |
+| burst | 10 | 1.244.160 | %0,16 |
+| micro_rev | 10 | 1.555.200 | %0,13 |
+| dual_t3 | 10 | 2.073.600 | %0,096 |
+| **t3_stoch** | **16** | **1.433.272.320** | **%0,00014** |
+
+**Yarım milyon kat.** Aileyi seçen şey doğrulama skoru olduğu için,
+karşılaştırma ızgara boyutuyla karışmış durumda. İki zıt yanlılık aynı anda
+çalışıyor: büyük ızgara daha çok aşırı-uyum fırsatı verir (skor şişer), ama
+aynı zamanda aile kendi optimumundan uzak kalır (hak ettiğinden düşük
+görünür). Hangisi baskın **ölçülmedi** — DEEP-1'in yeni şekli bu.
+
+Kitabın hâli (n=6, **kanıt değil**): GER40 %6,94 kapsam / 3,38 retention ile
+en tepede; US30 `t3_stoch` %0,00014 kapsamla en altta — o konfig 700.000'de
+bir örneklemin en iyisi, yapısı gereği kitaptaki en az aranmış ayar.
+
+16 boyutta 2000 rastgele nokta arasında komşuluk yoktur; büyük ailelerde
+`MIN_PLATEAU_NEIGHBOURS=3` şartını yalnız refine turlarının ürettiği noktalar
+sağlıyor, yani plato kontrolü tohumun etrafındaki birkaç adımdan ibaret.
+
+**Ölü eksen bütçe yemiyor** — bunu ben hipotez olarak yazdım, ölçüldü,
+`combos_saved=0`. `searchable_axes` aramadan önce zaten buduyor.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
