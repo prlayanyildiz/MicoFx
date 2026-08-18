@@ -917,6 +917,44 @@ demektir — çok daha büyük bir bulgu.
 
 ---
 
+## 4m. Tam tarama determinizm verir, kâr vermez (19.08, GER40)
+
+GER40 / `stoch_flip` / M30, aynı donmuş barlar, `grid_total=28800` tam çarpım
+(1463 s = 24,4 dk):
+
+| koşu | holdout net R | PF |
+|---|---:|---:|
+| **tam tarama 28.800** | **+234,04** | 1,32 |
+| çekiliş seed 7 | +288,66 | 1,41 |
+| çekiliş seed 11 | +142,13 | 1,18 |
+| çekiliş seed 23 | +260,36 | 1,36 |
+| çekiliş seed 97 | +292,10 | 1,42 |
+
+Çekiliş ortalaması **+245,81**, SD **70,57**, SE 35,28. Tam − çekiliş =
+−11,77 R = **0,33 SE → ortada**. Şanslı çekiliş (97) tam taramayı 58 R
+geçiyor.
+
+**Determinizm bedava kâr değildir** — ölçüldü, kayda geçti, kimse sonradan
+"tam tarama daha iyiydi" diye hatırlamasın. Alınan tek şey: **aynı girdiyle
+aynı çıktı**, yani yeniden optimizasyonun rastgele bileşeninin silinmesi.
+Barlar ilerlediği için konfig yine değişebilir; silinen rastgelelik, değişimin
+tamamı değil.
+
+**Üçüncü bağımsız kanıt, kapı sonucu öngörmüyor:** beş koşudan kapıyı geçen
+tek çekiliş seed 11 ve holdout'u **en düşük olanı** (+142 vs +292). Tam
+taramanın kazananı da kapıdan geçmiyor (doğrulama PF 1,09 < 1,10). 4l'deki
+ρ(skor↔holdout)≈0 ile aynı yer.
+
+Çekiliş gürültüsü aileye göre farklı: GER40'ta beş kazananın çekirdeği aynı
+(sl=1,0 / trail_step=2,2 / spread=0,05), yalnız `trail_start` ve `stoch_k`
+oynuyor; US30'da kazananlar tamamen değişiyordu.
+
+**Engel:** `max_combos` küresel. GER40'ı tam taramaya almak onu 28800 yapmayı
+gerektirir, o zaman `t3_stoch` aynı bütçeyi alır ve süre patlar. Aile başına
+bütçe (BUDGET-1) olmadan uygulanamaz.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
