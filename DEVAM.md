@@ -509,6 +509,38 @@ gün büyüyor. Bugünkü hâli zayıf ama temiz; 92 günlük tablo güçlü ama
 
 ---
 
+## 4e. MT5 ekonomik takvimi bu makinede alınamıyor (18.08) — KAPALI YOL
+
+MT5'in takvimi yalnız MQL5'ten okunuyor (`CalendarValueHistory`); Python
+paketinde (`MetaTrader5 5.0.6090`) karşılığı **yok**. Köprü kuruldu
+(`mql5/MicoTakvimDisaAktar.mq5`, `KUR.ps1` adım 7 derliyor,
+`claude/_takvim_oku.py` okuyor) ve **veri gelmedi**.
+
+Kanıt:
+
+| ne | sonuç |
+|---|---|
+| `config/common.ini` → `NewsEnable` | **1** (açık) |
+| `config/terminal.ini` → `[CalendarList]` | **boş** |
+| `CalendarValueHistory` her pencerede | **5401** (zaman aşımı) |
+| `CalendarCountries` | çağrı **asılı kalıyor**, dönmüyor |
+| terminal log'unda takvim/haber senkronu | **tek satır yok** |
+
+900 günü tek çağrıda istemek de, 45 ve 30 günlük parçalara bölmek de aynı
+sonucu verdi. Yani sorun sorgu genişliği değil: takvim veritabanı hiç
+dolmamış ve besleme gelmiyor. Terminal ticaret sunucusuna bağlı
+(`bagli=1`, Pepperstone-Demo, build 6116) — bağlantı sorunu değil, **takvim
+beslemesi bu kuruluma ulaşmıyor**.
+
+**Tekrar denemeyin** — betikler repoda duruyor ve yeni bir makinede
+kendiliğinden derleniyor; orada besleme varsa çalışır. Bu makinede yok.
+
+NEWS-1 ön kaydı (T∈{15,30,60}, önem=3, n_iç≥50, içeride mean R<0 ve
+fark>2 SE) **yazıldığı gibi duruyor**; veri gelirse ölçüm hazır, karar kuralı
+kilitli.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
