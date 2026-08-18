@@ -677,6 +677,36 @@ sistemin iki ucu çelişiyorsa aradaki şey **seçim skorudur** — skorun düş
 terimi dar stop satın alıyor olabilir. LOSS-2 bunu ölçüyor (L2a sınır
 bağlayıcı mı, L2b skor vs holdout sıralaması, L2c kâğıtta da kuyruk mu).
 
+### Maliyet/R, stop tabanının mekanik açıklaması
+
+Bir gidiş-dönüşün maliyeti riske edilenin yüzdesi olarak = **spread ÷ stop
+mesafesi**. Stop yarıya inince aynı spread iki kat pahalı olur.
+
+| sembol | TF | spread/ATR | stop | maliyet/R | 0,25 ATR stopla |
+|---|---|---:|---:|---:|---:|
+| SpotBrent | M5 | 0,317 | 4,00 | %7,9 | **%127** |
+| JPN225 | M5 | 0,184 | 2,50 | %7,4 | **%74** |
+| US30 | M30 | 0,030 | 1,00 | %3,0 | %12,0 |
+| GER40 | M30 | 0,025 | 1,00 | %2,5 | %9,9 |
+| NAS100 | M30 | 0,015 | 1,00 | %1,5 | %5,8 |
+| XAUUSD | M15 | 0,013 | 1,00 | %1,3 | %5,3 |
+
+**İki M5 sembolü kitabın en geniş stoplarını taşıyor** (4,0 ve 2,5) ve
+spread/ATR oranları da en kötüsü. Arama stopu maliyeti seyreltmek için
+genişletmiş. M30'da maliyet zaten %1,5–3 olduğu için stop dar kalabiliyor —
+yani "dört sembol tabanda" bulgusunun kısmen mekanik bir açıklaması var ve
+skor hipotezi tek açıklama değil.
+
+**Hızlı al-sat (scalp/toplayıcı) sorusu bununla cevaplanır.** Ölçülen kenar
+~0,1 R/işlem; 0,25 ATR stopla maliyet SpotBrent'te %127, JPN225'te %74 —
+aritmetik olarak imkânsız. NAS100/XAUUSD'de %5-6 ile mümkün ama kenarın
+yarısı girişte gider. Zor değil, **pahalı**, ve pahalılık zaman dilimi
+küçüldükçe artıyor.
+
+Günlük işlem sayısı ile getiri karşılaştırması (100+ vs <100 işlem/gün)
+**yapılamaz**: yoğun günlerin dördü de temmuz, yani 10 sembollü çalkantı
+dönemi. Zamanla karışık, kesit geçersiz.
+
 ### Skor ile holdout, stop genişliği konusunda aynı şeyi istemiyor
 
 174 koşuda, kazananın `sl_atr_mult`'ı ile iki sıralama arasındaki Spearman
