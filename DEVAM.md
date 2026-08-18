@@ -627,6 +627,24 @@ Kitabın bütün kârı 2 saatten uzun yaşayan işlemlerden; altındaki her şe
 −1.097. Kural değil (girişte süre bilinmez), ama sistemin nasıl para
 kazandığının tarifi: **kazananları koşturarak.**
 
+**Zaman dilimi artefaktı değil** — operatörün sorusu üzerine kontrol edildi.
+M5 sembolleri doğal olarak kısa, M30'lar uzun yaşar; desen sadece "M30
+kazanıyor" olsaydı tablo çöp olurdu:
+
+| TF | 0–5 dk | 5–30 dk | 30–120 dk | **120+ dk** |
+|---|---:|---:|---:|---:|
+| M5 | −39,71 | −245,43 | −107,99 | **+357,48** |
+| M15 | −66,90 | −203,85 | −11,61 | **+193,10** |
+| M30 | −142,58 | −280,03 | +0,81 | **+173,61** |
+
+Üç zaman diliminin üçünde de aynı şekil. M5'te 120 dakika **24 bar**, M30'da
+**4 bar** — farklı bar sayısı, aynı para deseni. Mesele bar sayısı değil,
+**süre**.
+
+Sembol bazında 120+ kovası: JPN225 +259,41 · XAUUSD +193,10 · SpotBrent
++98,07 · NAS100 +91,59 · US30 +85,22 · **GER40 −3,20**. Altıda beş pozitif;
+tek sembolün, tek TF'nin ya da tek ailenin hikâyesi değil.
+
 Buradan `sl_atr_mult`'ı elle genişletmeye **gidilmez** — o zaten arama ekseni.
 Doğru soru bir seviye yukarıda ve LOSS-2'de: seçim skoru kuyruğu taşıyan
 adayları doğru ödüllendiriyor mu, yoksa DD ağırlığı üzerinden sistematik
