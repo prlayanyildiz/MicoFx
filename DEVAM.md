@@ -627,10 +627,10 @@ Hesap: Pepperstone demo **61562752**, bakiye **2.066 $**, özkaynak 2.143 $,
 | JPN225 | dual_t3 | M5 | 0,80 | 1 |
 | NAS100 | mtf_pullback | M30 | 0,80 | 1 |
 | US30 | t3_stoch | M30 | 0,80 | 1 |
-| SpotBrent | dual_t3 | M5 | 0,20 | 1 |
+| SpotBrent | dual_t3 | M5 | 0,80 | 1 |
 | XAUUSD | burst | M15 | 0,20 | 1 |
 
-Nominal toplam risk **%3,6**, eşzamanlı risk kapısı %15. Kitap 6 sembolde
+Nominal toplam risk **%4,2**, eşzamanlı risk kapısı %15. Kitap 6 sembolde
 sabit (operatör kararı); Asya–Avrupa–ABD–emtia dağılımı kasıtlı.
 
 **Bugün değişenler:** hesap kilidi demoya alındı · emir yolu onarıldı (0/Done
@@ -649,6 +649,12 @@ pencere (FWD-2) var.
 * Lot çarpanı — 100 işlem sonra: gerçekleşen R/işlem güven aralığı sıfırı
   dışlıyorsa 1,0 → 1,25. Tavan ×2,02, sınırı risk kapısı koyuyor, marj değil.
 * `daily_loss_pct` 22 — ölçüm penceresi kapanınca düşürülecek.
+* **XAUUSD — 50 işlem sonra**: kasa onu boyutlandıramıyor. Minimum lot her
+  işlemde niyetin **1,1–2,2 katı** risk aldırıyor (`risk %0.144 -> 0.005,
+  min lot 0.01 riski asiyor, 2.2x`), yani risk modeli o sembolde devrede
+  değil. Kitabın en düşük calmar'ı da onda (1,96). Gerçekleşen R/işlem
+  sıfırdan ayırt edilemiyorsa **silinir**; kasa büyüyüp minimum lot niyetin
+  içine sığdığında yeniden değerlendirilir.
 * `max_positions` — FWD-2, limit yüzünden düşen sinyallerin kâğıtta kârlı
   olup olmadığını söyleyecek. Kârlıysa bu ayrı bir arama ekseni olmalı.
 
