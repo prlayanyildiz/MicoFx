@@ -591,6 +591,49 @@ yön; daralmayı koda görünür kılmak gerekiyor (AUDIT-E1).
 
 ---
 
+## 4g. Zararlı işlemlere tersten bakış (18.08) — yön filtresi ölü, kâr kuyrukta
+
+30 gün, 375 işlem (126 kazanan / 247 kaybeden). `claude/_loss1_anatomy.py`.
+
+**Döngüsellik uyarısı.** Zaten kaybettiği bilinen işlemleri tersine çevirmek
+her zaman kârlı görünür — sonuca göre seçimdir. Aynı şekilde **çıkış şekli**,
+**tutma süresi** ve **kaybedenlerin MFE'si** sonuca koşulludur: stopla
+kapanan işlem tanımı gereği kaybetmiştir. Bu kesitler "sorun burada" demez,
+"kaybedenler kaybetti" der.
+
+**Girişte bilinen tek kesit — sembol × yön — sonuç vermedi.** Ham tablo
+çarpıcıydı (NAS100 BUY −139,77 net, SpotBrent BUY −100,59) ama hata payıyla:
+
+| kesit | n | ort $ | SE |
+|---|---:|---:|---:|
+| SpotBrent BUY | 17 | −5,92 | **5,19** |
+| NAS100 BUY | 56 | −2,50 | 1,22 |
+| GER40 SELL | 25 | −2,74 | 1,66 |
+| JPN225 BUY | 26 | +3,50 | 3,25 |
+
+12 hücre test edildi; 2 SE'yi aşan tek hücre (NAS100 BUY, 2,05 SE) çoklu
+karşılaştırmada şansın beklediği kadar. **Yön filtresi hipotezi ölü.**
+
+**Gerçek olan teşhis: kâr kuyrukta.**
+
+| tutma | n | net $ | kazanma |
+|---|---:|---:|---:|
+| 0–5 dk | 56 | −249,19 | %7,1 |
+| 5–30 dk | 123 | −729,31 | %13,8 |
+| 30–120 dk | 92 | −118,79 | %43,5 |
+| **120+ dk** | **104** | **+724,19** | **%62,5** |
+
+Kitabın bütün kârı 2 saatten uzun yaşayan işlemlerden; altındaki her şey net
+−1.097. Kural değil (girişte süre bilinmez), ama sistemin nasıl para
+kazandığının tarifi: **kazananları koşturarak.**
+
+Buradan `sl_atr_mult`'ı elle genişletmeye **gidilmez** — o zaten arama ekseni.
+Doğru soru bir seviye yukarıda ve LOSS-2'de: seçim skoru kuyruğu taşıyan
+adayları doğru ödüllendiriyor mu, yoksa DD ağırlığı üzerinden sistematik
+olarak dar stop mu seçiyor.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
