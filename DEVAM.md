@@ -449,6 +449,66 @@ aynı konfigin max_open=1 replay'i 3,96 (DD 34 vs 45). Bu ayrı iş.
 
 ---
 
+## 4d. `max_open` boşluğun beşte birini açıkladı, gerisi tek mekanizma değil (18.08)
+
+TF-2 penceresi (92 gün), kâğıt tarafı `max_open=2` ile yeniden koşuldu:
+
+| | R | n |
+|---|---:|---:|
+| kâğıt max_open=1 | +184,7 | 1032 |
+| kâğıt max_open=2 | +139,8 | 1531 |
+| canlı | −29,5 | 393 |
+
+Kapanan **44,9 R = boşluğun %21'i**. Kalan −169 R. Sembol kırılımı, toplamdan
+çok daha bilgilendirici:
+
+| sembol | boşluk (max_open=1) | boşluk (max_open=2) | kapanan |
+|---|---:|---:|---:|
+| GER40 | −40,5 | **−3,0** | 37,5 |
+| JPN225 | −57,5 | −47,5 | 10,0 |
+| XAUUSD | −48,4 | −42,4 | 5,9 |
+| US30 | −11,8 | −8,8 | 2,9 |
+| SpotBrent | −20,8 | −23,2 | −2,4 (açıldı) |
+| NAS100 | −35,3 | −44,3 | −9,0 (açıldı) |
+
+**GER40'ın bütün farkı `max_open`'mış.** NAS100 ve SpotBrent'te ters yön:
+`max_open=2` kâğıdı iyileştiriyor, yani canlı ikinci pozisyondan kazanç
+bırakıyordu. JPN225 ve XAUUSD kıpırdamadı. **Tek açıklama aramak yanlış** —
+farklı sembollerde farklı mekanizma.
+
+**Damga iyimserliği sistematik değil** (MAXOPEN-3): damga/replay calmar oranı
+GER40 1,34, diğer beşi 0,88–1,01. Kitap geneli bir boyutlandırma hatası yok;
+bu ip kesildi.
+
+### Canlı giriş hunisi — ilk doğrudan ölçüm
+
+`entry_blocks` sayaçları, 16.08 21:34'ten beri (kitap sabit dönem), 104 sinyal:
+
+| neden | sinyal | pay |
+|---|---:|---:|
+| risk_sembol_limiti | 42 | **%40,4** |
+| açıldı | 34 | %32,7 |
+| emir_hatasi | 12 | %11,5 |
+| spread | 9 | %8,7 |
+| risk_ters_yon | 5 | %4,8 |
+| lot | 2 | %1,9 |
+
+`emir_hatasi` **tarihî**: son `emir reddedildi` 17.08 11:20, onarım 13:29,
+sonrasında sıfır. Sayaç böceğin kalıntısını taşıyor.
+
+### 92 günlük sayı karşılaştırması çürük, kovalanmayacak
+
+Canlı 393, kâğıt1 1032 (%38) — canlı o pencerede `max_positions=2` ile daha
+gevşek olmasına rağmen **daha az** işlem aldı. Sebep: o 92 günde canlı bu
+konfigleri tutmuyordu (çalkantı). Yani take rate farkı çalkantıyla karışmış
+ve o pencereden temizlenemez. **Bu tabloyu kovalamayı bırakıyoruz.**
+
+Yerine FWD-2: 16.08 21:34'ten itibaren kitap sabit, `max_positions=1`, arama
+`max_open=1` — **ilk defa canlı ile kâğıt aynı süreci koşuyor**. Pencere her
+gün büyüyor. Bugünkü hâli zayıf ama temiz; 92 günlük tablo güçlü ama kirli.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
