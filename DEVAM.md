@@ -1427,6 +1427,38 @@ bakılacak.
 
 ---
 
+## 4x. Endeks eforu: deterministik ailelerle arama (19.08)
+
+Operatör kararı: endeksler kitapta kalıcı, emtia Claude'un takdirinde, efor
+**endeks verimine**.
+
+**D1b-f kapandı:** US30 budaması NAS100/GER40'ta geride, budanmış GER40
+kapıdan düşüyor. Izgara küçültmeyi **transferle** yaymak çalışmıyor; her aile
+için ayrı budama türetmek aynı kirlenmeyi geri getirir.
+
+**Asıl kaldıraç:** dört endeksin üçü çekiliş rejiminde — NAS100
+(mtf_pullback, 622k), US30 (t3_stoch, **1,43 G**, tam tarama imkânsız),
+JPN225 (dual_t3, 2,07 M). Yalnız GER40 deterministik (19.08 sabahı,
+`strategy_max_combos: {stoch_flip: 28800}`).
+
+**IDX-1:** dört endeksi **yalnız tam taranabilir altı ailede** ara
+(aroon_flip 2.880 · parabolic_flip 8.640 · wavetrend_flip 8.640 ·
+stoch_flip 28.800 · macd_flip 46.080 · st_trend 57.600), her aile kendi
+ızgara boyutunda. Altısı birden 95 dk (2 işçi) → botun 14 işçisiyle
+**~14 dk sembol/TF**. Dört endeks tek TF'de ~1 saat. Ödenebilir.
+
+**Neden bu uygulanabilir, öncekiler değildi:** seçimi Claude yapmıyor.
+Normal `walk_forward` çalışıyor — seçim arar, doğrulama sıralar, holdout
+yargılar, mevcut kapı karar verir. Ve sonuç **deterministik** olduğu için
+yarın tekrar koşulduğunda aynı çıkar. Bugün üç aday (L2b stop genişliği,
+CHOP-1c `adx_min`, BE-1/2 başabaş) tam da bu yüzden reddedildi.
+
+Beklenti önden: küçük ızgaralı ailelerin ortalama retention'ı daha iyi
+(aroon_flip 1,13 / macd_flip 1,11 vs t3_stoch 0,68) ama popülasyon gözlemi ve
+karşı örneği var (wavetrend_flip 0,39). Kazanan çıkmayabilir; o da sonuçtur.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
