@@ -1313,6 +1313,39 @@ Kitap artık **5 aktif sembol**: GER40, JPN225, NAS100, US30, SpotBrent.
 
 ---
 
+## 4v. Damga sapması artık sürekli kontrol ediliyor (19.08)
+
+18.08 gecesi elle koşulan denetim (4j) kalıcı hâle geldi:
+`Optimizer.stamp_drift()` + `GET /api/analysis/stamp-drift`.
+
+İki tasarım kararı raporu gürültüden kurtardı:
+
+1. **Yalnız ailenin okuduğu alanlar** karşılaştırılıyor
+   (`opt_fields_read | ENGINE_OPT_FIELDS`, `OPT_FIELDS` ile kesişim).
+   `stoch_flip` dokuz alan okuyor, damga kırk tane taşıyordu — hepsini
+   karşılaştırmak §5'in birinci arıza sınıfını denetim tarafında yeniden
+   kurardı. **Kesişim de şart:** `atr_period` motor alanı ve damgaya hiç
+   yazılmıyor; kesişim olmasa **her satır kırmızı** olurdu (Cursor yakaladı).
+2. **Makas kalibrasyonu artık kendi kaydını bırakıyor**
+   (`spread_recalibrated_from/to`). Kayıt varsa ve canlı `to` ile uyuşuyorsa
+   `calibrated`, yoksa `unexpected`. "Kalibrasyon değiştirdi" ile "biri elle
+   değiştirdi" farklı şeyler ve ikincisi 18.08'de iki kez oldu.
+
+**XAUUSD'nin kaydı geriye dönük yazıldı** — kalibrasyon 18.08 17:20:14'te
+oldu, kayıt özelliği 19.08'de eklendi. Log iki ucu da taşıyor
+(`max_spread_atr 0.05 -> 0.25`, gerekçesiyle), o yüzden uydurma değil
+aktarma. Yapılmasaydı rapor açıklanmış bir şey için kalıcı kırmızı taşırdı, ve
+**hep kırmızı gösteren kontrol okunmayan kontroldür**.
+
+Bugünkü durum: **açıklanmamış sapma 0.** Beş sembol tamamen temiz, XAUUSD'nin
+tek farkı `calibrated` olarak işaretli.
+
+Ayrıca `skip_after_loss` `simulate`'ten **silindi** (4t/CHOP-1d): aramada
+yoktu, `engine.py`'de yoktu, altı holdoutta da R kaybettiriyordu. Duran bayrak
+bir sonraki "bir deneyelim" karşılaştırmasını kâğıt ≠ canlı yapardı.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
