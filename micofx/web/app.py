@@ -1555,6 +1555,23 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         )
         return {"ok": True, **data}
 
+    @app.get("/api/analysis/stamp-drift")
+    def stamp_drift() -> dict[str, Any]:
+        """Live row vs stamp params, only fields the family or engine reads.
+
+        ``calibrated`` is max_spread_atr moved by apply-time calibration and
+        recorded on the stamp. ``unexpected`` is everything else — including
+        a spread change with no record.
+        """
+        data = optimizer.stamp_drift()
+        n = int(data.get("unexpected") or 0)
+        data["note"] = (
+            "Canli satir damgasiyla uyumlu."
+            if not n else
+            f"{n} beklenmeyen ayrisma — kalibrasyon kaydi olmayan fark kirmizi"
+        )
+        return {"ok": True, **data}
+
     @app.post("/api/analysis/entry-blocks/reset")
     def entry_blocks_reset() -> dict[str, Any]:
         engine.reset_entry_blocks()

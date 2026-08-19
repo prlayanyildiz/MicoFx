@@ -1199,6 +1199,17 @@ def searchable_axes(family: str, axes: dict[str, Any]) -> dict[str, Any]:
             if k in allow or k not in OPT_FIELDS}
 
 
+def stamp_fields(family: str) -> frozenset[str]:
+    """OPT axes a live-vs-stamp audit may treat as behaviour.
+
+    Unread family fields do not move signals (AUDIT-B). Comparing them
+    against the stamp produces the false positives STAMP-1b exists to stop.
+    Intersected with OPT_FIELDS so engine-only names like ``atr_period``
+    (never written into ``params``) do not flag every row.
+    """
+    return (opt_fields_read(family) | ENGINE_OPT_FIELDS) & frozenset(OPT_FIELDS)
+
+
 def required_bars(p: Params) -> int:
     """Lookback needed before the indicator stack is trustworthy."""
     htf = max(1, p.htf_factor if p.htf_mode == "t3" else 1)

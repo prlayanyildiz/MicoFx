@@ -29,9 +29,23 @@ from .models import (
 from .mt5client import Bars, MT5Client, timeframe_seconds
 from .spread_calibration import calibrate
 from .store import Store
-from .strategy import searchable_axes
+from .strategy import searchable_axes, stamp_fields
 
 APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
+
+
+def _stamp_values_match(live: Any, stamped: Any) -> bool:
+    """True when a live field and its stamp copy are the same number or value."""
+    if live is stamped:
+        return True
+    try:
+        fa = float(live)
+        fb = float(stamped)
+    except (TypeError, ValueError):
+        return live == stamped
+    if fa != fa or fb != fb:
+        return False
+    return abs(fa - fb) <= 1e-9
 
 
 def family_max_combos(opt_blob: dict[str, Any] | None, family: str,
@@ -1394,8 +1408,14 @@ class Optimizer:
                                float(getattr(cfg, "max_spread_atr", 0.0) or 0.0))
             if abs(result.cap - float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)) < 1e-9:
                 return
-            self.store.update_symbol(symbol, {"max_spread_atr": result.cap},
-                                     source="spread kalibrasyonu")
+            old_cap = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)
+            summary = dict(getattr(cfg, "opt_summary", None) or {})
+            summary["spread_recalibrated_from"] = old_cap
+            summary["spread_recalibrated_to"] = float(result.cap)
+            self.store.update_symbol(
+                symbol,
+                {"max_spread_atr": result.cap, "opt_summary": summary},
+                source="spread kalibrasyonu")
             LOG.emit(f"{symbol}: makas tavani {timeframe} icin yeniden okundu "
                      f"-> {result.cap:g} ({result.reason})", "OPT", symbol)
         except Exception as exc:                      # noqa: BLE001 - see docstring
@@ -1539,8 +1559,9 @@ class Optimizer:
         GAP-5 rewrote ``opt_summary.holdout`` from a live-row replay and left
         ``params`` on the previous apply. The stamp then described a config
         that had not been measured. ``detail['params']`` is that leftover —
-        the live row is what was simulated, so the stamp copies OPT_FIELDS
-        off the live row, not out of detail.
+        the live row is what was simulated, so the stamp copies
+        ``stamp_fields`` off the live row, not out of detail. Unread OPT
+        axes stay off the stamp (STAMP-1b).
 
         This is not ``apply``. Live exits stay put.
         """
@@ -1554,7 +1575,9 @@ class Optimizer:
         hold = detail.get("holdout")
         if not isinstance(hold, dict) or not hold:
             return {"ok": False, "error": "holdout yok"}
-        live_params = {k: getattr(cfg, k) for k in OPT_FIELDS if hasattr(cfg, k)}
+        live_params = {
+            k: getattr(cfg, k) for k in stamp_fields(cfg.strategy) if hasattr(cfg, k)
+        }
         summary = dict(getattr(cfg, "opt_summary", None) or {})
         summary["holdout"] = dict(hold)
         if detail.get("holdout_days") is not None:
@@ -1570,6 +1593,56 @@ class Optimizer:
         updated = self.store.update_symbol(
             symbol, patch, source=source or "opt restamp")
         return {"ok": updated is not None, "symbol": symbol}
+
+    def stamp_drift(self) -> dict[str, Any]:
+        """Live row vs stamp params, only on fields that can change behaviour.
+
+        ``max_spread_atr`` matching ``opt_summary.spread_recalibrated_to`` is
+        expected (apply then calibrates). The same gap with no record is
+        unexplained — GER40 session and book max_positions were caught by
+        hand; this is that check, standing.
+        """
+        rows: list[dict[str, Any]] = []
+        unexpected = 0
+        for cfg in list(self.store.symbols.values()):
+            allow = stamp_fields(cfg.strategy)
+            stamp = ((getattr(cfg, "opt_summary", None) or {}).get("params") or {})
+            if not isinstance(stamp, dict) or not stamp:
+                rows.append({
+                    "symbol": cfg.symbol,
+                    "family": cfg.strategy,
+                    "unexpected": [],
+                    "calibrated": [],
+                    "note": "damga params yok",
+                })
+                continue
+            summary = getattr(cfg, "opt_summary", None) or {}
+            calib = summary.get("spread_recalibrated_to")
+            diffs: list[dict[str, Any]] = []
+            calibrated: list[dict[str, Any]] = []
+            for key in sorted(allow):
+                if not hasattr(cfg, key):
+                    continue
+                live = getattr(cfg, key)
+                if key not in stamp:
+                    continue
+                stamped = stamp[key]
+                if _stamp_values_match(live, stamped):
+                    continue
+                item = {"field": key, "stamp": stamped, "live": live}
+                if (key == "max_spread_atr" and calib is not None
+                        and _stamp_values_match(live, calib)):
+                    calibrated.append(item)
+                else:
+                    diffs.append(item)
+            unexpected += len(diffs)
+            rows.append({
+                "symbol": cfg.symbol,
+                "family": cfg.strategy,
+                "unexpected": diffs,
+                "calibrated": calibrated,
+            })
+        return {"rows": rows, "unexpected": unexpected}
 
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,

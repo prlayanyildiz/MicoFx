@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import SymbolConfig
 from micofx.optimizer import Optimizer
+from micofx.strategy import stamp_fields
 
 
 class _Store:
@@ -89,6 +90,26 @@ def test_restamp_writes_live_params_not_the_leftover_apply():
     # Live row is not an apply. Exit fields already matched the replay.
     assert cfg.trail_start_atr == 1.0
     assert cfg.trail_step_atr == 1.8
+
+
+def test_restamp_omits_fields_the_family_does_not_read():
+    """stoch_flip does not read htf_factor/adx_min; stamping them is noise."""
+    cfg = SymbolConfig(symbol="GER40", magic=1, strategy="stoch_flip",
+                       timeframe="M30", htf_factor=9, adx_min=15.0,
+                       sl_atr_mult=1.2)
+    cfg.opt_summary = {"params": {"htf_factor": 9, "adx_min": 15.0}}
+    store = _Store(cfg)
+    opt = Optimizer(store=store, client=_Client())
+    result = opt.restamp_from_replay("GER40", REPLAY, source="test")
+    assert result["ok"] is True, result
+    stamped = (cfg.opt_summary or {}).get("params") or {}
+    allow = stamp_fields("stoch_flip")
+    assert "htf_factor" not in allow
+    assert "adx_min" not in allow
+    assert "htf_factor" not in stamped
+    assert "adx_min" not in stamped
+    assert "sl_atr_mult" in stamped
+
 
 
 def test_restamp_without_holdout_is_refused_and_the_stamp_does_not_move():
