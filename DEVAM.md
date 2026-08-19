@@ -1014,6 +1014,39 @@ varsaymıyor.
 
 ---
 
+## 4o. Etkisiz ayar — "okunuyor" ile "etkisi var" aynı şey değil (19.08)
+
+AUDIT-A "ölü ayar yok" dedi ve doğruydu: her anahtarın bir okuyucusu var. Ama
+`cooldown_sec` altı sembolde de **120 sn** ve girişler bar kapanışında oluyor;
+bar M5'te 300, M30'da 1800 sn. Soğuma bir sonraki bar kapanmadan doluyor —
+**hiçbir zaman hiçbir şeyi engellemiyor.** `OPT_FIELDS`'te de yok, arama hiç
+denemiyor.
+
+Yani §5'in birinci arıza sınıfının daha ince bir hâli: kod okuyor, değer
+davranışı değiştiremeyecek kadar küçük. **"Okunuyor mu" testi bunu
+yakalayamaz; "etkisi olabilir mi" testi yakalar.** AUDIT-A'yı bu gözle
+tekrarlamak gerekiyor.
+
+**`skip_after_loss` yalnız kâğıtta:** `backtest.py` dört yerde işliyor,
+`engine.py`'de hiç yok. Zarardan sonra bekleme simülasyonda mümkün, canlıda
+değil. İkisi de kapalı olduğu için bugüne kadar zararsızdı (AUDIT-C bunu
+"aynı" saymıştı, doğru); ama aranmayan ve canlıda karşılığı olmayan bir
+bayrak ileride yanlış karşılaştırma üretir.
+
+**`adx_min` üç sembolde 0** (JPN225 / NAS100 / US30), diğer üçünde 15. Aranmış
+değerler, unutulmuş değil — ama 4n'den sonra "arama seçti" eskisi kadar güçlü
+bir gerekçe değil.
+
+Üçü de CHOP-1'de ayrı ayrı ölçülecek; **birleştirilmeyecek**, yoksa hangi
+etkinin hangisinden geldiği bir daha ayrılamaz.
+
+**Bugünkü yamalar testereye dokunmuyor** — operatörün sorusuna dürüst cevap
+bu. Damga onarımı ölçüm doğruluğu, `max_positions` boyutlandırma, tam tarama
+tekrarlanabilirlik. Girişin yatay piyasada yön çevirmesini engelleyen hiçbir
+şey yapılmadı.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
