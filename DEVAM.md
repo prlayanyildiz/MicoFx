@@ -961,9 +961,22 @@ taramanın kazananı da kapıdan geçmiyor (doğrulama PF 1,09 < 1,10). 4l'deki
 (sl=1,0 / trail_step=2,2 / spread=0,05), yalnız `trail_start` ve `stoch_k`
 oynuyor; US30'da kazananlar tamamen değişiyordu.
 
-**Engel:** `max_combos` küresel. GER40'ı tam taramaya almak onu 28800 yapmayı
-gerektirir, o zaman `t3_stoch` aynı bütçeyi alır ve süre patlar. Aile başına
-bütçe (BUDGET-1) olmadan uygulanamaz.
+**Çözüldü (19.08 08:15, `cf8c45c`).** `strategy_max_combos` haritası eklendi
+(`family_max_combos`, harita yok / okunamaz / ≤0 → küresel değere düşer).
+Canlıya bağlandı: **`{"stoch_flip": 28800}`**, diğer her aile 2.000'de.
+
+GER40 kitabın **tek `stoch_flip` sembolü** ve bir sonraki yeniden
+optimizasyonunda tam çarpım taranacak — aynı barlar aynı konfigi verecek,
+çekiliş yok. Bot 14 paralel süreçle koştuğu için Cursor'un 2 işçiyle ölçtüğü
+24,4 dk canlıda ~3,5 dk'ya iner.
+
+Diğer beş sembolün ailesi tam taranamıyor: `t3_stoch` imkânsız (1,43 G),
+`dual_t3` 21 saat, `burst` 13 saat, `mtf_pullback` 6,4 saat. Onlar çekiliş
+rejiminde kalıyor.
+
+Ayrıca `record_opt_run` artık **ranked ilk 10'u** (params + doğrulama +
+holdout) saklıyor. 18–19.08 gecesinde üç ayrı ölçüm için taze arama koşmak
+zorunda kalmıştık, her biri ~20 dk.
 
 ---
 
