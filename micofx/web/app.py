@@ -1537,6 +1537,24 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         )
         return {"ok": True, **data}
 
+    @app.get("/api/analysis/trade-autopsies")
+    def trade_autopsies() -> dict[str, Any]:
+        """Every close, with fill-vs-signal, MFE/MAE and what was left on the table.
+
+        Read-only. A cell with n<30 is a count, not a finding. Does not change
+        entries or exits.
+        """
+        data = engine.trade_autopsy_report()
+        n = int(data.get("n") or 0)
+        left = data.get("left_on_table_r")
+        data["note"] = (
+            "Henuz kapanis otopisi yok - sayac bu surumle basladi."
+            if not n else
+            f"{n} kapanis"
+            + (f"; masada birakilan toplam {left:.2f} R" if left is not None else "")
+        )
+        return {"ok": True, **data}
+
     @app.post("/api/analysis/entry-blocks/reset")
     def entry_blocks_reset() -> dict[str, Any]:
         engine.reset_entry_blocks()

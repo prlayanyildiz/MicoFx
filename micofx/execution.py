@@ -242,7 +242,38 @@ class ExecutionMonitor:
             })
             book.setdefault("risk_dist", abs(float(pos["price_open"]) - float(pos["sl"]))
                             if pos["sl"] else 0.0)
+            # First-sight stop, frozen the same way as risk_dist: a later trail
+            # must not rewrite "did this close at the original SL or a moved
+            # one". 0 means the broker had no stop on first sight.
+            book.setdefault("original_sl", float(pos["sl"]) if pos["sl"] else 0.0)
+            book.setdefault("opened_at", int(pos.get("time") or 0))
+            # Peak excursion from entry, in price. Divided by this trade's own
+            # frozen risk_dist at close. Trailing must not shrink that R.
+            cur = float(pos.get("price_current") or 0)
+            entry = float(pos.get("price_open") or 0)
+            if cur > 0 and entry > 0:
+                fav = (cur - entry) if pos["side"] == "buy" else (entry - cur)
+                book["mfe"] = max(float(book.get("mfe") or 0.0), max(0.0, fav))
+                book["mae"] = max(float(book.get("mae") or 0.0), max(0.0, -fav))
         return set(self._open) - seen
+
+    def note_fill(self, ticket: int, **meta: Any) -> None:
+        """Attach fill-time facts the close path will not see again.
+
+        Called from the engine on a successful open, while signal-bar close,
+        spread and ADX are still on the symbol state. ``track()`` later
+        refreshes SL/TP/MFE but never overwrites these keys.
+        """
+        book = self._open.setdefault(int(ticket), {})
+        for key, value in meta.items():
+            if value is None:
+                continue
+            book.setdefault(key, value)
+
+    def snapshot(self, ticket: int) -> dict[str, Any] | None:
+        """Copy of the open book for one ticket, or None. Does not pop."""
+        book = self._open.get(int(ticket))
+        return dict(book) if book else None
 
     def reap(self, gone: set[int], deals: list[dict[str, Any]],
              client) -> list[dict[str, Any]]:
@@ -309,6 +340,11 @@ class ExecutionMonitor:
                 "price": price,
                 "volume": volume,
                 "profit": round(net.get(int(ticket), float(deal.get("profit", 0.0))), 2),
+                "time": int(deal.get("time") or 0),
+                # Copy, not the live dict: this report is the last moment the
+                # close path can still see MFE/MAE/fill metadata. The pop
+                # above already dropped the tracker slot.
+                "book": dict(book) if book else {},
             })
             if not book:
                 continue

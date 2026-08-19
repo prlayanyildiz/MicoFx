@@ -1034,6 +1034,7 @@ class MT5Client:
                 "profit": float(d.profit), "commission": float(d.commission),
                 "swap": float(d.swap), "time": int(d.time), "comment": d.comment,
                 "reason": int(d.reason), "entry": int(d.entry),
+                "type": int(d.type),
             })
         return out
 

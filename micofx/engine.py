@@ -69,6 +69,11 @@ SPREAD_RATIO_MIN_SAMPLES = 400
 # - small next to ``execution_samples``, enough for a G7-style window after
 # a restart. Oldest dropped.
 ENTRY_EVENT_LIMIT = 2048
+# Closed-trade autopsies. Separate ring, own dirty flag: this is ~2000 rows
+# of per-trade fields, not the entry-block episode log that hit 9 GB/day when
+# it flushed on every poll. A close without a row here is the defect POST-1
+# exists to catch.
+TRADE_AUTOPSY_LIMIT = 2000
 
 
 def _bar_key_json(bar_key: Any) -> list | str | int | float | None:
@@ -418,6 +423,11 @@ class Engine:
         self._entry_events: list[dict[str, Any]] = []
         self._entry_events_dirty = False
         self._load_entry_events()
+        self._trade_autopsy_limit = TRADE_AUTOPSY_LIMIT
+        self._trade_autopsies: list[dict[str, Any]] = []
+        self._trade_autopsies_dirty = False
+        self._trade_autopsies_since = time.time()
+        self._load_trade_autopsies()
         # How much wider the live tick's spread runs than the bar spread the
         # walk-forward charges, per symbol, as a coarse histogram of the ratio.
         #
@@ -796,6 +806,7 @@ class Engine:
         # Always, not only when something was ready. Daily/symbol halt tallies
         # happen on cycles where allow_entry is False and ready stays empty.
         self._flush_entry_blocks()
+        self._flush_trade_autopsies()
         self._flush_spread_ratio()
 
     # ----------------------------------------------------- entry diagnostics
@@ -1137,6 +1148,273 @@ class Engine:
         self._entry_blocks_dirty = True
         self._entry_events_dirty = True
         self._flush_entry_blocks()
+
+    def _broker_now_int(self) -> int:
+        """Broker wall-clock as a naive epoch, same stamps as deal.time.
+
+        Machine local (UTC+3) ``time.time()`` is the fallback only when the
+        broker clock has never been read - mixing the two for held_min would
+        look like a three-hour hold on a one-minute trade.
+        """
+        client = getattr(self, "client", None)
+        getter = getattr(client, "broker_now", None) if client is not None else None
+        now = 0.0
+        if callable(getter):
+            try:
+                now = float(getter() or 0.0)
+            except (TypeError, ValueError):
+                now = 0.0
+        if now > 0:
+            return int(now)
+        return int(time.time())
+
+    def _load_trade_autopsies(self) -> None:
+        """Restore the close ring. Corrupt rows are skipped, not coerced."""
+        try:
+            limit = int(getattr(self, "_trade_autopsy_limit", TRADE_AUTOPSY_LIMIT)
+                        or TRADE_AUTOPSY_LIMIT)
+            rows: list[dict[str, Any]] = []
+            for item in as_list(self.store.get_setting("trade_autopsies"),
+                                "trade_autopsies"):
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    symbol = str(item["symbol"])
+                    ticket = int(item["ticket"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                row = dict(item)
+                row["symbol"] = symbol
+                row["ticket"] = ticket
+                rows.append(row)
+            self._trade_autopsies = rows[-limit:]
+            since = as_number(self.store.get_setting("trade_autopsies_since"),
+                              0.0, "trade_autopsies_since")
+            self._trade_autopsies_since = since or time.time()
+        except Exception:
+            self._trade_autopsies = []
+            self._trade_autopsies_since = time.time()
+
+    def _autopsy_safe(self, **fields: Any) -> None:
+        """Record one close for diagnostics, and never let that break a close.
+
+        Both call sites sit in the bookkeeping that runs *after* the position
+        is already gone from the broker - one reaping a broker exit, one after
+        _close_tracked succeeded. An exception raised while building a
+        diagnostic row would abort that bookkeeping, and in _close_tracked it
+        would surface to the caller as a failed close that in fact happened.
+        Nothing measured here is worth that.
+        """
+        try:
+            self.record_trade_autopsy(self._autopsy_row(**fields))
+        except Exception as exc:                    # diagnostics only
+            LOG.emit(f"otopsi kaydi atlandi: {type(exc).__name__}", "WARN")
+
+    def record_trade_autopsy(self, row: dict[str, Any]) -> None:
+        """Append one close. Oldest dropped past the cap. Does not trade."""
+        events = getattr(self, "_trade_autopsies", None)
+        if events is None:
+            self._trade_autopsies = []
+            events = self._trade_autopsies
+        events.append(dict(row))
+        limit = int(getattr(self, "_trade_autopsy_limit", TRADE_AUTOPSY_LIMIT)
+                    or TRADE_AUTOPSY_LIMIT)
+        if len(events) > limit:
+            self._trade_autopsies = events[-limit:]
+        self._trade_autopsies_dirty = True
+
+    def _flush_trade_autopsies(self) -> None:
+        """Persist the close ring only when a close actually landed."""
+        try:
+            if not getattr(self, "_trade_autopsies_dirty", False):
+                return
+            limit = int(getattr(self, "_trade_autopsy_limit", TRADE_AUTOPSY_LIMIT)
+                        or TRADE_AUTOPSY_LIMIT)
+            rows = list(getattr(self, "_trade_autopsies", []) or [])[-limit:]
+            self._trade_autopsies = rows
+            self.store.set_setting("trade_autopsies", rows)
+            self.store.set_setting("trade_autopsies_since",
+                                   float(getattr(self, "_trade_autopsies_since", 0.0)
+                                         or 0.0))
+            self._trade_autopsies_dirty = False
+        except Exception:
+            pass
+
+    @staticmethod
+    def _autopsy_hold_bucket(held_min: float | None) -> str:
+        if held_min is None:
+            return "unknown"
+        if held_min < 5:
+            return "0-5"
+        if held_min < 30:
+            return "5-30"
+        if held_min < 120:
+            return "30-120"
+        return "120+"
+
+    @staticmethod
+    def _autopsy_exit_reason(reason_code: int | None, comment: str,
+                             book: dict[str, Any]) -> str:
+        """Map a close onto the five labels CHOP-1 will count.
+
+        Broker SL that still sits on the first-sight stop is ``sl``; a moved
+        stop is ``trail``. Engine comments decide flatten vs weekend. Manual
+        (terminal/phone/web) is ``manuel``. Stop-out is counted as ``sl``:
+        the position hit a hard loss, not a flatten we sent.
+        """
+        if reason_code in (execution.DEAL_REASON_CLIENT,
+                           execution.DEAL_REASON_MOBILE,
+                           execution.DEAL_REASON_WEB):
+            return "manuel"
+        if reason_code == execution.DEAL_REASON_SL:
+            orig = float(book.get("original_sl") or 0)
+            cur_sl = float(book.get("sl") or 0)
+            if orig and cur_sl and abs(cur_sl - orig) > max(1e-9, abs(orig) * 1e-8):
+                return "trail"
+            return "sl"
+        if reason_code == execution.DEAL_REASON_TP:
+            return "trail"
+        if reason_code == execution.DEAL_REASON_SO:
+            return "sl"
+        text = (comment or "").lower()
+        if "hafta" in text:
+            return "weekend"
+        return "flatten"
+
+    @staticmethod
+    def _autopsy_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(out):
+            return None
+        return out
+
+    def _autopsy_row(self, *, book: dict[str, Any], ticket: Any, symbol: Any,
+                     exit_price: float | None, exit_time: Any,
+                     profit: float | None, reason_code: Any,
+                     comment: str) -> dict[str, Any]:
+        """Build one close row from the open book plus the exit print.
+
+        Takes the raw report fields rather than coerced ones: the caller sits
+        in a close path, so any coercion it did would raise outside the guard
+        in ``_autopsy_safe``. A row with a missing ticket is still worth
+        keeping - it carries the excursions - so absent values become 0 here
+        instead of ending the row.
+        """
+        ticket = int(self._autopsy_float(ticket) or 0)
+        symbol = str(symbol or book.get("symbol") or "")
+        exit_time = int(self._autopsy_float(exit_time) or 0)
+        reason_code = (None if reason_code is None
+                       else int(self._autopsy_float(reason_code) or 0))
+        risk = self._autopsy_float(book.get("risk_dist")) or 0.0
+        entry = self._autopsy_float(book.get("entry"))
+        if entry is None:
+            entry = self._autopsy_float(book.get("fill_price"))
+        side = str(book.get("side") or "")
+        mfe = self._autopsy_float(book.get("mfe"))
+        mae = self._autopsy_float(book.get("mae"))
+        mfe_r = (mfe / risk) if mfe is not None and risk > 0 else None
+        mae_r = (mae / risk) if mae is not None and risk > 0 else None
+        r_realised = None
+        px = self._autopsy_float(exit_price)
+        if entry is not None and px is not None and risk > 0 and side in ("buy", "sell"):
+            move = (px - entry) if side == "buy" else (entry - px)
+            r_realised = move / risk
+        left = None
+        if mfe_r is not None and r_realised is not None:
+            left = mfe_r - r_realised
+        fill_t = int(book.get("fill_time") or book.get("opened_at") or 0)
+        closed_at = int(exit_time or 0)
+        held_min = None
+        if fill_t > 0 and closed_at > fill_t:
+            held_min = (closed_at - fill_t) / 60.0
+        tf = int(book.get("tf_seconds") or 0)
+        bars_held = None
+        if held_min is not None and tf > 0:
+            bars_held = (held_min * 60.0) / tf
+
+        def _round(value: float | None, digits: int) -> float | None:
+            return None if value is None else round(value, digits)
+
+        return {
+            "symbol": symbol,
+            "ticket": ticket,
+            "side": side,
+            "signal_bar_time": int(book.get("signal_bar_time") or 0) or None,
+            "fill_time": fill_t or None,
+            "exit_time": closed_at or None,
+            "fill_vs_signal_close": _round(
+                self._autopsy_float(book.get("fill_vs_signal_close")), 6),
+            "fill_vs_signal_close_pts": _round(
+                self._autopsy_float(book.get("fill_vs_signal_close_pts")), 3),
+            "fill_vs_signal_close_r": _round(
+                self._autopsy_float(book.get("fill_vs_signal_close_r")), 4),
+            "mfe_r": _round(mfe_r, 4),
+            "mae_r": _round(mae_r, 4),
+            "r_realised": _round(r_realised, 4),
+            "left_on_table_r": _round(left, 4),
+            "exit_reason": self._autopsy_exit_reason(reason_code, comment, book),
+            "held_min": _round(held_min, 2),
+            "bars_held": _round(bars_held, 2),
+            "spread_atr": _round(self._autopsy_float(book.get("spread_atr")), 4),
+            "adx": _round(self._autopsy_float(book.get("adx")), 2),
+            "atr_pct": _round(self._autopsy_float(book.get("atr_pct")), 6),
+            "profit": _round(self._autopsy_float(profit), 2),
+        }
+
+    def trade_autopsy_report(self) -> dict[str, Any]:
+        """Symbol x exit_reason x hold-time bucket, plus left-on-table total.
+
+        Observation only. ``n<30`` on a cell is a count, not a finding.
+        """
+        rows = list(getattr(self, "_trade_autopsies", []) or [])
+        groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+        left_total = 0.0
+        left_n = 0
+        for row in rows:
+            bucket = self._autopsy_hold_bucket(self._autopsy_float(row.get("held_min")))
+            key = (str(row.get("symbol") or ""),
+                   str(row.get("exit_reason") or ""),
+                   bucket)
+            cell = groups.setdefault(key, {
+                "symbol": key[0], "exit_reason": key[1], "held": key[2],
+                "n": 0, "r_sum": 0.0, "r_n": 0, "left_sum": 0.0, "left_n": 0,
+            })
+            cell["n"] += 1
+            realised = self._autopsy_float(row.get("r_realised"))
+            if realised is not None:
+                cell["r_sum"] += realised
+                cell["r_n"] += 1
+            left = self._autopsy_float(row.get("left_on_table_r"))
+            if left is not None:
+                cell["left_sum"] += left
+                cell["left_n"] += 1
+                left_total += left
+                left_n += 1
+        summary = []
+        for cell in groups.values():
+            summary.append({
+                "symbol": cell["symbol"],
+                "exit_reason": cell["exit_reason"],
+                "held": cell["held"],
+                "n": cell["n"],
+                "mean_r": (round(cell["r_sum"] / cell["r_n"], 4)
+                           if cell["r_n"] else None),
+                "left_on_table_r": (round(cell["left_sum"], 4)
+                                    if cell["left_n"] else None),
+            })
+        summary.sort(key=lambda r: (r["symbol"], r["exit_reason"], r["held"]))
+        return {
+            "since": float(getattr(self, "_trade_autopsies_since", 0.0) or 0.0),
+            "n": len(rows),
+            "left_on_table_r": round(left_total, 4) if left_n else None,
+            "summary": summary,
+            "rows": rows,
+        }
 
     # ------------------------------------------------- scheduled re-optimize
 
@@ -1935,6 +2213,45 @@ class Engine:
         # (ambiguous multi-fill) and is written as such rather than omitted,
         # because a missing field and an unresolved one are different facts.
         ticket = int(result.get("position", 0) or 0)
+        # Not ``note``: that name already holds the lot-sizing explanation this
+        # method logs a few lines down. Rebinding it printed a bound method in
+        # place of "risk %1.09 -> 0.515" on every fill.
+        note_fill = getattr(self.execution, "note_fill", None)
+        if ticket and callable(note_fill):
+            # Fill-time facts the close path cannot reconstruct: the signal
+            # bar is already consumed, and spread/ADX on state will move.
+            # Broker clock, same stamps as deal.time, so held_min is a
+            # duration not a UTC-vs-wall-clock gap.
+            sig_close = None
+            if state.bars is not None and len(state.bars.close):
+                sig_close = float(state.bars.close[-1])
+            fill_px = float(result["price"])
+            point = float(info.get("point") or 0)
+            fill_vs = None
+            if sig_close is not None:
+                # Positive = worse for the account, same sign as execution.
+                fill_vs = (fill_px - sig_close) if side == "buy" else (sig_close - fill_px)
+            atr_pct = None
+            if state.atr and sig_close:
+                atr_pct = float(state.atr) / sig_close
+            note_fill(
+                ticket,
+                signal_bar_time=int(state.last_bar or 0) or None,
+                fill_time=self._broker_now_int(),
+                fill_price=fill_px,
+                signal_close=sig_close,
+                fill_vs_signal_close=fill_vs,
+                fill_vs_signal_close_pts=(fill_vs / point if point and fill_vs is not None else None),
+                fill_vs_signal_close_r=(fill_vs / sl_dist if sl_dist and fill_vs is not None else None),
+                spread_atr=float(state.spread_atr or 0),
+                adx=state.adx,
+                atr_pct=atr_pct,
+                tf_seconds=timeframe_seconds(cfg.timeframe),
+                side=side,
+                entry=fill_px,
+                risk_dist=float(sl_dist or 0),
+                original_sl=float(result.get("sl") or 0) or None,
+            )
         LOG.emit(
             f"#{ticket} {side.upper()} {result['volume']:g} lot @ {result['price']:.5f} "
             f"SL={result['sl']:.5f} TP={result['tp']:.5f} | lot: {note}",
@@ -2354,6 +2671,16 @@ class Engine:
         magics = {c.magic for c in list(self.store.symbols.values())}
         if report["magic"] not in magics:
             return
+        self._autopsy_safe(
+            book=report.get("book") or {},
+            ticket=report.get("ticket"),
+            symbol=report.get("symbol"),
+            exit_price=self._autopsy_float(report.get("price")),
+            exit_time=report.get("time"),
+            profit=self._autopsy_float(report.get("profit")),
+            reason_code=report.get("reason"),
+            comment="",
+        )
         profit = report["profit"]
         detail = (f"{report['label'].capitalize()} ile kapandi #{report['ticket']} "
                   f"@ {report['price']:g} ({report['volume']:g} lot) kar={profit:.2f}")
@@ -2450,6 +2777,31 @@ class Engine:
                 money_per_price=self.client.money_per_price_unit(fill["symbol"],
                                                                  fill.get("volume", 0.0)),
             )
+        if ok:
+            # A partial close is not the trade ending. The remainder still
+            # runs; its autopsy waits for the last exit.
+            pos_vol = float(pos.get("volume") or 0)
+            filled_vol = float(fill.get("volume") or 0) if fill else 0.0
+            partial = volume is not None
+            if pos_vol > 0 and filled_vol > 0 and filled_vol + 1e-8 < pos_vol:
+                partial = True
+            if not partial:
+                snap = getattr(self.execution, "snapshot", None)
+                book = snap(int(pos["ticket"])) if callable(snap) else None
+                book = dict(book) if book else {}
+                book.setdefault("symbol", pos.get("symbol"))
+                book.setdefault("side", pos.get("side"))
+                book.setdefault("entry", pos.get("price_open"))
+                self._autopsy_safe(
+                    book=book,
+                    ticket=pos.get("ticket"),
+                    symbol=pos.get("symbol") or book.get("symbol") or "",
+                    exit_price=self._autopsy_float(fill.get("price")) if fill else None,
+                    exit_time=self._broker_now_int(),
+                    profit=None,
+                    reason_code=None,
+                    comment=comment,
+                )
         return ok
 
     def _update_stop(self, cfg: SymbolConfig, pos: dict[str, Any], atr: float,
