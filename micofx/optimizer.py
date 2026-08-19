@@ -1498,6 +1498,45 @@ class Optimizer:
             return "uygulama damgasi eksik: validated"
         return ""
 
+    def restamp_from_replay(self, symbol: str, detail: dict[str, Any] | None,
+                            source: str = "") -> dict[str, Any]:
+        """Refresh the stamp to the config the replay actually ran.
+
+        GAP-5 rewrote ``opt_summary.holdout`` from a live-row replay and left
+        ``params`` on the previous apply. The stamp then described a config
+        that had not been measured. ``detail['params']`` is that leftover —
+        the live row is what was simulated, so the stamp copies OPT_FIELDS
+        off the live row, not out of detail.
+
+        This is not ``apply``. Live exits stay put.
+        """
+        cfg = self.store.symbols.get(symbol)
+        if cfg is None:
+            return {"ok": False, "error": "sembol yok"}
+        # Narrowed here rather than with ``(detail or {})`` so the reader and
+        # the checker both see that everything below has a dict.
+        if detail is None:
+            return {"ok": False, "error": "holdout yok"}
+        hold = detail.get("holdout")
+        if not isinstance(hold, dict) or not hold:
+            return {"ok": False, "error": "holdout yok"}
+        live_params = {k: getattr(cfg, k) for k in OPT_FIELDS if hasattr(cfg, k)}
+        summary = dict(getattr(cfg, "opt_summary", None) or {})
+        summary["holdout"] = dict(hold)
+        if detail.get("holdout_days") is not None:
+            summary["holdout_days"] = float(detail["holdout_days"])
+        if "validated" in detail:
+            summary["validated"] = bool(detail["validated"])
+        summary["params"] = live_params
+        if source:
+            summary["stamp_source"] = source
+        patch: dict[str, Any] = {"opt_summary": summary}
+        if "validated" in detail:
+            patch["validated"] = bool(detail["validated"])
+        updated = self.store.update_symbol(
+            symbol, patch, source=source or "opt restamp")
+        return {"ok": updated is not None, "symbol": symbol}
+
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,
               timeframe: str | None = None, strategy: str | None = None) -> dict[str, Any]:
