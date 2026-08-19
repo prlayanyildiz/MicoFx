@@ -1099,6 +1099,41 @@ bağlanmayacak.
 
 ---
 
+## 4r. Yerel Ollama / DeepSeek-R1 — ölçüldü, dar bir yeri var (19.08)
+
+Makinede Ollama koşuyor: `deepseek-r1:8b` (5,2 GB) ve `:14b` (9,0 GB).
+**GPU yok** (12 çekirdek, 24 GB RAM, yalnız uzak masaüstü adaptörü).
+
+| ölçüm | 8b | 14b |
+|---|---:|---:|
+| üretim hızı | 3,1 tok/s | 2,7 tok/s |
+| aynı zor soruya süre | 125 s | 186 s |
+| cevap kalitesi | ikisi de **yanlış itiraz** üretti | |
+
+Zor akıl yürütmede ikisi de işe yaramadı: "kâr kuyrukta" iddiasına en güçlü
+itirazı sordum, ikisi de olmayan bir kurgu hatası uydurdu ve asıl itirazı
+(tutma süresi sonucun kendisi tarafından belirleniyor, totolojiye yakın)
+bulamadı. **8b, 14b ile aynı kalitede ve 1,5 kat hızlı** — 14b'nin bu makinede
+bir gerekçesi yok.
+
+**Düşünme bloğu bastırılabiliyor** (`template` ile boş `<think>`): 71 s → 4,5 s,
+16 kat. Ama bastırınca **ayırt etme yeteneği sıfırlanıyor**: 8 maddelik bir
+sınıflandırmada sekizine de aynı cevabı verdi (%50 = hep aynı şeyi söylemenin
+doğruluğu). Düşünme açıkken aynı işte 3/4, madde başına ~121 s.
+
+**Bulunan tek yer:** bitmiş metinde, sayı bildirip `n` veya SE vermeyen
+iddiaları işaretlemek. Bu, projenin en sık düştüğü disiplin (18.08'de üç kez:
+EX-3 over-read, GER40 seans kararı, "onarım sonrası zarardayız"). %75 doğruluk
+bir **işaretleyici** için yeterli — yanlış alarm 10 saniye, kaçırdığı zaten
+bugünkü durum. `claude/_rigor_check.py`.
+
+**Kurallar:** yalnız elle, yalnız bitmiş metinde, **asla arama koşarken** —
+model ~5 GB tutuyor ve `optimizer.py` işçi sayısını boştaki RAM'e göre
+hesaplıyor, yani yerleşik model her aramayı sessizce yavaşlatır. Hiçbir
+otomatik akışa bağlı değil.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
