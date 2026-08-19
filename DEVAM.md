@@ -1377,11 +1377,37 @@ Not: bu ayarlar aramanın seçtiği değerler (GER40 `trail_step` ızgara
 **tavanında**), yani unutulmuş değil — arama gevşek trail istiyor, ki 4g/4l
 ile tutarlı: kâr kuyrukta.
 
-BE-1 ölçüyor: `breakeven_at_r` ∈ {0, 0,5, 1,0, 1,5, 2,0}, altı holdout.
-**Karar kuralı önden kilitlendi:** calmar'ı altıda en az dörtte iyileştirmeli
-**ve** 120+ tutma kovasının net R'sini %10'dan fazla düşürmemeli. Kilit
-kuyruğu keserse kabul edilmez — REV-1 ve CHOP-1b, işlemi kısaltan her şeyin
-zarar verdiğini gösterdi.
+BE-1 ölçüldü (`9fe64ea`, bayrak varsayılan kapalı, arama geçirmiyor).
+Altı canlı holdout, `breakeven_at_r` ∈ {0, 0,5, 1,0, 1,5, 2,0}:
+
+| eşik | calmar iyileşen | 120+ kuyruk kaybı |
+|---|---|---|
+| 0,5 | 3 | JPN225 −%22, SpotBrent −%21 |
+| 1,0 | 3 | yok |
+| **1,5** | **5** (biri eşit, hiçbiri kötü değil) | **hepsi <%1** |
+| 2,0 | 3 | yok |
+
+`1,5` **kilitli kuralı geçiyor**. GER40 calmar 3,91 → **4,36** (net R
++175,49 → +178,52), XAUUSD 1,90 → **2,23** (+82,99 → +86), NAS100 2,33 →
+2,39, US30 2,15 → 2,21, JPN225 3,81 → 3,87, SpotBrent değişmiyor (trail
+zaten ~0,38 R'de entry'yi geçiyor).
+
+**Uygulanmadı.** Beş değeri holdout'ta deneyip en iyisini seçmek, holdout'u
+seçici hâline getirir; ön kayıt cherry-picking'i engeller ama **seçimin
+nerede yapıldığını** değiştirmez. Aynı red 18.08'de L2b'de (stop genişliği) ve
+19.08'de CHOP-1c'de (`adx_min`, calmar +%23) verildi — üçüncüsünde "ama bu
+sefer sonuç çok iyi" demek önceki ikisini anlamsız kılar.
+
+**BE-2:** aynı sweep, **doğrulama dilimi** sayılarıyla. Seçim doğrulamaya
+göre yapılır (seçimde zaten kullanılıyor, holdout'a dokunmuyor), holdout
+yalnız yargılar. Doğrulamanın seçtiği eşik holdout'ta da iyiyse elimizde
+**gerçekten doğrulanmış** bir iyileştirme olur — bu oturumda ilk uygulanabilir
+şey. Başka eşik seçer ve holdout'ta kötü çıkarsa, 4n'in "iç ölçüler dışarıyı
+öngörmüyor" bulgusunun beşinci kanıtı olur.
+
+Yan gözlem: `0,5`'te işlem sayısı artıyor (GER40 1247 → 1526) çünkü
+`max_open=1` altında erken kapanış slot'u boşaltıp yeni sinyale yer açıyor.
+Kilit yalnız çıkışı değil **giriş sayısını** da değiştiriyor.
 
 ---
 
