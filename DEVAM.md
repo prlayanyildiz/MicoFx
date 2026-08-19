@@ -1493,6 +1493,35 @@ turda kendiliğinden sınanacak. Bu, 4g/4l ile de tutarlı: kâr uzun tutulanda.
 
 ---
 
+## 4z. Otomatik yeniden optimizasyon durduruldu (19.08) — pencereyi korumak için
+
+`auto_reoptimize` **False** yapıldı. Sebep operasyonel ve acildi: dört sembol
+48 saatlik freni çoktan aşmıştı (US30 **93 saat**, JPN225 81, SpotBrent 81,
+NAS100 80), yani denetçi herhangi bir anda konfiglerini **değiştirebilirdi**.
+
+Değiştirseydi FWD-2'nin 16.08'den beri biriken penceresi sıfırlanırdı — ve o
+pencere, sistemin kâr edip etmediğini söyleyebilecek **tek** ölçüm (n=33, hâlâ
+sıfırdan ayırt edilemiyor).
+
+**Gerekçe yalnız pencere değil.** 4n/BE-2 ile beş bağımsız ölçüm gösterdi ki
+hiçbir iç ölçü dışarıyı öngörmüyor. Dolayısıyla otomatik bir apply, "onarım"
+kılığında **bilgisiz bir konfig değişimi**ne yakın. 18.08'de XAUUSD'yi bu
+mekanizma M5/`t3_stoch`'tan M15/`burst`'e taşıdı; damgası geçerliydi ama
+pencerenin ortasında oldu.
+
+**Korumalar duruyor.** `auto_reoptimize` yalnız `_queue_reoptimization`'ı
+kapatıyor (`supervisor.py:1007`). Ayrı ve açık kalanlar: karantina (11 ardışık
+zarar → 1 saat), izleme risk ölçeği (PF<1 → ×0,6), düşüş ölçeklemesi
+(soft %3,5 / hard %7, taban 0,6).
+
+**Geri açma tetikleyicisi:** FWD-2 kesin bir örnekleme ulaştığında (R/işlem
+güven aralığı sıfırı dışlayacak kadar), ya da bir sembol tekrar tekrar
+karantinaya girerse. **Bu ayar unutulmamalı** — kapalı bırakılmış bir
+otomatik onarım, açık bırakılmış kadar tehlikelidir; farkı, hangisinin
+unutulduğunu bilmemektir.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
