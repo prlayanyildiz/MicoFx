@@ -34,6 +34,38 @@ from .strategy import searchable_axes
 APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
 
 
+def family_max_combos(opt_blob: dict[str, Any] | None, family: str,
+                      default: int) -> int:
+    """Per-family search budget, else the global ``max_combos``.
+
+    Absent map, missing family, unreadable value, or a non-positive override
+    all fall back so a saved blob cannot silently disable a family (0) or
+    change live searches until the operator writes a real number.
+    """
+    fallback = int(default)
+    raw = (opt_blob or {}).get("strategy_max_combos")
+    if not isinstance(raw, dict) or family not in raw:
+        return fallback
+    try:
+        n = int(raw[family])
+    except (TypeError, ValueError):
+        return fallback
+    return n if n > 0 else fallback
+
+
+def _ranked_finalists(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Params + both OOS slices for the ranked top 10. Old runs omit ``top``."""
+    rows: list[dict[str, Any]] = []
+    for candidate in list(report.get("top") or [])[:10]:
+        rows.append({
+            "params": dict(candidate.get("params") or {}),
+            "score": candidate.get("score"),
+            "validation": dict(candidate.get("validation") or {}),
+            "holdout": dict(candidate.get("holdout") or {}),
+        })
+    return rows
+
+
 def _grid_axis_equal(left: Any, right: Any) -> bool:
     """Numeric search lists compare equal across int/float spelling."""
     if not isinstance(left, list) or not isinstance(right, list):
@@ -654,7 +686,8 @@ class Optimizer:
                     "spread_scale": spread_scale,
                     "charge_costs": charge_costs,
                     "grid": grid, "min_trades": min_trades, "segments": segments,
-                    "max_combos": max_combos, "min_positive": min_positive,
+                    "max_combos": family_max_combos(opt_blob, family, max_combos),
+                    "min_positive": min_positive,
                     "plateau": plateau, "commission": commission, "min_stop": min_stop,
                     "refine_rounds": refine_rounds, "all_hours": all_hours,
                     "day_end_flatten_min": day_end_flatten_min,
@@ -937,6 +970,7 @@ class Optimizer:
             "max_combos": report.get("max_combos"),
             "coverage": report.get("coverage"),
             "combo_seed": report.get("combo_seed"),
+            "top": _ranked_finalists(report),
             "force": bool(getattr(self, "_force_apply", False)),
             "applied_at": time.time() if applied else None,
             "previous": previous if applied else None,
