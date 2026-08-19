@@ -1398,16 +1398,32 @@ nerede yapıldığını** değiştirmez. Aynı red 18.08'de L2b'de (stop genişl
 19.08'de CHOP-1c'de (`adx_min`, calmar +%23) verildi — üçüncüsünde "ama bu
 sefer sonuç çok iyi" demek önceki ikisini anlamsız kılar.
 
-**BE-2:** aynı sweep, **doğrulama dilimi** sayılarıyla. Seçim doğrulamaya
-göre yapılır (seçimde zaten kullanılıyor, holdout'a dokunmuyor), holdout
-yalnız yargılar. Doğrulamanın seçtiği eşik holdout'ta da iyiyse elimizde
-**gerçekten doğrulanmış** bir iyileştirme olur — bu oturumda ilk uygulanabilir
-şey. Başka eşik seçer ve holdout'ta kötü çıkarsa, 4n'in "iç ölçüler dışarıyı
-öngörmüyor" bulgusunun beşinci kanıtı olur.
+**BE-2 ölçüldü — doğrulama seçemedi.** Altı sembol için **altı ayrı eşik**:
 
-Yan gözlem: `0,5`'te işlem sayısı artıyor (GER40 1247 → 1526) çünkü
-`max_open=1` altında erken kapanış slot'u boşaltıp yeni sinyale yer açıyor.
-Kilit yalnız çıkışı değil **giriş sayısını** da değiştiriyor.
+| sembol | doğrulamanın seçtiği | holdout'ta |
+|---|---:|---|
+| GER40 | 0,5 | **−32 R / −0,89 calmar** |
+| JPN225 | 1,0 | −4 R / +0,95 |
+| NAS100 | 1,5 | +1 R / +0,07 |
+| US30 | 0 | değişmiyor |
+| SpotBrent | 0 | değişmiyor |
+| XAUUSD | 1,0 | +22 R / +1,74 |
+
+Holdout'un temiz kazananı (1,5) doğrulamada yalnız NAS100'de birinci; üç
+sembolde canlıdan **kötü**. GER40 doğrulamada **her eşikte negatif** — o dilim
+ayırt edemiyor. **4n'in beşinci bağımsız doğrulaması.**
+
+**Uygulanmadı**, ve cazip çıkış da reddedildi: `1,5` işlem sayısını neredeyse
+değiştirmiyor (GER40 +24) oysa `0,5` şişiriyor (+279), buradan "en az yan
+etkili müdahale" diye dilimlerden bağımsız bir gerekçe kurulabilirdi — ama o
+gerekçe **holdout sonucu görüldükten sonra** kuruldu. Sonradan bulunan
+bağımsız gerekçe bağımsız değildir.
+
+**BE-3:** `breakeven_at_r` **arama eksenine** eklenecek ({0, 1.0, 1.5}) —
+sistemin bu soruyu cevaplamak için zaten sahip olduğu mekanizma; her parametre
+böyle seçiliyor. Bedeli: ızgara 3× (stoch_flip 28.800 → 86.400), yani GER40'ın
+tam tarama bütçesi yetmez. Süre ölçülüp determinizmi kaybetmeden ödenebilir mi
+bakılacak.
 
 ---
 
