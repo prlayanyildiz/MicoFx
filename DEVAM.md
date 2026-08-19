@@ -1187,6 +1187,57 @@ diye duruyor.
 
 ---
 
+## 4t. CHOP-1 — üç kol, uygulanacak hiçbir şey (19.08)
+
+Getiri eğrisi kuyruğunun son adayı. Üçü **ayrı ayrı** ölçüldü.
+
+**1a `cooldown_sec`:** beş sembolde **bit-özdeş**. Tek hareket XAUUSD 2 bar
+(n −7, **+1,81 R**, maxDD 43,6→40,4). Sebep 4o'da yazılıydı ve doğrulandı:
+`max_open=1` iken soğuma fill'den başlıyor, tutma süresi çoğu zaman tavandan
+uzun, yani soğuma pozisyon açıkken bitiyor. **Etkisiz kalıyor.**
+
+**1b `skip_after_loss`: altı sembolde de zararlı.**
+
+| sembol | A (kapalı) | B (açık) | B−A |
+|---|---:|---:|---:|
+| GER40 | +176,67 | +27,65 | **−149** |
+| NAS100 | +109,19 | +36,06 | −73 |
+| XAUUSD | +83,33 | +30,67 | −53 |
+| JPN225 | +67,15 | +31,57 | −36 |
+| SpotBrent | +20,71 | +11,99 | −9 |
+| US30 | +46,16 | +38,46 | −8 |
+
+Zarardan sonra beklemek işlem sayısını düşürüyor ve **kuyruğu kesiyor** —
+REV-1'in aynası. Kâğıtta duran bu bayrak canlıda karşılığı olmadığı için
+bugüne kadar zararsızdı; artık **ölçülmüş biçimde zararlı**, yani silinmeli.
+
+**1c `adx_min` (JPN225/NAS100/US30'da 0):**
+
+| | 0 | 10 | 15 | 20 | 25 |
+|---|---|---|---|---|---|
+| JPN225 net/calmar | **+67,15**/3,98 | +63,47/3,37 | +48,37/2,45 | +21,40/1,57 | +18,03/2,20 |
+| NAS100 | +109,19/2,31 | +111,97/2,40 | +107,44/**2,84** | +70,97/1,78 | +16,44/0,41 |
+| US30 | +46,16/2,03 | +50,96/2,24 | +47,90/**2,52** | +27,79/1,71 | +25,93/1,88 |
+
+NAS100 ve US30'da `adx_min=15` calmar'ı ~%23 iyileştiriyor. **Uygulanmıyor** —
+bu, **dokunulmamış testi seçim için kullanmak** olurdu ve holdout'u testlikten
+çıkarırdı. Aynı red 18.08 gecesi L2b'de stop genişliği için verildi; tutarlı
+olmazsa o red de anlamsızlaşır. Ayrıca `adx_min` zaten arama ekseni ve arama
+0 seçti — arama ile holdout'un anlaşmaması 4n'de dört kesitte ölçülmüş
+durumda, yeni bilgi değil.
+
+### Getiri eğrisi kuyruğu kapandı, uygulanan sıfır
+
+REV-1 (felaket), FLAT-2 (~+5 R, yalnız M5), CHOP-1a (etkisiz), 1b (zararlı),
+1c (holdout'a dokunmadan uygulanamaz). **Beş aday, uygulanabilir tek kural
+yok.**
+
+Geriye kalan dürüst kaldıraçlar ölçüm değil **sabır**: FWD-2 penceresi
+(sistem kâr ediyor mu, hâlâ bilmiyoruz), 100 işlemde lot çarpanı tetikleyicisi,
+ve ızgara küçültmenin getireceği tekrarlanabilirlik (D1b-f).
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
