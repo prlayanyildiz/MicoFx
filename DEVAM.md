@@ -1099,38 +1099,41 @@ bağlanmayacak.
 
 ---
 
-## 4r. Yerel Ollama / DeepSeek-R1 — ölçüldü, dar bir yeri var (19.08)
+## 4r. Yerel model: akıl yürütme değil, talimat (19.08)
 
-Makinede Ollama koşuyor: `deepseek-r1:8b` (5,2 GB) ve `:14b` (9,0 GB).
-**GPU yok** (12 çekirdek, 24 GB RAM, yalnız uzak masaüstü adaptörü).
+Makinede Ollama var; **GPU yok** (12 çekirdek, 24 GB RAM). Üretim hızı hangi
+model olursa olsun **~3 tok/s** — yani seçim "hangi model daha büyük" değil,
+**"kaç token harcıyor"** sorusudur.
 
-| ölçüm | 8b | 14b |
+Aynı işte (bir ölçüm cümlesi `n` ve hata payı taşıyor mu, tek kelime cevap):
+
+| model | doğruluk | süre/madde |
 |---|---:|---:|
-| üretim hızı | 3,1 tok/s | 2,7 tok/s |
-| aynı zor soruya süre | 125 s | 186 s |
-| cevap kalitesi | ikisi de **yanlış itiraz** üretti | |
+| deepseek-r1:8b, düşünme açık | 3/4 | **121 s** |
+| deepseek-r1:8b, düşünme kapalı | 4/8 (**ayırt etmiyor**, hepsine aynı cevap) | 3,5 s |
+| deepseek-r1:14b | 8b ile aynı kalite, 1,5 kat yavaş | — |
+| **qwen2.5:7b-instruct** | **7/8** | **~3 s** |
 
-Zor akıl yürütmede ikisi de işe yaramadı: "kâr kuyrukta" iddiasına en güçlü
-itirazı sordum, ikisi de olmayan bir kurgu hatası uydurdu ve asıl itirazı
-(tutma süresi sonucun kendisi tarafından belirleniyor, totolojiye yakın)
-bulamadı. **8b, 14b ile aynı kalitede ve 1,5 kat hızlı** — 14b'nin bu makinede
-bir gerekçesi yok.
+R1 her cevaptan önce zorunlu olarak yüzlerce token düşünüyor; GPU'suz bir
+makinede o düşünme dakikalara mal oluyor ve bastırılınca model **yargı
+yeteneğini tamamen kaybediyor**. Talimat modeli doğrudan cevap veriyor:
+**25 kat hızlı ve daha doğru.**
 
-**Düşünme bloğu bastırılabiliyor** (`template` ile boş `<think>`): 71 s → 4,5 s,
-16 kat. Ama bastırınca **ayırt etme yeteneği sıfırlanıyor**: 8 maddelik bir
-sınıflandırmada sekizine de aynı cevabı verdi (%50 = hep aynı şeyi söylemenin
-doğruluğu). Düşünme açıkken aynı işte 3/4, madde başına ~121 s.
+Zor akıl yürütmede hiçbiri işe yaramadı: "kâr kuyrukta" iddiasına en güçlü
+itirazı sorduğumda ikisi de olmayan bir kurgu hatası uydurdu, asıl itirazı
+(tutma süresi sonucun kendisi tarafından belirlenir) bulamadı.
 
-**Bulunan tek yer:** bitmiş metinde, sayı bildirip `n` veya SE vermeyen
-iddiaları işaretlemek. Bu, projenin en sık düştüğü disiplin (18.08'de üç kez:
-EX-3 over-read, GER40 seans kararı, "onarım sonrası zarardayız"). %75 doğruluk
-bir **işaretleyici** için yeterli — yanlış alarm 10 saniye, kaçırdığı zaten
-bugünkü durum. `claude/_rigor_check.py`.
+**Her iki deepseek modeli silindi** (19.08, operatör kararı; 14,2 GB yer
+açıldı). Kalan: `qwen2.5:7b-instruct`.
 
-**Kurallar:** yalnız elle, yalnız bitmiş metinde, **asla arama koşarken** —
-model ~5 GB tutuyor ve `optimizer.py` işçi sayısını boştaki RAM'e göre
-hesaplıyor, yani yerleşik model her aramayı sessizce yavaşlatır. Hiçbir
-otomatik akışa bağlı değil.
+**Kullanım:** `claude/_ollama.py` istemcisi, `claude/_rigor_check.py` aracı.
+Yalnız elle, bitmiş metinde, **asla arama koşarken** — yüklü model ~5 GB tutar
+ve `optimizer.py` işçi sayısını boştaki RAM'e göre hesaplar. Hiçbir otomatik
+akışa bağlı değil.
+
+**Sınırı:** aracın iddia ayıklayıcısı kaba (iki sayı geçen her satırı alıyor),
+yanlış pozitif üretiyor. Model tarafı değil, regex tarafı düzeltilmeli — ama
+getiri eğrisi kuyruğunun arkasında.
 
 ---
 
