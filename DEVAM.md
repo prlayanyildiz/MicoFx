@@ -1137,6 +1137,56 @@ getiri eğrisi kuyruğunun arkasında.
 
 ---
 
+## 4s. Flip aileleri dönmedikleri için çalışıyor (19.08) — REV-1 ve FLAT-2
+
+Operatörün hedefi: "getiri eğrisini artıralım, gereksiz stop yiyip işlem
+kaçırmayalım." İki aday ölçüldü, **ikisi de reddedildi**.
+
+### REV-1 — ters sinyalde kapat ve dön: felaket
+
+Gerekçe sağlam görünüyordu: `stoch_flip` dönmek için var, canlı motor dönüş
+sinyalini pozisyon limiti diye düşürüyor (4p), pozisyon da stratejinin zaten
+karşı çıktığı bir stopa kadar bekliyor.
+
+| sembol | A (bugün) | B (dön) | B−A |
+|---|---:|---:|---:|
+| **GER40** | +184,01 R | **−817,01 R** | **−1001** |
+| JPN225 | +67,15 | +41,77 | −25,4 |
+| NAS100 | +108,55 | +78,51 | −30,0 |
+| US30 | +46,16 | +40,77 | −5,4 |
+| XAUUSD | +83,33 | +80,98 | −2,4 |
+| SpotBrent | +20,80 | +23,59 | +2,8 |
+
+GER40: işlem 1248 → **3629** (2028 dönüş), medyan tutma **180 → 60 dk**,
+30–120 dk kovası tek başına **−1362 R**.
+
+**Bu, 4g/4l'yi tersine çeviriyor:** 120+ dakikada duran kâr, stratejilerin
+karşı sinyallere rağmen başardığı bir şey değil — **onlara rağmen beklemenin
+ürettiği** şey. Flip aileleri **dönmedikleri için** çalışıyor, ve dönüş
+sinyali stopun zaten süzdüğü gürültü. **4p'de "kaçan işlem" saydığım 52
+sinyal, kaçan fırsat değilmiş.**
+
+### FLAT-2 — seans sonu flatten: etkisi yok denecek kadar az
+
+| sembol | B−A |
+|---|---:|
+| GER40 / NAS100 / US30 / XAUUSD | **0** (flatten sayısı değişmiyor — o kapanışlar hafta sonu boşluğu) |
+| JPN225 | +3,82 R |
+| SpotBrent | +1,52 R |
+
+Kitap geneli ~**+5,3 R**, ve yalnız M5'te. JPN225'in 120+ kovası 158→169
+işlem, +139,9→+145,3 R — seans sonu M5'te biraz kuyruk kesiyor ama miktar
+önemsiz. **Kural çıkmıyor.**
+
+### Kalan
+
+Getiri eğrisi için kuyrukta CHOP-1 kaldı (`cooldown_sec` etkisiz,
+`skip_after_loss` yalnız kâğıtta, `adx_min` üç sembolde 0 — 4o). Bayrak
+(`reverse_on_signal`) varsayılan kapalı birleşti; soru cevaplanabilir kalsın
+diye duruyor.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
