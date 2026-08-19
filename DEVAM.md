@@ -816,9 +816,21 @@ Yani canlı, replay'in ölçtüğü çıkışla eşleşiyor; yalan söyleyen dam
 yok**, sürüklenme yok.
 
 Yani bulunan beş ayrışmanın hepsi ya stale `params` ya da gerekçelendirilmiş
-makas kalibrasyonu. **Denetim çalıştı, alarm gerçek değildi** — ve tam da bu
-yüzden `params` düzeltilmeli: bu alan güvenilmez olduğu sürece denetim her
-seferinde elle kovalanacak bir yanlış pozitif üretir.
+makas kalibrasyonu. **Denetim çalıştı, alarm gerçek değildi.**
+
+**Onarıldı (19.08 07:20, `c727a35` + `restamp_from_replay`).** Bot durduruldu,
+beş replay damgası canlı satırdan yeniden yazıldı, bot kaldırıldı. XAUUSD
+atlandı — onun damgası gerçek bir apply ve `params`'ı aramanın kullandığı
+değeri taşıyor; canlıya eşitlemek aramanın kaydını silerdi.
+
+Denetim şimdi **tek satır** veriyor: XAUUSD `max_spread_atr` 0,05 → 0,25,
+yani makas kalibrasyonunun bilinen müdahalesi. Dört yanlış pozitif sıfırlandı.
+
+**Denetim tasarımı:** karşılaştırma `opt_fields_read(family) |
+ENGINE_OPT_FIELDS` ile sınırlanmalı. Damga bütün OPT_FIELDS'i yazıyor ama
+`stoch_flip` yalnız 9'unu okuyor; okunmayan alandaki fark davranış
+değiştirmez ve uyarı üretmemeli (§5 birinci arıza sınıfının aynısı, denetim
+tarafında).
 
 Ders: damga "bu konfig şunu ölçtü" iddiasıdır; `params` yalan söylerse iddia
 doğrulanamaz hâle gelir ve **bugünkü bütün arıza sınıfı budur**. Damga yeniden
