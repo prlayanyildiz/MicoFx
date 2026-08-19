@@ -1459,6 +1459,40 @@ karşı örneği var (wavetrend_flip 0,39). Kazanan çıkmayabilir; o da sonuçt
 
 ---
 
+## 4y. M1 fiyat dışı, ve verimsizlik TF'den gelmiyor (19.08) — KAPALI
+
+Operatör sordu: performans kaybı zaman diliminden mi, M1 iş görür mü?
+
+**Maliyet/R = spread / stop mesafesi**, ve stop ATR cinsinden. ATR bar
+küçüldükçe küçülür, yani aynı spread hızlandıkça riskin daha büyük bir payına
+denk gelir. Ölçüm (sl = 1 ATR varsayımıyla):
+
+| sembol | M1 | M5 | M15 | M30 |
+|---|---:|---:|---:|---:|
+| SpotBrent | **%42,0** | %14,6 | %9,3 | %7,1 |
+| JPN225 | %23,9 | %7,8 | %3,2 | %2,5 |
+| GER40 | %21,7 | %5,9 | %2,8 | %2,3 |
+| US30 | %12,7 | %4,6 | %2,1 | %2,2 |
+| NAS100 | %6,6 | %3,0 | %1,1 | %1,0 |
+| XAUUSD | %4,7 | %1,8 | %0,6 | %0,5 |
+
+Ölçülen kenar ~0,1–0,2 R/işlem. M1'de SpotBrent'te maliyet kenarın **iki-dört
+katı**, GER40/JPN225'te kenarın tamamı, en ucuz ikisinde bile üçte biri.
+**M1 aritmetik olarak kapalı** — M1-1 görevi de bu yüzden konusuz kaldı
+(öznesi XAUUSD'ydi).
+
+**Verimsizlik TF seçiminden gelmiyor:** `timeframes` zaten `M5/M15/M30` ve
+`strategy_timeframes` haritası **boş**, yani her aile üçünü de deneyebiliyor.
+Mevcut TF'ler varsayılan değil, aramanın kararı. Ve maliyet aritmetiği
+aramadan bağımsız: hızlanmak mekanik olarak pahalılaşmaktır.
+
+Yön tersine bakıyor: en ucuz uç **M30**. JPN225 ve SpotBrent M5'te koşuyor ve
+M30'un 2–3 katı maliyet ödüyor — arama orada yeterli ek kenar bulmuş olmalı.
+IDX-1 endeksleri bütün TF'lerde yeniden arayacağı için JPN225'in TF'si o
+turda kendiliğinden sınanacak. Bu, 4g/4l ile de tutarlı: kâr uzun tutulanda.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
