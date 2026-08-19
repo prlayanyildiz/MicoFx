@@ -1259,20 +1259,35 @@ getirince:
 **Riske göre en kötüsü SpotBrent.** Canlı performansa bakarak karar
 verilseydi yanlış sembol silinirdi.
 
-### XAUUSD — devre dışı (performans değil, kontrol)
+### XAUUSD — silindi (19.08), ve gerekçem yanlıştı
 
-Doldurmaların **beşte dördünde** minimum lot niyetin **1,1–2,2 katını**
-aldırıyor (`risk %0.144 -> 0.007, min lot 0.01 riski asiyor, 2.2x`). Yani o
-sembolde ne kadar riske girildiğine risk modeli değil brokerin lot adımı karar
-veriyor. Buna ek olarak kitabın **en düşük holdout calmar'ı** onda (1,96).
+**Önce yazdığım gerekçe:** doldurmaların beşte dördünde minimum lot niyetin
+1,1–2,2 katını aldırıyor, yani kasa bu sembolü boyutlandıramıyor.
 
-İki gerekçe bağımsız ve biri örneklem gürültüsüne tabi değil. Tek düzeltme
-riski ~2,2 kat artırmak olurdu — en zayıf sembole daha çok para koymak.
+**Ölçüldü, yanlış çıktı.** Bakiye 2.001 $, %0,80 niyet = **16,01 $**;
+minimum lot riskleri:
 
-**Silinmedi, devre dışı bırakıldı.** Silmek 40 `opt_runs` kaydını götürürdü ve
-bu oturumda o tablo altı ayrı ölçümde kullanıldı. Ticari etki aynı, bu geri
-alınabilir. Kasa büyüyüp minimum lot niyetin içine sığdığında yeniden
-değerlendirilir.
+| sembol | min lot riski | sığar mı |
+|---|---:|---|
+| XAUUSD | **9,29 $** | evet |
+| JPN225 | 14,93 $ | evet |
+| NAS100 | 6,58 $ | evet |
+| GER40 | 5,78 $ | evet |
+| US30 | 6,03 $ | evet |
+| SpotBrent | 0,94 $ | evet |
+
+Taşma enstrümandan değil, XAUUSD'nin **%0,20'de koşmasından** geliyordu —
+SpotBrent'inki gibi eskiden kalma bir ayar. %0,80'de risk modeli kontrolü
+alıyor. **"Kasa gold'u boyutlandıramıyor" cümlesi yanlıştı.**
+
+Geriye kalan gerekçeler performansa dayalı ve daha zayıf: kitabın en düşük
+holdout calmar'ı (1,96), riske normalize edilmiş ikinci en kötü canlı sicil
+(−357 $). Karar operatörün: **endekslere odaklanmak.** Bu bir ölçümle
+çürütülecek iddia değil, portföy tercihi.
+
+**Silindi, devre dışı bırakılmadı** (operatör kararı). 40 `opt_runs` kaydı ve
+son konfig önce `claude/_opt_runs_XAUUSD_arsiv.json`'a alındı — o tablo bu
+oturumda altı ölçümde kullanıldı, ticari karar veriyi yok etmeyi gerektirmiyor.
 
 ### SpotBrent — kalıyor, ama izlemede
 
