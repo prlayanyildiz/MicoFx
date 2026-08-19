@@ -402,7 +402,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              spread_price: np.ndarray | None = None,
              min_stop: float | np.ndarray | None = None,
              flatten: np.ndarray | None = None,
-             skip_after_loss: bool = False,
              max_open: int = 1,
              reverse_on_signal: bool = False) -> Result:
     """Replay one bar window using an already-computed signal set.
@@ -483,10 +482,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     bar_total = 0
     ptr = 0
     guard = 0
-    # One skipped signal after a losing close — event, not N bars. Live 417
-    # book-magic deals: after a win WR 49.3%, after a loss 28%. N-bar wait
-    # failed OOS; this is the form that split-replicated.
-    skip_next = False
     max_open = max(1, int(max_open or 1))
 
     def _cooldown_bars() -> int:
@@ -500,7 +495,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         return cooldown_bars
 
     def _record_trade(is_buy, entry, sl_dist, s, j0, exit_bar, exit_price, reason):
-        nonlocal equity, peak, streak, bar_total, skip_next
+        nonlocal equity, peak, streak, bar_total
         if exit_price is None:
             exit_price = close[exit_bar] + (0.0 if is_buy else s)
             reason = "time"
@@ -522,8 +517,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             res.gross_loss_r += -r
             streak += 1
             res.longest_loss_streak = max(res.longest_loss_streak, streak)
-            if skip_after_loss:
-                skip_next = True
         equity += r
         peak = max(peak, equity)
         res.max_dd_r = max(res.max_dd_r, peak - equity)
@@ -633,10 +626,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         and (atr_entry / price_ref) < p.min_atr_ratio):
                     ptr += 1
                     continue
-                if skip_after_loss and skip_next:
-                    skip_next = False
-                    ptr += 1
-                    continue
                 if i <= cool_until:
                     ptr += 1
                     continue
@@ -708,10 +697,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         price_ref = float(open_[j0] + s) if is_buy else float(open_[j0] - s)
         if (p.min_atr_ratio > 0 and price_ref > 0
                 and (atr_entry / price_ref) < p.min_atr_ratio):
-            ptr += 1
-            continue
-        if skip_after_loss and skip_next:
-            skip_next = False
             ptr += 1
             continue
         sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
@@ -881,8 +866,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             res.gross_loss_r += -r
             streak += 1
             res.longest_loss_streak = max(res.longest_loss_streak, streak)
-            if skip_after_loss:
-                skip_next = True
 
         equity += r
         peak = max(peak, equity)
