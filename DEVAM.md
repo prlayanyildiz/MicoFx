@@ -1259,35 +1259,43 @@ getirince:
 **Riske göre en kötüsü SpotBrent.** Canlı performansa bakarak karar
 verilseydi yanlış sembol silinirdi.
 
-### XAUUSD — silindi (19.08), ve gerekçem yanlıştı
+### XAUUSD — silindi, sonra geri alındı (19.08). Gerekçem yanlıştı.
 
-**Önce yazdığım gerekçe:** doldurmaların beşte dördünde minimum lot niyetin
-1,1–2,2 katını aldırıyor, yani kasa bu sembolü boyutlandıramıyor.
+**Yazdığım gerekçe:** minimum lot niyetin 1,1–2,2 katını aldırıyor, kasa bu
+sembolü boyutlandıramıyor.
 
-**Ölçüldü, yanlış çıktı.** Bakiye 2.001 $, %0,80 niyet = **16,01 $**;
-minimum lot riskleri:
+**Ölçüldü, yanlıştı.** Bakiye 2.001 $, %0,80 niyet = 16,01 $. Minimum lot
+riskleri: XAUUSD **9,29** · JPN225 14,93 · NAS100 6,58 · US30 6,03 · GER40
+5,78 · SpotBrent 0,94. **Altısı da sığıyor.** Taşma enstrümandan değil,
+XAUUSD'nin **%0,20'de koşmasından** geliyordu — SpotBrent'inki gibi eskiden
+kalma bir ayar.
 
-| sembol | min lot riski | sığar mı |
-|---|---:|---|
-| XAUUSD | **9,29 $** | evet |
-| JPN225 | 14,93 $ | evet |
-| NAS100 | 6,58 $ | evet |
-| GER40 | 5,78 $ | evet |
-| US30 | 6,03 $ | evet |
-| SpotBrent | 0,94 $ | evet |
+Silindikten sonra kalan gerekçeler de tutmadı. Kitapla karşılaştırma:
 
-Taşma enstrümandan değil, XAUUSD'nin **%0,20'de koşmasından** geliyordu —
-SpotBrent'inki gibi eskiden kalma bir ayar. %0,80'de risk modeli kontrolü
-alıyor. **"Kasa gold'u boyutlandıramıyor" cümlesi yanlıştı.**
+| sembol | beklenti (R/işlem) | calmar | holdout n |
+|---|---:|---:|---:|
+| JPN225 | +0,201 | 3,74 | 315 |
+| SpotBrent | +0,182 | 4,35 | 120 |
+| **XAUUSD** | **+0,169** | 1,96 | **504** |
+| GER40 | +0,139 | 5,30 | 1294 |
+| US30 | +0,113 | 2,00 | 403 |
+| NAS100 | +0,090 | 1,98 | 1045 |
 
-Geriye kalan gerekçeler performansa dayalı ve daha zayıf: kitabın en düşük
-holdout calmar'ı (1,96), riske normalize edilmiş ikinci en kötü canlı sicil
-(−357 $). Karar operatörün: **endekslere odaklanmak.** Bu bir ölçümle
-çürütülecek iddia değil, portföy tercihi.
+Beklentide **altıda üçüncü**, örneklemde ikinci, ve kitaptaki **tek gerçek
+doğrulanmış damga** onda (`validated=True`, retention 1,158). Düşük calmar
+zayıf kenardan değil derin düşüşten (maxDD 43,6); NAS100 aynı calmar'da ve
+daha kötü beklentide. **"Kitabın en zayıfı" hiç doğru değildi.**
 
-**Silindi, devre dışı bırakılmadı** (operatör kararı). 40 `opt_runs` kaydı ve
-son konfig önce `claude/_opt_runs_XAUUSD_arsiv.json`'a alındı — o tablo bu
-oturumda altı ölçümde kullanıldı, ticari karar veriyi yok etmeyi gerektirmiyor.
+Canlı sicili de bozuk bir sürümden geliyor: %0,20 riskle ve minimum lot
+taşmasıyla koştu, yani bu konfig **hiç düzgün çalıştırılmadı**.
+
+**Geri alındı (19.08), %0,80 ile** — kitabın geri kalanıyla aynı seviye, ve
+lot tabanının riski belirlemesini bitiren şey. Arşivden konfig + 40 `opt_runs`
+birlikte döndü.
+
+**Ders:** yapısal görünen bir gerekçe (`kasa boyutlandıramıyor`) ölçülmeden
+kullanıldı ve bir sembol yanlış yere silindi. Aynı gün içinde ölçülüp geri
+alındı; kalıcı zarar arşiv sayesinde olmadı. **Yapısal iddia da ölçüm ister.**
 
 ### SpotBrent — kalıyor, ama izlemede
 
