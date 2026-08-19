@@ -1238,6 +1238,58 @@ ve ızgara küçültmenin getireceği tekrarlanabilirlik (D1b-f).
 
 ---
 
+## 4u. XAUUSD devre dışı, SpotBrent kalıyor (19.08)
+
+Operatör ikisini de sordu. Kararlar **ayrı**, çünkü sorunları aynı değil.
+
+### Canlı sicil, riske normalize edilince
+
+XAUUSD ve SpotBrent %0,20 riskle koştu, diğerleri %0,80. Aynı ölçeğe
+getirince:
+
+| sembol | gerçek risk | n | net $ | %0,80'e normalize |
+|---|---:|---:|---:|---:|
+| **SpotBrent** | 0,20 | 38 | −122 | **−489** |
+| XAUUSD | 0,20 | 98 | −89 | −357 |
+| GER40 | 0,80 | 65 | −151 | −151 |
+| NAS100 | 0,80 | 75 | −94 | −94 |
+| US30 | 0,80 | 45 | −33 | −33 |
+| JPN225 | 0,80 | 68 | +39 | +39 |
+
+**Riske göre en kötüsü SpotBrent.** Canlı performansa bakarak karar
+verilseydi yanlış sembol silinirdi.
+
+### XAUUSD — devre dışı (performans değil, kontrol)
+
+Doldurmaların **beşte dördünde** minimum lot niyetin **1,1–2,2 katını**
+aldırıyor (`risk %0.144 -> 0.007, min lot 0.01 riski asiyor, 2.2x`). Yani o
+sembolde ne kadar riske girildiğine risk modeli değil brokerin lot adımı karar
+veriyor. Buna ek olarak kitabın **en düşük holdout calmar'ı** onda (1,96).
+
+İki gerekçe bağımsız ve biri örneklem gürültüsüne tabi değil. Tek düzeltme
+riski ~2,2 kat artırmak olurdu — en zayıf sembole daha çok para koymak.
+
+**Silinmedi, devre dışı bırakıldı.** Silmek 40 `opt_runs` kaydını götürürdü ve
+bu oturumda o tablo altı ayrı ölçümde kullanıldı. Ticari etki aynı, bu geri
+alınabilir. Kasa büyüyüp minimum lot niyetin içine sığdığında yeniden
+değerlendirilir.
+
+### SpotBrent — kalıyor, ama izlemede
+
+Riske normalize edilmiş en kötü sicil onda, **ama n=38** ve o dönemin çoğu
+çalkantı dönemi. Kâğıtta kitabın **en iyi calmar'ı** (4,35), boyutlandırması
+temiz (min lot sorunu yok), ve riski **19.08 sabahı 0,20 → 0,80'e çıkarıldı** —
+o değişiklik henüz hiç test edilmedi.
+
+**Tetikleyici: 30 işlem.** Bu sabahki risk artışından sonraki 30 işlemde
+gerçekleşen R/işlem sıfırın anlamlı altındaysa risk 0,20'ye döner ya da sembol
+kapanır. En zayıf canlı sicile sahip sembolün riskini dört katına çıkarmış
+olmak, sıkı bir gözden geçirmeyi hak ediyor.
+
+Kitap artık **5 aktif sembol**: GER40, JPN225, NAS100, US30, SpotBrent.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
