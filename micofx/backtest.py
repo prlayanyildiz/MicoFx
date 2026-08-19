@@ -403,7 +403,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              min_stop: float | np.ndarray | None = None,
              flatten: np.ndarray | None = None,
              max_open: int = 1,
-             reverse_on_signal: bool = False) -> Result:
+             reverse_on_signal: bool = False,
+             breakeven_at_r: float = 0.0) -> Result:
     """Replay one bar window using an already-computed signal set.
 
     ``entries`` and ``spread_price`` are optional precomputed views of values
@@ -415,6 +416,11 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     rule: an opposite signal while a slot is full is dropped and the open
     trade waits for its stop. On closes that trade at the flip's fill bar and
     opens the other side. Search/walk_forward never pass it.
+
+    ``breakeven_at_r`` is the same kind of switch (BE-1). Zero is live: the
+    trail is the only way the stop crosses entry. A positive value pulls the
+    stop to entry plus commission once unrealised gain reaches that many R,
+    without pulling a better trail back. Search/walk_forward never pass it.
     """
     n = cache.close.size if hi is None else int(hi)
     lo = max(0, int(lo))
@@ -483,6 +489,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     ptr = 0
     guard = 0
     max_open = max(1, int(max_open or 1))
+    breakeven_at_r = float(breakeven_at_r or 0.0)
 
     def _cooldown_bars() -> int:
         cooldown_bars = 0
@@ -521,7 +528,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         peak = max(peak, equity)
         res.max_dd_r = max(res.max_dd_r, peak - equity)
 
-    def _trail_one(is_buy, entry, sl, trailing, j, s):
+    def _trail_one(is_buy, entry, sl, trailing, j, s, sl_dist):
         c = close[j]
         a = atr[j]
         gain = (c - entry) if is_buy else (entry - c)
@@ -541,6 +548,13 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                     trail = struct_sl
             if target is None or (trail > target if is_buy else trail < target):
                 target = trail
+        if (breakeven_at_r > 0 and sl_dist > 0
+                and gain >= breakeven_at_r * sl_dist):
+            be_sl = entry + commission_price if is_buy else entry - commission_price
+            if target is None:
+                target = be_sl
+            else:
+                target = max(target, be_sl) if is_buy else min(target, be_sl)
         if target is None:
             return sl, trailing
         ms = float(min_stop_at[j])
@@ -588,7 +602,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                                   pos["s"], pos["j0"], j, None, "time")
                     continue
                 sl, trailing = _trail_one(pos["is_buy"], pos["entry"], pos["sl"],
-                                          pos["trailing"], j, pos["s"])
+                                          pos["trailing"], j, pos["s"],
+                                          pos["sl_dist"])
                 pos["sl"] = sl
                 pos["trailing"] = trailing
                 still.append(pos)
@@ -789,10 +804,12 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 target = None
                 # Mirrors engine._update_stop's breakeven_locked guard: once the
                 # trail has ratcheted the stop to or past entry, the min_stop
-                # clamp below must never put it back on the losing side. There
-                # is no separate breakeven step - the trail is above entry
+                # clamp below must never put it back on the losing side. Live
+                # has no separate breakeven step - the trail is above entry
                 # once ``gain`` exceeds ``trail_step_atr * a``, whatever
-                # trail_start_atr is.
+                # trail_start_atr is. ``breakeven_at_r`` (paper, default 0)
+                # is the BE-1 measurement: lock to entry+commission once
+                # gain reaches that many R, without pulling a better trail.
                 breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
                 if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
                     trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
@@ -819,6 +836,15 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                             trail = struct_sl
                     if target is None or (trail > target if is_buy else trail < target):
                         target = trail
+                if (breakeven_at_r > 0 and sl_dist > 0
+                        and gain >= breakeven_at_r * sl_dist):
+                    be_sl = (entry + commission_price if is_buy
+                             else entry - commission_price)
+                    if target is None:
+                        target = be_sl
+                    else:
+                        target = (max(target, be_sl) if is_buy
+                                  else min(target, be_sl))
                 if target is not None:
                     # Live will not send a modify for an improvement smaller
                     # than this. Without the same floor here the replay
