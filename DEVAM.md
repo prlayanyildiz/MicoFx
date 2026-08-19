@@ -1346,6 +1346,45 @@ bir sonraki "bir deneyelim" karşılaştırmasını kâğıt ≠ canlı yapardı
 
 ---
 
+## 4w. Başabaş kilidi yok — üç sembol +2 R'yi geri verebiliyor (19.08)
+
+Otopsi halkası ilk dört kaydında operatörün "aldığımızı veriyoruz" cümlesini
+ölçülebilir hâle getirdi:
+
+```
+GER40    MFE +1,42 R  ->  kapanis -1,00 R   masada 2,42 R
+JPN225   MFE +0,91 R  ->  kapanis -1,00 R   masada 1,91 R
+```
+
+**Mekanik sebep:** trail en iyi fiyatın `trail_step_atr` ATR gerisinden gelir,
+yani trailing stop entry'yi ancak kâr `trail_step_atr`'yi aşınca geçer.
+
+| sembol | sl_atr | trail_step | stop başabaşa gelir |
+|---|---:|---:|---:|
+| **GER40** | 1,00 | 2,20 | **+2,20 R** |
+| **NAS100** | 1,00 | 1,80 | **+1,80 R** |
+| **US30** | 1,00 | 1,60 | **+1,60 R** |
+| JPN225 | 2,50 | 2,50 | +1,00 R |
+| XAUUSD | 1,00 | 0,40 | +0,40 R |
+| SpotBrent | 4,00 | 1,50 | +0,38 R |
+
+Üç sembolde trail adımı stop mesafesinden **geniş**: bir işlem +2,19 R kâra
+çıkıp yine tam stop yiyebilir. `backtest.py:792` bunu kendi yorumunda
+söylüyor — *"There is no separate breakeven step"*. **Sistemde başabaş kilidi
+yok**, tek koruma trail.
+
+Not: bu ayarlar aramanın seçtiği değerler (GER40 `trail_step` ızgara
+**tavanında**), yani unutulmuş değil — arama gevşek trail istiyor, ki 4g/4l
+ile tutarlı: kâr kuyrukta.
+
+BE-1 ölçüyor: `breakeven_at_r` ∈ {0, 0,5, 1,0, 1,5, 2,0}, altı holdout.
+**Karar kuralı önden kilitlendi:** calmar'ı altıda en az dörtte iyileştirmeli
+**ve** 120+ tutma kovasının net R'sini %10'dan fazla düşürmemeli. Kilit
+kuyruğu keserse kabul edilmez — REV-1 ve CHOP-1b, işlemi kısaltan her şeyin
+zarar verdiğini gösterdi.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
