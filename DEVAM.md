@@ -1060,6 +1060,45 @@ tekrarlanabilirlik. Girişin yatay piyasada yön çevirmesini engelleyen hiçbir
 
 ---
 
+## 4p. Flip aileleri canlıda hiç dönmüyor (19.08)
+
+Giriş hunisi, kitap sabit dönem (16.08 21:34'ten, 126 sinyal):
+
+| neden | sinyal | pay |
+|---|---:|---:|
+| **risk_sembol_limiti** | 52 | **%41,3** |
+| açıldı | 43 | %34,1 |
+| emir_hatasi (tarihî, onarıldı) | 12 | %9,5 |
+| spread | 11 | %8,7 |
+| risk_ters_yon | 5 | %4,0 |
+| lot | 3 | %2,4 |
+
+**GER40: 58 sinyal, 7 işlem (%12)**, 39'u pozisyon limitinden.
+
+`risk.py:501` pozisyon sayısını **yön kontrolünden önce** bakıyor:
+
+```
+501: if len(same_symbol) >= cfg.max_positions:   -> "sembol pozisyon limiti"
+503: if any(p["side"] != side for p in same_symbol): -> "ters yonde acik pozisyon"
+```
+
+`max_positions=1` iken açık pozisyon varken gelen **her** sinyal 501'e takılır,
+ters yönlüler dahil — bu yüzden `risk_ters_yon` sayacı artık dolmuyor ve
+52'nin içinde kaç dönüş sinyali olduğu **bilinmiyor**.
+
+`backtest.py:636` aynısını yapıyor (`len(opens) >= max_open: continue`), yani
+**canlı/kâğıt tutarsızlığı yok**; holdout sayıları bugünkü davranışı doğru
+yansıtıyor.
+
+**Sonuç: flip aileleri canlıda hiç dönmüyor.** `stoch_flip` "dön" dediğinde
+pozisyon kapanıp ters açılmıyor, stopa kadar bekliyor. Strateji "çık" derken
+stop yeniyor. REV-1 bunu ölçüyor: sinyal dönünce kapat-ve-ters-aç, altı
+konfigin holdout'unda. İki yönlü etki beklenir — erken çıkış gereksiz stopu
+azaltır, ama testerede iki kat işlem ve iki kat maliyet demektir. Ölçülmeden
+bağlanmayacak.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
