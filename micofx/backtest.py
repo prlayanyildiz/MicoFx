@@ -403,13 +403,19 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              min_stop: float | np.ndarray | None = None,
              flatten: np.ndarray | None = None,
              skip_after_loss: bool = False,
-             max_open: int = 1) -> Result:
+             max_open: int = 1,
+             reverse_on_signal: bool = False) -> Result:
     """Replay one bar window using an already-computed signal set.
 
     ``entries`` and ``spread_price`` are optional precomputed views of values
     that are identical for every window and every combination sharing a signal
     set. Passing them in is purely a caching shortcut - when omitted they are
     derived here exactly as before, and either way the numbers are the same.
+
+    ``reverse_on_signal`` is a measurement switch, default off. Off is the live
+    rule: an opposite signal while a slot is full is dropped and the open
+    trade waits for its stop. On closes that trade at the flip's fill bar and
+    opens the other side. Search/walk_forward never pass it.
     """
     n = cache.close.size if hi is None else int(hi)
     lo = max(0, int(lo))
@@ -634,6 +640,22 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if i <= cool_until:
                     ptr += 1
                     continue
+                if reverse_on_signal and opens:
+                    # Opposite signal: cover what is open the other way at this
+                    # bar's open (the fill the new side would have taken), then
+                    # the slot check below decides whether the flip itself
+                    # lands. Same-side signals still hit the cap, as live does.
+                    kept: list[dict] = []
+                    for pos in opens:
+                        if pos["is_buy"] == is_buy:
+                            kept.append(pos)
+                            continue
+                        _record_trade(
+                            pos["is_buy"], pos["entry"], pos["sl_dist"],
+                            pos["s"], pos["j0"], j,
+                            float(open_l[j] + (0.0 if pos["is_buy"] else s)),
+                            "reverse")
+                    opens = kept
                 if len(opens) >= max_open:
                     ptr += 1
                     continue
@@ -731,6 +753,49 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 reason = "flatten"
                 exit_bar = j
                 break
+
+            if reverse_on_signal and j > j0:
+                # Signal on closed bar j-1 fills at this bar's open. An
+                # opposite print covers the open side there; a same-side
+                # print is ignored (max_open=1 has no slot). Stop/flatten
+                # above still win if they also fire on this bar.
+                sig_i = j - 1
+                two_way = bool(buy_flags[sig_i]) and bool(sell_flags[sig_i])
+                want_buy = bool(buy_flags[sig_i]) and not two_way
+                want_sell = bool(sell_flags[sig_i]) and not two_way
+                flip = (is_buy and want_sell) or ((not is_buy) and want_buy)
+                if flip and (tradable is None or tradable[j]):
+                    s_now = float(spread_price[j])
+                    exit_price = float(open_l[j] + (0.0 if is_buy else s_now))
+                    reason = "reverse"
+                    exit_bar = j
+                    atr_next = atr[sig_i]
+                    new_buy = not is_buy
+                    can_open = (
+                        math.isfinite(atr_next) and atr_next > 0
+                        and not (p.max_spread_atr > 0
+                                 and s_now > atr_next * p.max_spread_atr)
+                    )
+                    price_ref = (float(open_l[j] + s_now) if new_buy
+                                 else float(open_l[j] - s_now))
+                    if (can_open and p.min_atr_ratio > 0 and price_ref > 0
+                            and (atr_next / price_ref) < p.min_atr_ratio):
+                        can_open = False
+                    if can_open:
+                        _record_trade(is_buy, entry, sl_dist, s, j0,
+                                      exit_bar, exit_price, reason)
+                        sl_dist = max(atr_next * p.sl_atr_mult,
+                                      float(min_stop_at[j]))
+                        entry = price_ref
+                        sl = entry - sl_dist if new_buy else entry + sl_dist
+                        is_buy = new_buy
+                        s = s_now
+                        trailing = False
+                        j0 = j
+                        exit_price = None
+                        reason = "time"
+                        continue
+                    break
 
             c = close[j]
             a = atr[j]
