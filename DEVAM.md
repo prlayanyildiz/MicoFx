@@ -1731,6 +1731,46 @@ Yine de ortalama ~0.
 
 ---
 
+## 5e. `edge_scale` göreli — kitabı değiştirmek herkesin lotunu değiştirir (20.08)
+
+Canlı boyutlandırma yolunu denetlerken bulundu. `RiskManager.edge_scale`:
+
+```
+edges = {enabled sembollerin holdout net_r / max_dd_r}
+return clamp(sqrt(mine / median(edges)), 0.6, 2.2)
+```
+
+Medyan **kitabın kendisinden** geliyor, yani bir sembol eklemek ya da çıkarmak
+**diğer beşinin lot çarpanını da** değiştiriyor.
+
+Bugünkü calmar'lar: GER40 5,30 · SpotBrent 4,35 · JPN225 3,74 · US30 2,00 ·
+NAS100 1,98 · XAUUSD 1,96 → medyan **2,868**.
+
+XAUUSD (medyan altı) silindiğinde medyan **3,74**'e çıkıyor ve:
+
+| sembol | 6 sembolle | XAUUSD silinince |
+|---|---:|---:|
+| GER40 | 1,36 | **1,19** (−%12) |
+| JPN225 | 1,14 | **1,00** (−%12) |
+| NAS100 | 0,83 | **0,73** (−%12) |
+
+**Medyan altı bir sembolü çıkarmak, geri kalan herkesin pozisyonunu
+küçültüyor.** Tasarım gereği (göreli boyutlandırma) ama sonucu şu: 19–20.08'de
+kitap üç kez değişti (SpotBrent riski, XAUUSD sil, XAUUSD geri al) ve her
+seferinde **altı sembolün altısının lotu** değişti — kimse istemeden.
+
+**Kural olarak kaydediliyor:** kitaptan sembol eklemek/çıkarmak, kalan
+sembollerin risk profilini de değiştiren bir karardır ve öyle sunulmalıdır.
+NAS100'ün 50 işlemlik tetikleyicisi dolduğunda bu, kararın açık bir parçası
+olacak — "NAS100'ü sil" aynı zamanda "GER40'ın lotunu %12 küçült" demek.
+
+**Yan not, dürüstlük kaydı:** bu, bir uyuşmazlık kovalarken bulundu ve
+uyuşmazlık **benim hatamdı** — altı elemanlı listenin medyanını ortadaki tek
+elemandan aldım (3,74), gerçek medyan 2,868. Kodun değerleri log'la birebir
+tutuyor. Denetleyenin de denetlenmesi gerekiyor; bu sefer denetleyen bendim.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
