@@ -1755,7 +1755,44 @@ sayılmaz.
 
 ## 6. Nerede duruyoruz
 
-### 18.08.2026 akşamı — güncel
+### 20.08.2026 akşamı — güncel
+
+Hesap: Pepperstone demo **61562752**, bakiye **2.262,89 $**, özkaynak 2.269 $.
+Oturum 16.08'de 2.113 ile başladı. Gün: 9 işlem, **+233,42 $** (US30 +82,
+GER40 +55, JPN225 +51, XAUUSD +49, NAS100 −3). **Bu gürültü** — `n→ayırt`
+canlıda hâlâ 538; dokuz işlem onu değiştirmiyor. İyi gün kötü günden daha
+ikna edici görünür, tehlikesi orada.
+
+Kitap **6 sembol**, hepsi `risk_percent 0,80` / `max_positions 1`:
+GER40 `stoch_flip`/M30 · JPN225 `dual_t3`/M5 · NAS100 `mtf_pullback`/M30 ·
+US30 `t3_stoch`/M30 · SpotBrent `dual_t3`/M5 · XAUUSD `burst`/M15.
+Nominal risk %4,80, kapı %15.
+
+**Açık denetimler ve durumları:**
+
+| kontrol | durum |
+|---|---|
+| damga sapması | **0 açıklanmamış** (XAUUSD `calibrated`) |
+| otopsi halkası | dolmakta, tablo n≥50'de |
+| gece yedeği | kendiliğinden dönüyor (19.08 22:00 ✓) |
+| test / ruff / mypy | **2220 / temiz / 0** |
+| auto_reoptimize | **kapalı** — FWD penceresi korumada (4z) |
+
+**Bekleyen tetikleyiciler:** NAS100 50 işlem · lot çarpanı 100 işlem ·
+SpotBrent 30 işlem (risk 4× arttı, test edilmedi) · auto-reopt geri açma ·
+XAUUSD (iki kez silinmeye kalkıldı, ikisinde de gerekçe ölçümde çöktü).
+
+**Nerede duruyoruz:** arama tarafı kapandı (5b/5d, iki imzalı). Kalan tek
+bilgi kaynağı FWD penceresi; `n→ayırt` **538**, günde ~23 işlemle **~12
+Eylül**. O tarihten önce verilecek "çalışıyor / çalışmıyor" hükmü veriye
+değil sabırsızlığa dayanır.
+
+**Protokol 20.08'de değişti (§1):** Cursor eşit yetkili. İlk gününde üç şey
+buldu — teselli dalı, iki hükmün fazla genişliği, `validated` sızıntısı.
+
+---
+
+### 18.08.2026 akşamı — o günün rakamları
 
 Hesap: Pepperstone demo **61562752**, bakiye **2.066 $**, özkaynak 2.143 $,
 1:100. Marj 62,64 $ (seviye %3421) — kaldıraç neredeyse hiç kullanılmıyor,
