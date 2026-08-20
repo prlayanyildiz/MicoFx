@@ -720,11 +720,18 @@ def _dual_t3(cache: IndicatorCache, p: Params) -> Signals:
     This is the deliberately minimal core of the system: a fast T3 crossing a
     slow T3 decides direction and timing, and ATR decides everything about risk
     (the hard stop and the trail - shared with every other family, none of it
-    reinvented here). There is no Stochastic RSI, no RSI, no
-    ADX regime gate, no higher-timeframe agreement gate, no Bollinger/Keltner
-    squeeze, no order-flow volume proxy, no Fibonacci ratio, no body-ratio or
-    ATR-percentile entry filter. Those series are not merely disabled here, they
-    are never computed for this family.
+    reinvented here). There is no Stochastic RSI, no RSI, no higher-timeframe
+    agreement gate, no Bollinger/Keltner squeeze, no order-flow volume proxy,
+    no Fibonacci ratio, no body-ratio filter. Those series are not merely
+    disabled here, they are never computed for this family.
+
+    The ADX regime gate *is* read, and this docstring said otherwise until
+    20.08.2026. ``adx_min`` / ``adx_max`` reach ``_regime`` below and are live
+    on SpotBrent (15 and 25). A docstring that denies a live gate is worse than
+    no docstring: anyone reading it concludes the setting is inert and leaves
+    it out of their reasoning - which is how the same class of mistake has
+    already cost this project a stamp that described a config it never ran and
+    a backup that documented itself as working.
 
     The one optional layer is SuperTrend (``st_mult > 0``), and it is admitted
     only because it is itself an ATR construction - an ATR envelope around the
