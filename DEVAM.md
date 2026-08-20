@@ -1522,6 +1522,46 @@ unutulduğunu bilmemektir.
 
 ---
 
+## 5a. Arama tarafında ölçülecek şey kalmadı (20.08) — IDX-1 ve BE-3
+
+**IDX-1 sonucu: hayır.** Dört endeks, altı deterministik aile, canlı TF:
+
+| endeks | kazanan | kapı | kazanan holdout | mevcut |
+|---|---|---|---:|---:|
+| GER40 | st_trend/M30 | ✗ | −0,43 | +174,49 |
+| JPN225 | macd_flip/M5 | ✗ | −12,58 | +65,46 |
+| NAS100 | parabolic_flip/M30 | ✓ | +75,62 | **+108,31** |
+| US30 | stoch_flip/M30 | ✗ | −7,56 | +49,09 |
+
+Dördün üçünde kazanan kapıdan geçemedi; geçen tek aday mevcut konfigden
+**−32,7 R**. Deterministik ailelerle arama daha iyi konfig üretmiyor.
+
+**Asıl bulgu `tried` listesinde:** GER40'ta `stoch_flip` holdout **+256,92**
+(mevcut +174,49'un üstünde) ama `validated=false` olduğu için boru hattı onu
+eleyip holdout'u **−0,43** olan `st_trend`'i seçti. **4n'in altıncı kanıtı.**
+
+**BE-3 iptal edildi.** Süre sorun değildi (86.400 tam tarama 73 dk / 2 işçi,
+botun işçileriyle ~10 dk). Mantık çöktü: `breakeven_at_r`'yi ızgaraya koymanın
+tek anlamı değeri **boru hattının seçmesiydi**, ve altı ölçüm o boru hattının
+seçemediğini gösteriyor. Seçemeyen bir seçiciye eksen eklemek hatayı büyütür;
+üstelik `stoch_flip` bütçesini 3× artırıp GER40'ın determinizmini riske atardı.
+
+BE-1 bayrağı kodda, varsayılan kapalı, arama geçirmiyor — soru cevaplanabilir
+kalsın diye.
+
+### Sonuç: bundan sonrası ileriye dönük veri
+
+Altı bağımsız kesitte aynı sınır çıktı. **Arama tarafında ölçülecek şey
+kalmadı** — daha çok arama, daha çok aile, daha çok eksen, hepsi denendi ve
+hiçbiri seçim sorununu çözmüyor. Kalan tek bilgi kaynağı **dışarı verisi**:
+FWD penceresi, her gün biraz daha.
+
+Bu bir duraklama değil sonuçtur. Ve donanım tarafında ölçülen tek somut
+kazanç determinizm: ~32-36 çekirdek / 64 GB ile altı sembolün beşi tek çalışma
+gününde tam taranabilir (US30 hariç, ızgarası 1,43 G).
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
