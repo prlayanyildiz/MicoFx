@@ -1771,6 +1771,53 @@ tutuyor. Denetleyenin de denetlenmesi gerekiyor; bu sefer denetleyen bendim.
 
 ---
 
+## 5f. "Etkisi var mı" süpürmesi — kapı bizden bir adım ötede (20.08)
+
+AUDIT-A "okunuyor mu" diye sormuştu; bu süpürme **"mevcut değeriyle davranışı
+değiştirebilir mi"** diye sordu (4o'da bulunan sınıf). Cursor koştu.
+
+### Kapıya ulaşamayan üç ayar
+
+| ayar | değer | neden ulaşılmıyor |
+|---|---|---|
+| `cooldown_sec` | altıda 120 | M5 barı 300 s; soğuma sonraki kapanıştan önce doluyor |
+| `max_total_positions` | 100 | kitabın açabileceği en fazla 6 |
+| **`max_concurrent_risk_pct`** | **15** | 6 × %0,80 × EDGE_MAX 2,2 = **%10,56** |
+
+**Üçüncüsü önemli ve "ölü" demek yanlış olur.** Kapı %1,136 sembol riskinden
+itibaren bağlayıcı oluyor. Bekleyen lot çarpanı tetikleyicisi 1,25× ile bizi
+%1,0'e taşır (hâlâ altında); **1,5× ile %1,2 ve kapı devreye girer.** Yani
+sistemin kendi freni, bir sonraki ölçeklenme kararının **tam bir adım
+ötesinde** duruyor — bu, ölçeklenirken bilinmesi gereken bir şey.
+
+Kayda geçsin: bu oturumda operatöre defalarca "nominal risk %4,80, kapı %15"
+dendi, sanki kapı koruyormuş gibi. **Koruyamazdı.**
+(`tests/test_current_values_do_not_reach_these_gates.py` ikisini kilitliyor.)
+
+### Belge yalanı: `_dual_t3` docstring'i
+
+*"There is no ... ADX regime gate"* diyordu. Kod `adx_min`/`adx_max` okuyup
+`_regime` uyguluyor ve **SpotBrent'te ikisi de canlı** (15 ve 25). Düzeltildi.
+Çalışan bir kapıyı inkâr eden docstring, okuyanı o ayarı akıl yürütmesinden
+çıkarmaya iter — damganın ölçmediği konfigi tarif etmesiyle ve yedeğin
+"her akşam çalışır" demesiyle **aynı sınıf**.
+
+### Okunmayan ama dolu on alan
+
+GER40 `adx_min=15` / `st_mult=1,5`, SpotBrent `htf_factor=12` /
+`t3_accel_min=0,04` / `min_body_ratio=0,25` / `cost_rank_max=0,5`, US30
+`st_mult=2,0` / `cost_rank_max=0,3`, NAS100 `t3_accel_min=0,01`, JPN225
+`cost_rank_max=0,5`. Aileleri okumuyor (AUDIT-D bit-özdeşliği kanıtladı),
+davranış değişmiyor — ama panelde duruyor. Ürün kararı, acil değil.
+
+### Bulunamayanlar (boş liste de sonuç)
+
+min>max klemp yok · birbirini geçersiz kılan iki *okunan* ayar yok ·
+`daily_loss_pct=22` gevşek ama ulaşılabilir · marj kapıları bu hesapta nadir
+ama imkânsız değil.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
