@@ -1667,6 +1667,32 @@ ilerledikçe bu oran düzelmeli. Düzelmezse giriş kapısında ayrıca bakılac
 
 ---
 
+## 5c. Teselli dalı kaldırıldı, ve eşit-yetki protokolü ilk gününde işledi (20.08)
+
+`_finish_symbol`, hiçbir aday kapıdan geçmediğinde **doğrulanmamışlar
+arasından bir kazanan adlandırıyordu**. Apply onu almıyordu (zaten `validated`
+şart) ama **rapor alıyordu**, ve okunan şey rapor. IDX-1'de bu, "GER40'ın
+araması −0,43'lük adayı +256,92'lik olana tercih etti" satırını üretti;
+Claude onu DEVAM'a yazdı ve operatöre söyledi. **Seçilen şey hiçbir şeydi.**
+
+Artık reddedilen tarama bunu söylüyor: `ok: True`, `best: None`,
+`keep_reason`, ve `opt_runs`'a **kazanansız bir satır** — yani "arama koştu,
+hiçbiri geçmedi" görünür oluyor, eskiden sessizdi. `tried` her iki yolda da
+duruyor (bugünkü denetim onu okuyarak yapıldı). Panel `keep_reason` gösteriyor.
+(`4848e31`, fail-first: `test_unvalidated_pool_does_not_name_a_winner.py`.)
+
+**Bunu Cursor buldu**, kendi ölçümüne dair Claude'un okumasını denetlerken —
+eşit yetki protokolünün (§1, `686ba8f`) ilk çıktısı. Aynı denetimde iki hüküm
+daha daraltıldı: "altı bağımsız kanıt" → tek seçicinin altı sondası, ve
+"arama tükendi" → **bu seçici tükendi**. Ayrıca `validated`'ın holdout PF'sini
+apply kapısına soktuğu sızıntı da orada yakalandı.
+
+Küçük borç: `opt_runs`'a artık `strategy: None` / `params: {}` satırları
+girebiliyor. Bugünkü altı analiz `.get()` kullandığı için kırılmıyor; doğrudan
+indeksleyen bir okuyucu patlar.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
