@@ -1353,7 +1353,7 @@ function renderOptJob() {
   const rows = results.map((r) => {
     const tr = el("tr");
     if (!r.ok || !r.best) {
-      tr.innerHTML = `<td class="sym">${esc(r.symbol)}</td><td colspan="15" class="neg">${esc(r.error || "sonuc yok")}</td>`;
+      tr.innerHTML = `<td class="sym">${esc(r.symbol)}</td><td colspan="15" class="neg">${esc(r.keep_reason || r.error || "sonuc yok")}</td>`;
       return tr;
     }
     const h = r.best.holdout;

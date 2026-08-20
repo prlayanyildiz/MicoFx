@@ -877,23 +877,7 @@ class Optimizer:
         if plan.get("error"):
             return {"symbol": cfg.symbol, "ok": False, "error": plan["error"]}
 
-        usable = [a for a in attempts if a.get("ok") and a.get("validated")]
-        if not usable:
-            usable = [a for a in attempts if a.get("ok")]
-        if not usable:
-            reasons = "; ".join(f"{a['timeframe']}/{a['strategy']}: {a.get('error', '?')}"
-                                for a in attempts[:4]) or "sonuc yok"
-            report = {"symbol": cfg.symbol, "ok": False, "error": reasons,
-                      "elapsed_sec": round(time.time() - started, 1)}
-            LOG.emit(f"{cfg.symbol}: {reasons}", "OPT", cfg.symbol)
-            return report
-
-        # Search scores are not comparable between families or timeframes - each
-        # sweep explores a different space. The validation slice is the common
-        # yardstick, and it is not the slice the final numbers are read from.
-        report = self._pick_by_validation(usable)
-        report["symbol"] = cfg.symbol
-        report["tried"] = [
+        tried = [
             {"timeframe": a["timeframe"], "strategy": a.get("strategy", "?"),
              "ok": bool(a.get("ok")), "validated": bool(a.get("validated")),
              "score": a["best"]["score"] if a.get("ok") else None,
@@ -902,7 +886,68 @@ class Optimizer:
              "error": a.get("error", "")}
             for a in attempts
         ]
-        report["elapsed_sec"] = round(time.time() - started, 1)
+        elapsed = round(time.time() - started, 1)
+        usable = [a for a in attempts if a.get("ok") and a.get("validated")]
+        if not usable:
+            if not any(a.get("ok") for a in attempts):
+                reasons = "; ".join(
+                    f"{a['timeframe']}/{a['strategy']}: {a.get('error', '?')}"
+                    for a in attempts[:4]) or "sonuc yok"
+                report = {"symbol": cfg.symbol, "ok": False, "error": reasons,
+                          "tried": tried, "elapsed_sec": elapsed}
+                LOG.emit(f"{cfg.symbol}: {reasons}", "OPT", cfg.symbol)
+                return report
+            # Sweeps ran; the OOS gate refused every one. Naming a winner
+            # here used to pick the best unvalidated validation score — a
+            # label that read as the search's proposal. Apply never took it
+            # (it already requires validated), but the report did, and that
+            # report is what got written down. No candidate, no name.
+            reason = "hicbir aday kapidan gecmedi"
+            incumbent = ((getattr(cfg, "opt_summary", None) or {}).get("holdout") or {})
+            report = {
+                "symbol": cfg.symbol,
+                "ok": True,
+                "validated": False,
+                "best": None,
+                "tried": tried,
+                "elapsed_sec": elapsed,
+                "keep_reason": reason,
+                "applied": False,
+                "holdout_retention": None,
+                "incumbent": {
+                    "net_r": incumbent.get("net_r"), "score": incumbent.get("score"),
+                    "profit_factor": incumbent.get("profit_factor"),
+                    "trades": incumbent.get("trades"),
+                    "strategy": cfg.strategy, "timeframe": cfg.timeframe,
+                    "updated_at": float(getattr(cfg, "opt_updated_at", 0.0) or 0.0),
+                } if incumbent else None,
+            }
+            self.store.record_opt_run(cfg.symbol, 0.0, {
+                "timeframe": None, "strategy": None,
+                "params": {},
+                "selection": {}, "validation": {}, "holdout": {},
+                "validated": False,
+                "keep_reason": reason,
+                "tried": tried,
+                "elapsed_sec": elapsed,
+                "force": bool(getattr(self, "_force_apply", False)),
+                "applied_at": None,
+                "previous": None,
+            }, False)
+            tail = f" -> uygulanmadi ({reason})"
+            if report.get("incumbent"):
+                tail += (f", mevcut ayar korundu "
+                         f"(test net {float(report['incumbent'].get('net_r') or 0.0):+.1f}R)")
+            LOG.emit(f"{cfg.symbol}: {reason}{tail}", "OPT", cfg.symbol)
+            return report
+
+        # Search scores are not comparable between families or timeframes - each
+        # sweep explores a different space. The validation slice is the common
+        # yardstick, and it is not the slice the final numbers are read from.
+        report = self._pick_by_validation(usable)
+        report["symbol"] = cfg.symbol
+        report["tried"] = tried
+        report["elapsed_sec"] = elapsed
 
         best = report["best"]
         score = float(best["score"])
@@ -1085,17 +1130,20 @@ class Optimizer:
         count breaking near-ties.
 
         This is a *tiebreaker only*, and only among candidates that already
-        cleared every out-of-sample gate. Nothing here can promote a candidate
-        that failed one: a mixed pool (the fallback branch, where nothing
-        validated) skips the tiebreak entirely, and the apply gates downstream
-        are untouched either way. The product's stated priority is scalping,
-        swing is the fallback when scalping genuinely does not validate for a
+        cleared every out-of-sample gate. The caller must not hand it an
+        unvalidated consolation set — naming a winner there is how a report
+        once claimed the search had picked a family the apply path would
+        have refused. The product's stated priority is scalping, swing is
+        the fallback when scalping genuinely does not validate for a
         symbol - so a scalp family (micro_rev/burst) among the near-tied peers
         wins over an equally-valid swing one; it never wins over a swing
         candidate that is not actually tied on validation.
         """
+        usable = [a for a in usable if a.get("validated")]
+        if not usable:
+            raise ValueError("validated kume bos")
         top = max(usable, key=lambda a: a["best"]["validation"]["score"])
-        if len(usable) < 2 or not all(a.get("validated") for a in usable):
+        if len(usable) < 2:
             return top
         ceiling = float(top["best"]["validation"]["score"])
         if ceiling <= 0.0:
