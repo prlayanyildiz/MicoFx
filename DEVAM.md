@@ -50,6 +50,34 @@ seçim yapma tuzağı).
 karşı görüşü de yazar. Ölçülebilir bir anlaşmazlık varsa **ölçülür**;
 ölçülemiyorsa ikisi de DEVAM'a geçer ve karar sahibi gerekçesini yazar.
 
+### 20.08 ikinci genişletme: Claude yargıç değil, uygulayıcı
+
+Kalan tek darboğaz Claude'un **onayı** idi. Kalkıyor. Cursor bir canlı
+değişiklik istediğinde artık ikna etmesi gerekmiyor; **Claude uygular.**
+
+Reddin tek geçerli biçimi **ölçülmüş bir itiraz**: "bence riskli" yetmez,
+"şu ölçüme göre şu zararı verir" gerekir, ve red DEVAM'a gerekçesiyle yazılır.
+Tercih reddi yoktur.
+
+**Üç kademe** — Cursor talebi hangi kademeye koyduğunu yazar:
+
+| kademe | ne | kim karar verir |
+|---|---|---|
+| **yeşil** | risk maruziyetini değiştirmeyen her şey: rapor, log, panel, ölçüm betiği, test, arama parametresi (`apply_best=False` ile) | **Cursor.** Claude uygular, tartışmaz. |
+| **sarı** | risk profilini değiştiren: `risk_percent`, `max_positions`, kitap kompozisyonu, denetçi eşikleri, `size_by_edge` | **İkisi birden.** Anlaşmazlık ölçülür; ölçülemezse uygulanmaz. |
+| **kırmızı** | hesap düzeyinde: kaldıraç, hesap kilidi, günlük fren tavanı, canlı paraya geçiş | **Operatör.** İkisi de öneri yazar, uygulamaz. |
+
+**Sarı kademe neden ikisi birden:** 5e'de ölçüldü — kitaptan bir sembol
+çıkarmak kalan beşinin lotunu %12 değiştiriyor. Risk kararları birbirine
+bağlı, ve tek kişinin görmediği bir yan etki oluyor.
+
+**Değişmeyen iki şey ve sebepleri (yetki değil, eşzamanlılık):**
+* canlı `micofx.db`'ye **tek süreç** yazar — iki yazar sqlite'ta birbirini ezer
+* git'e **tek süreç** commit atar — aynı çalışma ağacında staging paylaşılır
+
+Bunlar Cursor'ın yetkisini değil, iki sürecin aynı dosyaya çarpmasını
+sınırlıyor. Ayrı worktree kurulursa ikincisi de kalkar.
+
 Yazışma dosyaları:
 
 | yön | dosya |
