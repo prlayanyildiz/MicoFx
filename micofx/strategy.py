@@ -747,8 +747,10 @@ def _dual_t3(cache: IndicatorCache, p: Params) -> Signals:
     """
     close = cache.close
     size = close.size
-    # T3 and ATR only. k/d/adx are UI display slots; this family leaves them at
-    # zero rather than computing a Stochastic RSI it does not use.
+    # T3 and ATR only for the signal. k/d stay at zero - display slots for a
+    # Stochastic RSI this family does not compute. ADX is different and this
+    # comment used to lump it in with them: when adx_min or adx_max is set the
+    # series is real and gates entries, which is live on SpotBrent at 15/25.
     t3 = cache.t3(p.t3_length, p.t3_volume_factor)
     atr_series = cache.atr(p.atr_period)
     zeros = np.zeros(size, dtype=np.float64)

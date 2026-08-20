@@ -1463,6 +1463,13 @@ async function loadOptHistory() {
           : '<span class="pill off">hayir</span>'}${
           h.applied || !h.keep_reason ? ""
             : `<div class="small warn-text">${esc(h.keep_reason)}</div>`}</td>`;
+      // A refused sweep leaves no strategy and no params, and /api/opt/apply
+      // answers those with a 400. Offering the button anyway turns a run that
+      // found nothing into an error the operator has to interpret.
+      if (!h.strategy || !h.params || !Object.keys(h.params).length) {
+        tr.appendChild(el("td", { class: "small" }, "-"));
+        return tr;
+      }
       tr.appendChild(el("td", {}, el("button", {
         class: "btn btn-sm", text: "Uygula",
         onclick: async (e) => {
