@@ -1562,6 +1562,36 @@ gününde tam taranabilir (US30 hariç, ızgarası 1,43 G).
 
 ---
 
+## 5b. FWD haftalık raporu — "ne zaman bileceğiz" artık bir sayı (20.08)
+
+`cursor/_fwd_weekly.py` → her sabah tek satır, aynı sütunlar. Pencere
+`entry_blocks_since` = 16.08 18:34 sunucu; bar damgaları `gmtime`;
+`max_open=1`.
+
+İlk satır (20.08, pencere **3,75 gün**):
+
+| | n | değer | SE | sıfırdan ayırt | **gereken n** |
+|---|---:|---:|---:|---|---:|
+| kâğıt | 57 | +0,4606 R/işlem | 0,339 | hayır | **124** |
+| canlı kapalı | 87 | −1,50 $/işlem | 1,87 | hayır | **538** |
+
+Take 0,75 (43/57, SE 0,057). Kâğıt net +26,25 R, canlı **−130,68 $**.
+Otopsi halkası n=20 (<50, tablo yok).
+
+**`n→ayırt` sütunu raporun asıl değeri:** mean/SE oranı sabit kalırsa canlı
+tarafta `|mean| > 2 SE` için **~538 işlem** gerekiyor. Günde ~23 işlemle
+bu **~23 gün**, yani **eylül ortası**.
+
+Bu, "sistemin kâr edip etmediğini bilmiyoruz" cümlesini plan yapılabilir bir
+şeye çeviriyor. Ve şunu da söylüyor: bu tarihten önce alınacak "sistem
+çalışmıyor" ya da "çalışıyor" kararı **veriye değil sabırsızlığa** dayanır.
+
+Not: canlı 87 işlem, kâğıt 57 üretmiş — canlı hâlâ ~1,5 katı alıyor. Pencerenin
+ilk iki günü `max_positions=2` dönemiydi (1'e iniş 18.08 18:36); pencere
+ilerledikçe bu oran düzelmeli. Düzelmezse giriş kapısında ayrıca bakılacak.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
