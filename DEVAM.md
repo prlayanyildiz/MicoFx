@@ -1131,9 +1131,16 @@ Yalnız elle, bitmiş metinde, **asla arama koşarken** — yüklü model ~5 GB 
 ve `optimizer.py` işçi sayısını boştaki RAM'e göre hesaplar. Hiçbir otomatik
 akışa bağlı değil.
 
-**Sınırı:** aracın iddia ayıklayıcısı kaba (iki sayı geçen her satırı alıyor),
-yanlış pozitif üretiyor. Model tarafı değil, regex tarafı düzeltilmeli — ama
-getiri eğrisi kuyruğunun arkasında.
+**Ayıklayıcı düzeltildi (20.08).** İlk sürüm "iki sayı geçen her satırı"
+alıyordu ve ilk gerçek koşusunda beşte beş yanlış alarm verdi — model değil,
+regex kusuruydu. Artık üç şart birden aranıyor: bir sayı, onu *ölçüm* yapan
+bir belirteç (`R`, `%`, `$`, `n=`, `PF`, `calmar`, `SE`, beklenti…), ve tarih
+/ saat / bölüm numarasının işi yapmıyor olması.
+
+Yeniden koşuldu: 120 satırdan **4 iddia**, üçü isabetli yakalama, biri sınırda
+(ayar cümlesi). Ve üç isabetin üçü de **kendi brief'imden** — sayıyı yazıp
+örneklemi ve hata payını yazmadığım satırlar. Aracın var oluş sebebi tam
+olarak buydu.
 
 ---
 
