@@ -1571,9 +1571,25 @@ unutulduğunu bilmemektir.
 Dördün üçünde kazanan kapıdan geçemedi; geçen tek aday mevcut konfigden
 **−32,7 R**. Deterministik ailelerle arama daha iyi konfig üretmiyor.
 
-**Asıl bulgu `tried` listesinde:** GER40'ta `stoch_flip` holdout **+256,92**
-(mevcut +174,49'un üstünde) ama `validated=false` olduğu için boru hattı onu
-eleyip holdout'u **−0,43** olan `st_trend`'i seçti. **4n'in altıncı kanıtı.**
+**DÜZELTME (20.08, Cursor denetimi).** Yukarıdaki tabloyu "boru hattı
++256,92'lik `stoch_flip`'i eleyip −0,43'lük `st_trend`'i seçti" diye okumuştum.
+**Yanlış.** `optimizer.py:880-882`:
+
+```
+usable = [a for a in attempts if a.get("ok") and a.get("validated")]
+if not usable:
+    usable = [a for a in attempts if a.get("ok")]      # teselli dali
+```
+
+GER40'ta altı ailenin **altısı da** `validated=false`. Apply yolu
+`report.get("validated")` şartına bağlı, dolayısıyla **hiçbiri uygulanmazdı**;
+kitap incumbent'ta kalırdı. Raporlanan "kazanan", kapı herkesi reddedince
+`ok` olanlar arasından **adlandırma** yapan teselli dalının çıktısı — aramanın
+önerisi değil. **Boru hattı hiçbir şey seçmedi.**
+
+Doğru okuma: `stoch_flip` hem arama blend'inde hem holdout'ta birinci,
+doğrulamada ikinci; `validated=false` büyük olasılıkla doğrulama `_slice_ok`
+(PF < 1,10). Bu 4n'in bir satırı, **yeni bir kanıt değil**.
 
 **BE-3 iptal edildi.** Süre sorun değildi (86.400 tam tarama 73 dk / 2 işçi,
 botun işçileriyle ~10 dk). Mantık çöktü: `breakeven_at_r`'yi ızgaraya koymanın
@@ -1584,14 +1600,38 @@ seçemediğini gösteriyor. Seçemeyen bir seçiciye eksen eklemek hatayı büy�
 BE-1 bayrağı kodda, varsayılan kapalı, arama geçirmiyor — soru cevaplanabilir
 kalsın diye.
 
-### Sonuç: bundan sonrası ileriye dönük veri
+### Sonuç — ve bu da düzeltildi
 
-Altı bağımsız kesitte aynı sınır çıktı. **Arama tarafında ölçülecek şey
-kalmadı** — daha çok arama, daha çok aile, daha çok eksen, hepsi denendi ve
-hiçbiri seçim sorununu çözmüyor. Kalan tek bilgi kaynağı **dışarı verisi**:
-FWD penceresi, her gün biraz daha.
+Önce "altı bağımsız kesitte aynı sınır, arama tarafında ölçülecek şey kalmadı"
+diye yazmıştım. **İkisi de fazla genişti** (Cursor denetimi, 20.08):
 
-Bu bir duraklama değil sonuçtur. Ve donanım tarafında ölçülen tek somut
+**"Altı bağımsız" değil.** Altısında da *eksen* değişti, **seçici hiç
+değişmedi** — hepsi aynı `walk_forward` kesiti, aynı `rank_for_selection`
+doğrulama skoru, aynı `MIN_OOS_PF = 1.10`. Altı ayrı yargıç değil, **tek
+makinenin altı kez sondalanması**. Üstelik L2b/L2d zaten 4n'de "kanıtlandı
+demiyoruz" diye kayıtlıydı (n=10, SE 0,33, iki sembolde ters işaret); onları
+ayrı kanıt saymak aynı zayıf ρ'yu iki kez tartmak.
+
+**"Arama tükendi" değil, "bu seçici tükendi".** Tükenen şey `walk_forward` +
+doğrulamayla aile seçimi + 1,10 eşiği. Makineyi değiştirmeden başka yerde
+aramak da aynı sonucu üretir; makineyi değiştirmeden "arama bitti" demek de
+aynı sonucu **gizler**.
+
+**Sızıntı, ayrıca:** `validated = _slice_ok(validation) and _slice_ok(holdout)`
+— yani holdout PF'si apply kapısının **içinde**. Muhafazakâr yönde (kötü
+holdout uygulanmaz) ama "holdout yalnız yargılar" cümlesi bu yüzden tam doğru
+değil, ve "bağımsız yargıçlar" iddiasını da çürütüyor: hepsi aynı dilim
+tanımını ve aynı 1,10'u paylaşıyor.
+
+**IDX-1'in kendi kurgusunda iki eksik daha:** yalnız *canlı* TF koşuldu (4y
+JPN225'in M5'ini M30 ile sınayacağını yazmıştı, sınanmadı), ve incumbent
+aileler (`mtf_pullback`, `t3_stoch`, `dual_t3`) taramaya **dahil edilmedi**.
+Dolayısıyla tablo "küçük ızgaralı aileler, bu seçiciyle, canlı TF'de,
+incumbent'ı geçmedi" der — "dört endekste arama tükendi" demez. Ayrıca
+dilim uzunlukları kıyaslanamaz (JPN225 ~92 gün vs GER40 638 gün).
+
+**Ayakta kalan dar hâli:** 4n'in kendi cümlesi — *daha iyi seçmek değil, daha
+az seçmek*. Ve FWD penceresi hâlâ tek dış doğruluk kaynağı. Ve donanım tarafında ölçülen tek somut
 kazanç determinizm: ~32-36 çekirdek / 64 GB ile altı sembolün beşi tek çalışma
 gününde tam taranabilir (US30 hariç, ızgarası 1,43 G).
 
