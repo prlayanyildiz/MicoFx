@@ -1693,6 +1693,44 @@ indeksleyen bir okuyucu patlar.
 
 ---
 
+## 5d. ROLL-1: seçim başarısızlığı rejime bağlı değil (20.08)
+
+5b'nin daralttığı hüküm — *"arama değil, **bu seçici** tükendi"* — bir soru
+bırakmıştı: bu, son pencereye mi özgü, yoksa iç ölçü **hiçbir** dilimi
+öngörmüyor mu? Cursor ölçtü (arama yok, ızgara yok, konfig seçilmiyor;
+yalnız altı canlı damganın 6 genişleyen kesitte yeniden puanlanması).
+
+| kesit | ρ(doğrulama sırası, sonraki dilim) | SE | 2 SE'yi aşıyor |
+|---|---:|---:|---|
+| 0 | −0,26 | 0,48 | hayır |
+| 1 | **−0,83** | 0,28 | evet |
+| 2 | +0,20 | 0,49 | hayır |
+| 3 | **+0,89** | 0,23 | evet |
+| 4 | −0,03 | 0,50 | hayır |
+| 5 | +0,14 | 0,49 | hayır |
+
+**Ortalama 0,019.** Aşan iki kesit **ters işaretli**; en yeni iki kesit (bugüne
+en yakın) sıfıra en yakın. **"Yalnız son dilim bozuldu" deseni yok.**
+
+Sembol içi (aynı damga, 6 kesitte doğrulama↔sonraki dilim): GER40 −0,14,
+JPN225 −0,60, NAS100 −0,20, US30 −0,66, XAUUSD −0,60, SpotBrent +0,66.
+**Beşinin nokta tahmini negatif**, hiçbiri ayırt edilebilir değil.
+
+**Ne kurar, ne kurmaz.** Kurduğu: seçim başarısızlığının yalnız güncel rejime
+ait olduğuna dair **kanıt yok** — yani "bu seçiciye güvenebileceğimiz bir
+dönem" aramanın dayanağı kalmadı. Kurmadığı: başarısızlığın evrensel olduğu.
+Her ρ **n=6**, hepsi güçsüz, ve Cursor bunu her satırda yazdı.
+
+Kurgu notu: eşit *bar* payı eşit *takvim* değil — GER40 M30 7579 gün, JPN225
+M5 463 gün kapsıyor, yani kesit 0'da GER40'ın doğrulaması 2019, JPN225'inki
+2025. Kaba, ve Cursor kabalığı işaretledi (IDX-1'de aynı hatayı yapmıştık).
+Yine de ortalama ~0.
+
+**Sonuç:** 5b'nin dar hâli ayakta. Arama tarafında yapılacak yeni ölçüm yok
+**ve bu sefer hüküm ikimizin denetiminden geçti.**
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
