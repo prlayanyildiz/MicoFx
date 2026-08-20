@@ -16,11 +16,39 @@ mesajları neden'leri taşıyor, kod ne'yi.
 
 ## 1. Köprü — kim ne yapar
 
-**Claude** teşhis eder, karar verir, diff inceler, commit ve push atar.
-Ölçüm tasarlar, sonucu yorumlar, canlı sistemi yönetir.
+### 20.08.2026'dan itibaren: eşit yetki, tek yazar
 
-**Cursor** ölçer ve kodlar. Commit atmaz, push etmez, canlı bota ve DB'ye
-dokunmaz.
+Operatör kararı: **Cursor da Claude ile aynı tam yetkiye sahip.** İnceler,
+araştırır, bulur; sonra ikisi konuşup nasıl düzeltileceğini planlar.
+
+**İkisi de yapabilir:** kendi soruşturmasını açmak, öncelik önermek, ölçüm
+tasarlamak, kod yazmak, diğerinin kararına **itiraz etmek ve reddetmek**.
+"Brief bekliyorum" artık geçerli bir duruş değil — ikisi de kendi işini
+seçebilir.
+
+**Değişmeyen tek şey, yetki değil eşzamanlılık:** canlı DB'ye ve git'e
+**tek yazar** dokunur (sunucudaki Claude oturumu). Sebebi hiyerarşi değil,
+yarış koşulu: iki süreç aynı `micofx.db`'ye yazarsa biri diğerinin üzerine
+yazar, ve iki ajan commit atarsa değişikliğin kime ait olduğu kaybolur.
+Cursor bir canlı değişiklik isterse yazıp gerekçelendirir; Claude uygular ya
+da **gerekçeyle reddeder** — ve o red de tartışmaya açıktır.
+
+**Karşılıklı inceleme zorunlu.** Ürün kodu, iki taraftan hangisi yazarsa
+yazsın, diğerinin incelemesinden geçmeden commit edilmez. Bugüne kadar
+Claude Cursor'ın diff'ini inceliyordu ama **Claude'unkini kimse
+incelemiyordu**; bu asimetri kalktı. Cursor, Claude'un yazdığı koda ve
+verdiği hükümlere aynı sertlikte bakar.
+
+**Her rapor üç şeyi taşır:** ne yapıldı, sırada ne var, ve **neden bu**.
+Üçüncüsü en önemlisi — bu oturumda en çok değer, birinin diğerinin
+gerekçesindeki hatayı görmesinden çıktı (Cursor: ızgara budamasının
+kirlenmesi, `atr_period` kesişimi, `max_open` uyumsuzluğunun raporlanması;
+Claude: otopsi kaydının kapanışı bozabilmesi, `note` gölgelemesi, holdout'la
+seçim yapma tuzağı).
+
+**Anlaşmazlık kaydedilir.** İkisi aynı fikirde değilse hüküm veren taraf
+karşı görüşü de yazar. Ölçülebilir bir anlaşmazlık varsa **ölçülür**;
+ölçülemiyorsa ikisi de DEVAM'a geçer ve karar sahibi gerekçesini yazar.
 
 Yazışma dosyaları:
 
