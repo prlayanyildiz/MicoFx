@@ -1836,7 +1836,20 @@ GER40 `adx_min=15` / `st_mult=1,5`, SpotBrent `htf_factor=12` /
 `t3_accel_min=0,04` / `min_body_ratio=0,25` / `cost_rank_max=0,5`, US30
 `st_mult=2,0` / `cost_rank_max=0,3`, NAS100 `t3_accel_min=0,01`, JPN225
 `cost_rank_max=0,5`. Aileleri okumuyor (AUDIT-D bit-özdeşliği kanıtladı),
-davranış değişmiyor — ama panelde duruyor. Ürün kararı, acil değil.
+davranış değişmiyor — ama panelde duruyor.
+
+**Sıfırlanacak (Cursor'ın yeşil kararı, kitap düzleşince uygulanacak).**
+Uygulama anı zamanlama meselesi: canlı kitaba yazmak bot durdurmayı
+gerektiriyor ve kozmetik bir düzeltme için açık pozisyonların trail'i
+kesilmez.
+
+**Ve bir bağlantı, unutulmasın:** bu alanlar bugün ölü çünkü *o aile* onları
+okumuyor. **Aile değişirse canlanırlar** — ve o gün `adx_min`'in 0 mı 15 mi
+olduğu fark eder. 0 model varsayılanı ve tarafsız, 15 önceki ailenin artığı;
+yani sıfırlamak daha güvenli. Ama **"artık okunmuyor" ile "bir daha hiç
+okunmayacak" aynı şey değil.** `auto_reoptimize` kapalı olduğu için
+kendiliğinden aile değişmiyor ve her apply zaten aranan params'ı yazıyor —
+bu iki koşuldan biri değişirse not tekrar okunmalı.
 
 ### Bulunamayanlar (boş liste de sonuç)
 
