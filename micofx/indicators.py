@@ -162,6 +162,24 @@ def rolling_sum(src: np.ndarray, length: int) -> np.ndarray:
     return out
 
 
+def macd_periods(fast: int, slow: int) -> tuple[int, int]:
+    """Order MACD periods so the first is the shorter EMA.
+
+    Grid axes and POST /api/opt/params range-check each period independently,
+    so ``macd_fast=26, macd_slow=12`` stores with HTTP 200. ``macd()`` already
+    swaps those before computing; warmup and ``required_bars`` used to read
+    the raw ``macd_slow`` and under-warm the same swapped input. One helper,
+    every reader.
+    """
+    fast_n = max(1, int(fast))
+    slow_n = max(1, int(slow))
+    if fast_n > slow_n:
+        fast_n, slow_n = slow_n, fast_n
+    elif fast_n == slow_n:
+        slow_n = fast_n + 1
+    return fast_n, slow_n
+
+
 def macd(close: np.ndarray, fast: int, slow: int, signal: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Classic MACD: fast/slow EMA spread, its own EMA as the signal line.
 
@@ -171,19 +189,10 @@ def macd(close: np.ndarray, fast: int, slow: int, signal: int) -> tuple[np.ndarr
     read, not a price-smoothing read. Two lines converging/diverging can flip
     ahead of a slow line's own direction change.
 
-    ``fast`` must be the shorter period. The grid lists them independently,
-    and POST /api/opt/params will accept ``macd_fast=26, macd_slow=12`` with
-    HTTP 200 (same hole ema() had). Without a swap the line is the classic
-    MACD negated, so every zero-cross in ``macd_flip`` buys where it should
-    sell. Equal periods make the line identically zero; bump the slow one.
-    The shipped grid (fast 6..16, slow 18..34) never hits either case.
+    ``fast`` must be the shorter period. See ``macd_periods``. The shipped
+    grid (fast 6..16, slow 18..34) never hits a swap or an equal-period bump.
     """
-    fast_n = max(1, int(fast))
-    slow_n = max(1, int(slow))
-    if fast_n > slow_n:
-        fast_n, slow_n = slow_n, fast_n
-    elif fast_n == slow_n:
-        slow_n = fast_n + 1
+    fast_n, slow_n = macd_periods(fast, slow)
     fast_ema = ema(close, fast_n)
     slow_ema = ema(close, slow_n)
     line = fast_ema - slow_ema

@@ -252,7 +252,7 @@ class IndicatorCache:
         return self._atr[key]
 
     def macd(self, fast: int, slow: int, signal: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        key = (int(fast), int(slow), int(signal))
+        key = (*ind.macd_periods(fast, slow), int(signal))
         if key not in self._macd:
             self._macd[key] = ind.macd(self.close, *key)
         return self._macd[key]
@@ -992,8 +992,10 @@ def _macd_flip(cache: IndicatorCache, p: Params) -> Signals:
     sell = below & ~was_below
 
     # MACD needs the slow EMA plus its own signal EMA to settle, and the ATR
-    # the exits are sized from needs its own warmup.
-    warmup = min(size, max(p.macd_slow + p.macd_signal, p.atr_period * 3))
+    # the exits are sized from needs its own warmup. Use the ordered slow so
+    # a swapped payload does not under-warm while macd() itself uses 34.
+    _, slow_n = ind.macd_periods(p.macd_fast, p.macd_slow)
+    warmup = min(size, max(slow_n + p.macd_signal, p.atr_period * 3))
     buy[:warmup] = False
     sell[:warmup] = False
 
@@ -1234,7 +1236,7 @@ def required_bars(p: Params) -> int:
                    int(p.t3_fast * max(1.2, p.t3_slow_mult)) * 20,
                    int(p.st_period) * 10
                    if (p.st_mult > 0 or p.strategy == "st_trend") else 0,
-                   (p.macd_slow + p.macd_signal) * 10,
+                   (ind.macd_periods(p.macd_fast, p.macd_slow)[1] + p.macd_signal) * 10,
                    (p.wt_channel_len + p.wt_avg_len) * 10,
                    (p.stoch_k_period + p.stoch_k_smooth + p.stoch_d_smooth) * 8,
                    p.aroon_length * 8))

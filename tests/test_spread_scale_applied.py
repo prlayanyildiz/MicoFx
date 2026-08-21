@@ -184,3 +184,43 @@ def test_the_sample_threshold_is_what_guards_against_a_glitch():
     it nothing is applied at all, whatever the reading says."""
     blob = {"X": _hist(SPREAD_RATIO_BUCKETS - 1, SPREAD_RATIO_MIN_SAMPLES - 1)}
     assert _optimizer(blob)._spread_scale("X") == 1.0
+
+
+def test_a_store_failure_returns_one_but_says_so_once():
+    """Same class as the engine flush latch: 1.0 keeps the search running,
+    silence lets a frozen sqlite look like 'no measurement' and cost ~10% cheap.
+    One WARN, then quiet until a successful read re-arms it.
+    """
+    from micofx.logbus import LOG
+
+    class _Boom:
+        def get_setting(self, key, default=None):
+            raise OSError("disk")
+
+    opt = object.__new__(Optimizer)
+    opt.store = _Boom()
+    seen: list[tuple[str, str, str]] = []
+    orig = LOG.emit
+
+    def _cap(msg, level="INFO", symbol=""):
+        seen.append((msg, level, symbol))
+        return orig(msg, level, symbol)
+
+    LOG.emit = _cap
+    try:
+        assert opt._spread_scale("XAUUSD") == 1.0
+        assert opt._spread_scale("XAUUSD") == 1.0
+        warns = [row for row in seen if row[1] == "WARN"]
+        assert len(warns) == 1
+        assert "spread_ratio" in warns[0][0]
+        assert warns[0][2] == "XAUUSD"
+
+        opt.store = _Store({"XAUUSD": _hist(20, SPREAD_RATIO_MIN_SAMPLES)})
+        measured = opt._spread_scale("XAUUSD")
+        assert measured > 1.0
+        opt.store = _Boom()
+        seen.clear()
+        assert opt._spread_scale("XAUUSD") == 1.0
+        assert len([row for row in seen if row[1] == "WARN"]) == 1
+    finally:
+        LOG.emit = orig

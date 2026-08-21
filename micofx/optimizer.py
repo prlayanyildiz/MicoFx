@@ -231,6 +231,11 @@ class Optimizer:
         self.entry_lock: threading.Lock | None = None
         # Bars fetched at plan time, reused for incumbent replay (AS3).
         self._bar_snap: dict[tuple[str, str], Any] = {}
+        # First store/import failure of _spread_scale gets one WARN; a later
+        # success re-arms it. Same latch the engine uses for diagnostic flushes:
+        # returning 1.0 on a frozen read is the old behaviour (search still
+        # runs) but quoting that 1.0 as "no measurement" is a ~10% cheap cost.
+        self._spread_scale_warned = False
 
     @property
     def busy(self) -> bool:
@@ -488,49 +493,62 @@ class Optimizer:
         cleared the sample threshold. Half a session of ticks from one hour is
         the reading that already misled us once; nothing moves the search
         until the distribution is real.
+
+        A missing or thin histogram is 1.0 on purpose and stays quiet. An
+        exception (import, store) is also 1.0 so the search still runs, but
+        that 1.0 is a frozen read being treated as "no measurement" - the
+        search then costs ~10% cheap. WARN once; clear the latch on the next
+        success so a second outage is not silent.
         """
         try:
             from .engine import SPREAD_RATIO_BUCKETS, SPREAD_RATIO_MIN_SAMPLES, _ratio_percentile
             blob = self.store.get_setting("spread_ratio", {}) or {}
             counts = blob.get(symbol)
-            if not isinstance(counts, (list, tuple)):
-                return 1.0
-            counts = [int(v) for v in counts
-                      if isinstance(v, (int, float)) and not isinstance(v, bool)]
-            if len(counts) != SPREAD_RATIO_BUCKETS:
-                return 1.0
-            if sum(counts) < SPREAD_RATIO_MIN_SAMPLES:
-                return 1.0
-            median = _ratio_percentile(counts, 0.50)
-            if not median or median <= 0:
-                return 1.0
-            # Bounded both ways, but the two bounds do different jobs.
-            #
-            # The floor is a stance: a ratio under 1 says the live tick is
-            # TIGHTER than the bar, and letting that make the search cheerier
-            # than the bars justify is the one direction this whole mechanism
-            # exists to prevent. Clamped to 1.0.
-            #
-            # The ceiling is only a sanity bound, and the first version set it
-            # at 3.0 with no data behind it. There is data now: across fifteen
-            # symbols the highest measured median is CHFJPY at 3.35 over 3204
-            # samples - above that ceiling. So 3.0 was not catching an absurd
-            # reading, it was truncating the single measurement that matters
-            # most, and searching the book's most expensive symbol ~10% cheaper
-            # than it really is.
-            #
-            # The glitch guard is SPREAD_RATIO_MIN_SAMPLES, not this: a frozen
-            # feed or a one-off gap cannot hold a stable median across hundreds
-            # of samples spanning hours.
-            #
-            # 5.0 is the histogram's own maximum - its last bucket is an
-            # overflow reported at its lower edge, so no median can exceed it.
-            # The ceiling is therefore the measurement's resolution rather than
-            # a number picked here, and anything lower would clip real data
-            # again the moment a symbol measures above it.
-            return float(min(5.0, max(1.0, median)))
-        except Exception:
+            scale = 1.0
+            if isinstance(counts, (list, tuple)):
+                counts = [int(v) for v in counts
+                          if isinstance(v, (int, float)) and not isinstance(v, bool)]
+                if (len(counts) == SPREAD_RATIO_BUCKETS
+                        and sum(counts) >= SPREAD_RATIO_MIN_SAMPLES):
+                    median = _ratio_percentile(counts, 0.50)
+                    if median and median > 0:
+                        # Bounded both ways, but the two bounds do different jobs.
+                        #
+                        # The floor is a stance: a ratio under 1 says the live tick is
+                        # TIGHTER than the bar, and letting that make the search cheerier
+                        # than the bars justify is the one direction this whole mechanism
+                        # exists to prevent. Clamped to 1.0.
+                        #
+                        # The ceiling is only a sanity bound, and the first version set it
+                        # at 3.0 with no data behind it. There is data now: across fifteen
+                        # symbols the highest measured median is CHFJPY at 3.35 over 3204
+                        # samples - above that ceiling. So 3.0 was not catching an absurd
+                        # reading, it was truncating the single measurement that matters
+                        # most, and searching the book's most expensive symbol ~10% cheaper
+                        # than it really is.
+                        #
+                        # The glitch guard is SPREAD_RATIO_MIN_SAMPLES, not this: a frozen
+                        # feed or a one-off gap cannot hold a stable median across hundreds
+                        # of samples spanning hours.
+                        #
+                        # 5.0 is the histogram's own maximum - its last bucket is an
+                        # overflow reported at its lower edge, so no median can exceed it.
+                        # The ceiling is therefore the measurement's resolution rather than
+                        # a number picked here, and anything lower would clip real data
+                        # again the moment a symbol measures above it.
+                        scale = float(min(5.0, max(1.0, median)))
+        except Exception as exc:
+            if not getattr(self, "_spread_scale_warned", False):
+                LOG.emit(
+                    f"{symbol}: spread_ratio okunamadi ({type(exc).__name__}) - "
+                    "arama 1.0 ile ucuzluyor, sqlite donmus olabilir",
+                    "WARN",
+                    symbol,
+                )
+                self._spread_scale_warned = True
             return 1.0
+        self._spread_scale_warned = False
+        return scale
 
     def _plan_symbol(self, cfg, lookback_days: int, bar_cap: int,
                      variants: list[dict[str, Any]],

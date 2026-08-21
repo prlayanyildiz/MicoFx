@@ -63,3 +63,43 @@ def test_equal_periods_do_not_collapse_the_line_to_zero():
     line, _sig, hist = ind.macd(close, 12, 12, 9)
     assert np.any(np.abs(line) > 1e-12)
     assert np.any(np.abs(hist) > 1e-12)
+
+
+def test_macd_periods_is_the_single_order_source():
+    assert ind.macd_periods(12, 26) == (12, 26)
+    assert ind.macd_periods(26, 12) == (12, 26)
+    assert ind.macd_periods(12, 12) == (12, 13)
+    assert ind.macd_periods(0, 5) == (1, 5)
+
+
+def test_warmup_and_required_bars_use_the_ordered_slow():
+    """After the swap, raw macd_slow can be the short period. Warmup and
+    required_bars used to size from that raw field and under-warm 8 inverted
+    grid cells by 1-4 bars. Same helper as macd() itself closes that gap.
+    atr_period=1 so ATR does not mask the MACD term.
+    """
+    from micofx.strategy import IndicatorCache, Params, compute, required_bars
+
+    close = _close()
+    high = close + 0.4
+    low = close - 0.4
+    cache = IndicatorCache(high, low, close)
+    classic = Params(strategy="macd_flip", macd_fast=12, macd_slow=34,
+                     macd_signal=9, atr_period=1)
+    swapped = Params(strategy="macd_flip", macd_fast=34, macd_slow=12,
+                     macd_signal=9, atr_period=1)
+    assert required_bars(classic) == required_bars(swapped)
+    left = compute(cache, classic)
+    right = compute(cache, swapped)
+    np.testing.assert_array_equal(left.buy, right.buy)
+    np.testing.assert_array_equal(left.sell, right.sell)
+
+
+def test_swapped_and_classic_share_one_cache_key():
+    from micofx.strategy import IndicatorCache
+
+    close = _close()
+    cache = IndicatorCache(close + 0.4, close - 0.4, close)
+    cache.macd(12, 26, 9)
+    cache.macd(26, 12, 9)
+    assert list(cache._macd) == [(12, 26, 9)]
