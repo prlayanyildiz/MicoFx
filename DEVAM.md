@@ -2952,3 +2952,51 @@ ta kendisi ("a missed entry costs a signal, a duplicate costs double risk").
 3. `_verify_ambiguous_send`'in "dolmadı" sözü, limitin 1 olmasına yaslanıyor.
 
 Docstring düzeltildi: artık ne ölçtüğünü ve neyin koruduğunu söylüyor.
+
+## 5k · MISS-1: kaçırılan işlemler ölçüldü (21.08)
+
+Operatör `max_positions=10` sordu; istediği limit değil, **"işlem
+kaçırmayalım"**. Limiti tartışmak yerine kaçırma ölçüldü — `entry_blocks`
+`signals` sayacı, 16.08 18:34'ten beri:
+
+**Açılan 95, engellenen 150 → kaçırma oranı %61.**
+
+| sebep | n | pay |
+|---|---|---|
+| `risk_sembol_limiti` | 101 | %67 |
+| `spread` | 28 | %19 |
+| `emir_hatasi` | 12 | %8 |
+| `risk_ters_yon` | 5 | %3 |
+| `lot` | 4 | %3 |
+
+| sembol | açılan | engel | kaçırma | en büyük sebep |
+|---|---|---|---|---|
+| GER40 | 18 | 91 | **%83** | limit=68 |
+| SpotBrent | 6 | 12 | %67 | **spread=12** |
+| XAUUSD | 23 | 19 | %45 | limit=11 |
+| JPN225 | 25 | 18 | %42 | limit=12 |
+| NAS100 | 14 | 9 | %39 | limit=9 |
+| US30 | 9 | 1 | %10 | limit=1 |
+
+**Üç sonuç, üçü de hedefi daraltıyor:**
+
+1. **Bu bir GER40 sorusu.** 101 limit engelinin 68'i tek sembolde. Kitap
+   geneline limit açmak, sorunun üçte ikisini çözmek için tamamını riske
+   atmak.
+2. **SpotBrent'in kaçırması makastan.** 12/12 `spread`. Limit orada hiçbir
+   şey değiştirmez — ayrı iş.
+3. **101'in içi karışık, ve bu belirleyici.** `risk.py:501-504`'te sayı
+   kontrolü yön kontrolünden **önce** çalışıyor: `max_positions=1` iken ters
+   yön sinyalleri de `risk_sembol_limiti` olarak yazılıyor. Görünen
+   `risk_ters_yon=5` gerçek sayı **değil**. Ters işlemler ölçüldü:
+   GER40'ta **−1001 R**. Limiti açmak, zararlı olduğu ölçülmüş işlemleri de
+   içeri alır — payı bilinmiyor.
+
+**Sonuç: %61 kaçırma gerçek, ama "kaçırılan = kazanç" değil.** Kararı
+verebilmek için iki ölçüm gerekiyor (Cursor'a devredildi): o 101'in kaç
+tanesinin aynı yön olduğu, ve aynı yönde ikinci girişin holdout'ta ne
+kazandırdığı. İkincisi `max_open` geçişini **ön koşul** yapıyor — mayın
+artık yalnız engel değil, kararı almanın yolu.
+
+Uyarı: `signals` mandalı bellekte, restart yeni epizot başlatır; sayı hafif
+yukarı sapabilir, yön değil büyüklük etkilenir.
