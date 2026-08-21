@@ -319,6 +319,70 @@ def test_engine_parks_ipc_verified_flat_without_ambiguous_retcode():
     assert state.signal == "buy"
 
 
+
+def test_a_late_fill_does_not_get_a_second_order_on_the_same_bar():
+    """"Verified unfilled" is a two-second look, and the retry must re-check.
+
+    The verifier watches the position book for about two seconds after an
+    unconfirmed send. Finding nothing, it reports the order never landed and
+    the signal is deliberately left alive so a genuinely failed entry can try
+    again. What stopped a fill that arrived later from becoming a second
+    position was never this code - it was the position limit refusing the
+    retry, which only worked because the limit was one. Above one the retry
+    goes through and one signal takes two entries, the exact duplicate the
+    verifier exists to prevent.
+
+    So the retry carries its own check: if our open count has grown since the
+    send that "did not fill", it did fill.
+    """
+    engine, client, state, cfg = _entry_harness({
+        "ok": False,
+        "retcode": -10001,
+        "verified_unfilled": True,
+        "error": "EURUSD: dogrulandi: yeni pozisyon olusmamis",
+    })
+
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+    assert engine._unfilled_probe["EURUSD"][1] == 0, "sifir acikken olculdu"
+    assert state.signal == "buy", "gercek bir basarisizlikta sinyal yasar"
+    first_sends = client.open_market_calls
+
+    # Thirty seconds pass: the link park expires while the bar is still live.
+    # That park narrows this window, it does not close it - the backoff is
+    # thirty seconds and an M30 bar runs for thirty minutes.
+    engine._link_backoff = {}
+
+    # The fill turns up a beat later, under our magic, on the same bar.
+    engine._positions = [{"ticket": 5001, "magic": cfg.magic, "symbol": "EURUSD",
+                          "side": "buy", "volume": 0.1, "sl": 0.9, "tp": 0.0,
+                          "price_open": 1.0, "time": 0, "profit": 0.0, "swap": 0.0}]
+
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+
+    assert client.open_market_calls == first_sends, "ikinci emir gonderilmemeliydi"
+    assert state.entry_block == "gec_dolum"
+    assert state.signal == "", "bar tuketildi, sinyal yeniden teklif edilmez"
+
+
+def test_the_check_does_not_swallow_a_genuine_retry():
+    """A miss that stayed a miss must still be retried - the count is the test."""
+    engine, client, state, cfg = _entry_harness({
+        "ok": False,
+        "retcode": -10001,
+        "verified_unfilled": True,
+        "error": "EURUSD: dogrulandi: yeni pozisyon olusmamis",
+    })
+
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+    before = client.open_market_calls
+    engine._link_backoff = {}          # the park is a separate mechanism
+
+    # Book unchanged: nothing landed late, so this is an ordinary retry.
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+
+    assert client.open_market_calls > before, "gercek kacirma tekrar denenmeliydi"
+    assert state.entry_block != "gec_dolum"
+
 # --------------------------------------------------------------- engine harness
 
 def _entry_harness(open_market_result):
@@ -390,6 +454,7 @@ def _entry_harness(open_market_result):
     eng._orphan_tickets = set()
     eng._orphan_scan = {}
     eng._link_backoff = {}   # real Engine always has it
+    eng._unfilled_probe = {}   # real Engine always has it
     eng.states = {}
 
     state = SymbolState("EURUSD")

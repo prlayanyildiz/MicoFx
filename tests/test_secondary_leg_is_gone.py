@@ -71,6 +71,7 @@ def test_leftover_secondary_tickets_do_not_hold_entry():
     eng.store = SimpleNamespace(system=SimpleNamespace())
     eng.client = SimpleNamespace(connected=True)
     eng._link_backoff = {}
+    eng._unfilled_probe = {}   # real Engine always has it
     eng._orphan_scan = {}
     eng._sec_tickets = {99}
     st = SymbolState("EURUSD")

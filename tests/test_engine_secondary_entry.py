@@ -119,6 +119,7 @@ def _make_engine(cfg, positions_after):
     eng._orphan_tickets = set()
     eng._orphan_scan = {}
     eng._link_backoff = {}   # real Engine always has it
+    eng._unfilled_probe = {}   # real Engine always has it
     eng.states = {}
     eng._cooldowns = {}          # persisted post-fill cooldown; see Engine.__init__
     return eng, client, store
@@ -694,6 +695,7 @@ def _pending_exits_engine(cfg, positions):
     eng._orphan_tickets = set()
     eng._orphan_scan = {}
     eng._link_backoff = {}   # real Engine always has it
+    eng._unfilled_probe = {}   # real Engine always has it
     updates = []
     eng.store = SimpleNamespace(
         symbols=SimpleNamespace(values=lambda: [cfg]),
@@ -720,6 +722,7 @@ def test_apply_pending_exits_lands_once_orphan_scan_clears():
     eng, updates = _pending_exits_engine(cfg, positions=[])
     eng._orphan_scan = {}  # resolved/dropped
     eng._link_backoff = {}   # real Engine always has it
+    eng._unfilled_probe = {}   # real Engine always has it
 
     eng._apply_pending_exits()
 

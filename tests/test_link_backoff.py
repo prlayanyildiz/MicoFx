@@ -38,6 +38,7 @@ from micofx.mt5client import AMBIGUOUS_RETCODES
 def _engine():
     eng = object.__new__(Engine)
     eng._link_backoff = {}
+    eng._unfilled_probe = {}   # real Engine always has it
     eng._orphan_scan = {}
     return eng
 

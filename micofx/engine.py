@@ -324,6 +324,18 @@ class Engine:
         # not act. Restoring a stop is a live behaviour change on the money
         # path and does not get made for a case nobody has seen.
         self._stopless_seen: set[int] = set()
+        # symbol -> (bar key, how many of ours were open) at the moment a send
+        # came back "verified unfilled". That verdict is a two-second look at
+        # the position book, not proof the order never reached the market, and
+        # the signal is deliberately left alive so a genuinely failed entry can
+        # retry. What protected the retry from a fill that landed late was the
+        # position limit: at max_positions=1 the count gate refused it. Above
+        # 1 that refusal disappears and the retry sends a second order for the
+        # same signal on the same bar - one signal, two entries, which is the
+        # duplicate open_market's verifier exists to prevent. So the retry
+        # carries its own check now: if our count has grown since the failed
+        # send, the entry landed and there is nothing left to retry.
+        self._unfilled_probe: dict[str, tuple[tuple[int, int], int]] = {}
         # Diagnostic flushes that have failed and not yet succeeded again.
         # The three _flush_* methods swallow their exceptions on purpose: a
         # transient sqlite lock should retry silently, and the dirty bit is
@@ -2080,6 +2092,26 @@ class Engine:
         # acquired - a fresh orphan from the other side of the same race. The
         # re-check below closes that direction too.
         before_tickets = {p["ticket"] for p in self._positions if p["magic"] == base.magic}
+        probe = self._unfilled_probe.pop(cfg.symbol, None)
+        if probe is not None:
+            probe_bar, probe_count = probe
+            here = (int(state.last_bar or 0), int(state.pending_bar_key[1] or 0))
+            if probe_bar == here and len(before_tickets) > probe_count:
+                # A previous send on this same bar came back "verified
+                # unfilled" - and since then a position of ours has appeared.
+                # The order did reach the market, just later than the two
+                # seconds the verifier watched for. Sending again would give
+                # this one signal a second entry, which the position limit
+                # used to prevent only because it was set to one.
+                LOG.emit(f"onceki emir gec dolmus (acik {probe_count} -> "
+                         f"{len(before_tickets)}) - ayni bar icin ikinci emir "
+                         f"gonderilmedi.", "WARN", cfg.symbol)
+                self._mark_bar_filled(cfg.symbol, state.signal_source, state.last_bar)
+                state.signal = ""
+                state.signal_source = ""
+                state.note = "onceki emir gec dolmus - tekrar gonderilmedi"
+                state.entry_block = "gec_dolum"
+                return
         orphan_closed = False
         unresolved_ticket = False
         with self.entry_lock:
@@ -2231,6 +2263,13 @@ class Engine:
             # poll. Retcode check kept as belt-and-suspenders.
             if result.get("verified_unfilled") or result.get("retcode") in AMBIGUOUS_RETCODES:
                 self._link_backoff[base.symbol] = time.time() + LINK_BACKOFF_SEC
+            if result.get("verified_unfilled"):
+                # Remember what "nothing landed" was counted against, so the
+                # retry can tell a late fill from a genuine miss.
+                self._unfilled_probe[cfg.symbol] = (
+                    (int(state.last_bar or 0), int(state.pending_bar_key[1] or 0)),
+                    sum(1 for p in self._positions if p["magic"] == cfg.magic),
+                )
             # Verified-flat is the gate working: book readable, nothing filled,
             # symbol parked. WARN so fault scans do not treat a successful
             # refuse as a live Error (same reason pending-drop went WARN).

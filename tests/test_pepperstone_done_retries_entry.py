@@ -115,6 +115,7 @@ def _make_engine(cfg, open_result, positions_after=None):
     eng._orphan_tickets = set()
     eng._orphan_scan = {}
     eng._link_backoff = {}
+    eng._unfilled_probe = {}   # real Engine always has it
     eng.states = {}
     eng._cooldowns = {}
     eng._filled_bars = {}
