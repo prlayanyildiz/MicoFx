@@ -71,12 +71,38 @@ Tercih reddi yoktur.
 çıkarmak kalan beşinin lotunu %12 değiştiriyor. Risk kararları birbirine
 bağlı, ve tek kişinin görmediği bir yan etki oluyor.
 
-**Değişmeyen iki şey ve sebepleri (yetki değil, eşzamanlılık):**
-* canlı `micofx.db`'ye **tek süreç** yazar — iki yazar sqlite'ta birbirini ezer
-* git'e **tek süreç** commit atar — aynı çalışma ağacında staging paylaşılır
+### 21.08 üçüncü genişletme: commit, restart, ve sarının daralması
 
-Bunlar Cursor'ın yetkisini değil, iki sürecin aynı dosyaya çarpmasını
-sınırlıyor. Ayrı worktree kurulursa ikincisi de kalkar.
+Cursor'ı bekleten üç şey daha kalkıyor. Hiçbiri yetki değildi ama sonuçları
+aynıydı: her düzeltme Claude'un sırasını bekliyordu.
+
+**1. Cursor kendi işini commit eder.** Şart: **`git add -A` yok** — yalnız
+kendi dokunduğu dosyalar, adıyla. Sebebi çalışma ağacının paylaşılması;
+`-A` diğerinin yarım işini içeri alır. İnceleme **sonradan** yapılır, ve bu
+yeterli: kod otomatik dağıtılmıyor, bot yalnız yeniden başlatılınca alıyor.
+
+**2. Cursor botu yeniden başlatabilir** (§3'teki prosedürle: doğru
+yorumlayıcı, sonra **portu doğrula**). Kural: öncesinde ve sonrasında
+`FOR_CLAUDE.md`'ye yazar, ki ikisi aynı anda durdurup iki örnek açmasın.
+Açık pozisyon varken kozmetik değişiklik için durdurmaz — 20.08'de beş
+pozisyon açıkken bunu ikimiz de reddettik, doğru refleksti.
+
+**3. Sarı kademe daraldı: kapsam "risk koduna dokunmak" değil,
+"amaçlanan maruziyeti değiştirmek".** `risk.py`'de bir hesap hatası bulup
+düzeltmek — kodun zaten yapmayı amaçladığı şeyi yapmasını sağlamak —
+**yeşildir**. Sarı olan, maruziyetin kendisini kasıtlı değiştirmektir:
+`risk_percent`, `max_positions`, kitap kompozisyonu, denetçi eşikleri,
+`size_by_edge`.
+
+Sarı neden duruyor: 5e'de ölçüldü — kitaptan bir sembol çıkarmak kalan
+beşinin lotunu %12 değiştiriyor. Maruziyet kararları birbirine bağlı ve tek
+okuyucunun kaçırdığı yan etkiler var (20.08'de XAUUSD'yi silip geri alırken
+Claude kaçırdı).
+
+**Geriye kalan tek teknik kısıt:** canlı `micofx.db`'ye **tek süreç** yazar.
+İki yazar sqlite'ta birbirini ezer ve botun bellekteki kopyası üzerine yazar.
+Cursor bir canlı ayar isterse yazar, Claude uygular — ve **ölçülmüş itiraz
+dışında reddedemez**.
 
 Yazışma dosyaları:
 
