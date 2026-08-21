@@ -1859,6 +1859,40 @@ ama imkânsız değil.
 
 ---
 
+## 5g. Kaybedenler girişte ayırt edilmiyor (21.08) — LOSS-1'in temiz hâli
+
+18.08'in kayıp anatomisi (4g) yalnız **sonuca koşullu** alanları
+kullanabiliyordu ve bunu yazmıştı. Otopsi halkası (POST-1) girişteki kapı
+değerlerini de tutuyor; n=36'da (16 kazanan / 20 kaybeden) ilk kez
+**döngüsel olmayan** kesit çekildi.
+
+| girişte bilinen | kazanan | kaybeden | fark / SE |
+|---|---:|---:|---|
+| `spread_atr` | 0,0446 | 0,0448 | −0,0003 / 0,0157 |
+| `atr_pct` | 0,0018 | 0,0018 | ~0 |
+| `fill_vs_signal_close_r` | +0,0028 | +0,0178 | −0,0150 / 0,0173 |
+| `adx` | 32,1 (n=3) | 19,4 (n=4) | +12,7 / 10,5 |
+
+**Hiçbiri ayırt edilemiyor.** İşleme girildiği anda kaybedenle kazanan aynı
+görünüyor — yani giriş kapılarına eklenecek bir şey yok, ve bu CHOP-1c'yi
+(ADX filtresi işe yaramadı) işlem verisinden bağımsız doğruluyor.
+
+Yan gözlem: 36 kaydın yalnız **7'sinde ADX var**, çünkü üç sembolde
+`adx_min=0` olduğu için seri hiç hesaplanmıyor. 5f'nin ölü ayarı veride
+görünüyor.
+
+**Ayıran şey sonradan:** MAE kazananda 0,33 R, kaybedende **0,91 R**
+(ayırt edilir). Çıkış: `sl` n=19 **−15,00 R**, `flatten` n=9 +6,90,
+`trail` n=8 **+20,99** — sekiz trail çıkışı kitabın kârını taşıyor.
+
+MAE farkı sonuca koşullu, ama **zamana bağlanırsa koşullu olmaktan çıkar**:
+girişten N bar sonraki MAE, o anda bilinen bir sayıdır. LOSS-3 bunu ölçüyor
+(N ∈ {1,2,3,5}, erken kapatma eşiği X ∈ {0,5, 0,75, 1,0}), ve BE-1'in
+kuralıyla korunuyor: **120+ tutma kovasının net R'si %10'dan fazla düşerse
+aday elenir** — kârın tamamı orada.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
