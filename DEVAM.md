@@ -261,6 +261,20 @@ Süreç sınırını geçmesi gereken her şey **veri** olarak geçmeli
 | MT5 | `C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe` |
 | **botu başlat** | `C:\MicoFX-venv\Scripts\pythonw.exe run.py` (cwd = proje) |
 
+**Bot iki `pythonw.exe` süreci gösterir — bu normaldir.** Venv'in
+`Scripts\pythonw.exe`'si Windows'ta bir **yönlendirici**: `pyvenv.cfg`'deki
+`home`'dan asıl yorumlayıcıyı başlatır ve venv'in `site-packages`'ını yolda
+tutar. Doğrulandı (21.08):
+
+```
+PID 3404   C:\MicoFX-venv\Scripts\pythonw.exe run.py    (ebeveyn, soket yok)
+PID 15732  C:\Program Files\Python312\pythonw.exe run.py  (cocuk, port 8900)
+```
+
+Yani **portu tutan sürecin yolu Program Files görünür** ve bu bir arıza
+değildir — `sys.prefix` venv'i, `sys.base_prefix` Python312'yi gösterir,
+`import uvicorn` çalışır. Panikleyip öldürmeyin.
+
 **Botu `C:\Program Files\Python312` ile başlatmayın.** O yorumlayıcıda
 `uvicorn`/`fastapi` yok; `pythonw` ile başlatılınca hata da görünmez, süreç
 sessizce ölür. 18.08'de seans düzeltmesi için bot durdurulup yanlış
