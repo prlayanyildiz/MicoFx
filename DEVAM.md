@@ -1987,9 +1987,16 @@ aileden **6'ya** inip dört endeksi aradı, sonuç **0/4 validated apply**.
 "Daha az aday = daha kararlı seçim" teorik olarak doğru, **bu seçicide
 gösterilmedi**. Daha da kesmek yalnız challenger havuzunu yok eder.
 
-**3. Canlı olmayan aileler tek dürüst challenger.** `aroon_flip`,
-`parabolic_flip`, `wavetrend_flip`, `macd_flip`, `st_trend`, `t3_flip` —
-altısı IDX-1'in challenger seti ve **tam taranabilir tek alternatif havuz**.
+**3. Canlı olmayan aileler tek dürüst challenger.** IDX-1'in altısı
+`aroon_flip` · `parabolic_flip` · `wavetrend_flip` · **`stoch_flip`** ·
+`macd_flip` · `st_trend` idi; bunlardan **canlı olmayan beşi** tam taranabilir
+tek alternatif havuz (`stoch_flip` GER40'ta incumbent, yani hem challenger hem
+mevcut).
+
+`t3_flip` (144.000) ve `micro_rev` (1,55 M) o havuzda **değil** — ızgaraları
+`max_combos=2000`'in üstünde, yani çekiliş aileleri. Silinmemelerinin gerekçesi
+ayrı: `t3_flip` 18 kazanmış 5 apply almış, `micro_rev` canlı olmuş (XAUUSD M5).
+Gerekçeleri IDX-1 setine bağlanmasın.
 `macd_flip` apply=0: kapı çalışıyor, aile ölü değil. `micro_rev` canlı olmuş
 (XAUUSD M5). `STRATEGY_TIMEFRAMES = {}` kasıtlı — hangi TF hangi aileye uyar
 diye önden kesmiyoruz; aile silmek o kararı geri alır.
