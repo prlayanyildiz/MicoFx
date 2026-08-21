@@ -2853,6 +2853,13 @@ düştü, temiz koşumda 2235 geçti. **Test sonucu, koşum sırasında öbürü
 commit'i varsa geçersizdir** — düşen testi kendi değişikliğine yazmadan önce
 `git log --date=format:%H:%M:%S` ile zamana bak.
 
+**Ve testi commit'in kapısı yapmak istiyorsan çıktıyı borulama.**
+`pytest ... | tail -2 && git commit` **kapı değildir**: boru hattının çıkış
+kodu `tail`'ındır, yani pytest kırmızı olsa da zincir devam eder. 21.08'de
+tam böyle kırmızı suite üstüne commit atıldı (`f62b6b8`; düşenler yarıştan
+kaynaklıydı, ama kapı yine de açıktı). Doğrusu:
+`pytest -q > out.txt 2>&1; echo $?` — sonra oku, sonra commit et.
+
 ### 5j-ek · Otopsi tablosundaki 4 eksik kapanış — reap hatası DEĞİL
 
 Cursor 19–21.08 penceresinde otopsi tablosunda 45 satıra karşı brokerde 49
