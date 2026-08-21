@@ -99,10 +99,32 @@ beşinin lotunu %12 değiştiriyor. Maruziyet kararları birbirine bağlı ve te
 okuyucunun kaçırdığı yan etkiler var (20.08'de XAUUSD'yi silip geri alırken
 Claude kaçırdı).
 
-**Geriye kalan tek teknik kısıt:** canlı `micofx.db`'ye **tek süreç** yazar.
-İki yazar sqlite'ta birbirini ezer ve botun bellekteki kopyası üzerine yazar.
-Cursor bir canlı ayar isterse yazar, Claude uygular — ve **ölçülmüş itiraz
-dışında reddedemez**.
+### 21.08 dördüncü genişletme: son ayrım da kalktı
+
+Operatör: *"tüm yetkiyi Cursor'a ver, ikinizde tam yetkilisiniz."*
+
+**Cursor canlı `micofx.db`'ye de yazar.** Kalan kısıt yetki değil, aynı anda
+iki yazar olmamasıydı — ve bunun çözümü zaten kurulu: **botu durduran, pencereyi
+sahiplenir.** Restart protokolü (öncesinde ve sonrasında `FOR_CLAUDE.md`'ye
+yaz) DB yazımı için de geçerli. Kim durdurduysa o yazar, o başlatır, o portu
+doğrular.
+
+Kural tek cümle: **bot açıkken canlı DB'ye yazılmaz** — motorun bellekteki
+kopyası üzerine yazar ve değişiklik sessizce kaybolur. Bu iki gün içinde
+öğrenildi, teori değil.
+
+**Sarı kademe duruyor ve simetriktir.** Maruziyeti kasten değiştiren karar
+(`risk_percent`, `max_positions`, kitap kompozisyonu, denetçi eşikleri,
+`size_by_edge`) **ikisinin de tek başına yapamayacağı** şeydir — Claude da
+yapamaz. Bu bir hiyerarşi değil iki anahtar kuralı, ve gerekçesi ölçülmüş:
+5e'de bir sembolü çıkarmanın kalan beşinin lotunu %12 değiştirdiği görüldü,
+ve o bağlantıyı 20.08'de Claude tek başına kaçırdı.
+
+**Kırmızı operatörde kalır:** kaldıraç, hesap kilidi, günlük fren tavanı,
+canlı paraya geçiş.
+
+Bundan sonra ikisi arasında **yetki farkı yoktur.** Kalan her şey sıra ve
+koordinasyon.
 
 Yazışma dosyaları:
 
