@@ -2887,3 +2887,44 @@ yerine ilk satırın zamanından başlatılmalı.
 Bu, ikimizin birbirinin **kaydını** (ölçümünü değil) düzelttiği üçüncü vaka.
 Sınıf tekrar ediyor: sayı doğru, cümle yanlış. Ölçen taraf sayının ne
 anlattığını, ölçmeyen taraf cümlenin ne iddia ettiğini görüyor.
+
+### 5j-2 · Ortak modül turu, Claude payı (21.08)
+
+`run` 279, `backup` 419, `logbus` 168, `paths` 105, `account_lock` 64,
+`spread_calibration` 191, `edge_decomposition` 134.
+
+**Kesin hata yok.** Bu dosyalar zaten sertleştirilmiş: `paths` her açılış
+hatasını operatörün okuyabileceği bir satıra çeviriyor, `run`'ın yetim işçi
+temizliği bu yorumcuya daraltılmış (öldürmesi imkânsız olan tarafta hata
+yapıyor), `logbus` dosya yazımını kilitliyor ve OSError'da bellekteki halkaya
+düşüyor.
+
+**Kayıt 1 — `account_lock`'taki asimetri kasıtlı.** Gerçek para vetosu yalnız
+**bağlanmamış** dalda çalışıyor; kilit zaten kuruluysa `trade_mode` sorulmuyor.
+Bu bir açık değil: **kilidi elle kurmak, operatörün onayının ta kendisi.**
+Eşleşen dala bir `is_real_money_account` kontrolü eklemek sıkılaştırma gibi
+görünür ve aslında canlıya geçmenin tek yolunu kapatır. Koda yorum olarak
+yazıldı, çünkü bunu "düzeltmek" fazlasıyla davetkâr.
+
+**Kayıt 2 — log dosyası makine saatiyle damgalanıyor.** `logbus`
+`time.localtime(entry["ts"])` kullanıyor ve bu **doğru**: `ts` makinenin
+ürettiği bir epoch, MT5 damgası değil. Ama sonucu şu: log satırları **makine
+yerel**, bar/deal/otopsi damgaları **sunucu**. Bugün ikisi çakışıyor (makine
+UTC+3, broker GMT+3) ve 5j-ek'teki kanıtın tamamı bu çakışmaya dayanıyordu —
+log satırlarını `exit_time` ile eşleştirdim. Bu bir garanti değil,
+yapılandırma tesadüfü. Saat kayması uyarısı (`8b876aa`) bu riski örtüyor, ama
+log ile sunucu damgası karşılaştıran **herkes** bu varsayımı bilmeli.
+
+**Bulgu — `edge_decomposition` üretimde çağrılmıyor.** Modül yön becerisini
+çıkış geometrisinden ayırıyor (GER40 14.08: holdout E +0,153 gerçek yönle,
++0,048 aynı çıkışlar + yazı tura). Docstring "her config için üretilebilir
+olmalı, tek seferlik defter değil" diyor. Bugün **tek çağıranı testler**.
+Yani: sorduğumuz soruya cevap veren, yazılmış ve testli bir araç var ve hiçbir
+yere bağlı değil. Ölü kod değil — **kullanılmayan yetenek**, ki performans
+arayışında bundan daha doğrudan bir soru yok: *kenarımız yön seçmekte mi,
+çıkışlarda mı?* Cursor'a ölçüm olarak devredildi.
+
+**Küçük not:** `_side_stats` `x >= 0` ile sıfır R'yi **kazanan** sayıyor.
+Başabaş çıkış (trail tam girişte) bunu üretebilir. WR'yi yukarı, `avg_win`'i
+aşağı çeker — iki yanlış ters yönde. Maliyet yüklüyken tam sıfır nadir; kanıt
+görülmeden düzeltilmedi.

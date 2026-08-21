@@ -50,6 +50,12 @@ def decide_account_lock(
             bind_server=found_server,
         )
     if exp_login == found_login and exp_server == found_server:
+        # No real-money veto on this branch, and that is deliberate: an
+        # already-bound pair IS the operator's approval. The refusal above
+        # only stops a real account being adopted *automatically* on first
+        # sight, and setting the lock by hand is the one way to say yes to
+        # live money. Adding a trade_mode check here would read like a
+        # tightening and would in fact remove the only route to going live.
         return AccountLockDecision(allow_entry=True)
     return AccountLockDecision(
         allow_entry=False,
