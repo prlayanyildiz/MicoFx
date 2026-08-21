@@ -1973,6 +1973,52 @@ Bayrak (`mae_close_bars` / `mae_close_r`) varsayılan kapalı birleşti
 
 ---
 
+## 5i. Aile azaltma: hiçbiri gitmiyor, ve gerekçe performans değil (21.08)
+
+Operatör sordu, Cursor araştırdı, **cevap hayır**. Üç gerekçe, üçü de
+retention/performanstan bağımsız:
+
+**1. Bugünkü kazanç sıfır.** `auto_reoptimize` kapalı (4z), yani hiçbir tarama
+kendiliğinden koşmuyor. 12 aile de 5 aile de duvar saati **aynı: sıfır**.
+Listeyi şimdi kesmek çalışmayan makineyi hızlandırmaktır.
+
+**2. Azaltma zaten ölçüldü ve işe yaramadı.** IDX-1 tam olarak buydu: 12
+aileden **6'ya** inip dört endeksi aradı, sonuç **0/4 validated apply**.
+"Daha az aday = daha kararlı seçim" teorik olarak doğru, **bu seçicide
+gösterilmedi**. Daha da kesmek yalnız challenger havuzunu yok eder.
+
+**3. Canlı olmayan aileler tek dürüst challenger.** `aroon_flip`,
+`parabolic_flip`, `wavetrend_flip`, `macd_flip`, `st_trend`, `t3_flip` —
+altısı IDX-1'in challenger seti ve **tam taranabilir tek alternatif havuz**.
+`macd_flip` apply=0: kapı çalışıyor, aile ölü değil. `micro_rev` canlı olmuş
+(XAUUSD M5). `STRATEGY_TIMEFRAMES = {}` kasıtlı — hangi TF hangi aileye uyar
+diye önden kesmiyoruz; aile silmek o kararı geri alır.
+
+Karşılaştırma noktası: `flow_rev` / `trix_flip` 14.08'de **gerçek bir boşlukla**
+silindi (162 adayda apply 0, holdout 2,7 ve 5,0 vs sonraki en kötü 23,2).
+Bugünkü adaylarda o boşluk **yok**.
+
+**`t3_stoch` ayrı ve doğru ayrım:** aranamazlığı (1,43 G, D1b'de sapma
+ortalamadan büyük) bir **arama politikası** sorunu, aile silme sorunu değil.
+Silinirse US30'un gideceği yer ölçülü: IDX-1'de `stoch_flip` holdout
+**−7,56** vs incumbent **+49,09**. Taşımak daha kötü. US30 `t3_stoch`'ta
+kalır, ve **yeni bilet çekmek için yeniden örneklenmez** (D1b'nin kapattığı
+şey).
+
+**Ölçülemeyen açıkça yazıldı:** aile sayısı düşürüldüğünde `validated` oranı
+ve apply başına aile değişimi **bu seçicide ölçülemez, çünkü seçici apply
+etmiyor.** Uydurma sayı üretilmedi.
+
+### Kararın koşulu — unutulmasın
+
+Bu **"asla"** değil, **"şimdi değil"**. Kararı değiştirecek tek şey:
+`auto_reoptimize` geri açılırsa ya da seçici yenilenirse aile listesi tekrar
+maliyet ve çoklu-karşılaştırma taşımaya başlar. O gün bu kayıt yeniden
+okunmalı; bugünkü gerekçelerin **ikisi de** (sıfır maliyet, ölçülmüş
+etkisizlik) o koşula bağlı.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
