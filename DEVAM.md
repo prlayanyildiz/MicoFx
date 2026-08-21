@@ -1893,6 +1893,46 @@ aday elenir** — kârın tamamı orada.
 
 ---
 
+## 5h. Kaybedeni erken tanıyoruz, kesmek daha pahalı (21.08) — LOSS-3
+
+5g "girişte fark yok" demişti. **Zamanlanmış MAE farkı buluyor** ve döngüsel
+değil: girişten N bar sonraki aleyhe gidiş, o anda bilinen bir sayı.
+
+GER40, N=1 bar, holdout n=1247:
+
+| MAE₁ | n | nihai R/işlem | SE |
+|---|---:|---:|---:|
+| <0,25 | 366 | **+0,61** | 0,14 |
+| 0,25–0,5 | 354 | +0,48 | 0,12 |
+| 0,5–0,75 | 217 | +0,03 | 0,15 |
+| >0,75 | 310 | **−0,73** | 0,08 |
+
+Aynı eğim NAS100 / US30 / XAUUSD'de de var. **Kaybedeni bir bar sonra
+tanıyabiliyoruz** — giriş alanlarının hiç yapamadığı şey.
+
+**Ama kesmek daha pahalı.** GER40 N=1 X=0,5'te holdout **−94,7 R**
+(+173,8 → +79). Sebep 4g/4l'nin aynası: erken aleyhe giden işlemler,
+döndüklerinde kuyruğu üretenlerle **aynı işlemler**. GER40'ın 120+ kovası
+n=732 / **+668,7 R** taşıyor ve erken çıkış tam oraya nişan alıyor.
+
+Kapıyı geçen 2/6 sembol de okunduğunda düşüyor: NAS100 **+1,09 R / 1045
+işlem** (gürültü), SpotBrent'te `mae` çıkışı **n=1–2** (yok hükmünde).
+Cursor `_slice_ok`'ın minimum ΔR istemediğini kendisi işaretledi; eşik
+kararı bana bırakıldı ve **ikisi de reddedildi**.
+
+**X=1,0 eksen değil kapı:** stop ~1 R'de ve önce ateşliyor, MAE>1 R'ye hiç
+ulaşılmıyor — 6×4 dilimin hepsinde `mae` çıkışı sıfır.
+
+**Sistemin doğası hakkında en net cümle bu:** *hangi işlemin kaybedeceğini
+erken söyleyebiliyoruz, ve onu kesmek tutmaktan daha pahalıya mal oluyor.*
+REV-1 (dönüş), CHOP-1b (zarar sonrası bekleme) ve şimdi LOSS-3 — üçü de
+işlemi kısaltıyor, üçü de kuyruğu kesiyor, üçü de zarar veriyor.
+
+Bayrak (`mae_close_bars` / `mae_close_r`) varsayılan kapalı birleşti
+(`a9ba721`), arama geçirmiyor.
+
+---
+
 ## 5. Tekrarlayan arıza sınıfları
 
 Bu projede aynı hatalar farklı kılıklarda geri geliyor:
