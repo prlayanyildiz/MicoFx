@@ -2765,3 +2765,90 @@ Türkçe konuş, kısa yaz. Commit mesajları, kod yorumları ve test docstring'
 Ajan cevap verdi denince dosyayı sormadan aç. Sembol elemeden önce
 düzeltme sonrası veri bekle. `engine`/`optimizer`/`app` değişince canlı süreç
 eski kodda kalır — restart gerekir.
+
+## 5j · SWEEP-1: satır satır ortak tarama (21.08)
+
+Operatör: *"her kodun altına, her satıra bakın: hata, köşe, ölü kod."*
+15.785 satır, sorumluluk hattına bölündü — canlı para hattı Claude (6.269),
+araştırma hattı Cursor (6.356), ortak modüller (3.160) sonra. Gerekçe:
+**hangi hattı düzeltecekse onu okusun.** Canlı hatta yanlış düzeltme para
+kaybettirir, araştırma hattında yanlış düzeltme ölçümü sessizce bozar.
+
+### Bulunan kesin hatalar
+
+**1. Kitapsız magic sessizce yönetimsiz kalıyordu** (`engine.py:2456`,
+`0d6d681`). `manage_positions` pozisyonu magic ile arıyor; kitapta karşılığı
+yoksa çıplak `continue` — trail yok, stop yönetimi yok, flatten yok, log da
+yok. O döngüdeki diğer bütün atlamalar yapışkan ve tekrarlı; bu biri kalıcı
+ve görünmezdi. API bu durumu üretemiyor (silme ve magic değişimi açık
+pozisyonda 409, orphan taraması da kapalı) — **ama o kapıların hepsi web
+katmanında** ve elle yazılmış bir DB satırı hepsinin yanından geçiyor. O yol
+bugün, ikimize de canlı DB yazma yetkisi verilmesiyle gerçek oldu. Pozisyon
+kapatılmıyor (config yoksa ne olduğu bilinemez; tanımlanamayanı kapatmak
+brokerin stopunda bırakmaktan kötü) — yalnız sessizlik bitti: ticket başına
+bir WARN, ticket kitaptan düşünce mandal serbest.
+
+**2. MACD ters dönemde klasiğin negatifi** (`indicators.py:165`, `3dc3b4f` +
+`add6ad4`, Cursor). `macd_fast=26, macd_slow=12` panelden HTTP 200 geçiyor;
+takas olmadan histogram klasik MACD'nin **tam negatifi**, yani `macd_flip`
+**satması gereken yerde alıyor**. Bağımsız doğrulandı: 12/26, 6/18, 16/34
+bit-özdeş kaldı; eski 26/12 gerçekten `-1 ×` klasik; eşit dönem çizgiyi
+sıfıra yığıyordu. Shipped ızgara (fast 6..16, slow 18..34) hiç çarpışmıyor,
+`macd_flip` kitapta yok — yani canlı davranış değişmedi.
+İkinci tur: takas `macd()` içindeydi, **warmup ham `macd_slow` okuyordu**;
+ters ızgarada 8 hücre 1–4 bar eksik ısınıyordu. `macd_periods()` tek kaynak
+oldu (hesap, warmup, `required_bars`, cache anahtarı).
+
+**3. Bozulan teşhis yazımı sessizdi** (`engine.py`, `397824f`). Üç `_flush_*`
+istisnayı kasten yutuyor — geçici sqlite kilidinde sessiz retry doğru ve
+dirty biti True kalıyor. Kalıcı bozulma da aynı şekilde yutuluyordu. Zarar
+işlem değil, **iki okuyucunun ayrışması**: panel bu tabloları bellekten
+okuyup taze görünmeye devam ederken, FWD raporları / otopsi tablosu /
+`_spread_scale` aynı tabloları sqlite'tan okuyor ve **donmuş sayıyı canlı
+diye yayınlar**. Gerekçenin bu keskin hali Cursor'undur. Aynı mandal
+`optimizer._spread_scale`'e de kondu (`add6ad4`).
+
+### Sarı kapıya çakılan mayın — `max_positions` artırılamaz, önce bu düzelecek
+
+`backtest.walk_forward` → `simulate()` çağrısı `max_open` **geçirmiyor**
+(varsayılan 1); `optimizer._holdout_costed` de aynı. Bugün `max_positions=1`
+olduğu için bit-özdeş, **ölçüm doğru**. `max_positions` 2'ye çıktığı gün arama
+ve apply kapısı hâlâ 1'i ölçer: canlı iki pozisyon taşırken seçici tek
+pozisyonluk bir dünyaya göre karar verir.
+
+İkimiz bunu **bağımsız iki yoldan** bulduk (Claude'un ölü-parametre taraması,
+Cursor'un çağrı-zinciri taraması). Bugün kasten düzeltilmedi — bugün
+düzeltmek sessiz bir davranış değişikliği olurdu, ve bu projede sessiz
+davranış değişikliği tam olarak kovaladığımız şey.
+
+**Kural:** `max_positions` artırma kararı sarı kapıdan (ikimizin onayı)
+geçer, ve **bu düzeltilmeden o kapı açılmaz.**
+
+### Temiz çıkan sınıflar (sonuçsuz değil — sonuç bunlar)
+
+* Yutulan istisna, canlı para hattı: 18/18 savunulabilir. Hiçbiri emir yolunu
+  yutmuyor; hepsi teşhis kalıcılığı, yeniden bağlanma öncesi `mt5.shutdown()`,
+  encoding fallback, kapanış sonrası deal araması.
+* Sıfıra bölme, canlı para hattı: taranan 20 bölmenin hepsi korumalı
+  (`start_balance` 3061, `r_value` 1954, `raw` 325, `equity` 532/540,
+  `days` 648, `max_dd` 256).
+* `_t3_flip` docstring'i "ADX yok" **doğru** — gövde ADX okumuyor. 5f'deki
+  `_dual_t3` yalanının kardeşi değil.
+
+### Kayıt: sessiz onarım damganın kör noktası
+
+`ema()` kırpıyor, `macd()` takas ediyor, `wilder()` kırpıyor — üçü de girdiyi
+sessizce onarıyor. Panel 26/12 gösterir, motor 12/26 koşar, **damga 26/12
+yazar**, ve `stamp_drift()` sıfır sapma raporlar: damga ile canlı satır
+birbirine uyar, ikisi de koşulandan farklı olduğu halde. Bugün ulaşılamaz
+(ızgara çarpışmıyor, `macd_flip` kitapta yok). Düzeltme değil **kayıt**:
+ızgara elle değişirse ya da `/api/opt/params` ters dönem alırsa sapma raporu
+sessiz kalır — ve biz o rapora güveniyoruz.
+
+### Ortak çalışma tehlikesi (yeni, ölçüldü)
+
+Aynı çalışma dizinini paylaşıyoruz. Cursor `add6ad4`'ü 14:39:25'te yazdı,
+benim tam suite koşumun ortasında; 3 test dosya altımdan değişti diye
+düştü, temiz koşumda 2235 geçti. **Test sonucu, koşum sırasında öbürünün
+commit'i varsa geçersizdir** — düşen testi kendi değişikliğine yazmadan önce
+`git log --date=format:%H:%M:%S` ile zamana bak.
