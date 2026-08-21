@@ -419,6 +419,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              min_stop: float | np.ndarray | None = None,
              flatten: np.ndarray | None = None,
              max_open: int = 1,
+             block_reverse: bool = False,
              reverse_on_signal: bool = False,
              breakeven_at_r: float = 0.0,
              mae_close_bars: int = 0,
@@ -434,6 +435,13 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     rule: an opposite signal while a slot is full is dropped and the open
     trade waits for its stop. On closes that trade at the flip's fill bar and
     opens the other side. Search/walk_forward never pass it.
+
+    ``block_reverse`` is the other live rule the stacked path was missing.
+    Default off so older max_open>1 numbers still mean what they meant
+    (hedges allowed). On refuses an opposite fill while anything is open -
+    pyramid yes, hedge no - which is risk.py's "ters yonde acik pozisyon
+    var". Search/walk_forward never pass it; a raised-limit measurement
+    must.
 
     ``breakeven_at_r`` is the same kind of switch (BE-1). Zero is live: the
     trail is the only way the stop crosses entry. A positive value pulls the
@@ -712,6 +720,17 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                             float(open_l[j] + (0.0 if pos["is_buy"] else s)),
                             "reverse")
                     opens = kept
+                if block_reverse and any(pos["is_buy"] != is_buy for pos in opens):
+                    # The live rule the stacked path was missing. With
+                    # max_open > 1 this replay would open a hedge beside an
+                    # existing position, which the engine refuses outright
+                    # (risk.py's "ters yonde acik pozisyon var"). Measuring a
+                    # raised limit without this compares against a world we
+                    # would never run - and biases against it twice over, since
+                    # the hedge both loses on its own account and occupies the
+                    # slot a same-direction entry would otherwise have taken.
+                    ptr += 1
+                    continue
                 if len(opens) >= max_open:
                     ptr += 1
                     continue
