@@ -170,9 +170,22 @@ def macd(close: np.ndarray, fast: int, slow: int, signal: int) -> tuple[np.ndarr
     *spread* between two EMAs of different speed - a momentum divergence
     read, not a price-smoothing read. Two lines converging/diverging can flip
     ahead of a slow line's own direction change.
+
+    ``fast`` must be the shorter period. The grid lists them independently,
+    and POST /api/opt/params will accept ``macd_fast=26, macd_slow=12`` with
+    HTTP 200 (same hole ema() had). Without a swap the line is the classic
+    MACD negated, so every zero-cross in ``macd_flip`` buys where it should
+    sell. Equal periods make the line identically zero; bump the slow one.
+    The shipped grid (fast 6..16, slow 18..34) never hits either case.
     """
-    fast_ema = ema(close, max(1, int(fast)))
-    slow_ema = ema(close, max(1, int(slow)))
+    fast_n = max(1, int(fast))
+    slow_n = max(1, int(slow))
+    if fast_n > slow_n:
+        fast_n, slow_n = slow_n, fast_n
+    elif fast_n == slow_n:
+        slow_n = fast_n + 1
+    fast_ema = ema(close, fast_n)
+    slow_ema = ema(close, slow_n)
     line = fast_ema - slow_ema
     sig = ema(line, max(1, int(signal)))
     return line, sig, line - sig
