@@ -826,3 +826,62 @@ def test_manage_positions_warns_once_for_position_under_unknown_magic(monkeypatc
     eng._positions = []
     eng.manage_positions(server_now=0.0)
     assert eng._unmanaged_seen == set()
+
+
+def _flush_engine():
+    """Bare engine carrying only what the diagnostic flushes touch."""
+    eng = object.__new__(Engine)
+    eng._flush_warned = set()
+    eng._trade_autopsies = [{"x": 1}]
+    eng._trade_autopsies_dirty = True
+    eng._trade_autopsies_since = 0.0
+    return eng
+
+
+def test_flush_failure_warns_once_and_rearms_after_a_success(monkeypatch):
+    """A diagnostic flush that cannot reach sqlite says so - exactly once.
+
+    The three _flush_* methods swallow their exceptions so a transient lock
+    retries quietly, and the dirty bit stays True so it does retry. Permanent
+    failure was swallowed the same way, which is the dangerous half: the panel
+    keeps serving these tables out of memory while every report that reads
+    them back out of sqlite quotes a frozen number as a live one.
+    """
+    lines: list[tuple[str, str]] = []
+    monkeypatch.setattr("micofx.engine.LOG.emit",
+                        lambda msg, level="INFO", *a, **k: lines.append((msg, level)))
+
+    eng = _flush_engine()
+
+    class _Broken:
+        def set_setting(self, *a, **k):
+            raise OSError("disk full")
+
+    eng.store = _Broken()
+    eng._flush_trade_autopsies()
+    eng._trade_autopsies_dirty = True
+    eng._flush_trade_autopsies()
+
+    warned = [m for m, lvl in lines if "teshis kaydi diske yazilamadi" in m and lvl == "WARN"]
+    assert len(warned) == 1, "kalici bozulmada tek satir, her denemede degil"
+    assert "trade_autopsies" in warned[0]
+    # Retry must stay armed - the flush is not allowed to mark itself done.
+    assert eng._trade_autopsies_dirty is True
+
+    class _Working:
+        def __init__(self) -> None:
+            self.saved: dict = {}
+
+        def set_setting(self, key, value):
+            self.saved[key] = value
+
+    eng.store = _Working()
+    eng._flush_trade_autopsies()
+    assert eng._trade_autopsies_dirty is False
+    assert eng._flush_warned == set()
+
+    # A later, distinct outage is reported again rather than muted by the latch.
+    eng.store = _Broken()
+    eng._trade_autopsies_dirty = True
+    eng._flush_trade_autopsies()
+    assert len([m for m, lvl in lines if "teshis kaydi diske yazilamadi" in m]) == 2

@@ -309,6 +309,18 @@ class Engine:
         # and permanent. Latched per ticket because the poll runs every few
         # seconds and the warning is worth exactly once.
         self._unmanaged_seen: set[int] = set()
+        # Diagnostic flushes that have failed and not yet succeeded again.
+        # The three _flush_* methods swallow their exceptions on purpose: a
+        # transient sqlite lock should retry silently, and the dirty bit is
+        # left True so it does retry. What the swallow also hid was permanent
+        # failure. The damage is not lost trades but two readers drifting
+        # apart - the panel serves these tables out of memory and stays
+        # fresh, while the forward reports, the autopsy table and the
+        # optimiser's spread scale read them back out of sqlite and would go
+        # on quoting a frozen number as a live one. One line the first time,
+        # cleared on the next success, so a signal firing every two seconds
+        # does not become a log of its own.
+        self._flush_warned: set[str] = set()
         # Tickets whose weekend force-close failed at least once - kept sticky
         # across the Sat/Sun -> Monday boundary so a broker that rejected the
         # close all weekend doesn't just quietly resume normal trailing the
@@ -859,6 +871,38 @@ class Engine:
         except Exception:
             pass
 
+    def _flush_failed(self, name: str, exc: BaseException) -> None:
+        """First failure of a diagnostic flush gets one line; repeats stay quiet.
+
+        Reached from inside the flush ``except``, so it is the last place
+        allowed to raise: anything thrown here leaves the handler and breaks
+        the one guarantee these methods make, which is that a diagnostic
+        write can never interrupt a trading cycle. Hence getattr rather than
+        plain attribute access - the same idiom the flush bodies already use
+        for their own rings, and what keeps a partially built engine (tests,
+        and any future construction order) from turning a swallowed disk
+        error into a live exception.
+        """
+        try:
+            warned = getattr(self, "_flush_warned", None)
+            if warned is None:
+                warned = set()
+                self._flush_warned = warned
+            if name in warned:
+                return
+            warned.add(name)
+            LOG.emit(f"teshis kaydi diske yazilamadi ({name}: {type(exc).__name__}) - "
+                     f"panel bellekten taze okumaya devam eder, sqlite okuyan "
+                     f"raporlar donmus sayi gorur", "WARN")
+        except Exception:                       # the warning is never worth a cycle
+            pass
+
+    def _flush_ok(self, name: str) -> None:
+        """A landed flush re-arms the warning for the next distinct outage."""
+        warned = getattr(self, "_flush_warned", None)
+        if warned:
+            warned.discard(name)
+
     def _flush_spread_ratio(self, interval: float = 300.0) -> None:
         """Persist the histogram, at most once every few minutes.
 
@@ -886,8 +930,9 @@ class Engine:
             self.store.set_setting("spread_ratio", self._spread_ratio)
             self._spread_ratio_dirty = False
             self._spread_ratio_at = now
-        except Exception:
-            pass
+            self._flush_ok("spread_ratio")
+        except Exception as exc:
+            self._flush_failed("spread_ratio", exc)
 
     def spread_ratio(self) -> dict[str, Any]:
         """Per-symbol median and 90th percentile of tick spread / bar spread."""
@@ -1096,8 +1141,9 @@ class Engine:
                 self._entry_events = events[-limit:]
                 self.store.set_setting("entry_block_events", self._entry_events)
                 self._entry_events_dirty = False
-        except Exception:
-            pass
+            self._flush_ok("entry_blocks")
+        except Exception as exc:
+            self._flush_failed("entry_blocks", exc)
 
     def entry_blocks(self) -> dict[str, Any]:
         """The tally, per symbol and per leg.
@@ -1248,8 +1294,9 @@ class Engine:
                                    float(getattr(self, "_trade_autopsies_since", 0.0)
                                          or 0.0))
             self._trade_autopsies_dirty = False
-        except Exception:
-            pass
+            self._flush_ok("trade_autopsies")
+        except Exception as exc:
+            self._flush_failed("trade_autopsies", exc)
 
     @staticmethod
     def _autopsy_hold_bucket(held_min: float | None) -> str:
