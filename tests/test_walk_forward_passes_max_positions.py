@@ -1,9 +1,9 @@
-"""walk_forward and the charged holdout must score cfg.max_positions.
+"""walk_forward and the charged holdout must score the live slot rules.
 
-simulate() already has the stacked path. The search and the apply-time
-holdout omitted max_open, so a config with max_positions=2 was still
-scored as 1. At 1 the new call is bit-identical; at 2 the stacked path
-actually runs. Live stays at 1 until a yellow-door decision says otherwise.
+max_open comes from cfg.max_positions. block_reverse is always on in
+search: live never hedges, so a sweep at max_positions=2 must not pick
+parameters against a world the engine refuses. At max_positions=1 the
+flag is a no-op (the slot cap already drops the opposite fill).
 """
 from __future__ import annotations
 
@@ -73,19 +73,24 @@ def test_max_positions_one_is_bit_identical_to_the_default():
 
 def test_walk_forward_forwards_cfg_max_positions(monkeypatch):
     seen: list[int] = []
+    flags: list[bool] = []
     real = bt.simulate
 
     def wrap(*args, **kwargs):
         seen.append(int(kwargs["max_open"]))
+        flags.append(bool(kwargs["block_reverse"]))
         return real(*args, **kwargs)
 
     monkeypatch.setattr(bt, "simulate", wrap)
     _run(max_positions=2)
     assert seen, "walk_forward never called simulate"
     assert set(seen) == {2}
+    assert set(flags) == {True}
     seen.clear()
+    flags.clear()
     _run(max_positions=1)
     assert set(seen) == {1}
+    assert set(flags) == {True}
 
 
 def test_max_open_from_cfg_clamps_junk_to_one():
@@ -99,3 +104,4 @@ def test_holdout_costed_forwards_tmp_max_positions():
     src = inspect.getsource(Optimizer._holdout_costed)
     assert "max_open_from_cfg" in src
     assert "max_open=" in src
+    assert "block_reverse=True" in src

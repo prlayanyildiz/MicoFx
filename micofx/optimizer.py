@@ -1574,7 +1574,8 @@ class Optimizer:
             cache, sig, bars.open, bars.spread, point, p, tradable,
             lo, hi, commission,
             spread_price=spread_price, min_stop=min_stop_series, flatten=flatten,
-            max_open=backtest.max_open_from_cfg(tmp))
+            max_open=backtest.max_open_from_cfg(tmp),
+            block_reverse=True)
         return res.as_dict()
 
     def _charge_costs_stamp(self, detail: dict[str, Any] | None) -> bool:

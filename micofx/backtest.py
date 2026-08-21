@@ -436,12 +436,12 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     trade waits for its stop. On closes that trade at the flip's fill bar and
     opens the other side. Search/walk_forward never pass it.
 
-    ``block_reverse`` is the other live rule the stacked path was missing.
-    Default off so older max_open>1 numbers still mean what they meant
-    (hedges allowed). On refuses an opposite fill while anything is open -
-    pyramid yes, hedge no - which is risk.py's "ters yonde acik pozisyon
-    var". Search/walk_forward never pass it; a raised-limit measurement
-    must.
+    ``block_reverse`` is the live hedge veto. Default off so a direct
+    ``max_open>1`` call still means what older measurements meant (hedges
+    allowed). ``walk_forward`` and the charged holdout pass it on, because
+    live never hedges: risk.py's "ters yonde acik pozisyon var" fires at
+    any ``max_positions``. At ``max_open=1`` the flag is a no-op - the
+    slot cap already drops the opposite fill.
 
     ``breakeven_at_r`` is the same kind of switch (BE-1). Zero is live: the
     trail is the only way the stop crosses entry. A positive value pulls the
@@ -1321,7 +1321,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                         entries=entries, spread_price=spread_price,
                         min_stop=min_stop_series,
                         flatten=flatten,
-                        max_open=slot_cap)
+                        max_open=slot_cap,
+                        block_reverse=True)
 
     def evaluate(p: Params, sig=None, entries: np.ndarray | None = None,
                  last: Result | None = None,
