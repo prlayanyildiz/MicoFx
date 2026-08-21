@@ -1240,6 +1240,24 @@ class Engine:
             return int(now)
         return int(time.time())
 
+    def _autopsy_window_start(self, rows: list[dict[str, Any]] | None = None) -> float:
+        """Oldest exit stamp still in the ring, or now if the ring is empty.
+
+        ``trade_autopsies_since`` used to be a start-of-feature stamp restored
+        even when the ring was empty. The n>=50 gate and FWD completeness then
+        used a denominator the table never covered. The window is the rows.
+        """
+        if rows is None:
+            rows = list(getattr(self, "_trade_autopsies", []) or [])
+        times: list[float] = []
+        for row in rows:
+            t = self._autopsy_float(row.get("exit_time"))
+            if t is not None and t > 0:
+                times.append(t)
+        if times:
+            return float(min(times))
+        return time.time()
+
     def _load_trade_autopsies(self) -> None:
         """Restore the close ring. Corrupt rows are skipped, not coerced."""
         try:
@@ -1260,9 +1278,14 @@ class Engine:
                 row["ticket"] = ticket
                 rows.append(row)
             self._trade_autopsies = rows[-limit:]
-            since = as_number(self.store.get_setting("trade_autopsies_since"),
-                              0.0, "trade_autopsies_since")
-            self._trade_autopsies_since = since or time.time()
+            # The stored stamp is not the table. It was written when the
+            # feature first started (empty ring, 19.08 09:43) and then
+            # restored across restarts; the first row landed at 15:19.
+            # Completeness vs broker closes used that stamp and counted
+            # four SL exits the ring never contained. Oldest exit_time
+            # still in the ring is the window the n>=50 gate actually has.
+            self._trade_autopsies_since = self._autopsy_window_start(
+                self._trade_autopsies)
         except Exception:
             self._trade_autopsies = []
             self._trade_autopsies_since = time.time()
@@ -1293,6 +1316,7 @@ class Engine:
                     or TRADE_AUTOPSY_LIMIT)
         if len(events) > limit:
             self._trade_autopsies = events[-limit:]
+        self._trade_autopsies_since = self._autopsy_window_start()
         self._trade_autopsies_dirty = True
 
     def _flush_trade_autopsies(self) -> None:
@@ -1305,9 +1329,9 @@ class Engine:
             rows = list(getattr(self, "_trade_autopsies", []) or [])[-limit:]
             self._trade_autopsies = rows
             self.store.set_setting("trade_autopsies", rows)
+            self._trade_autopsies_since = self._autopsy_window_start(rows)
             self.store.set_setting("trade_autopsies_since",
-                                   float(getattr(self, "_trade_autopsies_since", 0.0)
-                                         or 0.0))
+                                   float(self._trade_autopsies_since))
             self._trade_autopsies_dirty = False
             self._flush_ok("trade_autopsies")
         except Exception as exc:
@@ -1482,7 +1506,7 @@ class Engine:
             })
         summary.sort(key=lambda r: (r["symbol"], r["exit_reason"], r["held"]))
         return {
-            "since": float(getattr(self, "_trade_autopsies_since", 0.0) or 0.0),
+            "since": float(self._autopsy_window_start(rows)),
             "n": len(rows),
             "left_on_table_r": round(left_total, 4) if left_n else None,
             "summary": summary,

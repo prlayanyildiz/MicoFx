@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -85,6 +86,8 @@ def _engine() -> Engine:
     eng._trade_autopsies = []
     eng._trade_autopsies_dirty = False
     eng._trade_autopsy_limit = TRADE_AUTOPSY_LIMIT
+    eng._flush_ok = lambda *_a, **_k: None
+    eng._flush_failed = lambda *_a, **_k: None
     return eng
 
 
@@ -152,3 +155,39 @@ def test_the_autopsy_report_is_on_the_panel():
         encoding="utf-8")
     assert "/api/analysis/trade-autopsies" in src
     assert "trade_autopsy_report" in src
+
+
+def test_autopsy_since_is_the_oldest_row_not_a_stamp_from_before_the_table():
+    """19.08 09:43 stamp survived restarts; first row landed 15:19.
+
+    Completeness vs broker closes used the stamp and counted four SL exits
+    the ring never contained. The window is the rows.
+    """
+    eng = _engine()
+    eng.store.settings["trade_autopsies_since"] = 1000.0
+    eng.store.settings["trade_autopsies"] = [
+        {"symbol": "GER40", "ticket": 1, "exit_time": 5000},
+        {"symbol": "NAS100", "ticket": 2, "exit_time": 8000},
+    ]
+    eng._load_trade_autopsies()
+    assert eng._trade_autopsies_since == 5000
+    assert eng.trade_autopsy_report()["since"] == 5000
+
+
+def test_an_empty_autopsy_ring_does_not_restore_a_since_that_covers_nothing():
+    eng = _engine()
+    eng.store.settings["trade_autopsies_since"] = 1000.0
+    eng.store.settings["trade_autopsies"] = []
+    before = time.time()
+    eng._load_trade_autopsies()
+    assert eng._trade_autopsies_since >= before
+    assert eng._trade_autopsies_since != 1000.0
+
+
+def test_flush_persists_the_row_derived_since():
+    eng = _engine()
+    eng._trade_autopsies_since = 1000.0
+    eng.record_trade_autopsy({"symbol": "GER40", "ticket": 1, "exit_time": 5000})
+    eng._flush_trade_autopsies()
+    assert eng.store.settings["trade_autopsies_since"] == 5000
+
