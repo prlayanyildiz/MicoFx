@@ -110,6 +110,22 @@ RATIO_ALL_ADVERSE = 99.0
 # flood the log on every review.
 _WARN_COOLDOWN = 3600.0
 
+# How many cycles a closed ticket may go unmatched in the deal history before
+# its bookkeeping is dropped. A position leaves positions_get() the instant it
+# closes, but its deal reaches history_deals_get() a moment later - the fill
+# path already documents that lag and carries a fallback for it. reap() used
+# to pop the tracker slot before checking whether the deal had arrived, so a
+# close caught in that gap lost its MFE/MAE and fill metadata permanently and
+# was never reported at all: no log line, no autopsy row, no slippage sample.
+# It is the same shape as the hand-closed positions this module already fixed
+# once, and it lands in exactly the table the loss analysis reads.
+#
+# The retry is only armed when the position has NO deal in the window at all.
+# A close this engine ordered does have deals, just none with a broker-side
+# reason, and that is the normal case - retrying those would query history
+# twenty times over for every ordinary exit.
+MAX_REAP_TRIES = 20
+
 
 def _usable_sample(row: Any) -> bool:
     """Whether a restored sample row can survive ``_summarise``.
@@ -319,10 +335,30 @@ class ExecutionMonitor:
 
         reports: list[dict[str, Any]] = []
         for ticket in gone:
-            book = self._open.pop(int(ticket), None)
             chunks = closers.get(int(ticket))
             if not chunks:
+                # No broker-side closing deal. Two very different reasons, and
+                # popping the slot for both is what lost the report.
+                book = self._open.get(int(ticket))
+                if book is not None and int(ticket) not in net:
+                    # Not a single deal for this position in a two-hour
+                    # window: the close is real (it left positions_get) but
+                    # history has not caught up. Keep the slot and try again
+                    # next cycle - ``track`` re-lists it in ``gone`` for as
+                    # long as it stays here.
+                    tries = int(book.get("reap_tries", 0)) + 1
+                    book["reap_tries"] = tries
+                    if tries < MAX_REAP_TRIES:
+                        continue
+                    LOG.emit(f"#{ticket} kapandi ama {MAX_REAP_TRIES} dongu boyunca "
+                             f"islem gecmisinde eslesmedi - kayit dusuruldu "
+                             f"(otopsi/kayma ornegi yok)", "WARN")
+                # Either the engine ordered this close itself (deals exist,
+                # none broker-side - the ordinary case, already recorded
+                # against its own requested tick) or the budget ran out.
+                self._open.pop(int(ticket), None)
                 continue
+            book = self._open.pop(int(ticket), None)
             deal = chunks[-1]
             reason = int(deal["reason"])
             volume = sum(float(d.get("volume", 0.0)) for d in chunks)
@@ -372,8 +408,17 @@ class ExecutionMonitor:
         return reports
 
     def forget(self, gone: set[int]) -> None:
-        """Drop bookkeeping for closes we could not attribute to a deal."""
+        """Drop bookkeeping for closes we could not attribute to a deal.
+
+        Skips the ones ``reap`` is still waiting on. Those left positions_get
+        without any deal reaching history yet, and dropping them here would
+        undo the retry a line after it was armed - the engine calls this
+        immediately after reap, with the same set.
+        """
         for ticket in gone:
+            book = self._open.get(int(ticket))
+            if book is not None and 0 < int(book.get("reap_tries", 0)) < MAX_REAP_TRIES:
+                continue
             self._open.pop(int(ticket), None)
 
     def drop_symbol(self, symbol: str) -> None:
