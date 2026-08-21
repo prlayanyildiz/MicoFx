@@ -404,7 +404,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              flatten: np.ndarray | None = None,
              max_open: int = 1,
              reverse_on_signal: bool = False,
-             breakeven_at_r: float = 0.0) -> Result:
+             breakeven_at_r: float = 0.0,
+             mae_close_bars: int = 0,
+             mae_close_r: float = 0.0) -> Result:
     """Replay one bar window using an already-computed signal set.
 
     ``entries`` and ``spread_price`` are optional precomputed views of values
@@ -421,6 +423,11 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     trail is the only way the stop crosses entry. A positive value pulls the
     stop to entry plus commission once unrealised gain reaches that many R,
     without pulling a better trail back. Search/walk_forward never pass it.
+
+    ``mae_close_bars`` / ``mae_close_r`` are LOSS-3. Zero bars is live: MAE
+    is not an exit. A positive bar count closes the trade at that bar's
+    close if MAE through those bars exceeds the R threshold. Search and
+    walk_forward never pass them.
     """
     n = cache.close.size if hi is None else int(hi)
     lo = max(0, int(lo))
@@ -490,6 +497,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     guard = 0
     max_open = max(1, int(max_open or 1))
     breakeven_at_r = float(breakeven_at_r or 0.0)
+    mae_close_bars = max(0, int(mae_close_bars or 0))
+    mae_close_r = float(mae_close_r or 0.0)
 
     def _cooldown_bars() -> int:
         cooldown_bars = 0
@@ -586,6 +595,22 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             return close[j] + (0.0 if is_buy else s), "flatten"
         return None, None
 
+    def _mae_tick(is_buy, entry, sl_dist, j0, j, mae_px):
+        # LOSS-3: accumulate MAE; fire only on the Nth bar, after stop/flatten.
+        if mae_close_bars <= 0 or sl_dist <= 0:
+            return mae_px, False
+        bar_high, bar_low = high[j], low[j]
+        if is_buy:
+            adverse = entry - bar_low
+        else:
+            adverse = bar_high + float(trigger_pad[j]) - entry
+        if adverse > mae_px:
+            mae_px = adverse
+        held = j - j0 + 1
+        if held == mae_close_bars and (mae_px / sl_dist) > mae_close_r:
+            return mae_px, True
+        return mae_px, False
+
     if max_open > 1:
         opens: list[dict] = []
         cool_until = -1
@@ -596,6 +621,17 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if px is not None:
                     _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
                                   pos["s"], pos["j0"], j, px, reason)
+                    continue
+                mae_px, mae_hit = _mae_tick(
+                    pos["is_buy"], pos["entry"], pos["sl_dist"],
+                    pos["j0"], j, pos.get("mae_px", 0.0))
+                pos["mae_px"] = mae_px
+                if mae_hit:
+                    _record_trade(
+                        pos["is_buy"], pos["entry"], pos["sl_dist"],
+                        pos["s"], pos["j0"], j,
+                        close[j] + (0.0 if pos["is_buy"] else pos["s"]),
+                        "mae")
                     continue
                 if j >= n - 1:
                     _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
@@ -669,6 +705,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 opens.append({
                     "is_buy": is_buy, "entry": entry, "sl": sl,
                     "sl_dist": sl_dist, "trailing": False, "j0": j0, "s": s,
+                    "mae_px": 0.0,
                 })
                 cd = _cooldown_bars()
                 if cd:
@@ -724,6 +761,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # original risk being hit, a "trail" is giving back part of a move that
         # had already gone our way.
         trailing = False
+        mae_px = 0.0
 
         exit_price = None
         exit_bar = j0
@@ -751,6 +789,13 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 # same ordering here (checked immediately after the stop).
                 exit_price = close[j] + (0.0 if is_buy else s)
                 reason = "flatten"
+                exit_bar = j
+                break
+
+            mae_px, mae_hit = _mae_tick(is_buy, entry, sl_dist, j0, j, mae_px)
+            if mae_hit:
+                exit_price = close[j] + (0.0 if is_buy else s)
+                reason = "mae"
                 exit_bar = j
                 break
 
@@ -794,6 +839,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         j0 = j
                         exit_price = None
                         reason = "time"
+                        mae_px = 0.0
                         continue
                     break
 
