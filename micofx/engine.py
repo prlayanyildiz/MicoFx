@@ -298,6 +298,17 @@ class Engine:
         # that validated it ever did. Not persisted: worst case after a restart
         # is one extra evaluation on the first cycle, not a correctness issue.
         self._stop_bar: dict[int, int] = {}
+        # Tickets seen open under a magic no longer in the book. The API
+        # refuses to delete a symbol or move its magic while a position is
+        # open (web/app.py's 409s), so this set is meant to stay empty - but
+        # every one of those guards lives in the API, and a hand-written row
+        # in micofx.db goes around all of them. The engine's own answer to an
+        # unmapped magic is a bare ``continue``: no trail, no stop management,
+        # no flatten, and - until now - no line anywhere saying so. Every
+        # other skip in that loop is sticky and retried; this one was silent
+        # and permanent. Latched per ticket because the poll runs every few
+        # seconds and the warning is worth exactly once.
+        self._unmanaged_seen: set[int] = set()
         # Tickets whose weekend force-close failed at least once - kept sticky
         # across the Sat/Sun -> Monday boundary so a broker that rejected the
         # close all weekend doesn't just quietly resume normal trailing the
@@ -2405,6 +2416,7 @@ class Engine:
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         live = {p["ticket"] for p in self._positions}
         self._stop_bar = {t: v for t, v in self._stop_bar.items() if t in live}
+        self._unmanaged_seen &= live
         # The prune is held under entry_lock because the seed-overwrite and
         # DELETE magic-reuse paths clear these same maps under it (see
         # web/app.py's seed handler and _scan_orphan_candidates). Pruning
@@ -2453,6 +2465,18 @@ class Engine:
                 continue
             cfg = by_magic.get(pos["magic"])
             if cfg is None:
+                # Deliberately not closed: without a config we cannot say what
+                # this position is for, and closing something we cannot
+                # identify is worse than leaving it on its broker-side stop.
+                # What we can do is stop it being invisible.
+                ticket = int(pos["ticket"])
+                if ticket not in self._unmanaged_seen:
+                    self._unmanaged_seen.add(ticket)
+                    LOG.emit(f"#{ticket} ({pos.get('symbol', '?')}, magic "
+                             f"{pos['magic']}) kitapta karsiligi olmayan bir "
+                             f"magic altinda acik - MicoFX bu pozisyonu "
+                             f"yonetmiyor (trail/stop yok), yalnizca brokerin "
+                             f"stopu gecerli.", "WARN")
                 continue
             state = self.states.get(cfg.symbol)
             atr = state.atr if state else 0.0

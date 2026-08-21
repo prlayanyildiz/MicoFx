@@ -405,6 +405,7 @@ def test_manage_positions_retries_orphan_ticket_close_and_skips_normal_managemen
     eng._force_flat_pending = set()
     eng._partials = {}
     eng._stop_bar = {}
+    eng._unmanaged_seen = set()
     # Position 401 is a previously-unresolved secondary ticket, still open.
     eng._positions = [{"ticket": 401, "magic": 1, "side": "buy", "volume": 0.1,
                        "time": 0, "profit": 0, "swap": 0}]
@@ -438,6 +439,7 @@ def test_manage_positions_orphan_retry_done_partial_keeps_tracking():
     eng._force_flat_pending = set()
     eng._partials = {}
     eng._stop_bar = {}
+    eng._unmanaged_seen = set()
     pos = {"ticket": 402, "magic": 1, "side": "buy", "volume": 0.2,
            "time": 0, "profit": 0, "swap": 0}
     eng._positions = [pos]
@@ -476,6 +478,7 @@ def test_force_flat_pending_sticky_after_session_window(monkeypatch):
     eng._force_flat_pending = set()
     eng._partials = {}
     eng._stop_bar = {}
+    eng._unmanaged_seen = set()
     eng._orphan_tickets = set()
     pos = {"ticket": 701, "magic": 1, "side": "buy", "volume": 0.2,
            "time": 0, "profit": 0, "swap": 0}
@@ -554,6 +557,7 @@ def test_manage_positions_trails_leftover_ticket_on_primary_atr():
     eng._force_flat_pending = set()
     eng._partials = {}
     eng._stop_bar = {}
+    eng._unmanaged_seen = set()
     eng._orphan_tickets = set()
     eng._sec_tickets = {601}
     eng._positions = [{"ticket": 601, "magic": 1, "side": "buy", "volume": 0.1,
@@ -772,3 +776,53 @@ def test_entry_multi_candidate_done_partial_not_orphan_closed():
     assert set(client.closed) == {611, 612}
     assert state.signal == "buy"  # not consumed as "fully flat"
     assert eng._orphan_tickets == {611, 612}
+
+
+def test_manage_positions_warns_once_for_position_under_unknown_magic(monkeypatch):
+    """A position whose magic left the book is skipped - but never silently.
+
+    The API refuses to delete a symbol or move its magic while anything is
+    open under it, so reaching this branch means the book was edited around
+    those guards - a hand-written micofx.db row, or a restore. The engine
+    cannot manage what it cannot identify, and closing an unidentified
+    position is worse than leaving it on its broker stop; what it must not do
+    is skip it without a word, forever, every few seconds.
+    """
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._weekend_pending = set()
+    eng._force_flat_pending = set()
+    eng._partials = {}
+    eng._stop_bar = {}
+    eng._unmanaged_seen = set()
+    eng._orphan_tickets = set()
+    # magic 77 belongs to no symbol in the book; cfg's own magic is 1.
+    eng._positions = [{"ticket": 501, "magic": 77, "symbol": "GHOST",
+                       "side": "buy", "volume": 0.1, "time": 0,
+                       "profit": 0, "swap": 0}]
+
+    class _Values:
+        def values(self):
+            return [cfg]
+    eng.store.symbols = _Values()
+
+    lines: list[tuple[str, str]] = []
+    monkeypatch.setattr("micofx.engine.LOG.emit",
+                        lambda msg, level="INFO", *a, **k: lines.append((msg, level)))
+
+    eng.manage_positions(server_now=0.0)
+    eng.manage_positions(server_now=0.0)
+
+    warned = [m for m, lvl in lines if "yonetmiyor" in m and lvl == "WARN"]
+    assert len(warned) == 1, "uyari ticket basina bir kez, her dongude degil"
+    assert "501" in warned[0] and "77" in warned[0]
+    # Skipped, not closed, and not adopted as an orphan retry.
+    assert client.closed == []
+    assert eng._orphan_tickets == set()
+    assert eng._unmanaged_seen == {501}
+
+    # Gone from the broker -> the latch is released, so if the same ticket
+    # somehow reappears it is reported again rather than staying quiet.
+    eng._positions = []
+    eng.manage_positions(server_now=0.0)
+    assert eng._unmanaged_seen == set()
