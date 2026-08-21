@@ -2852,3 +2852,38 @@ benim tam suite koşumun ortasında; 3 test dosya altımdan değişti diye
 düştü, temiz koşumda 2235 geçti. **Test sonucu, koşum sırasında öbürünün
 commit'i varsa geçersizdir** — düşen testi kendi değişikliğine yazmadan önce
 `git log --date=format:%H:%M:%S` ile zamana bak.
+
+### 5j-ek · Otopsi tablosundaki 4 eksik kapanış — reap hatası DEĞİL
+
+Cursor 19–21.08 penceresinde otopsi tablosunda 45 satıra karşı brokerde 49
+kapanış ölçtü; eksik dördü de `DEAL_REASON_SL`. İlk atıf `a94bdd5`'e
+(deal gecikmesinde kaybolan kapanış) yapıldı. **Tutmuyor**, ve kaydı düzelten
+taraf bu atıftan çıkarı olan taraftı — yani en dikkatli okunması gereken yer.
+
+**Ayırt eden kanıt: dördünün de log satırı var.** O satırları
+`_log_broker_exit` yazıyor, onu besleyen `reap()`. `reap` düşürseydi log
+satırı da olmazdı — düzeltilen hatanın tanımı zaten "log satırı yok, otopsi
+satırı yok, kayma örneği yok". Üstelik `_log_broker_exit` otopsiyi log
+satırından **önce** yazıyor. Log varsa reap çalışmıştır.
+
+`_autopsy_safe` istisna yutsa WARN atardı; logda sıfır tane var.
+
+Geriye tek açıklama: o aralıkta `_log_broker_exit` içindeki `_autopsy_safe`
+çağrısı **henüz yoktu**. Tabloya ilk satır 19.08 15:19:58'de düşüyor, logdaki
+o anki kapanış 15:19:59 — aynı kapanış. 09:43–15:19 arası tabloda **sıfır**
+satır, aynı aralıkta 4 kapanış loglanmış. Kesintili değil, hiç yok.
+
+**Asıl bulgu — `trade_autopsies_since` yanlış payda.** `_restore`
+(`engine.py:1265`) `since`'i halka boş olsa da DB'den geri yüklüyor
+(`since or time.time()`), böylece 09:43:11 damgası bütün restart'lardan sağ
+çıkmış ve tablonun gerçek başlangıcından **5 sa 37 dk** önceyi gösteriyor.
+Bu paydaya göre hesaplanan her tamlık/oran — ve n≥50 eşiğine kalan mesafe —
+eksik sayar. FWD raporu bu paydadan okuyor.
+
+**`a94bdd5` hakkındaki kayıt değişmiyor: yapısal olarak ulaşılabilir,
+gerçekleştiği gözlenmedi.** Onu doğrulayan kanıt aranırsa pencere `since`
+yerine ilk satırın zamanından başlatılmalı.
+
+Bu, ikimizin birbirinin **kaydını** (ölçümünü değil) düzelttiği üçüncü vaka.
+Sınıf tekrar ediyor: sayı doğru, cümle yanlış. Ölçen taraf sayının ne
+anlattığını, ölçmeyen taraf cümlenin ne iddia ettiğini görüyor.
