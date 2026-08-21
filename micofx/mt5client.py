@@ -1430,8 +1430,17 @@ class MT5Client:
         * **one new same-magic ticket** - the order DID fill. Returned as a
           normal success so the entry is booked once and the signal is
           consumed, instead of being retried into a duplicate position.
-        * **no new ticket after the whole retry window** - genuinely never
-          reached the market. Plain failure, safe to retry on the next poll.
+        * **no new ticket after the whole retry window** - nothing had landed
+          in the ~2.1s the book was watched. Read that for what it is: the
+          book was readable and stayed empty, not proof the order never
+          reached the market. A fill propagating later is still possible, and
+          what actually stops it becoming a second position is the per-symbol
+          position limit refusing the retry - a different subsystem from the
+          one making the promise. At ``max_positions`` above 1 that refusal
+          goes away and one signal can end up holding two entries, which is
+          the exact duplicate this function exists to prevent. Recorded as a
+          condition on raising that setting. Plain failure, safe to retry on
+          the next poll while the limit is 1.
           ``retcode`` is forwarded so Engine can park the symbol for
           ``LINK_BACKOFF_SEC`` on connection-class codes (10031/10012) -
           without it the 2.1s verifier would be re-run every poll for the

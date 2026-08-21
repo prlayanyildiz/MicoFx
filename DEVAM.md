@@ -2928,3 +2928,27 @@ arayışında bundan daha doğrudan bir soru yok: *kenarımız yön seçmekte mi
 Başabaş çıkış (trail tam girişte) bunu üretebilir. WR'yi yukarı, `avg_win`'i
 aşağı çeker — iki yanlış ters yönde. Maliyet yüklüyken tam sıfır nadir; kanıt
 görülmeden düzeltilmedi.
+
+### 5j-3 · `max_positions` kapısına üçüncü koşul
+
+`_verify_ambiguous_send` belirsiz bir emirden sonra pozisyon defterini ~2,1 sn
+izliyor; hiçbir şey düşmezse `verified_unfilled` dönüyor ve docstring bunu
+*"genuinely never reached the market"* diye yazıyordu. **2,1 sn kanıt değil.**
+Defter okunabildi ve boş kaldı — o kadar.
+
+Geç düşen bir dolumun ikinci pozisyona dönüşmesini engelleyen şey, o
+fonksiyon değil: **sembol başına pozisyon limiti retry'ı reddediyor**
+(`risk.py:501-504`, sayı kontrolü yön kontrolünden önce). Yani sözü veren
+altsistem ile sözü tutan altsistem farklı.
+
+`max_positions` 1'in üstüne çıkarsa o reddetme kalkar ve **tek sinyal iki
+giriş** taşıyabilir — modülün var oluş sebebi olarak yazdığı duplikasyonun
+ta kendisi ("a missed entry costs a signal, a duplicate costs double risk").
+
+**Kapının koşulları artık üç:**
+1. `walk_forward` → `simulate` `max_open` geçirmiyor (5j) — arama tek
+   pozisyonluk dünyayı ölçüyor.
+2. `optimizer._holdout_costed` aynı.
+3. `_verify_ambiguous_send`'in "dolmadı" sözü, limitin 1 olmasına yaslanıyor.
+
+Docstring düzeltildi: artık ne ölçtüğünü ve neyin koruduğunu söylüyor.
