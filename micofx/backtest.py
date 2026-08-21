@@ -395,6 +395,22 @@ def stop_fill_price(is_buy: bool, sl: float, bar_open: float,
     return float(bar_open) if bar_open > sl else float(sl)
 
 
+def max_open_from_cfg(cfg) -> int:
+    """Concurrent slots paper must score the same way live caps them.
+
+    ``simulate`` defaults to 1. ``walk_forward`` and the charged holdout used
+    to omit the argument, so a config with ``max_positions=2`` was still
+    scored as 1 - the number that decided whether stacking was even worth
+    turning on. At ``max_positions=1`` this still returns 1, and every
+    existing search result stays bit-identical.
+    """
+    try:
+        n = int(getattr(cfg, "max_positions", 1) or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return max(1, n)
+
+
 def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarray,
              point: float, p: Params, tradable: np.ndarray | None = None,
              lo: int = 0, hi: int | None = None, commission_price: float = 0.0,
@@ -1273,6 +1289,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
             _sig_cache[key] = hit
         return hit
 
+    slot_cap = max_open_from_cfg(cfg)
+
     def run_window(p: Params, window: tuple[int, int], sig=None,
                    entries: np.ndarray | None = None,
                    values: dict[str, Any] | None = None) -> Result:
@@ -1283,7 +1301,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                         window[0], window[1], commission_price,
                         entries=entries, spread_price=spread_price,
                         min_stop=min_stop_series,
-                        flatten=flatten)
+                        flatten=flatten,
+                        max_open=slot_cap)
 
     def evaluate(p: Params, sig=None, entries: np.ndarray | None = None,
                  last: Result | None = None,
