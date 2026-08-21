@@ -309,6 +309,21 @@ class Engine:
         # and permanent. Latched per ticket because the poll runs every few
         # seconds and the warning is worth exactly once.
         self._unmanaged_seen: set[int] = set()
+        # Tickets seen open with no stop attached. This system's one and only
+        # intended exit is the stop, so a position without one has no exit at
+        # all - and the trail cannot supply the missing one, because it
+        # returns early while the trade is losing (``profit_dist <= 0``),
+        # which is exactly the half where an unprotected position costs
+        # something. Nothing in this codebase writes a stopless order: the
+        # INVALID_STOPS ladder widens the levels rather than dropping them,
+        # and a refused re-anchor keeps the levels the broker already holds.
+        # What can still produce it is a stop removed by hand in the terminal
+        # and an ambiguous send adopting a fill the broker took without
+        # levels. Neither has happened here - the log carries no SL=0 open, no
+        # failed re-anchor and no adopted position - so this reports and does
+        # not act. Restoring a stop is a live behaviour change on the money
+        # path and does not get made for a case nobody has seen.
+        self._stopless_seen: set[int] = set()
         # Diagnostic flushes that have failed and not yet succeeded again.
         # The three _flush_* methods swallow their exceptions on purpose: a
         # transient sqlite lock should retry silently, and the dirty bit is
@@ -2464,6 +2479,7 @@ class Engine:
         live = {p["ticket"] for p in self._positions}
         self._stop_bar = {t: v for t, v in self._stop_bar.items() if t in live}
         self._unmanaged_seen &= live
+        self._stopless_seen &= live
         # The prune is held under entry_lock because the seed-overwrite and
         # DELETE magic-reuse paths clear these same maps under it (see
         # web/app.py's seed handler and _scan_orphan_candidates). Pruning
@@ -2527,6 +2543,20 @@ class Engine:
                 continue
             state = self.states.get(cfg.symbol)
             atr = state.atr if state else 0.0
+
+            ticket_no = int(pos["ticket"])
+            if not float(pos.get("sl") or 0.0):
+                if ticket_no not in self._stopless_seen:
+                    self._stopless_seen.add(ticket_no)
+                    LOG.emit(f"#{ticket_no} STOPSUZ acik - bu sistemde tek cikis "
+                             f"stoptur, trail ise yalnizca kardayken calisir, "
+                             f"yani zararda koruma yok. MT5'i elle kontrol edin.",
+                             "ERROR", cfg.symbol)
+            elif ticket_no in self._stopless_seen:
+                # A stop turned up again (restored by hand, or the trail set
+                # one once the trade moved into profit) - re-arm, so a second
+                # disappearance is reported instead of being muted.
+                self._stopless_seen.discard(ticket_no)
 
             # weekend_closed() already gated new entries; it never touched a
             # position that was already open going into the weekend. Crypto

@@ -51,6 +51,7 @@ def test_manage_positions_skips_tag_prune_when_disconnected():
     eng._partials = {}
     eng._stop_bar = {}
     eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
     eng.states = {}
     eng.entry_lock = threading.Lock()
 

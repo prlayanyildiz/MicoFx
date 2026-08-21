@@ -406,6 +406,7 @@ def test_manage_positions_retries_orphan_ticket_close_and_skips_normal_managemen
     eng._partials = {}
     eng._stop_bar = {}
     eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
     # Position 401 is a previously-unresolved secondary ticket, still open.
     eng._positions = [{"ticket": 401, "magic": 1, "side": "buy", "volume": 0.1,
                        "time": 0, "profit": 0, "swap": 0}]
@@ -440,6 +441,7 @@ def test_manage_positions_orphan_retry_done_partial_keeps_tracking():
     eng._partials = {}
     eng._stop_bar = {}
     eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
     pos = {"ticket": 402, "magic": 1, "side": "buy", "volume": 0.2,
            "time": 0, "profit": 0, "swap": 0}
     eng._positions = [pos]
@@ -479,6 +481,7 @@ def test_force_flat_pending_sticky_after_session_window(monkeypatch):
     eng._partials = {}
     eng._stop_bar = {}
     eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
     eng._orphan_tickets = set()
     pos = {"ticket": 701, "magic": 1, "side": "buy", "volume": 0.2,
            "time": 0, "profit": 0, "swap": 0}
@@ -558,6 +561,7 @@ def test_manage_positions_trails_leftover_ticket_on_primary_atr():
     eng._partials = {}
     eng._stop_bar = {}
     eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
     eng._orphan_tickets = set()
     eng._sec_tickets = {601}
     eng._positions = [{"ticket": 601, "magic": 1, "side": "buy", "volume": 0.1,
@@ -795,6 +799,7 @@ def test_manage_positions_warns_once_for_position_under_unknown_magic(monkeypatc
     eng._partials = {}
     eng._stop_bar = {}
     eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
     eng._orphan_tickets = set()
     # magic 77 belongs to no symbol in the book; cfg's own magic is 1.
     eng._positions = [{"ticket": 501, "magic": 77, "symbol": "GHOST",
@@ -885,3 +890,53 @@ def test_flush_failure_warns_once_and_rearms_after_a_success(monkeypatch):
     eng._trade_autopsies_dirty = True
     eng._flush_trade_autopsies()
     assert len([m for m, lvl in lines if "teshis kaydi diske yazilamadi" in m]) == 2
+
+
+def test_a_position_without_a_stop_is_reported_not_silently_trailed(monkeypatch):
+    """A stopless position has no exit at all, and the trail will not supply one.
+
+    The trail returns early while the trade is losing, which is precisely the
+    half where a missing stop costs something - so the gap can never close by
+    itself. Nothing here writes a stopless order (the INVALID_STOPS ladder
+    widens rather than drops, a refused re-anchor keeps what the broker holds),
+    and it has never been observed on this account. It is reported rather than
+    repaired: putting a stop back is a live behaviour change on the money path
+    and is not made for a case nobody has seen.
+    """
+    cfg = _cfg()
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._weekend_pending = set()
+    eng._force_flat_pending = set()
+    eng._partials = {}
+    eng._stop_bar = {}
+    eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
+    eng._orphan_tickets = set()
+    eng._positions = [{"ticket": 701, "magic": 1, "symbol": "GER40", "side": "buy",
+                       "volume": 0.1, "time": 0, "profit": 0, "swap": 0, "sl": 0.0}]
+
+    class _Values:
+        def values(self):
+            return [cfg]
+    eng.store.symbols = _Values()
+
+    lines: list[tuple[str, str]] = []
+    monkeypatch.setattr("micofx.engine.LOG.emit",
+                        lambda msg, level="INFO", *a, **k: lines.append((msg, level)))
+
+    eng.manage_positions(server_now=0.0)
+    eng.manage_positions(server_now=0.0)
+
+    shouted = [m for m, lvl in lines if "STOPSUZ" in m and lvl == "ERROR"]
+    assert len(shouted) == 1, "ticket basina bir kez"
+    assert "701" in shouted[0]
+    assert client.closed == [], "raporlanir, kapatilmaz"
+
+    # A stop reappearing re-arms the report, so a second disappearance is not
+    # muted by the latch.
+    eng._positions[0]["sl"] = 99.0
+    eng.manage_positions(server_now=0.0)
+    assert eng._stopless_seen == set()
+    eng._positions[0]["sl"] = 0.0
+    eng.manage_positions(server_now=0.0)
+    assert len([m for m, lvl in lines if "STOPSUZ" in m]) == 2
