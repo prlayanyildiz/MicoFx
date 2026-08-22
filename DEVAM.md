@@ -162,6 +162,45 @@ kilidi bunu yakalamaz ve her sinyal iki kez açılır.
 
 ## 2. Cursor protokolü (bağlayıcı)
 
+### 2a · SAHİPLENME KURALI (22.08, operatör) — düzeltmeden önce haber ver
+
+> *"bir şey düzeltmeden önce 'buldum, bunu yapıyorum' diye birbirinize bilgi
+> verin ki aynı sorunlar üzerinden dönüp durmayın."*
+
+Sebebi bugün yaşandı: Claude cooldown ayrışmasını analiz ederken Cursor onu
+zaten düzeltip commit ediyordu (`8889f2c`, 12:23). İki taraf da doğru
+çalıştı, ama emek ikiye katlandı ve Claude'un "tek-pozisyon kolunda cooldown
+yok" hükmü yanlış çıktı — çünkü öbür taraf o kodu o sırada değiştiriyordu.
+
+**Kural: düzenlemeye başlamadan önce köprüye tek satır yaz.**
+
+Biçim sabit ve greplenebilir olsun:
+
+```
+SAHIP: <dosya:satir> — <bir cumlede ne> — <duzeltiyorum | duzeltmiyorum | soruyorum>
+```
+
+Dört madde:
+
+1. **Önce satır, sonra düzenleme.** Sıra ters olursa kural yok demektir.
+2. **İlk sahiplenen alır.** Aynı şeye bakıyorsan, sahiplenme satırını
+   gördüğün an bırak ve "ben de bakıyordum, sende" yaz. Pazarlık yok —
+   pazarlık, dönüp durmanın kendisidir.
+3. **Bitince sonucu yaz.** Düzelttiysen commit'i, düzeltmediysen gerekçeyi.
+   **Vazgeçtiysen de yaz** — yoksa o satır sonsuza kadar sahipli görünür ve
+   öbür taraf ona dokunmaz.
+4. **"Düzeltmiyorum" da bir sahiplenmedir.** Bulguyu kaydettiysen ve
+   bilerek bırakıyorsan bunu söyle; yoksa öbür taraf aynı şeyi baştan
+   bulur. Bugün üç bulgu bilerek bırakıldı (yetim `opt_runs` kaydı,
+   okunmayan alanlar, cooldown) — üçü de yazılı olduğu için ikinci kez
+   aranmadı.
+
+**Ucuz olsun.** Tek satır, dosya:satır, bir cümle. Uzun yazmak zorunda
+kalırsan kural terk edilir; terk edilen kural yoktan kötüdür.
+
+**İstisna: acil arıza.** Canlı hatta para akan bir arıza varsa önce durdur,
+sonra yaz. Sıra yalnız burada ters olabilir.
+
 **Onay almadan davranış değiştirme.** Canlı emir yolunu, risk kapılarını
 veya seans kurallarını değiştiren kod brief'te açıkça istenmedikçe yazılmaz.
 İyi fikir yeterli sebep değil — fikirler raporun sonuna `ÖNERİ` başlığı
