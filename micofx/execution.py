@@ -180,8 +180,27 @@ class ExecutionMonitor:
 
     def _restore(self) -> None:
         blob = self.store.get_setting("execution_samples") or {}
+        # Symbols that have left the portfolio are dropped, the same way
+        # engine._flush_spread_ratio drops them from its histogram and for the
+        # same reason: stats() aggregates every row into one portfolio number,
+        # so samples from instruments nobody trades any more keep shaping the
+        # figure that answers "is our execution any good". Measured 22.08 -
+        # four deleted symbols held 96 of 575 rows, 17% of the whole sample.
+        # (The effect on the number was 0.0002 R against a 0.05 R warning
+        # threshold, so nothing was ever misjudged; the share is the problem,
+        # not today's answer.) drop_symbol already prunes on the delete path;
+        # this covers rows that arrived before it did, or a book edited around
+        # the API.
+        #
+        # Guarded on a non-empty book: Store.__init__ loads symbols and seeds
+        # them when the table is empty, so this cannot normally be blank - but
+        # wiping every stored sample because a lookup came back empty is not a
+        # failure worth risking for a tidy-up.
+        live = set(getattr(self.store, "symbols", None) or ())
         if isinstance(blob, dict):
             for symbol, rows in blob.items():
+                if live and str(symbol) not in live:
+                    continue
                 if isinstance(rows, list):
                     kept = [r for r in rows[-MAX_SAMPLES:] if _usable_sample(r)]
                     if kept:
