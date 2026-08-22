@@ -3044,3 +3044,59 @@ Araç vardı, kendi tavsiyeme uygulanmadı. Sorun dikkatsizlik değil,
 Bu kural cevapları **yavaşlatır**. "Sayı şu, ama henüz bir şey demiyor"
 demek, hızlı bir tavsiyeden az tatmin edicidir. Operatör bunu bilerek
 istedi: geri alınan bir tavsiye, geç gelen bir tavsiyeden pahalıdır.
+
+## 6b · Restart penceresi ve onun ortaya çıkardığı hata (22.08 08:18–08:36)
+
+Kitap düz (21.08 23:54 gün sonu flatten), cumartesi, piyasa kapalı. Pencere
+alındı, bot `C:\MicoFX-venv\Scripts\pythonw.exe run.py` ile yeniden
+başlatıldı, port 8900 doğrulandı. **Bekleyen sekiz düzeltme canlıya indi.**
+Kitap, risk, limit, kompozisyon: hiçbirine dokunulmadı.
+
+Not: iki `pythonw` süreci normaldir (venv yönlendiricisi + `Program Files`
+yolunu gösteren çocuğu, portu çocuk tutar) — `179d734` bunu tam da bu sabah
+yanlış okunmasın diye yazmıştı ve işe yaradı.
+
+### Restart'ın kendisi bir hata ortaya çıkardı — hafta sonu koruması açıktı
+
+Yeniden başlatınca logda daha önce görülmemiş bir satır düştü:
+`broker saati yerel saatten -8 saat farkli`.
+
+**Görünen kısım uyarıydı; altındaki ciddiydi.** MT5'in Python API'sinde
+`TimeCurrent()` yok, yani broker saati **yalnız en yeni tick damgasıdır** ve
+piyasa kapalıyken donar. Bayatlık koruması "damga ne kadar eski" değil,
+**"bu süreç ne zamandır izliyor"** ölçüyordu — ve restart o sayacı sıfırlıyor.
+Sonuç: `decision_now()` cuma kapanışını *taze* diye döndürdü.
+
+O damgayı tüketen yer kritik: `_try_entry`'nin son adımı, **para harcamadan
+hemen önceki hafta sonu kontrolü** — docstring'i "seans kapısının sözüne
+güvenmez" diyor, ve tam olarak bayat bir damgaya güveniyordu.
+
+Canlı veriyle ölçüldü (varsayım değil):
+```
+weekend_closed(GER40, cuma damgasi)   = False
+weekend_closed(GER40, gercek cumartesi) = True
+```
+
+**Kanıtlanmayan kısım da yazılsın:** işlem *açılacak mıydı* bilinmiyor —
+üst kapılar (seans, `market_open`) başka gerekçeyle reddetmiş olabilir.
+Yani **açık kalan bir koruma**, alınmış bir işlem değil.
+
+### İlk düzeltme yetersizdi ve bu ölçümle anlaşıldı
+
+`fdf34cd`: "bir ilerleme görülmeden yaş bilinemez" dedi. Restart edildi ve
+**20 saniye sonra uyarı yine düştü.** Sebep ölçüldü: kitaptaki altı sembol
+cumaya birer saniye arayla dondu, sırayla okununca **gerçek değerlerden
+gerçek ilerlemeler** üretiyor — hiçbir şey akmadığı hâlde.
+
+`292f121`: doğru test "ilerledi mi" değil **"tempo tutuyor mu"**. Saat, ilk
+okumadan bu yana geçen yerel sürenin en az yarısını kazanmış olmalı, ve
+pencere donmuş damgaların saniyelik farkının dolduramayacağı kadar uzun
+(60 sn). Restart'tan sonraki ilk dakika saat **bilinmiyor** sayılır —
+`decision_now()` None döner, giriş yolu bunu zaten "broker saati bayat"
+diye reddeder.
+
+**Canlıda doğrulandı:** 08:33 restart'ından sonra uyarı **0 kez** düştü.
+
+Ders, kuralın (§6a) ilk sınavıydı ve ilkinde kaybettim: `fdf34cd` ölçülerek
+değil **akıl yürütülerek** yazıldı ve canlı log onu bir dakikada çürüttü.
+İkincisi ölçümden sonra yazıldı.
