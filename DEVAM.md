@@ -3190,3 +3190,22 @@ Operatör bunu bilerek seçti; kayıt buraya, sonucu FWD'de görülecek.
 
 **İnceleme tetikleyicisi: 30 işlem.** Bakılacaklar — gerçekleşen eşzamanlı
 pozisyon sayısı, dip, sembol başına E, ve tavanların bağlayıp bağlamadığı.
+
+### 6d-not · DST operatörde — bu iş kapandı
+
+Operatör: *"gerekirse dst değişimi bende kanka, takılma o işe."*
+
+Saat tarafında yapılacak iş **bitti**. Elde olan: bayatlık tespiti tempo
+testiyle doğru çalışıyor (canlıda doğrulandı), ve ölçülen broker-makine farkı
+artık kalıcı — boşluğun öbür tarafında değişmişse tek satırla bildiriliyor:
+
+```
+broker saati kaydi: +0 -> -1 saat (yaz/kis saati degisimi olabilir -
+seans pencereleri broker damgasinda, kontrol edin)
+```
+
+O satır düşerse **karar operatörün**. Otomatik telafi (yerel saatten broker
+saati tahmin etmek) bilerek yapılmıyor: tahminin yanlış olacağı tek an DST
+değişiminin kendisi, yani ona güvenileceği an.
+
+**Bu başlığa yeniden girilmeyecek.** Kapsam operatör tarafından kapatıldı.
