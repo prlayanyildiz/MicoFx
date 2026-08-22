@@ -1193,6 +1193,28 @@ zorunda kalmıştık, her biri ~20 dk.
 > da MinBTL'yi **şişiriyor**. Uyuşma, varsayımın doğruluğunu değil
 > aritmetiğin tutarlılığını gösterir.
 >
+> **N_eff yalnız ölçülmedi — sakladığımız veriyle ölçülemiyor da (22.08).**
+> Hazır araç arandı: `purgedcv.effective_n_trials` (MIT) tam bu adı
+> taşıyor **ama bizim vakamıza uymuyor.** Sıralı örnekleyiciler için
+> yazılmış (Optuna TPE, CMA-ES) ve ölçtüğü şey **denemelerin koşturulma
+> sırasındaki otokorelasyon**. Bizim aramamızda sıra yok — tam sayım ya da
+> sabit tohumlu düzgün rastgele örnek.
+>
+> **Ölçüldü (Cursor, 1600 skor, komşu ızgara + gürültü):**
+> ızgara sırasıyla `n_eff = 3`, karıştırılmış hâliyle `n_eff = 1600`.
+> **Aynı veri, sıralamaya göre 533 kat fark.** Yani o fonksiyondan çıkacak
+> sayı bağımlılık yapısını değil **bizim sıralama tercihimizi** yansıtır;
+> karara dayanak olamaz. Kütüphane suçlu değil — docstring'i zaten
+> "heuristic" diyor ve hedef kitlesini açıkça yazıyor.
+>
+> **Bizim bağımlılığımız sıralı değil, yapısal:** ızgara komşuları
+> parametre paylaştığı için benzer. Doğru ölçüm, aday konfiglerin
+> işlem-seviyesi getiri serileri arasındaki korelasyon yapısından gelir —
+> **ve o vektörler damgada saklanmıyor.** Yani soruyu kapatmak için arama
+> yeniden koşulmalı ve aday getiri vektörleri (ya da korelasyon özeti)
+> saklanmalı. Tasarım notu: bugün saklamadığımız şey, yarın cevaplamamızı
+> engelliyor.
+>
 > **Ölçülmedi ve kararı o verecek: N_eff.** Ölçülmeden hüküm *"seçici yapı
 > gereği çalışamaz"* **değildir**. Cursor bu gerekçeyle seçiciyi
 > değiştirmedi; katılıyorum.
