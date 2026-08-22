@@ -3328,3 +3328,47 @@ saati tahmin etmek) bilerek yapılmıyor: tahminin yanlış olacağı tek an DST
 değişiminin kendisi, yani ona güvenileceği an.
 
 **Bu başlığa yeniden girilmeyecek.** Kapsam operatör tarafından kapatıldı.
+
+## 8. Gelecek projeler için notlar (bu proje kapsamı dışı)
+
+### 8a · Polymarket — değerlendirildi, ertelendi (22.08)
+
+Operatör bir X paylaşımı gönderdi (*"50+ Polymarket botu, her biri ayda
+100.000+ $"*), inceledik, ve **bu proje için değil, gelecek projeler için**
+not düşüyoruz. Buraya yazılıyor ki bir dahaki sefere baştan araştırılmasın.
+
+**İddia sayıya vurunca çöktü.** 50 × 100 bin = ayda 5 milyon = günde
+~167 bin dolar **kâr**. Polymarket'in *bütün* aktif piyasalarındaki toplam
+24 saatlik hacim **17,4 milyon dolar**. Yani tek bir bot grubunun, platformun
+tüm hacminin ~%1'ini, üstelik onun bir diliminden, saf kâr olarak çekmesi
+gerekiyor. Piyasa yapıcılığında kâr hacmin binde birleri mertebesindedir.
+Büyüklük sırası testinden geçmiyor. (Kaynak çerçevesi de pazarlama: çıplak
+link, "public relations" biyografisi, Telegram davetiyesi.)
+
+**Teknik içerik yine de gerçek ve genel:** bağımsız gerçeğe uygun değer,
+kayma yüzünden kenarın tamamının alınamaması, envanter yönetimi, veri
+bozulunca durdurma. Ders kitabı kavramları, doğru yazılmış.
+
+**Teknik olarak yapılabilir (doğrulandı):** Polymarket'in açık API'si,
+resmî Python SDK'sı ve REST uçları var.
+
+**Taşınan:** ölçüm disiplini · walk-forward/holdout yöntemi ·
+maliyet-kenar aritmetiği (`edge_cover` zaten o formül) · parite ilkesi
+(kâğıt ile canlı aynı kuralı iki kere yazarsa ayrışır).
+
+**Taşınmayan:** motor (MT5'e bağlı) · stratejiler (ATR stopla trend takibi;
+5 dk ikilide stop yok, boyut olasılıktan çıkar) · seans/hafta sonu (7/24) ·
+R katları üzerine kurulu risk modeli.
+
+**Asıl zor kısım tesisat değil, kenar.** "BTC 5 dk sonra yukarıda mı"nın
+gerçeğe uygun değeri ~%50 artı küçük bir mikroyapı terimi; üstünlük
+"rakiplerden hızlı cevaplamak"tan geliyor. Gecikme/altyapı yarışı.
+
+**Bir gün başlanırsa ilk adım inşa değil ölçüm olsun:** kamuya açık geçmiş
+veriyle, basit bir gerçeğe uygun değer modeli ücret ve kayma sonrası
+sıfırdan ayırt edilebilir kenar üretiyor mu? Sermaye yok, motor yok, risk
+yok. "Hayır" çıkarsa aylar kurtulur.
+
+**Erteleme gerekçesi (22.08):** elimizdeki sistemin kenarı hâlâ sıfırdan
+ayırt edilemiyor (ölçüm penceresi 538 işlem) ve üç slot kararının sonucu
+görülmedi. İkinci cephe açmak ikisini de yarım bırakır.
