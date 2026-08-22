@@ -3100,3 +3100,39 @@ diye reddeder.
 Ders, kuralın (§6a) ilk sınavıydı ve ilkinde kaybettim: `fdf34cd` ölçülerek
 değil **akıl yürütülerek** yazıldı ve canlı log onu bir dakikada çürüttü.
 İkincisi ölçümden sonra yazıldı.
+
+## 6c · Okunmayan alanlar: ölçüldü, ve **yazılmadı** (22.08)
+
+Bekleyen iş "kitap düzleşince okunmayan alanları sıfırla"ydı. §6a gereği
+yazmadan önce her alan tek tek doğrulandı — okuyarak değil, **oynatarak**:
+alan değiştirilip aynı barlarda sinyal dizisi karşılaştırıldı.
+**48 dünya** (8 tohum × 3 oynaklık × 2 zaman dilimi).
+
+Sonuç her alanda **ya 0/48 ya 48/48**. Kısmi vaka yok — bu ikili dağılım,
+testin doğru şeyi ölçtüğünün de kanıtı: alanlar koşullu değil, yapısal
+olarak okunuyor ya da okunmuyor.
+
+**Okunuyor — dokunulmayacak (6):**
+SpotBrent `adx_min`/`adx_max`/`st_mult`, NAS100 `htf_factor`,
+US30 `min_body_ratio`, XAUUSD `cost_rank_max`.
+
+**Ölü — sinyale etkisi yok (12):**
+SpotBrent `min_body_ratio`/`cost_rank_max`/`htf_factor`/`t3_accel_min`,
+GER40 `adx_min`/`st_mult`, JPN225 `cost_rank_max`,
+NAS100 `t3_accel_min`, US30 `st_mult`/`cost_rank_max`,
+XAUUSD `adx_min`/`htf_factor`.
+
+**Önceki kaydın iki düzeltmesi:** XAUUSD bu listede hiç yoktu — iki ölü, bir
+canlı alanı var. US30'un `min_body_ratio`'su **canlı**, ölü sanılan
+`st_mult`/`cost_rank_max` ile karıştırılmamalı.
+
+### Karar: sıfırlanmadı, kaydedildi
+
+Sıfırlamanın amacı "dolu ama işe yaramayan alan okuyanı yanıltıyor"du. O
+amacı **bu tablo da sağlıyor**, ve mutasyon üç şey istiyor: üçüncü bir bot
+durdurma, canlı config'e yazma, ve ölçemediğim bir kuyruk riski (ileride aile
+değişirse sıfır miras kalır). Kazanç belgeleme düzeyinde, risk davranış
+düzeyinde — takas kötü.
+
+Bu bir erteleme değil, karar. Kuyruk işi kapandı. Değiştirmek isteyen bu
+tabloyu okur ve neden yazılmadığını bilir.
