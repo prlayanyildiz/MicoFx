@@ -50,6 +50,8 @@ def _client() -> MT5Client:
     c._tick_cache = {}
     c._info_cache = {}
     c._broker_now = 0.0
+    c._broker_seen_at = 0.0
+    c._broker_anchor = None
     c.select = lambda s: s
     return c
 

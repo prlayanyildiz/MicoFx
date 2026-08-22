@@ -111,6 +111,15 @@ _MAX_TICK_AHEAD_SEC = 48 * 3600.0
 # the only one MetaTrader5's Python API exposes, and it freezes when the
 # market shuts. Past this age it is Friday's close, not "now".
 DECISION_CLOCK_MAX_AGE_SEC = 600.0
+
+# How long the broker clock has to be watched before "is it running" can be
+# answered at all, and how much of local time it has to have gained over that
+# window to count as running. Sixty seconds is far longer than the spread
+# between the book's frozen symbol stamps (seconds), so a shut market cannot
+# fill the window; half is loose enough that a quiet instrument or a slow poll
+# does not read as frozen.
+BROKER_CLOCK_MIN_WINDOW_SEC = 60.0
+BROKER_CLOCK_MIN_RATE = 0.5
 _RECONNECT_COOLDOWN = 5.0
 
 
@@ -219,18 +228,26 @@ class MT5Client:
         # _broker_now keeps returning Friday's close, and anything that reads
         # it as "now" is wrong by however long the market has been shut.
         self._broker_seen_at: float = 0.0
-        # Whether the broker clock has been seen to ADVANCE, as opposed to
-        # merely being read once. A fresh process starts with _broker_now at
-        # zero, so the first tick satisfies "newer than what we had" even when
-        # it is Friday's close - and _broker_seen_at is then stamped with the
-        # current local time, which says the clock moved a moment ago. The
-        # staleness guard built to keep a shut market out of the skew warning
-        # cannot see that, because it measures how long WE have been watching
-        # rather than how old the stamp is. Restarting on a closed market put
-        # "broker saati yerel saatten -8 saat farkli" in the log on 22.08.
-        # Until an advance is actually observed, the age is unknowable, and
-        # unknowable has to answer None rather than zero.
-        self._broker_advanced: bool = False
+        # First (local, broker) pair this process saw, and the anchor for
+        # asking whether the broker clock is RUNNING rather than merely
+        # readable.
+        #
+        # A single advance does not answer that. A fresh process starts with
+        # _broker_now at zero, so the first tick counts as newer whatever its
+        # age, and the six symbols in the book froze at slightly different
+        # seconds on Friday - so reading them in turn produces real advances
+        # from real values while nothing is moving at all. That was measured,
+        # not guessed: a process carrying an advance-based guard still logged
+        # "broker saati yerel saatten -9 saat farkli" twenty seconds after
+        # starting on a shut market.
+        #
+        # What separates a running clock from a frozen one is that a running
+        # one keeps pace with local time. Over the same span, broker seconds
+        # and local seconds accumulate together; a frozen clock gains only the
+        # spread between symbol stamps and then stops. So the test is the
+        # ratio over a window, and it needs the window to be long enough that
+        # the seeding spread cannot fill it.
+        self._broker_anchor: tuple[float, float] | None = None
         self._name_map: dict[str, str] = {}
         self._overrides: dict[str, str] = {}
         self._symbol_names_cache: list[str] = []
@@ -701,10 +718,8 @@ class MT5Client:
         # Newest broker-clock reading seen anywhere in the book - see
         # market_open() for why this, and not the wall clock, is the yardstick.
         if data["time"] > self._broker_now:
-            # An advance only counts as one if there was something to advance
-            # from; the seeding read tells us nothing about the broker's clock.
-            if self._broker_now > 0.0:
-                self._broker_advanced = True
+            if self._broker_anchor is None:
+                self._broker_anchor = (time.time(), data["time"])
             self._broker_now = data["time"]
             self._broker_seen_at = time.time()
         return data
@@ -787,9 +802,26 @@ class MT5Client:
         purpose - the two clocks' offset is the unknown being tested, so it
         cannot appear in the test.
         """
-        if self._broker_seen_at <= 0 or not self._broker_advanced:
+        if self._broker_seen_at <= 0 or not self._clock_is_running():
             return None
         return max(0.0, time.time() - self._broker_seen_at)
+
+    def _clock_is_running(self) -> bool:
+        """Whether the broker clock has kept pace with local time.
+
+        Answers False until the window is long enough to be worth reading, so
+        for the first minute after any restart the broker clock is reported as
+        unknown. That is the honest state and it is the safe one: decision_now
+        already turns unknown into a refusal, and the entry path turns that
+        into "broker saati bayat" rather than into a trade.
+        """
+        if self._broker_anchor is None:
+            return False
+        anchor_local, anchor_broker = self._broker_anchor
+        local_span = time.time() - anchor_local
+        if local_span < BROKER_CLOCK_MIN_WINDOW_SEC:
+            return False
+        return (self._broker_now - anchor_broker) >= BROKER_CLOCK_MIN_RATE * local_span
 
     def broker_utc_offset_hours(self, symbols: list[str]) -> int | None:
         """The broker server's own UTC offset in whole hours, or None.

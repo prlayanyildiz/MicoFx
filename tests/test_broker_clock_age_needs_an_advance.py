@@ -1,16 +1,22 @@
-"""A stale first tick is not evidence that the broker clock just moved.
+"""A broker clock that is readable is not the same as one that is running.
 
-MetaTrader5's Python API has no TimeCurrent(), so the newest tick stamp is the
-only broker clock available and it stands still while the market is shut. The
-staleness guard exists to keep that frozen stamp out of the skew warning - but
-it measured how long this process had been watching rather than how old the
-stamp was, and a fresh process starts with nothing to compare against. So the
-first tick, however old, counted as an advance and stamped the age at zero.
+MetaTrader5 exposes no TimeCurrent, so the newest tick stamp is the only
+broker clock there is, and it stands still while the market is shut. The
+staleness guard that keeps a frozen stamp out of the decision path measured
+how long THIS PROCESS had been watching, which a restart resets - so on 22.08
+a bot restarted on a Saturday reported the skew as minus eight hours and,
+underneath the warning, handed Friday's close to the last-mile weekend check
+as a current broker time. Asked about a Friday, it said it was not the
+weekend.
 
-Restarting on a closed market on 22.08 put "broker saati yerel saatten -8 saat
-farkli" in the live log, which is the reading the guard was written to prevent.
-Until an advance is actually observed, the age is unknowable, and unknowable
-answers None.
+Requiring an advance was tried and measured insufficient: the book's six
+symbols froze at slightly different seconds, so reading them in turn produces
+real advances from real values while nothing moves. A process carrying that
+guard still logged the warning twenty seconds after starting.
+
+What separates a running clock from a frozen one is pace. Over a window, a
+running clock gains broker seconds at roughly the rate local seconds pass; a
+frozen one gains the spread between symbol stamps and then nothing.
 """
 from __future__ import annotations
 
@@ -20,78 +26,70 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.mt5client import MT5Client
+from micofx.mt5client import BROKER_CLOCK_MIN_WINDOW_SEC, MT5Client
 
 
 def _client() -> MT5Client:
     c = object.__new__(MT5Client)
     c._broker_now = 0.0
     c._broker_seen_at = 0.0
-    c._broker_advanced = False
+    c._broker_anchor = None
     return c
 
 
-def _observe(c: MT5Client, stamp: float) -> None:
-    """The advance bookkeeping from tick(), without the terminal."""
+def _observe(c: MT5Client, stamp: float, at: float | None = None) -> None:
+    """The clock bookkeeping from tick(), without a terminal."""
+    now = time.time() if at is None else at
     if stamp > c._broker_now:
-        if c._broker_now > 0.0:
-            c._broker_advanced = True
+        if c._broker_anchor is None:
+            c._broker_anchor = (now, stamp)
         c._broker_now = stamp
-        c._broker_seen_at = time.time()
+        c._broker_seen_at = now
 
 
 def test_age_is_unknown_before_any_tick():
     assert _client().broker_now_age() is None
 
 
-def test_the_seeding_tick_does_not_make_a_stale_clock_look_fresh():
+def test_the_window_is_not_answered_before_it_is_long_enough():
+    """For the first minute after a restart the answer is "unknown", by design."""
     c = _client()
-    friday_close = time.time() - 8 * 3600
-    _observe(c, friday_close)
-
-    assert c.broker_now() == friday_close, "saat yine de okunur"
-    assert c.broker_now_age() is None, (
-        "ilk okuma saatin ilerledigini gostermez - bayat damga taze sayilmamali")
-
-
-def test_a_real_advance_makes_the_age_measurable_again():
-    c = _client()
-    _observe(c, time.time() - 8 * 3600)
-    _observe(c, time.time() - 8 * 3600 + 60)      # ticks start flowing
-
-    age = c.broker_now_age()
-    assert age is not None and age < 5.0, "gercek ilerleme olcumu geri acar"
-
-
-def test_a_stamp_that_does_not_move_never_counts_as_an_advance():
-    c = _client()
-    stamp = time.time() - 40 * 3600
-    _observe(c, stamp)
-    for _ in range(5):
-        _observe(c, stamp)                        # shut market, same stamp
+    _observe(c, time.time())
     assert c.broker_now_age() is None
+    assert c.decision_now() is None
 
 
-def test_a_weekend_restart_no_longer_hands_friday_to_the_money_gate():
-    """The last-mile weekend guard consumed a stamp it believed was current.
-
-    _try_entry calls decision_now() immediately before spending money,
-    precisely so it does not take the session gate's word for the weekend. On
-    a restart with the market shut, decision_now() answered with Friday's
-    close - fresh, by a staleness test that could not tell a seeding read from
-    an advance - and sessions.weekend_closed() was then asked about a Friday.
-    It said no.
-
-    Measured on the live database at 08:20 on Saturday 22.08, after a restart
-    at 08:18: the guard returned False for the stale stamp and True for the
-    real time. Fail-closed means None here, which the entry path already turns
-    into "broker saati bayat" and refuses.
-    """
-    friday_close = time.time() - 8 * 3600
+def test_stamps_frozen_at_different_seconds_do_not_read_as_a_running_clock():
+    """The measured failure: six symbols, six slightly different frozen stamps."""
     c = _client()
-    _observe(c, friday_close)
+    started = time.time() - (BROKER_CLOCK_MIN_WINDOW_SEC + 30)
+    friday = started - 8 * 3600
+    # Seeding across the book: real advances, spread over four seconds.
+    for i, offset in enumerate((0.0, 1.0, 2.0, 2.5, 3.0, 4.0)):
+        _observe(c, friday + offset, at=started + i * 0.4)
+
+    assert c.broker_now_age() is None, "donmus kitap kosan saat sayilmamali"
     assert c.decision_now() is None, "bayat damga karar saati olarak verilmemeli"
 
-    # Once ticks really flow again, the gate gets its clock back.
-    _observe(c, friday_close + 60)
+
+def test_a_clock_keeping_pace_with_local_time_is_accepted():
+    c = _client()
+    started = time.time() - (BROKER_CLOCK_MIN_WINDOW_SEC + 30)
+    broker0 = started - 3 * 3600          # a real offset, constant throughout
+    for k in range(0, 91, 10):            # 90 seconds of local time, matched
+        _observe(c, broker0 + k, at=started + k)
+
+    age = c.broker_now_age()
+    assert age is not None, "kosan saat olculebilmeli"
     assert c.decision_now() is not None
+
+
+def test_a_clock_that_freezes_mid_run_stops_being_measurable():
+    """Pace decays, and the last-advance age closes the gate before it does."""
+    c = _client()
+    started = time.time() - 4 * 3600
+    broker0 = started - 3 * 3600
+    for k in range(0, 3601, 300):         # an hour of healthy tracking
+        _observe(c, broker0 + k, at=started + k)
+    # Then the market shuts: three more hours of local time, no new stamps.
+    assert c.decision_now() is None, "donunca karar saati kapanmali"
