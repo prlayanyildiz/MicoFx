@@ -219,6 +219,18 @@ class MT5Client:
         # _broker_now keeps returning Friday's close, and anything that reads
         # it as "now" is wrong by however long the market has been shut.
         self._broker_seen_at: float = 0.0
+        # Whether the broker clock has been seen to ADVANCE, as opposed to
+        # merely being read once. A fresh process starts with _broker_now at
+        # zero, so the first tick satisfies "newer than what we had" even when
+        # it is Friday's close - and _broker_seen_at is then stamped with the
+        # current local time, which says the clock moved a moment ago. The
+        # staleness guard built to keep a shut market out of the skew warning
+        # cannot see that, because it measures how long WE have been watching
+        # rather than how old the stamp is. Restarting on a closed market put
+        # "broker saati yerel saatten -8 saat farkli" in the log on 22.08.
+        # Until an advance is actually observed, the age is unknowable, and
+        # unknowable has to answer None rather than zero.
+        self._broker_advanced: bool = False
         self._name_map: dict[str, str] = {}
         self._overrides: dict[str, str] = {}
         self._symbol_names_cache: list[str] = []
@@ -689,6 +701,10 @@ class MT5Client:
         # Newest broker-clock reading seen anywhere in the book - see
         # market_open() for why this, and not the wall clock, is the yardstick.
         if data["time"] > self._broker_now:
+            # An advance only counts as one if there was something to advance
+            # from; the seeding read tells us nothing about the broker's clock.
+            if self._broker_now > 0.0:
+                self._broker_advanced = True
             self._broker_now = data["time"]
             self._broker_seen_at = time.time()
         return data
@@ -771,7 +787,7 @@ class MT5Client:
         purpose - the two clocks' offset is the unknown being tested, so it
         cannot appear in the test.
         """
-        if self._broker_seen_at <= 0:
+        if self._broker_seen_at <= 0 or not self._broker_advanced:
             return None
         return max(0.0, time.time() - self._broker_seen_at)
 

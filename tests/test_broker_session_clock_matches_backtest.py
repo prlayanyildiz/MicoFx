@@ -74,6 +74,9 @@ def test_decision_now_is_none_when_the_stamp_is_stale():
     c = MT5Client.__new__(MT5Client)
     c._broker_now = UTC_NOON
     c._broker_seen_at = time.time() - (DECISION_CLOCK_MAX_AGE_SEC + 60)
+    # This test is about staleness, so it starts from a client that has
+    # already watched the clock move; seeding alone proves nothing about it.
+    c._broker_advanced = True
     assert c.decision_now() is None
 
 
@@ -81,4 +84,5 @@ def test_decision_now_returns_the_stamp_when_fresh():
     c = MT5Client.__new__(MT5Client)
     c._broker_now = UTC_NOON + TR
     c._broker_seen_at = time.time()
+    c._broker_advanced = True
     assert c.decision_now() == pytest.approx(UTC_NOON + TR)
