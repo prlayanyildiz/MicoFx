@@ -2072,6 +2072,49 @@ sayılmaz.
 
 ## 6. Nerede duruyoruz
 
+### 22.08.2026 cumartesi — güncel (altındaki 20.08 bloğu tarihî)
+
+Piyasa kapalı, kitap **düz**, bot ayakta (port 8900). Gün başı bakiyesi
+**2.290,27** (21.08 kapanışı **+106,96**, 16 işlem — günün tamamını 12sa 49dk
+taşınan tek GER40 pozisyonu çevirdi, +123,98).
+
+**Kitap — 22.08 09:55'te değişti (§6d):**
+
+| sembol | aile / TF | risk | slot | max_lot |
+|---|---|---:|---:|---:|
+| GER40 | `stoch_flip`/M30 | 0,80 | **3** | 1,20 |
+| SpotBrent | `dual_t3`/M5 | 0,80 | **3** | 1,30 |
+| NAS100 | `mtf_pullback`/M30 | 0,80 | **3** | 1,00 |
+| US30 | `t3_stoch`/M30 | 0,80 | **3** | 0,60 |
+| JPN225 | `dual_t3`/M5 | 0,80 | **3** | 0,40 |
+| XAUUSD | `burst`/M15 | 0,80 | **1** | 0,05 |
+
+Nominal risk **%12,8** (kapı %15, bağlamaz). Tavan-lot en kötü hâlde marj
+**1.577** (bütçe ~2.156). Eşzamanlı pozisyon tavanı 16;
+`max_total_positions` canlıda 100, shipped 60, dataclass 60.
+
+**Denetimler:** damga sapması 0 açıklanmamış · otopsi halkası n≥50'de
+tabloya · gece yedeği dönüyor · test/ruff/mypy **2263 / temiz / 0** ·
+`auto_reoptimize` **kapalı**.
+
+**22.08'de ne oldu:** 12 commit, **10 kesin hata**. Kitapsız magic ·
+MACD ters dönem · sessiz teşhis yazımı · deal gelmeden unutulan kapanış ·
+stopsuz pozisyon · **hafta sonu para koruması** · saat tempo testi · saat
+farkının kaybolması · `max_total_positions` dataclass'ı (13 < 16) · panelin
+temsil edemediği alan. Ayrıca §6a kuralı yazıldı ve ilk sınavı kaybedildi.
+
+**Nerede duruyoruz:** slot artışı **kaldıraçtır, kenar değil** — MAXOPEN-3'te
+E farkları gürültü (≤0,42 SE, gerçek std 2,24), dip monoton ve büyük
+(GER40 6 slotta +%125). Operatör bunu bilerek seçti. Bundan sonraki tek
+bilgi kaynağı **canlı FWD**; kâğıt tarafında bugün ölçülecek yeni şey yok.
+
+**Pazar akşamı açılışta ilk kez görülecek:** üç slotun gerçek doluluğu ·
+on düzeltmenin ilk canlı işlemi · `entry_blocks`'ta `risk_sembol_limiti`
+payının düşüşü (= MISS-1'in canlı cevabı, %61 kaçırmanın ne kadarı
+alınabilirmiş).
+
+---
+
 ### 20.08.2026 akşamı — güncel
 
 Hesap: Pepperstone demo **61562752**, bakiye **2.262,89 $**, özkaynak 2.269 $.
@@ -2334,6 +2377,29 @@ teorik eşzamanlı risk %12.4; sistem kapısı `max_concurrent_risk_pct=15`.
 ---
 
 ## 7. Açık işler, öncelik sırasıyla
+
+### 22.08 cumartesi — güncel kuyruk (altındaki 18.08 bloğu tarihî)
+
+**Bekleyen tek şey pazar akşamı açılışı.** Cumartesi kâğıt tekrarı yasak
+(§6a: dönüp durmayalım). İki agent de "bugün uygulanacak ölçülmüş-evet iş
+yok" diyor.
+
+| iş | ne zaman | soru |
+|---|---|---|
+| FWD ilk satır | pazar açılışından sonra | üç slot canlıda ne yapıyor |
+| slot incelemesi | **30 işlem** | dip arttı mı, sembol başına E, tavanlar bağladı mı, gerçekleşen eşzamanlı doluluk |
+| MISS-1 canlı cevabı | 30 işlem | `risk_sembol_limiti` payı ne kadar düştü |
+| otopsi tablosu | n≥50 | kapanış anatomisi |
+
+**Ölçülmedi — nihai, yeniden koşulmayacak:** GER40=2 tek başına (0,14 SE) ·
+kitap geneli 10 (nominal %48, giriş piyangosu) · okunmayan alan sıfırlama
+(kazanç belge, risk davranış — §6c) · aile azaltma (§5i) · DST otomatik
+telafisi (operatörde, §6d-not).
+
+**Devam eden tetikleyiciler:** NAS100 50 işlem · lot çarpanı 100 işlem ·
+SpotBrent 30 işlem · `daily_loss_pct` 22 · `auto_reoptimize` geri açma.
+
+---
 
 ### 18.08 gece — güncel kuyruk (altındaki eski maddeler tarihî)
 
