@@ -48,7 +48,6 @@ def test_manage_positions_skips_tag_prune_when_disconnected():
     eng._sec_tickets = {42}
     eng._orphan_tickets = {99}
     eng._weekend_pending = set()
-    eng._partials = {}
     eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
