@@ -3468,6 +3468,23 @@ yok. "Hayır" çıkarsa aylar kurtulur.
 ayırt edilemiyor (ölçüm penceresi 538 işlem) ve üç slot kararının sonucu
 görülmedi. İkinci cephe açmak ikisini de yarım bırakır.
 
+### 8a-2 · GitHub okuma yöntemi (22.08) — tahmin etme, ağacı oku
+
+Depo dosyası okurken yol **tahmin edilmez**. 22.08'de `purgedcv/_metrics.py`
+tahmin edildi (404), doğrusu `src/purgedcv/_metrics.py` çıktı ve bundan
+yanlışlıkla "kaynağı okuyamıyorum, yetkim yok" sonucu çıkarıldı. Araç
+eksiği yoktu; yöntem eksikti.
+
+Çalışan sıra (aynı akşam iki kez doğrulandı):
+1. `github.com/<owner>/<repo>` → üst düzey ağaç (`src/` var mı?)
+2. `github.com/<owner>/<repo>/tree/main/<dizin>` → **kesin dosya adları**
+3. `raw.githubusercontent.com/<owner>/<repo>/main/<tam yol>` → içerik
+
+**`gh` (GitHub CLI) kurulmadı.** Makinede winget/choco/scoop yok, kurulum
+canlı işlem makinesine elden ikili indirmek demekti. Operatör yetkiyi
+verdi; kazanç kolaylık seviyesinde, risk makine seviyesinde olduğu için
+kullanılmadı — 6c'de okunmayan alanları sıfırlamama kararıyla aynı takas.
+
 ### 8b · Araç taraması: çoklu-test düzeltmesi (22.08)
 
 §4n ekindeki açık soruyu (**N_eff**) çözebilecek araç arandı.
