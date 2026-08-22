@@ -49,6 +49,14 @@ DB_REL = DB_PATH.relative_to(ROOT)
 
 
 LOG_FILE = ROOT / "logs" / "yedek.log"
+# The production log's own path, captured once. Tests that care about the log
+# monkeypatch LOG_FILE to a tmp dir and still get their write; tests that only
+# happen to run a backup no longer append to the file the operator reads to
+# answer "did last night's backup run". Measured 22.08: 1516 of 5003 lines,
+# thirty percent, came from pytest temp dirs. run.py guards baslatilamadi.log
+# the same way and for the same reason - a record kept for a human is worth
+# less the more machine noise it carries.
+_REAL_LOG_FILE = LOG_FILE
 
 
 def _stamp() -> str:
@@ -70,6 +78,8 @@ def _log_line(text: str) -> None:
     Best effort: a backup must not fail because its log could not be
     written.
     """
+    if "pytest" in sys.modules and LOG_FILE == _REAL_LOG_FILE:
+        return
     try:
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(LOG_FILE, "a", encoding="utf-8", errors="replace") as fh:
