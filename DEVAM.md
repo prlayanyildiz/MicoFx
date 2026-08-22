@@ -3136,3 +3136,57 @@ düzeyinde — takas kötü.
 
 Bu bir erteleme değil, karar. Kuyruk işi kapandı. Değiştirmek isteyen bu
 tabloyu okur ve neden yazılmadığını bilir.
+
+## 6d · maks_poz 3 ve ölçülmüş lot tavanları (22.08 09:55)
+
+Operatör kararı: *"max poz 10 seçilebilir şekilde iyileştirmeleri yapın,
+varsayılan 3 olsun, kasa büyürse 10'a kadar açalım. maks lot tavanı sana."*
+Onay operatör tarafından Claude'a devredildi, ikinci anahtar Cursor'dan
+alındı (sarı kapı).
+
+**Yazılan (bot durdurulmuş, kitap boş, piyasa kapalı):**
+
+| sembol | max_positions | max_lot | p90 (30g) | 30g max |
+|---|---:|---:|---:|---:|
+| GER40 | 1 → **3** | 0,80 → **1,20** | 0,60 | 0,80 |
+| SpotBrent | 1 → **3** | 0,80 → **1,30** | 0,64 | 0,80 |
+| NAS100 | 1 → **3** | 0,60 → **1,00** | 0,50 | 0,60 |
+| US30 | 1 → **3** | 0,40 → **0,60** | 0,30 | 0,40 |
+| JPN225 | 1 → **3** | 0,60 → **0,40** | 0,20 | 0,20 |
+| XAUUSD | **1 (değişmedi)** | 0,16 → **0,05** | 0,02 | 0,04 |
+
+Sonuç: nominal risk **%12,8** (tavan %15, bağlamaz), tavan-lot en kötü hâlde
+marj **1577** (bütçe ~2156, %73 — marj kapısı susuyor). Gerçekçi hâl
+(p90 × slot) bunun çok altında.
+
+Yedek: `data/micofx_before_maxpos3_1787381646.db`.
+
+### XAUUSD neden 3 değil — talimattan sapma, ölçümle
+
+1 lotun marjı **4605 $**; endekslerde 73–207. 0,05 tavanla bile 3 pozisyon
+**691 $** eder = bütçenin %32'si, ve diğer beş sembolün **toplamı 1351**.
+Tek isim kitabın üçte biri olurdu ve tavan-lot dünyası bütçenin %100'üne
+otururdu — o da marj kapısının bağlaması, yani girişlerin geliş sırasına
+göre elenmesi. Operatörün 10'u reddetme gerekçesinin aynısı.
+
+Bu his değil ölçüm; altın bu kasada endekslerle aynı kitapta değil.
+
+### Tavanların işi lot seçmek değil
+
+Tavanlar 30 günlük gerçekleşen dağılımın (n 46–112) **p90'ının 2 katı**.
+Bugünkü hiçbir tavan o dağılımda bağlamıyor. Amaç patolojik bir ATR
+çöküşünde saçma lotu durdurmak — seçici olmak değil.
+
+**Claude'un düzeltilen iddiası:** "GER40'ın tavanı lot belirleyici olmuş"
+demişti; Cursor 30 günü ölçtü, **1/79**. Son işleme bakıp desen çıkarma
+hatası — 22.08'de aynı sınıftan üçüncüsü (diğerleri: 0,28 SE'yi sonuç
+saymak, saat düzeltmesini ölçmeden yazmak).
+
+### Bilinerek kabul edilen
+
+Slot artışı **kenar iyileştirmesi değil, kaldıraç**: MAXOPEN-3'te E farkları
+gürültü (≤0,42 SE), dip ise monoton ve büyük (GER40 6 slotta +%125).
+Operatör bunu bilerek seçti; kayıt buraya, sonucu FWD'de görülecek.
+
+**İnceleme tetikleyicisi: 30 işlem.** Bakılacaklar — gerçekleşen eşzamanlı
+pozisyon sayısı, dip, sembol başına E, ve tavanların bağlayıp bağlamadığı.
