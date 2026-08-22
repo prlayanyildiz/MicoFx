@@ -280,7 +280,29 @@ class Engine:
         self.last_error = ""
         # Last logged broker-vs-local hour gap. None until first read; a
         # change to a non-zero value is the October DST leak becoming visible.
+        #
+        # Restored from the database rather than starting empty. The gap is
+        # only measurable while ticks flow, so a restart over a shut market
+        # used to lose it entirely - and the one moment it matters is the
+        # moment it changes, which is a DST switch at 03:00 on a Sunday,
+        # inside exactly the gap where nothing can be measured. Keeping the
+        # last known value across the outage is what lets the first tick
+        # afterwards answer "did the broker move" instead of "here is a
+        # number with nothing to compare it to".
+        #
+        # This is a cross-check, not an input. Nothing extrapolates the broker
+        # clock from this machine's: over a weekend that extrapolation would
+        # be wrong precisely when a DST switch made it matter, which is why
+        # decision_now refuses rather than guesses.
         self._session_clock_skew: int | None = None
+        try:
+            stored = store.get_setting("session_clock_skew")
+            if stored is not None and not isinstance(stored, bool):
+                self._session_clock_skew = int(stored)
+        except (TypeError, ValueError):
+            # A hand-edited or older row is not worth refusing to start over;
+            # the next measurable tick writes a clean value.
+            self._session_clock_skew = None
         self._day_cache: dict[str, Any] = {}
         self._day_cache_at = 0.0
         # ticket -> {"rungs": how many scale-out steps already banked,
@@ -3423,12 +3445,33 @@ class Engine:
         """Log once when broker wall clock leaves the machine's wall clock.
 
         Measurement only. Does not rewrite session windows.
+
+        An unmeasurable clock - a shut market, or the first minute after a
+        restart - leaves the last known gap in place instead of erasing it.
+        Erasing it would mean the next reading has nothing to be compared
+        against, and the reading worth catching is a *change*: the broker
+        shifting an hour at a DST switch, which happens on a Sunday inside
+        the very outage where measurement is impossible. The stored value is
+        what turns the first tick after the weekend into an answer.
         """
         skew = self._measured_clock_skew(server_now)
-        warn = sessions.session_clock_warning(skew)
+        if skew is None:
+            return
         prev = getattr(self, "_session_clock_skew", None)
+        if skew == prev:
+            return
         self._session_clock_skew = skew
-        if warn and skew != prev:
+        try:
+            self.store.set_setting("session_clock_skew", skew)
+        except Exception as exc:                  # measurement, never a cycle
+            self._flush_failed("session_clock_skew", exc)
+        if prev is not None and prev != skew:
+            LOG.emit(f"broker saati kaydi: {prev:+d} -> {skew:+d} saat "
+                     f"(yaz/kis saati degisimi olabilir - seans pencereleri "
+                     f"broker damgasinda, kontrol edin)", "WARN")
+            return
+        warn = sessions.session_clock_warning(skew)
+        if warn:
             LOG.emit(warn, "WARN")
 
     def snapshot(self) -> dict[str, Any]:
