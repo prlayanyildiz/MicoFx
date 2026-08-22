@@ -3007,3 +3007,40 @@ artık yalnız engel değil, kararı almanın yolu.
 
 Uyarı: `signals` mandalı bellekte, restart yeni epizot başlatır; sayı hafif
 yukarı sapabilir, yön değil büyüklük etkilenir.
+
+## 6a · KURAL (22.08, operatör) — çıktıdan emin olmadan işe kalkışma
+
+> *"ikiniz için de yeni kural. çıktılardan emin olmadan işe kalkışmayın,
+> gerekirse tekrar test yapın araştırın, geri dönüp dönüp durmayalım."*
+
+Sebebi somut: 21.08 gecesi Claude, GER40 için `max_positions=2`'yi
+**tavsiye etti** ve gerekçesi "E 0,136 → 0,148 yükseliyor" idi. Ertesi sabah
+merdiven 6 basamağa uzayınca o fark **0,28 SE** çıktı — gürültü. Tavsiye
+geri çekildi. Operatör bir gece boyunca yanlış bir tavsiyeyi taşıdı.
+
+**Teşhis, niyet değil süreç:** `claude/_rigor_check.py` bu oturumda tam
+bunun için yazıldı — "n veya SE olmadan sayı bildiren iddiaları işaretle".
+Araç vardı, kendi tavsiyeme uygulanmadı. Sorun dikkatsizlik değil,
+**kontrolün akışa bağlanmamış olması**.
+
+### Kural, uygulanabilir hâliyle
+
+1. **Karar taşıyan her sayı n ve hata payıyla gelir.** `n=2192, E=0.148`
+   yeterli değil; `ΔE=+0.012, 0.28 SE` gerekir.
+2. **Üç hüküm vardır, ikisi değil:** *ölçüldü evet* / *ölçüldü hayır* /
+   **ölçülmedi**. "Ölçülmedi" geçerli ve **nihai** bir cevaptır, geçici
+   bir yer tutucu değil. Bu oturumda en çok bu üçüncüsü eksikti.
+3. **~2 SE altındaki fark sonuç değildir.** Tavsiyeye dönüştürülmez,
+   DEVAM'a bulgu diye yazılmaz, operatöre iletilmez.
+4. **Monotonsuzluk gürültü kanıtıdır.** Bir eğri ileri geri gidiyorsa,
+   üstündeki "tepe" ve "çukur" isimlendirilmez.
+5. **Tavsiye göndermeden önce `_rigor_check.py` kendi metnine koşulur.**
+   Araç varsa akışta olacak; yoksa yok sayılır.
+6. **Örneklem örtüşüyorsa bağımsız SE muhafazakârdır ve bu söylenir.**
+   Eşleştirilmiş test gerekiyorsa istenir, tahmin edilmez.
+
+### Bedeli, peşinen
+
+Bu kural cevapları **yavaşlatır**. "Sayı şu, ama henüz bir şey demiyor"
+demek, hızlı bir tavsiyeden az tatmin edicidir. Operatör bunu bilerek
+istedi: geri alınan bir tavsiye, geç gelen bir tavsiyeden pahalıdır.
