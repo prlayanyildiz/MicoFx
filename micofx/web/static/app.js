@@ -714,7 +714,7 @@ const POSITION_SECTION = {
     { k: "fixed_lot", t: "num", label: "Sabit lot", step: 0.01, min: 0.01, max: 20 },
     { k: "risk_percent", t: "num", label: "Risk %", step: 0.05, min: 0.05 },
     { k: "max_lot", t: "num", label: "Maks lot", step: 0.01, min: 0.01, max: 20 },
-    { k: "max_positions", t: "int", label: "Maks pozisyon", min: 1, max: 50 },
+    { k: "max_positions", t: "int", label: "Maks pozisyon", min: 1, max: 10 },
     { k: "symbol_daily_loss_pct", t: "num", label: "Sembol gunluk zarar limiti % (0=kapali)", step: 0.1, min: 0 },
   ],
 };

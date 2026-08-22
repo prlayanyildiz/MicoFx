@@ -123,7 +123,7 @@ _SYMBOL_RISK_BOUNDS = {
     "risk_percent": (0.0, 20.0, False),   # (min, max, min_inclusive) - % of balance per trade
     "max_lot": (0.0, 20.0, False),
     "fixed_lot": (0.0, 20.0, False),
-    "max_positions": (1, 50, True),
+    "max_positions": (1, 10, True),
     # The whole exit model is these three numbers, so all three are
     # strictly-positive. ``trail_start_atr`` is the one that actually needed
     # a gate: engine._update_stop and backtest both arm the trail behind

@@ -126,3 +126,6 @@ def test_the_shipped_template_is_a_dict_of_the_expected_shape():
     assert isinstance(data["symbols"], list) and data["symbols"]
     magics = [s["magic"] for s in data["symbols"]]
     assert len(magics) == len(set(magics)), "defaults.json'da magic cakismasi"
+    # Six names times the operator's selectable ten is 60. The old shipped
+    # 10 would clip that book on a fresh install, silently, by arrival order.
+    assert int(data["system"]["max_total_positions"]) >= 60

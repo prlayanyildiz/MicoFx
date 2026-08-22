@@ -502,6 +502,25 @@ def test_patch_refuses_max_positions_out_of_range():
     assert res.status_code == 400
 
 
+def test_patch_refuses_max_positions_above_the_operator_cap():
+    """Operator cap is ten. 11 used to be a silent panel write (bound was 50)."""
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 11})
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].max_positions == 1
+
+
+def test_patch_accepts_max_positions_at_the_operator_cap():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 10})
+    assert res.status_code == 200
+    assert store.symbols["XAUUSD"].max_positions == 10
+
+
 def test_patch_refuses_nan_in_top_level_exit_field():
     # sl_atr_mult has no per-field bounds entry (unlike risk_percent/max_lot)
     # - the general NaN/Infinity sweep is what has to catch this one.

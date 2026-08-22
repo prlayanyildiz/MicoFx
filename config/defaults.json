@@ -6,7 +6,7 @@
     "running": false,
     "autostart_bot": false,
     "poll_interval_sec": 2.0,
-    "max_total_positions": 10,
+    "max_total_positions": 60,
     "lot_multiplier": 1.0,
     "size_by_edge": true,
     "block_high_cost": true,
