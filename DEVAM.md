@@ -3445,3 +3445,39 @@ yok. "Hayır" çıkarsa aylar kurtulur.
 **Erteleme gerekçesi (22.08):** elimizdeki sistemin kenarı hâlâ sıfırdan
 ayırt edilemiyor (ölçüm penceresi 538 işlem) ve üç slot kararının sonucu
 görülmedi. İkinci cephe açmak ikisini de yarım bırakır.
+
+### 8b · Araç taraması: çoklu-test düzeltmesi (22.08)
+
+§4n ekindeki açık soruyu (**N_eff**) çözebilecek araç arandı.
+
+**`purgedcv`** (`github.com/eslazarev/purged-cross-validation`, PyPI,
+**MIT**, Py 3.10–3.14, 112 commit, 27 yıldız). İhraç ettikleri arasında
+tam ihtiyacımız olanlar var: `effective_n_trials`, `deflated_sharpe_ratio`,
+`probability_of_backtest_overfitting`, `minimum_backtest_length`,
+`CombinatoriallySymmetricCV`, `purge`/`apply_embargo`.
+
+**Ekosistem:** kanonik `mlfinlab` **ücretli/kapalı** kaynağa geçmiş;
+ücretsiz kombinatoryal alternatif `timeseriescv` **2018'den beri terk**
+ve bilinen doğruluk sorunları var. Serbest seçenek ince.
+`pypbo` **AGPL-3.0** + eski bağımlılık → alınmadı.
+
+**Karar: bağımlılık olarak alınmıyor.** DSR/MinBTL formülleri kısa,
+kendimiz yazarız. `effective_n_trials` okunmaya değer (MIT, gerekirse
+atıfla vendor edilebilir) — korelasyonlu denemeden bağımsız deneme sayısı
+türetmek tek satır değil ve yöntem seçimi sonucu değiştirir.
+
+**Şart:** bu araçlardan çıkan hiçbir sayı, **elle yapılmış bir kontrol
+hesapla uyuşmadan** karara dayanak olmaz. 22.08'de beş kez doğrulanmamış
+sayıya güvenilip yanılındı; 27 yıldızlı bir kütüphaneye güvenmek için
+sebep yok.
+
+**Yan ürün — kontrol edildi ve temiz:** dilim sınırında açık kalan işlem
+bir sonraki dilime sızmıyor. `simulate` dilim sonuna kadar koşuyor ve açık
+pozisyonu son barda `reason="time"` ile kapatıyor (`backtest.py:539`,
+`954`). Purged CV'nin önlediği sızıntı bizde yok. Hipotez taramadan
+alındı, kendi kodumuzda test edildi, tutmadı.
+
+**Ayrıca:** `hftbacktest` kendini "backtest ile canlının hizalanması"
+üzerinden tanımlıyor. Alan uzak (kripto HFT, emir defteri), taşınacak kod
+yok — ama PARITE-1'in **yerleşik bir disiplin** olduğunun ikinci bağımsız
+işareti (birincisi "reconciliation-gated backtester" tanımı).
