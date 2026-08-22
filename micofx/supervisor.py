@@ -820,8 +820,8 @@ class Supervisor:
         stored key when it is a real number, otherwise derive it.
         """
         hold = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
-        if "expectancy" in hold:
-            raw = hold.get("expectancy")
+        raw = hold.get("expectancy")
+        if raw is not None and not isinstance(raw, bool):
             try:
                 value = float(raw)
             except (TypeError, ValueError):
