@@ -1004,7 +1004,8 @@ class Optimizer:
                         "grid_total": report.get("grid_total"),
                         "max_combos": report.get("max_combos"),
                         "coverage": report.get("coverage"),
-                        "combo_seed": report.get("combo_seed")},
+                        "combo_seed": report.get("combo_seed"),
+                        "combos": report.get("combos")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok"))
             if not applied:
@@ -1844,6 +1845,13 @@ class Optimizer:
             ),
             "combo_seed": None if detail.get("combo_seed") is None
             else int(detail["combo_seed"]),
+            # Evaluated count for the winning sweep — the one-run K in the
+            # MinBTL table. grid_total is the family product; this is how
+            # many configs actually ran. GAP-5 slim stamps dropped it and
+            # the live book cannot answer "how hard did we search" without
+            # walking opt_runs. Absence is None, not a refusal.
+            "combos": None if detail.get("combos") is None
+            else int(detail["combos"]),
         }
         flag = bool(detail.get("validated"))
         patch["validated"] = flag

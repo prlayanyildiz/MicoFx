@@ -67,6 +67,9 @@ def _cfg() -> SymbolConfig:
         "validated": True,
         "params": {"trail_start_atr": 0.8, "trail_step_atr": 2.2,
                    "sl_atr_mult": 1.0},
+        "combos": 278,
+        "grid_total": 28800,
+        "coverage": 0.07,
     }
     return cfg
 
@@ -87,6 +90,12 @@ def test_restamp_writes_live_params_not_the_leftover_apply():
     assert stamped["sl_atr_mult"] == 1.0
     assert (cfg.opt_summary or {}).get("holdout", {}).get("net_r") == 107.19
     assert (cfg.opt_summary or {}).get("stamp_source") == "GAP-5 replay"
+    # Replay rewrites holdout and params. Search-budget keys are not in the
+    # replay payload; they have to stay on the summary or the next restamp
+    # repeats GAP-5's slim drop.
+    assert (cfg.opt_summary or {}).get("combos") == 278
+    assert (cfg.opt_summary or {}).get("grid_total") == 28800
+    assert (cfg.opt_summary or {}).get("coverage") == 0.07
     # Live row is not an apply. Exit fields already matched the replay.
     assert cfg.trail_start_atr == 1.0
     assert cfg.trail_step_atr == 1.8
