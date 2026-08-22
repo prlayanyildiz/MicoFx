@@ -1145,10 +1145,31 @@ zorunda kalmıştık, her biri ~20 dk.
 > yaklaşık **dört-beş kat kısa** olduğunu söylüyor. Böyleyse §4n bir keşif
 > değil, **beklenen sonuç**: o pencerede hiçbir seçici çalışamaz.
 >
-> **Claude (işlem birimi):** kazananın t'si K denemenin maksimumunu aşmalı;
-> `gerekli n = (σ/μ)² · 2 ln K`. GER40'ta μ=0,139, σ=2,24 → K=28.800 için
-> gerekli n **5.333**, elimizdeki **1.248**. Gözlenen t **2,19**, gereken
-> **4,53**. K=100 gibi minik bir aramada bile gerekli n 2.392.
+> **Claude (işlem birimi) — ilk sayı yanlıştı, düzeltilmiş hâli aşağıda.**
+> Formül doğru: `gerekli n = (σ/μ)² · 2 ln K`. Ama K'yı **28.800** aldım ve
+> o `strategy_max_combos` **ayarı**ydı — uygulanan koşunun deneme sayısı
+> değil. Damgadan gerçek sayı **278** (Cursor buldu, `opt_runs`'ta
+> doğrulandı). Bu, 22.08'de beşinci kez aynı sınıf hata: **eldeki sayıyı
+> geçerli sayı sanmak.**
+>
+> **Ve düzeltirken asıl soru çıktı: K'nın tanımı.** `opt_runs`'ta sembol
+> başına toplam denenen konfig:
+>
+> | sembol | koşu | applied | toplam K | eşik(toplam) |
+> |---|---:|---:|---:|---:|
+> | GER40 | 22 | 5 | 25.537 | 4,51 |
+> | JPN225 | 30 | 2 | 45.845 | 4,63 |
+> | NAS100 | 33 | 6 | 51.562 | 4,66 |
+> | SpotBrent | 31 | 9 | 33.062 | 4,56 |
+> | US30 | 17 | 5 | 27.018 | 4,52 |
+> | XAUUSD | 40 | 9 | 62.941 | 4,70 |
+>
+> GER40 gözlenen t ≈ 2,19 → K=278 ile oran **0,76**, K=25.537 ile **0,49**.
+>
+> **İkisi de tam doğru değil.** Tek koşu az sayıyor: canlı konfig 22
+> aramanın hayatta kalanı ve reddedilen her koşu da bir denemedir. Toplam
+> çok sayıyor: koşular eşzamanlı bir seçim değildi, farklı tarih ve veride
+> koştular.
 >
 > **Cursor (kanonik, yıl birimi):** Bailey–Borwein–López de Prado Thm 3.1,
 > SR*=1, N = kazanan taramanın değerlendirilen konfig sayısı:
@@ -1163,8 +1184,10 @@ zorunda kalmıştık, her biri ~20 dk.
 >
 > En iyi oran 0,19 — yani en uzun penceremiz gerekenin **beşte biri**.
 >
-> **İki hesabın uyuşması ne kanıtlar, ne kanıtlamaz.** Farklı birim
-> sistemleri (işlem vs yıl), aynı mertebe: aritmetik tutarlı. **Ama ikisi
+> **İki hesabın "uyuşması" da düzeltilmeli.** Uyuşma, benim yanlış K'mla
+> ortaya çıkmıştı; doğru K ile işlem-birimi hesabı çok daha ılımlı (0,49–0,76)
+> ve yıl-birimi tablosundan (0,19) ayrışıyor. İki yöntem **aynı şeyi
+> söylemiyor**; ikisi de aynı yönü gösteriyor ama şiddeti farklı. **Ama ikisi
 > de aynı zayıf varsayımı paylaşıyor — denemelerin bağımsızlığı.** Izgara
 > komşuları bağımlı, yani **etkin N gerçek N'den küçük** ve her iki hesap
 > da MinBTL'yi **şişiriyor**. Uyuşma, varsayımın doğruluğunu değil
@@ -1177,6 +1200,12 @@ zorunda kalmıştık, her biri ~20 dk.
 > Diğer zayıflıklar: skorumuz yıllık Sharpe değil (SR*=1 bir kabul, ölçüm
 > değil) · R dağılımı çarpık ve kalın kuyruklu, normallik yaklaşık ·
 > 12 aile × 3 TF bütçe üst sınırı damgada yok.
+>
+> **Ayrıca somut bir eksik:** canlı damgada `combos`, `grid_total`,
+> `coverage` **yok** (altı sembolde de `None` — GAP-5 slim damgası,
+> `expectancy` ile aynı sınıf). Yani çoklu-test düzeltmesi **canlı kitaptan
+> hesaplanamıyor**, ancak `opt_runs`'a geri gidilerek. O tablo budanırsa K
+> geri getirilemez. Uygulanan konfige deneme sayısı damgalanmalı.
 >
 > **Neden önemli:** doğrulanırsa "arama tarafında ölçülecek şey kalmadı"
 > (§5a) hükmü **yeniden açılır** — kapanmasının sebebi tükenmiş bir arama
