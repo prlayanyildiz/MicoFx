@@ -982,13 +982,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # 1 bar (M15+ swing) of the strategy TF after a *fill*. Mirror that so
         # scalp scores are not inflated by back-to-back fills the live engine
         # would have blocked. Longer holds already cover the pause via exit_bar.
-        cooldown_bars = 0
-        if p.cooldown_sec > 0 and cache.tf_seconds > 0:
-            from .models import is_scalp_strategy
-            max_bars_cd = 1 if (not is_scalp_strategy(p.strategy)
-                                and cache.tf_seconds >= 900) else 2
-            capped = min(int(p.cooldown_sec), max_bars_cd * int(cache.tf_seconds))
-            cooldown_bars = max(0, capped // int(cache.tf_seconds))
+        # Same helper as the stacked path: a second copy of the clamp used to
+        # sit here, which made this arm look like it had no cooldown at all.
+        cooldown_bars = _cooldown_bars()
         resume_signal = max(exit_bar, j0 + cooldown_bars - 1)
         while ptr < entries.size and entries[ptr] <= resume_signal:
             ptr += 1
