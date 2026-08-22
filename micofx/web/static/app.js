@@ -1710,7 +1710,7 @@ async function saveAI(patch, flashNode) {
 /* ---------------------------------------------------------------- system */
 
 const SYS_FIELDS = [
-  { k: "max_total_positions", label: "Maks toplam pozisyon", t: "int", min: 1, max: 50 },
+  { k: "max_total_positions", label: "Maks toplam pozisyon", t: "int", min: 1, max: 200 },
   { k: "lot_multiplier", label: "Global lot carpani", t: "num", step: 0.25, min: 0.1, max: 20 },
   { k: "size_by_edge", label: "Holdout R/maxDD ile lot", t: "bool" },
   { k: "daily_loss_pct", label: "Gunluk zarar limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },

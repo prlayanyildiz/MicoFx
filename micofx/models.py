@@ -563,7 +563,14 @@ class SystemConfig:
     poll_interval_sec: float = 2.0
 
     # ---- account-level guards ----
-    max_total_positions: int = 13
+    # Has to be able to hold the book, and the book is now six symbols with
+    # up to ten slots each. It sat at 13 while the live configuration allows
+    # sixteen concurrent positions, so any construction that fell back to this
+    # default - a fresh install, a settings row missing the key - would have
+    # capped the portfolio three short and refused the rest by order of
+    # arrival. That is the entry lottery every other limit here was set to
+    # avoid, arriving from the one setting nobody touched.
+    max_total_positions: int = 60
     # Separate sub-caps inside max_total_positions for scalp (micro_rev/burst,
     # M5) vs swing (everything else) positions, so a run of scalp fills
     # cannot use up the whole shared budget and leave no room for a swing
