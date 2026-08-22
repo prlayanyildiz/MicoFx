@@ -1139,6 +1139,50 @@ zorunda kalmıştık, her biri ~20 dk.
 
 ## 4n. Hiçbir iç ölçü dışarıyı öngörmüyor (19.08) — L2 zinciri kapandı
 
+> **22.08 EKİ — bu bulgunun sebebi seçici olmayabilir, aritmetik olabilir.**
+> Aşağıdaki hüküm duruyor ama **açıklaması değişebilir.** İki bağımsız
+> hesap, holdout/doğrulama penceremizin denenen konfig sayısına göre
+> yaklaşık **dört-beş kat kısa** olduğunu söylüyor. Böyleyse §4n bir keşif
+> değil, **beklenen sonuç**: o pencerede hiçbir seçici çalışamaz.
+>
+> **Claude (işlem birimi):** kazananın t'si K denemenin maksimumunu aşmalı;
+> `gerekli n = (σ/μ)² · 2 ln K`. GER40'ta μ=0,139, σ=2,24 → K=28.800 için
+> gerekli n **5.333**, elimizdeki **1.248**. Gözlenen t **2,19**, gereken
+> **4,53**. K=100 gibi minik bir aramada bile gerekli n 2.392.
+>
+> **Cursor (kanonik, yıl birimi):** Bailey–Borwein–López de Prado Thm 3.1,
+> SR*=1, N = kazanan taramanın değerlendirilen konfig sayısı:
+>
+> | sembol | N | doğrulama (yıl) | MinBTL (yıl) | oran |
+> |---|---:|---:|---:|---:|
+> | GER40 | 278 | 1,58 | 8,25 | **0,19** |
+> | US30 | 1651 | 1,53 | 11,53 | 0,13 |
+> | XAUUSD | 1473 | 0,76 | 11,31 | 0,07 |
+> | SpotBrent | 291 | 0,27 | 8,33 | 0,03 |
+> | JPN225 | 1274 | 0,25 | 11,04 | 0,02 |
+>
+> En iyi oran 0,19 — yani en uzun penceremiz gerekenin **beşte biri**.
+>
+> **İki hesabın uyuşması ne kanıtlar, ne kanıtlamaz.** Farklı birim
+> sistemleri (işlem vs yıl), aynı mertebe: aritmetik tutarlı. **Ama ikisi
+> de aynı zayıf varsayımı paylaşıyor — denemelerin bağımsızlığı.** Izgara
+> komşuları bağımlı, yani **etkin N gerçek N'den küçük** ve her iki hesap
+> da MinBTL'yi **şişiriyor**. Uyuşma, varsayımın doğruluğunu değil
+> aritmetiğin tutarlılığını gösterir.
+>
+> **Ölçülmedi ve kararı o verecek: N_eff.** Ölçülmeden hüküm *"seçici yapı
+> gereği çalışamaz"* **değildir**. Cursor bu gerekçeyle seçiciyi
+> değiştirmedi; katılıyorum.
+>
+> Diğer zayıflıklar: skorumuz yıllık Sharpe değil (SR*=1 bir kabul, ölçüm
+> değil) · R dağılımı çarpık ve kalın kuyruklu, normallik yaklaşık ·
+> 12 aile × 3 TF bütçe üst sınırı damgada yok.
+>
+> **Neden önemli:** doğrulanırsa "arama tarafında ölçülecek şey kalmadı"
+> (§5a) hükmü **yeniden açılır** — kapanmasının sebebi tükenmiş bir arama
+> değil, geçersiz bir ölçüm penceresi olur. Sıradaki ucuz ölçüm N_eff.
+
+
 | sıralayan | US30 ρ(holdout) | NAS100 ρ(holdout) |
 |---|---:|---:|
 | arama blend'i (`score`) | −0,02 | −0,08 |
