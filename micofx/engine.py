@@ -370,6 +370,8 @@ class Engine:
         # cleared on the next success, so a signal firing every two seconds
         # does not become a log of its own.
         self._flush_warned: set[str] = set()
+        # Last (nominal book risk, cap) pair reported by _note_risk_capacity.
+        self._risk_capacity_noted: tuple[float, float] | None = None
         # Tickets whose weekend force-close failed at least once - kept sticky
         # across the Sat/Sun -> Monday boundary so a broker that rejected the
         # close all weekend doesn't just quietly resume normal trailing the
@@ -711,6 +713,7 @@ class Engine:
         getter = getattr(self.client, "decision_now", None)
         server_now = getter() if callable(getter) else None
         self._note_session_clock(self.client.server_now())
+        self._note_risk_capacity()
         login = int(account.get("login") or 0)
         balance = float(account.get("balance", 0.0) or 0.0)
         if server_now is not None:
@@ -3440,6 +3443,48 @@ class Engine:
             "session_clock_skew_hours": skew,
             "session_clock_warning": sessions.session_clock_warning(skew),
         }
+
+    def _note_risk_capacity(self) -> None:
+        """Say so when the book is configured to want more risk than the cap allows.
+
+        ``max_concurrent_risk_pct`` is enforced one entry at a time, at the
+        moment of the entry, and it refuses. Nothing compares the book's own
+        arithmetic against it beforehand - so a portfolio configured to want
+        more than the cap does not fail, it degrades: entries are taken until
+        the ceiling is reached and refused afterwards, which means whichever
+        symbol signals first that hour gets the room and the selector's
+        ranking stops deciding anything. The refusal even reads like an
+        ordinary condition in the log.
+
+        Reachable two ways, and one of them arrived today. Raising slots is
+        the obvious one: five symbols at three slots plus gold is 12.8% under
+        a 15% cap, but five slots would be 24%. The other is quieter - the
+        shipped and dataclass defaults for this cap are 8.0, sized for a
+        freshly seeded book at one slot per symbol, so a system row that has
+        to fall back to defaults while the symbol rows survive puts an 8% cap
+        under a 12.8% book. Same shape as max_total_positions defaulting to
+        thirteen under a sixteen-position book, found earlier today.
+
+        Latched on the pair, so a steady configuration is silent and a change
+        speaks once.
+        """
+        try:
+            sys_cfg = self.store.system
+            cap = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
+            nominal = sum(
+                float(c.risk_percent or 0.0) * max(1, int(c.max_positions or 1))
+                for c in list(self.store.symbols.values()) if c.enabled)
+            state = (round(nominal, 2), round(cap, 2))
+            if state == getattr(self, "_risk_capacity_noted", None):
+                return
+            self._risk_capacity_noted = state
+            if cap > 0 and nominal > cap:
+                LOG.emit(f"kitap %{nominal:.2f} eszamanli risk istiyor, tavan "
+                         f"%{cap:.2f} - tavan dolunca girisler sinyal sirasina "
+                         f"gore reddedilir, secici siralamasi devre disi kalir",
+                         "WARN")
+        except Exception as exc:                  # a notice never stops a cycle
+            self._flush_failed("risk_capacity", exc)
 
     def _note_session_clock(self, server_now: float) -> None:
         """Log once when broker wall clock leaves the machine's wall clock.
