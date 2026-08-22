@@ -407,8 +407,7 @@ class Supervisor:
 
     def _priority_locked(self, cfg: SymbolConfig, verdict: SymbolVerdict | None = None) -> float:
         v = verdict if verdict is not None else self.verdicts.get(cfg.symbol)
-        hold = (cfg.opt_summary or {}).get("holdout") or {}
-        expected_r = float(hold.get("expectancy", 0.0) or 0.0)
+        expected_r = self.holdout_expectancy(cfg)
         state_w = {"ok": 1.0, "idle": 0.55, "watch": 0.25, "quarantine": 0.0}
         live = 0.0
         if v and v.trades >= max(3, int(self.settings["min_trades"]) // 2):
@@ -810,6 +809,35 @@ class Supervisor:
     QUARANTINE_N_CAP = 150
 
     @staticmethod
+    def holdout_expectancy(cfg: SymbolConfig) -> float:
+        """R per trade on the stamped holdout, even when the key is missing.
+
+        GAP-5 restamped five live rows with a slim blob that kept ``net_r``
+        and ``trades`` and dropped ``expectancy``. Readers that treated a
+        missing key as 0.0 then ranked those symbols as having no paper edge,
+        so a same-cycle slot race preferred the one name that still carried
+        the field. The number is ``net_r / trades`` either way; use the
+        stored key when it is a real number, otherwise derive it.
+        """
+        hold = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
+        if "expectancy" in hold:
+            raw = hold.get("expectancy")
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                value = float("nan")
+            if math.isfinite(value):
+                return value
+        try:
+            trades = int(hold.get("trades") or 0)
+            net = float(hold.get("net_r") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        if trades <= 0 or not math.isfinite(net):
+            return 0.0
+        return net / trades
+
+    @staticmethod
     def holdout_win_prob(cfg: SymbolConfig) -> float | None:
         """Stamped holdout win rate as a probability, or None if unusable.
 
@@ -958,8 +986,7 @@ class Supervisor:
 
     def _attach_expectation(self, cfg: SymbolConfig, v: SymbolVerdict) -> None:
         """Attach backtest expectancy and a simple live-health ratio (PF / 1.2)."""
-        hold = (cfg.opt_summary or {}).get("holdout") or {}
-        v.expected_r = float(hold.get("expectancy", 0.0) or 0.0)
+        v.expected_r = self.holdout_expectancy(cfg)
         v.expected_per_trade = v.expected_r  # kept in R units for the AI table
         if v.trades >= int(self.settings["min_trades"]) and v.expected_r > 0:
             v.edge_health = round(max(0.0, min(3.0, v.profit_factor / 1.2)), 2)
