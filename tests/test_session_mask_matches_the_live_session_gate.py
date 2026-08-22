@@ -35,7 +35,7 @@ WEEK = np.arange(WEEK_START, WEEK_START + 7 * 86400, 300, dtype=np.float64)
 
 
 def _cfg(**kw) -> SymbolConfig:
-    base = dict(symbol="GER40", group="index", magic=1, use_sessions=True)
+    base = {"symbol": "GER40", "group": "index", "magic": 1, "use_sessions": True}
     base.update(kw)
     return SymbolConfig(**base)
 

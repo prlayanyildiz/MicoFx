@@ -2926,6 +2926,20 @@ tam böyle kırmızı suite üstüne commit atıldı (`f62b6b8`; düşenler yar�
 kaynaklıydı, ama kapı yine de açıktı). Doğrusu:
 `pytest -q > out.txt 2>&1; echo $?` — sonra oku, sonra commit et.
 
+**Ve o "doğrusu" da kapı değildi.** 22.08'de aynı hata tekrarlandı:
+`ruff check . > out.txt 2>&1; echo "ruff=$?"` yazıldı, ruff **1** döndü,
+çıktı ekranda göründü — ve zincir devam edip commit attı (`a355b7a`,
+`C408`). Sebep aynı: `echo` da bir komuttur ve **kendi başarısı** `&&`'e
+gider. Çıkış kodunu **yazdırmak** onu kapı yapmaz.
+
+**Tek doğru biçim: kapı komutun kendisi olsun.**
+`ruff check . && mypy micofx && pytest -q && git commit ...`
+Sayıyı görmek istiyorsan ayrı çalıştır, ama commit'i **doğrudan** komutlara
+bağla. Araya `echo`, `tail`, `head`, `| grep` girerse kapı açılır.
+
+Bu, aynı hatanın iki gün üst üste tekrarıdır ve ikisinde de "kontrolü
+gördüm" sanıldı. Görmek kapı değildir.
+
 ### 5j-ek · Otopsi tablosundaki 4 eksik kapanış — reap hatası DEĞİL
 
 Cursor 19–21.08 penceresinde otopsi tablosunda 45 satıra karşı brokerde 49
