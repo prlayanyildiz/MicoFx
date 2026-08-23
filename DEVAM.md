@@ -3579,3 +3579,51 @@ sorunlarımız (MT5, kâğıt/canlı paritesi, çoklu-test düzeltmesi)
 
 **Kural: tarama, liste gezmek değil, açık problem listemizle aramak
 olacak.** Liste paylaşımları hızlıca elenir ve buraya tek satır yazılır.
+
+## 9. OLAY 24.08 · Bot 32 saat kör kaldı, kendini toparlamadı
+
+**Ne oldu:** 22.08 17:18'de MT5 IPC bağlantısı koptu
+(`positions_get basarisiz (-10001 IPC send failed)`). MT5 terminali
+**17:19'da kendini yeniden başlattı**. Bot **geri bağlanmadı** — ama
+**durmadı da**: süreç ayakta, port 8900 bağlı, teşhis veritabanına
+yazılmaya devam ediyor. **Dışarıdan sağlıklı görünüyordu.**
+
+Logda kopmadan sonra **tek satır** var: 24.08 01:00'de bir SIGNAL, ve
+sayıları 22.08 08:26 ile **birebir aynı** — yani bayat bar.
+
+**Zararın gerçek büyüklüğü (ilk tahmin yanlıştı):**
+Kesinti 32 saat, ama piyasa neredeyse tamamında kapalıydı — 21.08 23:54'te
+kapandı, 24.08 01:00'de açıldı. Bot 01:17'de yeniden başlatıldı.
+**Kayıp işlem süresi ~17 dakika, 32 saat değil.** Hafta sonu işlem yoktu;
+otopsi halkası cuma akşamı 50, pazartesi 50 — sıfır işlem, doğrulandı.
+
+**Neden tehlikeli:** aynı arıza salı öğleden sonra olsa bir seans kaybı.
+
+**Toparlanma doğrulandı:** yeniden başlatmadan sonra `session_clock_skew`
+**ilk kez** yazıldı (=0). O alan ancak tickler akarken ve tempo testi
+geçerken yazılır — yani bağlantı gerçekten kuruldu, "port açık" değil.
+
+### Alınan önlem: `MicoFX Gece Restart` (00:00, günlük)
+
+`gece_restart.py` — ağacı durdurur, başlatır, portu doğrular, kendi
+loguna yazar (`logs/gece_restart.log`), 45 sn içinde açılmazsa bir kez
+daha dener, olmazsa **HATA** yazar.
+
+**Neden 00:00:** kitaptaki altı sembolün **hepsi** seans dışı (en erken
+pencere 01:00) ve gün sonu flatten 23:5x'te çalışmış — yani kitap düz,
+restart hiçbir pozisyonu bölmez. Günün tek güvenli saati.
+
+**Neden koşulsuz:** sağlık kontrolü "sağlıklı"yı tanımlamak zorunda, ve bu
+olay **dışarıdan sağlıklı görünüyordu**. İyi olanı yeniden başlatmak
+işlemsiz bir saatte birkaç saniye; sessizce körü başlatmamak bir seans.
+
+**Doğrulandı, varsayılmadı:** script elle iki kez, zamanlanmış görev bir
+kez uçtan uca çalıştırıldı — `LastTaskResult: 0`, log tam, bot ayağa
+kalktı.
+
+### Ama bu kemer, tamir değil — asıl kusur duruyor
+
+`mt5client.ensure()` içinde 5 saniyelik bekleme ile `connect()` çağıran
+yeniden bağlanma mekanizması **var**. Terminal bir dakika sonra geri
+gelmişti. **Neden 32 saat boyunca bağlanmadı, bilinmiyor** — ve logda
+tek bir yeniden deneme satırı bile yok. Bu ayrı bir soruşturma.
