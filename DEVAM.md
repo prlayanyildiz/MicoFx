@@ -3520,3 +3520,39 @@ alındı, kendi kodumuzda test edildi, tutmadı.
 üzerinden tanımlıyor. Alan uzak (kripto HFT, emir defteri), taşınacak kod
 yok — ama PARITE-1'in **yerleşik bir disiplin** olduğunun ikinci bağımsız
 işareti (birincisi "reconciliation-gated backtester" tanımı).
+
+### 8c · Tarama günlüğü — 23.08 (operatörün gönderdiği liste)
+
+Kaynak: X paylaşımı, "trading botu için 5 GitHub deposu".
+`freqtrade` · `hummingbot` · `jesse` · `QuantConnect/Lean` · `lumibot`.
+
+**Sonuç: beşi de alınmadı.** Gerekçeler:
+* `freqtrade` — **kripto-özel**, dokümantasyonu açıkça "hisse, forex, vadeli
+  yok" diyor. MT5 yok.
+* `hummingbot` — kripto CEX/DEX piyasa yapıcılığı. MT5 yok.
+* `jesse` — kripto. MT5 yok.
+* `Lean` (Apache-2.0) — çok varlıklı (forex dahil), ciddi proje; **ama
+  motor C#** ve kendi aracı kurumları üzerinden çalışıyor. **MT5 yok.**
+* `lumibot` — ABD aracı kurumları odaklı (Alpaca/IB/Tradier). MT5 yok.
+
+**Yan bulgu — besleme kaynağı:** `wangzhe3224/awesome-systematic-trading`
+(5000+ yıldız, MIT/CC-BY, aktif, aracı kurum API'leri ve bileşen
+kütüphaneleri diye kategorili). Kör aramadan iyi bir başlangıç noktası.
+**Ama bizim iki gerçek açığımızı kapsamıyor:** MetaTrader bölümü yok,
+aşırı-uyum/doğrulama istatistiği bölümü yok.
+
+### Ve iki günün deseni: liste taramaları sıfır getirdi
+
+22–23.08'de üç "en iyi N trading deposu" paylaşımı incelendi
+(NautilusTrader zinciri · Polymarket · bu liste). **Üçünden de sıfır
+benimseme çıktı.** Buna karşılık **problem güdümlü** tek arama
+(`çoklu-test düzeltmesi`) hem `purgedcv`'yi buldu hem de onu **almamamız
+gerektiğini** gösterdi — yani gerçek bir karar üretti.
+
+**Sebebi yapısal, şanssızlık değil:** bu listeler popülerliğe göre
+sıralanıyor ve bu alanda popülerlik = kripto + yeni başlayan. Bizim
+sorunlarımız (MT5, kâğıt/canlı paritesi, çoklu-test düzeltmesi)
+**popüler olmayan sorunlar**.
+
+**Kural: tarama, liste gezmek değil, açık problem listemizle aramak
+olacak.** Liste paylaşımları hızlıca elenir ve buraya tek satır yazılır.
