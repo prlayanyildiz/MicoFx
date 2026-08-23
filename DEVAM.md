@@ -3521,6 +3521,29 @@ alındı, kendi kodumuzda test edildi, tutmadı.
 yok — ama PARITE-1'in **yerleşik bir disiplin** olduğunun ikinci bağımsız
 işareti (birincisi "reconciliation-gated backtester" tanımı).
 
+### 7a · PARITE envanteri — trail ekseni (23.08, sapma yok)
+
+Kârın tamamını kuyruk taşıyor ve kuyruğu trail belirliyor, o yüzden
+envanterin en değerli ekseni buydu. Karşılaştırıldı: **sapma yok.**
+
+**Ortak:** `trail = ref/c ∓ atr*trail_step_atr` ifadesi · `trail_min_step`
+(models.py'de tek kaynak, testle çivili) · yapısal/hibrit dalı ·
+`breakeven_locked` · yalnız ileri mandallama.
+
+**Canlıda üç ek reddetme, üçü de kâğıdın temsil edemediği durum için:**
+`current_sl != 0` (canlıda stop 0 olabilir) · `original_risk` kapısı
+(kâğıtta `target > sl` aynı işi görüyor) · canlı kotasyon geri çekilmişse
+başabaş koruması.
+
+**Kasıtlı tek fark:** kâğıt **bar kapanışıyla** kırpıyor, canlı **o anki
+kotasyonla**. Bar içi hızlı harekette canlı, kâğıdın koyamayacağı seviye
+koyar. Kapatılamaz (replay'de tick yok) — "fill fiyatı" ile aynı sınıf:
+kasten farklı, **büyüklüğü ölçülmemiş**.
+
+Ölçülebilir: kod `target != wanted` olduğunda zaten `settled = False`
+yapıyor; bir sayaç canlı kotasyonun trail'i kaç kez geri tuttuğunu verir.
+**Aday olarak bekliyor** — açılış öncesi canlı durum eklenmedi.
+
 ### 8c · Tarama günlüğü — 23.08 (operatörün gönderdiği liste)
 
 Kaynak: X paylaşımı, "trading botu için 5 GitHub deposu".
