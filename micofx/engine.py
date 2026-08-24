@@ -1931,6 +1931,15 @@ class Engine:
             state.bars_ready = len(bars) if bars else 0
             return False
 
+        if state.last_bar > 0 and bars.last_closed_time < state.last_bar:
+            # History rewound after attach. Measured 24.08 01:00: NAS100
+            # SIGNAL identical to 22.08 08:26 (K=40.1 D=52.1 ATR=56.39410).
+            # The process never restarted, so last_bar was not 0, and SIGNAL
+            # only emits when last_closed != last_bar. copy_rates handed back
+            # an older last-closed stamp; the equality check below only
+            # catches "same stamp". Keep the in-memory bar, do not re-fire it.
+            return False
+
         state.bars_ready = len(bars)
         state.bars = bars
         tf_sec = timeframe_seconds(cfg.timeframe)
