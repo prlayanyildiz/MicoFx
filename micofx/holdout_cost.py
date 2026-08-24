@@ -27,6 +27,46 @@ def _tf_seconds(name: str) -> int:
     return _TF_SECONDS[key]
 
 
+def charged_holdout(*, bars, cfg: SymbolConfig, point: float, tick_value: float,
+                    tick_size: float, spread_scale: float, min_stop: float | None,
+                    segments: int, trade_all_hours: bool, day_end_flatten_min: int,
+                    tf_seconds: int):
+    """One charged holdout slice. Inputs already resolved — no client, no store.
+
+    Apply gathers from the live terminal; replay gathers from the snapshot.
+    The arithmetic lives here once so the two cannot drift (review 24.08 09:20).
+    """
+    n = len(bars)
+    segs = int(segments)
+    if n < 800 or n < segs * 150:
+        raise ValueError(f"window too short for holdout edges: n={n} segments={segs}")
+    edges = [int(round(n * i / segs)) for i in range(segs + 1)]
+    lo, hi = edges[-2], edges[-1]
+    commission = backtest.commission_in_price(
+        cfg.commission_per_lot, float(tick_value or 0), float(tick_size or 0))
+    scale = float(spread_scale)
+    spread_pts = backtest.imputed_spread_pts(bars.spread)
+    spread_price = spread_pts * point * scale
+    raw_spread_price = spread_pts * point
+    floor_const = backtest.stop_floor_const(min_stop, point)
+    min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
+    tradable = backtest.session_mask(cfg, bars.time, bool(trade_all_hours))
+    flatten = backtest.flatten_mask(
+        cfg, bars.time, bool(trade_all_hours), int(day_end_flatten_min))
+    p = Params.from_config(cfg)
+    cost_price = spread_price + float(commission)
+    cache = IndicatorCache(bars.high, bars.low, bars.close, bars.time, tf_seconds,
+                           bars.open, bars.volume, cost_price)
+    sig = compute(cache, p)
+    res = backtest.simulate(
+        cache, sig, bars.open, bars.spread, point, p, tradable,
+        lo, hi, commission,
+        spread_price=spread_price, min_stop=min_stop_series, flatten=flatten,
+        max_open=backtest.max_open_from_cfg(cfg),
+        block_reverse=True)
+    return res, lo, hi
+
+
 def cost_share(cost_rs: list[float] | np.ndarray, trade_rs: list[float] | np.ndarray,
                threshold_pct: float) -> dict[str, Any]:
     """n / median / p90 / share above the live cost gate. No net R."""
@@ -70,44 +110,25 @@ def replay(snap: dict[str, Any]) -> dict[str, Any]:
     n = len(bars)
     if n < 800 or n < segments * 150:
         raise ValueError(f"snapshot window too short for holdout edges: n={n} segments={segments}")
-    edges = [int(round(n * i / segments)) for i in range(segments + 1)]
-    lo, hi = edges[-2], edges[-1]
     cfg = SymbolConfig.from_dict(dict(snap["config"]))
     overlay = cfg.to_dict()
     overlay["timeframe"] = snap["timeframe"]
     overlay["symbol"] = snap["symbol"]
     tmp = SymbolConfig.from_dict(overlay)
-    tf_seconds = _tf_seconds(snap["timeframe"])
-    commission = backtest.commission_in_price(
-        tmp.commission_per_lot,
-        float(info.get("tick_value") or 0),
-        float(info.get("tick_size") or 0),
-    )
-    scale = float(snap["spread_scale"])
-    spread_pts = backtest.imputed_spread_pts(bars.spread)
-    spread_price = spread_pts * point * scale
-    raw_spread_price = spread_pts * point
-    min_stop = float(snap["min_stop"])
-    floor_const = backtest.stop_floor_const(min_stop, point)
-    min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
-    tradable = backtest.session_mask(tmp, bars.time, bool(snap["trade_all_hours"]))
-    flatten = backtest.flatten_mask(
-        tmp, bars.time, bool(snap["trade_all_hours"]), int(snap["day_end_flatten_min"]))
-    p = Params.from_config(tmp)
-    cost_price = spread_price + float(commission)
-    cache = IndicatorCache(bars.high, bars.low, bars.close, bars.time, tf_seconds,
-                           bars.open, bars.volume, cost_price)
-    sig = compute(cache, p)
-    res = backtest.simulate(
-        cache, sig, bars.open, bars.spread, point, p, tradable,
-        lo, hi, commission,
-        spread_price=spread_price, min_stop=min_stop_series, flatten=flatten,
-        max_open=backtest.max_open_from_cfg(tmp),
-        block_reverse=True)
+    res, lo, hi = charged_holdout(
+        bars=bars, cfg=tmp, point=point,
+        tick_value=float(info.get("tick_value") or 0),
+        tick_size=float(info.get("tick_size") or 0),
+        spread_scale=float(snap["spread_scale"]),
+        min_stop=float(snap["min_stop"]),
+        segments=segments,
+        trade_all_hours=bool(snap["trade_all_hours"]),
+        day_end_flatten_min=int(snap["day_end_flatten_min"]),
+        tf_seconds=_tf_seconds(snap["timeframe"]))
     report = cost_share(res.trade_cost_rs, res.trade_rs, float(snap["max_cost_pct_of_risk"]))
     report["symbol"] = snap["symbol"]
     report["timeframe"] = snap["timeframe"]
-    report["spread_scale"] = scale
+    report["spread_scale"] = float(snap["spread_scale"])
     report["lo"] = lo
     report["hi"] = hi
     return report

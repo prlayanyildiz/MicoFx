@@ -11,6 +11,7 @@ from micofx.bar_snapshot import read, write
 from micofx.bars import Bars
 from micofx.holdout_cost import cost_share, replay
 from micofx.models import SymbolConfig
+from micofx.optimizer import Optimizer
 
 
 def test_share_counts_trades_above_the_live_gate_without_rescoring():
@@ -77,3 +78,16 @@ def test_replay_reads_the_pin_and_does_not_need_a_client(tmp_path):
     assert got["threshold_pct"] == 18.0
     assert "net_r" not in got
     assert got["lo"] < got["hi"]
+
+
+def test_apply_and_replay_share_one_charged_slice():
+    """The weekend class: the same rule written twice. 24.08 09:20."""
+    import inspect
+    apply_src = inspect.getsource(Optimizer._holdout_costed)
+    replay_src = inspect.getsource(replay)
+    assert "charged_holdout(" in apply_src
+    assert "charged_holdout(" in replay_src
+    assert "imputed_spread_pts" not in apply_src
+    assert "imputed_spread_pts" not in replay_src
+    assert "backtest.simulate" not in apply_src
+    assert "backtest.simulate" not in replay_src

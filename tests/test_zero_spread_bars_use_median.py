@@ -35,7 +35,7 @@ def test_the_search_and_the_charged_replay_both_impute():
     """A helper nobody calls is the same as no fix."""
     wf = (Path(__file__).resolve().parents[1] / "micofx" / "backtest.py"
           ).read_text(encoding="utf-8")
-    opt = (Path(__file__).resolve().parents[1] / "micofx" / "optimizer.py"
-           ).read_text(encoding="utf-8")
+    slice_src = (Path(__file__).resolve().parents[1] / "micofx" / "holdout_cost.py"
+                 ).read_text(encoding="utf-8")
     assert "imputed_spread_pts(bars.spread)" in wf
-    assert "imputed_spread_pts(bars.spread)" in opt
+    assert "imputed_spread_pts(bars.spread)" in slice_src

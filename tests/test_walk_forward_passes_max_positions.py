@@ -16,6 +16,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx import backtest as bt
+from micofx.holdout_cost import charged_holdout
 from micofx.models import SymbolConfig
 from micofx.optimizer import Optimizer
 
@@ -101,7 +102,9 @@ def test_max_open_from_cfg_clamps_junk_to_one():
 
 
 def test_holdout_costed_forwards_tmp_max_positions():
-    src = inspect.getsource(Optimizer._holdout_costed)
-    assert "max_open_from_cfg" in src
-    assert "max_open=" in src
-    assert "block_reverse=True" in src
+    apply_src = inspect.getsource(Optimizer._holdout_costed)
+    slice_src = inspect.getsource(charged_holdout)
+    assert "charged_holdout(" in apply_src
+    assert "max_open_from_cfg" in slice_src
+    assert "max_open=" in slice_src
+    assert "block_reverse=True" in slice_src

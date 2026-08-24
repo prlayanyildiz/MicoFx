@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from . import backtest
+from .holdout_cost import charged_holdout
 from .logbus import LOG
 from .models import (
     EXIT_RISK_FIELDS,
@@ -1536,47 +1537,25 @@ class Optimizer:
         n = len(bars)
         if n < segments * 150:
             return None
-        edges = [int(round(n * i / segments)) for i in range(segments + 1)]
-        lo, hi = edges[-2], edges[-1]
         overlay = dict(cfg.to_dict())
         overlay["timeframe"] = timeframe
         overlay["strategy"] = strategy
         overlay.update(params)
         tmp = SymbolConfig.from_dict(overlay)
-        point = float(info["point"])
-        tf_seconds = timeframe_seconds(timeframe)
-        commission = backtest.commission_in_price(
-            tmp.commission_per_lot,
-            float(info.get("tick_value") or 0),
-            float(info.get("tick_size") or 0),
-        )
-        scale = self._spread_scale(symbol)
-        spread_pts = backtest.imputed_spread_pts(bars.spread)
-        spread_price = spread_pts * point * scale
-        raw_spread_price = spread_pts * point
         try:
             min_stop = self.client.min_stop_distance(symbol)
         except Exception:
             min_stop = None
-        floor_const = backtest.stop_floor_const(min_stop, point)
-        min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
         system = getattr(self.store, "system", None)
-        all_hours = bool(getattr(system, "trade_all_hours", False))
-        day_end = int(getattr(system, "day_end_flatten_min", 0) or 0)
-        tradable = backtest.session_mask(tmp, bars.time, all_hours)
-        flatten = backtest.flatten_mask(tmp, bars.time, all_hours, day_end)
-        from .strategy import IndicatorCache, Params, compute
-        p = Params.from_config(tmp)
-        cost_price = spread_price + float(commission)
-        cache = IndicatorCache(bars.high, bars.low, bars.close, bars.time, tf_seconds,
-                               bars.open, bars.volume, cost_price)
-        sig = compute(cache, p)
-        res = backtest.simulate(
-            cache, sig, bars.open, bars.spread, point, p, tradable,
-            lo, hi, commission,
-            spread_price=spread_price, min_stop=min_stop_series, flatten=flatten,
-            max_open=backtest.max_open_from_cfg(tmp),
-            block_reverse=True)
+        res, _, _ = charged_holdout(
+            bars=bars, cfg=tmp, point=float(info["point"]),
+            tick_value=float(info.get("tick_value") or 0),
+            tick_size=float(info.get("tick_size") or 0),
+            spread_scale=self._spread_scale(symbol),
+            min_stop=min_stop, segments=segments,
+            trade_all_hours=bool(getattr(system, "trade_all_hours", False)),
+            day_end_flatten_min=int(getattr(system, "day_end_flatten_min", 0) or 0),
+            tf_seconds=timeframe_seconds(timeframe))
         return res.as_dict()
 
     def _charge_costs_stamp(self, detail: dict[str, Any] | None) -> bool:
