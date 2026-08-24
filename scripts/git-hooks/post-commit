@@ -1,0 +1,23 @@
+#!/bin/sh
+# Push every commit, so neither agent can forget one.
+#
+# Six commits sat unpushed on 24.08 before the operator noticed. Discipline
+# was the only thing carrying it and discipline is what slipped, so the push
+# moves into the commit itself.
+#
+# Never fails the commit: the commit already happened when this runs, and a
+# dead network must not look like a broken commit. Failures land in
+# logs/push.log, which is the point - a silent retry is how this got lost the
+# first time.
+LOG="$(git rev-parse --show-toplevel)/logs/push.log"
+mkdir -p "$(dirname "$LOG")" 2>/dev/null
+SHA=$(git rev-parse --short HEAD)
+SUB=$(git log -1 --pretty=%s)
+
+if OUT=$(git push origin HEAD 2>&1); then
+    printf '%s push OK   %s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$SHA" "$SUB" >> "$LOG"
+else
+    printf '%s push HATA %s %s\n%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$SHA" "$SUB" "$OUT" >> "$LOG"
+    echo "UYARI: push basarisiz ($SHA) - logs/push.log'a bakin" >&2
+fi
+exit 0

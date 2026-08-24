@@ -321,6 +321,16 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     if (-not $haveMail) { & git -C $Root config user.email "prlayanyildiz@gmail.com" | Out-Null }
     Say ("  Kimlik: " + (& git -C $Root config user.name) + " <" + (& git -C $Root config user.email) + ">") "Green"
 
+    $hookSrc = Join-Path $Root "scripts\git-hooks\post-commit"
+    $hookDir = Join-Path $Root ".git\hooks"
+    if ((Test-Path -LiteralPath $hookSrc) -and (Test-Path -LiteralPath $hookDir)) {
+        # .git/hooks is not versioned. Six commits sat unpushed on 24.08
+        # because the only copy lived on this machine. KUR puts the same
+        # hook on a fresh clone so commit=push is not a memory.
+        Copy-Item -LiteralPath $hookSrc -Destination (Join-Path $hookDir "post-commit") -Force
+        Say "  post-commit hook kuruldu (her commit origin'e gider)." "Green"
+    }
+
     $remote = (& git -C $Root remote get-url origin) 2>$null
     if ($remote) {
         Say "  Uzak depo: $remote" "Green"
