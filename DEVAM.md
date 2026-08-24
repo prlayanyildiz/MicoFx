@@ -3852,6 +3852,8 @@ Claude 14:24: GER40 14:00 SELL `risk_ters_yon` (açık BUY). 14:40: JPN225 3,5 d
 
 **24.08 15:10 — WEB-1 Claude'da (operatör).** Terminal kullanış + tavan. Fail-first: `max_concurrent_risk_pct` Sistem'de var (`app.js` 1717), çift yok. Eksik: Panel kart/özet tavanı göstermiyor; Tani otopsi API'sini çizmiyor; STOPSUZ satır `dim`. Yeşil, sayı 30 oynanmaz.
 
+**24.08 15:31 — NAS100 SIGNAL yeniden, blok kaydı yok.** 15:31:26 = 15:30:03 ile aynı okuma. Restart `last_bar=0` SIGNAL basar; `filled_bars` ikinci fill'i keser, `_tally_entry` yok. Tasarım (19:00 çift fill). Boş `entry_block_events` bug değil.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.
