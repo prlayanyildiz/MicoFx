@@ -89,6 +89,22 @@ def test_a_stop_trailed_to_entry_drops_out_of_the_budget():
     assert allowed.ok, allowed.reason
 
 
+def test_a_missing_stop_does_not_free_the_budget():
+    """sl=0 used to return 0 remaining risk, same as a trail at entry.
+
+    manage_positions reports STOPSUZ and does not close. The concurrent-risk
+    cap then treated the naked ticket as free room for the next fill.
+    """
+    risk = RiskManager(_Store(), _Client())
+    cfg = risk.store.symbols["XAUUSD"]
+    open_now = [_pos(sl=0.0)]
+    account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
+    blocked = risk.can_open(cfg, "buy", 1.0, open_now, account, sl_distance=4.0)
+    assert not blocked.ok
+    assert "stopsuz" in blocked.reason
+    assert risk.remaining_position_risk(open_now[0]) == float("inf")
+
+
 def test_zero_disables_the_concurrent_risk_gate():
     store = _Store()
     store.system.max_concurrent_risk_pct = 0.0

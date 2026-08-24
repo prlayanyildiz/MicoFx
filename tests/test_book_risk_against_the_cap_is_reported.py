@@ -58,6 +58,17 @@ def test_todays_book_under_todays_cap_is_silent(monkeypatch):
     assert lines == []
 
 
+def test_size_by_edge_raises_the_configured_ceiling(monkeypatch):
+    """Live flag. EDGE_MAX 2.2 turns 12.8 into 28.16, above the 15 cap."""
+    lines = _lines(monkeypatch)
+    eng = _engine(15.0, BOOK_TODAY)
+    eng.store.system.size_by_edge = True
+    eng._note_risk_capacity()
+    warned = [m for m, lvl in lines if lvl == "WARN" and "eszamanli risk" in m]
+    assert len(warned) == 1
+    assert "%28.16" in warned[0] and "%15.00" in warned[0]
+
+
 def test_the_default_cap_under_todays_book_is_reported(monkeypatch):
     """The quiet path: system settings fall back while the symbols survive."""
     lines = _lines(monkeypatch)

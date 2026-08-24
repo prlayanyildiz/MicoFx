@@ -477,12 +477,18 @@ class RiskManager:
         A trail pulled to entry (or into profit) is zero remaining risk and
         must free budget; counting the original stop would keep the gate
         conservative after the danger has already left.
+
+        A missing stop is the opposite: remaining risk cannot be measured,
+        and treating it as zero would free the concurrent-risk budget for a
+        naked position. That is unbounded so the cap refuses.
         """
         sl = float(pos.get("sl") or 0.0)
         entry = float(pos.get("price_open") or 0.0)
         volume = float(pos.get("volume") or 0.0)
-        if sl <= 0 or entry <= 0 or volume <= 0:
+        if entry <= 0 or volume <= 0:
             return 0.0
+        if sl <= 0:
+            return float("inf")
         dist = (entry - sl) if pos.get("side") == "buy" else (sl - entry)
         if dist <= 0:
             return 0.0
@@ -496,6 +502,14 @@ class RiskManager:
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
         mine = [p for p in positions if p["magic"] in magics]
+        if any(float(p.get("volume") or 0.0) > 0 and not float(p.get("sl") or 0.0)
+               for p in mine):
+            # Report-only STOPSUZ in manage_positions does not close the
+            # ticket. Remaining risk used to return 0 for sl=0, so the
+            # concurrent-risk cap treated a naked position as free budget.
+            # Volume is required so a stub ticket (tests, a partial dict)
+            # is not mistaken for a live unprotected fill.
+            return Verdict(False, "stopsuz acik pozisyon")
 
         same_symbol = [p for p in mine if p["symbol"] == self.client.resolve(cfg.symbol)]
         if len(same_symbol) >= cfg.max_positions:
