@@ -214,6 +214,19 @@ sonra `git push origin HEAD` çalıştırıyor. İki agent de aynı depoda
 sessizce geride kalmaz ama bir commit'in gerçekten gittiğini gösteren tek
 şey `## main...origin/main` satırının temiz olmasıdır.
 
+### 2b-not · 24.08 12:12 — her değişiklik commit+push (operatör)
+
+> *"commit et ve her değişiklik te yap"*
+
+Hook uncommitted dosyaya dokunmaz; duran şey kuyruktu. 12:12'de gitti
+(adıyla, `git add -A` yok). Bundan sonra her ürün değişikliği commit
+edilir, hook `origin/HEAD`'e basar. Canlı tavan %30 git'te yok (DB).
+
+**Git'e girmeyen:** `data/micofx.db`, `logs/`, `claude/`, `cursor/`, `graft/`.
+
+**Kurulum:** `scripts/git-hooks/post-commit` depoda; `KUR.ps1` adım 6
+`.git/hooks/post-commit`'e kopyalar. Yeni makine aynı kuyruğu tekrarlamasın.
+
 ## 2a · SAHİPLENME KURALI (22.08, operatör) — düzeltmeden önce haber ver
 
 > *"bir şey düzeltmeden önce 'buldum, bunu yapıyorum' diye birbirinize bilgi
@@ -3745,3 +3758,70 @@ diske yazılmıyor (`_PERSIST`).
 
 **`ensure()` canlılık sondası ölçülmedi ve dokunulmadı** — körlük "ensure
 çağrılmıyor"dan gelmediği için oraya yama yapmak yanlış tamir olurdu.
+
+---
+
+## 24.08 10:35 — kusur avı (Cursor)
+
+Operatör: bütün hata/kusur/sorun. Claude boş kalmasın.
+
+### 24.08 11:22 — operatör restart verdi
+
+`gece_restart.py`: pid 676 durdu, port 8900 pid 9176 (venv çocuğu) 10 sn'de açıldı. MT5 bağlandı. Kitap uyarısı bir kez konuştu: **%28,16 vs tavan %15** (`size_by_edge` × `EDGE_MAX`, tavan değişmedi). Açık XAUUSD #363789447 broker SL'sinde; trail hiç yazmamıştı, bellek kaybı yok. Bayat-bar (`c519c2d`) + uncommitted `risk`/TRADE/`capture` canlıda.
+
+**Saat — canlı seans restart (22.08 hafta sonu değil).** 22.08 08:18 donmuş cuma tick'i `-8`/`-9` uydurmuştu. Bugün 11:22 açık piyasada: `broker saati ... farkli` **0 satır**. `session_clock_skew` hâlâ **0**. 11:30 GER40 fill, restart'tan 8 dk sonra (tempo penceresi 60 sn) — `due` broker saatiyle bağladı, 45 sn `stale` yedeğine düşmedi. DST otomatik telafi yok (1 Kas, operatör). Claude brief damgaları ~2 saat ileriydi; bot saati değil.
+
+### 24.08 12:01 — eşzamanlı risk tavanı %15 → %30 (operatör)
+
+1:100 marjı zaten broker'da; bağlayan **risk tavanıydı**. Kitap `size_by_edge` × `EDGE_MAX` ile %28,16 istiyor, %15 sıra gelince kesiyordu. Canlı `POST /api/system`: `max_concurrent_risk_pct` **30**. Log: `12:01:40 CFG ... 15.0 -> 30.0`. Slot 3, altın 1, `risk_percent` 0,8, günlük fren %22, marj %90 aynı. Kenar değil kapasite — sistem düzelince oda var.
+
+### 24.08 11:50 — Ollama / Nautilus / Graft (operatör tweet)
+
+Tweet'ler Ollama katalogu değil. Quant Science: **Nautilus Trader** (olay + enjekte saat, `TestClock`/`LiveClock`). Robiartec: 6 ajan reposu; işe yarayanı **Graft**. 232 ajan / video stüdyo / Nautilus'a göç **yok** — canlı kitap, kâğıt≠canlı riski.
+
+Ollama (GPU yok, 24 GB): `qwen2.5:7b-instruct` duruyor; `qwen2.5-coder:7b` indi (4,7 GB). R1/14b yok (19.08 ölçüldü, silindi). Model **yüklü değil** — arama RAM'i.
+
+Graft 0.12.1: `graft/` 4345 düğüm, telemetry off, gitignore. `--deep` LLM yok. MT5 tersine yok.
+
+Nautilus saati (açık kaynak okuma, broker binary değil): zaman global `time.time()` değil enjekte bağımlılık. MicoFX tempo kapısı aynı sınıfı zaten kesiyor; kalan karışım `deals_since` `time.time()` yedeği ve logbus makine damgası. Motoru Nautilus yapmıyoruz.
+
+### Kesin, yamalandı (11:22 restart ile canlıda)
+
+1. **Çıplak pozisyon eşzamanlı riski sıfırlıyordu.** `remaining_position_risk` `sl<=0` için 0 dönüyordu — trail'in girişe çekilmesiyle aynı sayı. `manage_positions` STOPSUZ'u raporlar, kapatmaz. Kapı bir sonraki girişi serbest bütçe sanırdı. Artık `volume>0` ve `sl==0` iken `can_open` `"stopsuz acik pozisyon"`; kalan risk `inf`.
+2. **TRADE satırında magic ve maliyet yoktu.** JPN225 #364015065 bizim mi, log söylemiyordu (`/api/state` 401 tasarım). `maliyet` sayacı 16.08'den beri hiç büyümüyor; geçen fill'lerin %18'e ne kadar yakın olduğu diskte yoktu. Satır artık `magic=` ve `maliyet %` taşır.
+3. **`_note_risk_capacity` `size_by_edge`'i saymıyordu.** Canlı flag True, `EDGE_MAX` 2,2. Kitap `risk_percent×slot` ile %12,8 görünür, tavan %15'in altında sessiz kalır; gerçek tavan **%28,16**. Uyarı 11:22'de bir kez konuştu. 12:01'de tavan **%30** (operatör).
+
+### Ölçüldü, kod hatası değil
+
+- **`maliyet` kapısı kırık değil.** 11 bugünkü otopsi `spread_atr` 0,016–0,153. GER40 `sl=1,0` → ~%6,6 R; JPN225 `sl=2,5` ve 0,153 → ~%6,1 R. %18'e hiç yaklaşmamış. Kâğıt payı başka rejim / bar×scale — gece `capture()`, canlıda değil.
+- **STOPSUZ kapatılmaz** — kasten rapor. 24.08 01:24'ten beri 0.
+- **Trail geometrisi** — GER40 #363891851 10:30'da 1,91×ATR'de kıpırdadı. Sessizlik bug değil, `trail_step` eşiği.
+- **Piramit** — GER40 10:00 ve JPN225 10:30, aynı yön, cumartesi slot 1→3. Tasarım.
+
+### Körlük, yama yok (yeşil, sıradaki)
+
+- Açık MFE yalnız bellekte (`ExecutionMonitor._open`). sqlite'da yok. Panel 401.
+- Apply hâlâ botun kendi client'ından spread okur; snapshot `capture()` hazır, canlıda koşulmadı.
+- `filled_bars` aynı bara ikinci fill'i keser; piramit bir sonraki barı bekler (bugün doğru çalıştı).
+
+**24.08 11:08 — `capture` 1,0 guard'ı SpotBrent'te çürüdü.** Claude histogram medyanlarını kova kova saydı. SpotBrent n=309624, medyan **0,95**, `scale` taban yüzünden **1,00**. Bu sessiz/ince histogram değil; tick makası bardan dar (%57,2 ratio<1). Eski `scale<=1.0` reddi bu sembolü kalıcı dışlardı. Guard artık **ölçülmüş medyan yoksa** reddeder; kıstırılmış 1,0'ı kabul eder. GER40/NAS100 bu gece 1,05 — plan değişmez. Açık MFE hâlâ **ölçülmedi**. 11:28: `_spread_scale` 1,0 / histogram medyanı ayrışması da reddedilir.
+
+**SpotBrent makas kapısı** `max_spread_atr=0,15` vs maliyet %18: 0,15/4,0=%3,75. Claude: 13/19 sinyal bu kapıda, gerçek maliyet %5–8. Eşik **dokunulmadı** (n=19). Bloklar `entry_block_events`'te kalıcı — "kayıt yok" iddiası yanlış yer aramaktı.
+
+**İma maliyet tavanı** (konfigürasyon, n yok): `max_spread_atr / sl_atr_mult`. SpotBrent %3,75 · JPN225 %7,2 · GER40/US30 %8 · NAS100 %12 · XAUUSD %25. Maliyet kapısı %18 yalnız altının üstünde; diğerlerinde makas önce keser. `maliyet` sayacının 16.08'den beri 0 olmasının sebebi bu. Oran aramanın yan ürünü, hedef değil. Dokunulmadı.
+
+**24.08 11:07 — GER40 ikili aynı saniyede kapandı.** #363891851 trail −4,01 (r=−0,29, mfe 2,17) · #364080413 giriş SL −15,93 (r=−1,00, mfe 1,65). Stoplar 0,88 puan. JPN225 11:00 kalıbının tekrarı. Açık kalan: XAUUSD. Kapalı 15, net **−216,15**.
+
+**Trail bağlayan MFE** (Claude 12:20, `trail_min_step` dahil): `max(start, 1,1×step − sl) / sl`. GER40 **1,42 R** (12:05'teki 1,20 eksikti). MFE gerek şart, yeter değil — trail yalnız kapanmış bara bakıyor. Bugün 15 kapanışta formül+kayıt tutuyor: trail yalnız US30 (−0,47 R) ve GER40 #363891851 (−0,29 R). Eşik yok.
+
+**"Kârı veriyoruz" — 65 otopsi (19.08 15:19–24.08 11:07), n ve pay ile.** Kazanma %36,9 (24/65). Medyan R **−0,999**, ortalama R **+0,122** — kenar kuyrukta. Kazanan: medyan gerçekleşen +1,10 R, medyan MFE 2,77, masada 1,01 R. Kaybeden: medyan −1,00 R, medyan MFE 0,34. Hiç yeşile geçmeyen 12/65. MFE≥0,5 sonra tam stop 10/65. MFE≥1,5 sonra kırmızı **3/65** (bugün XAUUSD #363638785, GER40 #364080413, trail'li GER40 #363891851). Başabaş kilidi (BE-1 1,5 R holdout'ta geçti, BE-2 doğrulamada GER40 −32 R, MASTER_PROMPT `breakeven_atr`'ı yasaklar) **uygulanmadı**. Gece saati kapısı holdout'ta öldü. GitHub EA / TP / kısmi çıkış yok.
+
+**65 otopside 14/15** (Claude 12:40). Tek sapma 19.08 21:31 JPN225 #361502433 trail `mfe_r=0,924` vs giriş-ATR eşiği 1,20, `r=+0,419`. Açık bırakılan aday kapandı: `_update_stop` canlı `state.atr` kullanır, giriş ATR'si değil. Log: giriş SL 429,70 (~ATR 172); 21:10 trail `5,00xATR` kimliği `atr_now≈72`. Formül giriş ATR'siyle yaklaşık. Trail dondurulmadı.
+
+**Motor kapısı 15/15** (Claude, ilk `kar NxATR` ≥ `trail_start`): KIRIK 0. Canlı-ATR sınıfı yalnız #361502433. GER40 `start=0,50` yazmayı bağlamıyor — `trail_min_step` ~1,2–1,4. Eşik yok.
+
+**24.08 12:07 — SpotBrent HTF=+0 ısınma değil.** Claude 20/20 `HTF=+0` ve aday sebep `t3_length×6×htf_factor`. Çürütüldü: ısınma yalnız `buy`/`sell` önekini keser, SIGNAL barı zaten geçmiş. SpotBrent ailesi **`dual_t3`** (`strategy.py:801`) `htf_up`/`htf_down` **düz False** döner; `_trend_gate` çağrılmaz. `htf_factor=12` okunmayan eksen (AUDIT-B). NAS100 `mtf_pullback` / XAUUSD `burst` kapıyı gerçekten hesaplar. dual_t3'e HTF eklenmedi — tasarım, ölçüm yok, sarı değil.
+
+### Açma
+
+Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.
