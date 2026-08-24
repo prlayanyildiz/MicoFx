@@ -45,9 +45,10 @@ class _Bars:
         return self.n
 
 
-def _engine(last_closed):
+def _engine(last_closed, broker_now=0.0):
     need = required_bars(Params())
     n = max(60, need // 2)
+    now = float(broker_now)
 
     class _Client:
         connected = True
@@ -56,7 +57,7 @@ def _engine(last_closed):
             return _Bars(n, last_closed)
 
         def broker_now(self):
-            return 0.0
+            return now
 
         def info(self, symbol):
             return {"point": 0.01, "tick_value": 1.0, "tick_size": 0.01}
@@ -98,3 +99,34 @@ def test_a_newer_last_closed_is_still_a_new_bar():
 
     assert fresh is True
     assert state.last_bar == later
+
+
+def test_a_future_last_closed_does_not_raise_the_yardstick():
+    """Tick path already drops future stamps; bars must too or rewind locks."""
+    broker = float(FRIDAY_AFTERNOON)
+    future = FRIDAY_AFTERNOON + 86400 * 30
+    eng, _n = _engine(future, broker_now=broker)
+    state = SymbolState("NAS100")
+    state.last_bar = FRIDAY_AFTERNOON
+    state.last_fetch = 0.0
+
+    fresh = eng._refresh_signals(_cfg(), state, Params.from_config(_cfg()))
+
+    assert fresh is False
+    assert state.last_bar == FRIDAY_AFTERNOON
+    assert "ileri" in state.note
+
+
+def test_a_poisoned_future_last_bar_does_not_silence_the_symbol():
+    """Escape: last_bar ahead of the broker clock is not a scored bar."""
+    broker = float(FRIDAY_AFTERNOON + TF)
+    closed = FRIDAY_AFTERNOON + TF
+    eng, _n = _engine(closed, broker_now=broker)
+    state = SymbolState("NAS100")
+    state.last_bar = FRIDAY_AFTERNOON + 86400 * 30
+    state.last_fetch = 0.0
+
+    fresh = eng._refresh_signals(_cfg(), state, Params.from_config(_cfg()))
+
+    assert fresh is True
+    assert state.last_bar == closed

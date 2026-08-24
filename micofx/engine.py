@@ -1931,6 +1931,21 @@ class Engine:
             state.bars_ready = len(bars) if bars else 0
             return False
 
+        tf_sec = timeframe_seconds(cfg.timeframe)
+        broker_now = self.client.broker_now()
+        # Same-clock as last_closed (broker naive epoch). Machine time is the
+        # UTC-offset trap. No tick yet (0.0) means we cannot judge "future".
+        if broker_now > 0.0 and state.last_bar > broker_now + tf_sec:
+            # Escape hatch for the rewind gate below. That gate has no way
+            # out: once last_bar sits in the future, every real bar is older
+            # and the symbol never signals again. The tick path already
+            # drops those stamps (_MAX_TICK_AHEAD_SEC); bars did not, and
+            # 6c3de07 made a poisoned last_bar fatal. Review 24.08 07:55.
+            state.last_bar = 0
+        if broker_now > 0.0 and bars.last_closed_time > broker_now + tf_sec:
+            state.note = "bar damgasi ileri tarih"
+            return False
+
         if state.last_bar > 0 and bars.last_closed_time < state.last_bar:
             # History rewound after attach. Measured 24.08 01:00: NAS100
             # SIGNAL identical to 22.08 08:26 (K=40.1 D=52.1 ATR=56.39410).
@@ -1938,11 +1953,19 @@ class Engine:
             # only emits when last_closed != last_bar. copy_rates handed back
             # an older last-closed stamp; the equality check below only
             # catches "same stamp". Keep the in-memory bar, do not re-fire it.
+            state.note = "bar gecmisi geri sarildi"
+            key = (cfg.symbol, int(bars.last_closed_time))
+            logged = getattr(self, "_bar_rewind_logged", None)
+            if logged is None:
+                self._bar_rewind_logged = logged = set()
+            if key not in logged:
+                logged.add(key)
+                LOG.emit("bar gecmisi geri sarildi - taze sinyal sayilmadi",
+                         "WARN", cfg.symbol)
             return False
 
         state.bars_ready = len(bars)
         state.bars = bars
-        tf_sec = timeframe_seconds(cfg.timeframe)
         state.next_bar_at = bars.last_closed_time + 2 * tf_sec + 2
 
         if bars.last_closed_time == state.last_bar:
