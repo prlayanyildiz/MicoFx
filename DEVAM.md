@@ -189,7 +189,32 @@ kilidi bunu yakalamaz ve her sinyal iki kez açılır.
 
 ## 2. Cursor protokolü (bağlayıcı)
 
-### 2a · SAHİPLENME KURALI (22.08, operatör) — düzeltmeden önce haber ver
+### 2b · PUSH KURALI (24.08, operatör) — her commit otomatik gider
+
+> *"push görevini unutmayın. Onu her değişiklikte yapacak şekilde
+> planlayın."*
+
+Sebebi ölçülü: 24.08 09:05'te **6 commit push edilmemiş** halde duruyordu
+(hepsi sabahki `bar_snapshot` zinciri). Kuralı taşıyan tek şey disiplindi
+ve kayan şey disiplin oldu.
+
+**Çözüm disiplin değil, mekanizma:** `.git/hooks/post-commit` her commit'ten
+sonra `git push origin HEAD` çalıştırıyor. İki agent de aynı depoda
+çalıştığı için ikisini birden kapsıyor; kimse hatırlamak zorunda değil.
+
+**Tasarım notları:**
+* **Commit'i asla düşürmez.** Hook çalıştığında commit zaten olmuştur; ölü
+  bir ağ bozuk bir commit gibi görünmemeli. `exit 0`.
+* **Başarısızlık sessiz değil** — `logs/push.log`'a yazılır ve stderr'e
+  uyarı basar. Sessiz yeniden deneme, bu işi ilk başta kaybettiren şeydi.
+* **Hook sürüm kontrolünde değil** (`.git/hooks/` izlenmiyor). Yani yeni
+  makinede **elle kurulmalı** — kurulum adımı olarak not.
+
+**Yine de her push'tan sonra `git status -sb` bakılmalı:** hook ağ hatasında
+sessizce geride kalmaz ama bir commit'in gerçekten gittiğini gösteren tek
+şey `## main...origin/main` satırının temiz olmasıdır.
+
+## 2a · SAHİPLENME KURALI (22.08, operatör) — düzeltmeden önce haber ver
 
 > *"bir şey düzeltmeden önce 'buldum, bunu yapıyorum' diye birbirinize bilgi
 > verin ki aynı sorunlar üzerinden dönüp durmayın."*
