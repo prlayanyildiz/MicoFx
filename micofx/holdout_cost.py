@@ -9,6 +9,7 @@ so the rest of the sequence would have been different. Report the share.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -132,3 +133,61 @@ def replay(snap: dict[str, Any]) -> dict[str, Any]:
     report["lo"] = lo
     report["hi"] = hi
     return report
+
+
+def capture(*, client: Any, store: Any, symbol: str, timeframe: str,
+            path: Path | None = None) -> Path:
+    """Write one holdout snapshot through an already-connected client.
+
+    Does not call initialize() or shutdown(). The trading process already
+    holds the only bind, or the bot is stopped and this process is the only
+    initialize. A second process would drop the live connection.
+
+    ``spread_scale == 1.0`` is refused here even with a fat histogram:
+    write() treats that as a real bar=tick reading, but GER40/NAS100 are
+    not that market (review 24.08 09:35). A 1.0 at fetch is a bad read.
+    """
+    from .bar_snapshot import snapshot_path, write
+    from .optimizer import Optimizer
+
+    cfg = store.symbols.get(symbol)
+    if cfg is None:
+        raise ValueError(f"{symbol}: not in the store")
+    info = client.info(symbol)
+    if not info or not (float(info.get("point") or 0) > 0):
+        raise ValueError(f"{symbol}: client.info missing point")
+    opt = store.opt_params() or {}
+    want = int(opt.get("max_bars") or 0) or 20000
+    bars = client.bars(symbol, timeframe, want)
+    if bars is None or len(bars) < 800:
+        raise ValueError(f"{symbol}: bar window too short to be a holdout")
+    min_stop = float(client.min_stop_distance(symbol))
+    scale = float(Optimizer(store=store, client=client)._spread_scale(symbol))
+    blob = store.get_setting("spread_ratio", {}) or {}
+    counts = blob.get(symbol) or []
+    n = 0
+    if isinstance(counts, (list, tuple)):
+        n = sum(int(v) for v in counts
+                if isinstance(v, (int, float)) and not isinstance(v, bool))
+    if scale <= 1.0:
+        raise ValueError(
+            f"{symbol}: spread_scale {scale} at capture - refusing the silent "
+            "1.0 that would hide the 18% gate")
+    system = getattr(store, "system", None)
+    dest = path or snapshot_path(symbol, timeframe)
+    write(
+        dest, symbol=symbol, timeframe=timeframe, bars=bars,
+        info={
+            "point": float(info.get("point") or 0),
+            "tick_value": float(info.get("tick_value") or 0),
+            "tick_size": float(info.get("tick_size") or 0),
+        },
+        min_stop=min_stop, spread_scale=scale, spread_scale_n=n,
+        segments=int(opt.get("segments") or 0) or 5,
+        trade_all_hours=bool(getattr(system, "trade_all_hours", False)),
+        day_end_flatten_min=int(getattr(system, "day_end_flatten_min", 0) or 0),
+        charge_costs=bool(getattr(system, "charge_costs", True)),
+        max_cost_pct_of_risk=float(getattr(system, "max_cost_pct_of_risk", 0) or 0),
+        config=cfg.to_dict(),
+    )
+    return dest
