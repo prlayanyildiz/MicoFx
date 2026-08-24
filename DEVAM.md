@@ -3854,6 +3854,27 @@ Claude 14:24: GER40 14:00 SELL `risk_ters_yon` (açık BUY). 14:40: JPN225 3,5 d
 
 **24.08 15:31 — NAS100 SIGNAL yeniden, blok kaydı yok.** 15:31:26 = 15:30:03 ile aynı okuma. Restart `last_bar=0` SIGNAL basar; `filled_bars` ikinci fill'i keser, `_tally_entry` yok. Tasarım (19:00 çift fill). Boş `entry_block_events` bug değil.
 
+**24.08 15:40 — kaçan işlemler, bugünün R yolu (n=6, etiket n<30).** Ömür boyu `entry_blocks` (%58 kaçırma, 102 `risk_sembol_limiti`) slot=1 dönemini karıştırır; cevap değil. Slot=3 (22.08 09:55) halkasında limit engeli **0**. Bugün 28 SIGNAL, 20 fill. 8 boşluğun 2'si fill değil: 01:00 NAS100 bayat Cuma barı, 15:31 `filled_bars` kopyası.
+
+Gerçek kaçış 6. 03:15 GER40 `spread` 2 sn sonra aynı barda doldu — kaçış değil. Kapı sırası: makas, `can_open`'dan önce (`engine.py:2279` / `2330`); 14:30 SpotBrent BUY etiketi `spread` ama açık SELL vardı, bağlayıcı kısıt ters yön de.
+
+M5 + native, giriş=sinyal kapanışı, SL=`sl_atr_mult`×ATR, trail canlı formül (`start` sonrası `ref±step`). `mt5.initialize(path)` yalnız, `shutdown` yok.
+
+| saat | sembol | etiket | yön | hard SL | trail çıkış | not |
+|---|---|---|---|---|---|---|
+| 09:30 | GER40 | ters | BUY | −1 R (sonraki M30) | −1 | açık SELL #363891851; kapanış MFE 0 |
+| 09:30 | SpotBrent | spread | SELL | (trail kilitler) | **+0,36 R** | tek masada kalan. 12:15 SELL alındı −1 R |
+| 09:35 | JPN225 | ters | SELL | −1 R | −1 | fitil MFE 1,04; kapanış 0,47 < trail_start 3,0 ATR. açık BUY −1 R |
+| 11:00 | SpotBrent | spread | BUY | −1 R | −1 | kapı zararlıyı kesti. 12:15 ters SELL alındı |
+| 14:00 | GER40 | ters | SELL | −1 R | −1 | M5 ilk barda stop. açık BUY #364185297 hâlâ duruyor |
+| 14:30 | SpotBrent | spread | BUY | duruyor +0,12 | trail yok (kapanış MFE 0,12) | açık SELL #364230392 15:32 −1 R; hedge, yön kenarı değil |
+
+**Kaçırılan ≠ kazanç.** Altıyı standalone alsaydık kabaca **−3,5 R daha kötü** (dört −1 + Brent 09:30 +0,36 + 14:30 +0,12). Tek bırakılan kâr: SpotBrent 09:30 **+0,36 R**, n=1. `max_spread_atr` / `risk_ters_yon` açılmadı. MISS-1 GER40 ters holdout −1001 R duruyor.
+
+**24.08 15:51 — 11:30 “ters yığın” yok (Claude çürüttü, log aynı).** `#363891851` ve `#364080413` **11:07:21** kapandı; BUY `#364185297` **11:30:03**. 23 dk GER40 boş. Otopsi `exit_time` fromtimestamp 14:07 TRADE 11:07 — saat kayması, delik değil. Listeden düştü.
+
+**24.08 16:08 — `after_1h` bar kapanışını bekler (yeşil).** `last_closed_time` açılış damgası. Eşik `open >= exit+3600` altının 14:46 saatini 16:15'e itiyordu; 15:45 M15 16:00'te bitmişti (97 sn). Artık `open + tf`. Gözlem, emir yok. Operatör TF/scalp: M1 ve TF indirme kapalı; işlem sayısı bugün dar değildi.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.

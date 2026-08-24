@@ -269,6 +269,23 @@ def test_fill_after_stop_waits_until_the_hour_has_closed():
     assert eng._trade_autopsies_dirty is False
 
 
+def test_fill_after_stop_uses_the_bar_close_not_its_open_stamp():
+    """A bar that opened 97s before the hour elapsed has already closed.
+
+    Gold 24.08 14:46: the 15:45 M15 finished at 16:00; waiting on the open
+    stamp pushed the fill to 16:15. Observation only.
+    """
+    eng = _engine()
+    eng.store.symbols["GER40"] = SymbolConfig(symbol="GER40", magic=1, timeframe="M15")
+    exit_t = 1000
+    last_open = exit_t + 3600 - 97
+    eng._trade_autopsies = [_priced_row(exit_time=exit_t)]
+    state = SymbolState("GER40")
+    state.bars = _bars(last=last_open)
+    eng._fill_after_stop("GER40", state)
+    assert eng._trade_autopsies[0].get("after_1h_bars") == 3
+
+
 def test_fill_after_stop_writes_the_hour_once_bars_exist():
     eng = _engine()
     eng._trade_autopsies = [_priced_row(exit_time=1000)]

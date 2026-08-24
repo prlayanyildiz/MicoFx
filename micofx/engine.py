@@ -1601,6 +1601,9 @@ class Engine:
             return
         dirty = False
         horizon = 3600.0
+        store = getattr(self, "store", None)
+        cfg = (getattr(store, "symbols", None) or {}).get(symbol) if store is not None else None
+        tf_sec = int(timeframe_seconds(cfg.timeframe) or 0) if cfg is not None else 0
         for row in rows:
             if str(row.get("symbol") or "") != symbol:
                 continue
@@ -1609,7 +1612,12 @@ class Engine:
             exit_t = self._autopsy_float(row.get("exit_time"))
             if exit_t is None or exit_t <= 0:
                 continue
-            if last_closed < float(exit_t) + horizon:
+            # last_closed_time is the OPEN of the last closed bar. The hour
+            # after the exit exists once that bar has closed (open + tf).
+            # Comparing open stamps delayed gold's 14:46 hour until 16:15 —
+            # the 16:00 bar's close — instead of 16:00, when the 15:45 M15
+            # had already finished (97s past the wall hour). Measured 24.08.
+            if last_closed + tf_sec < float(exit_t) + horizon:
                 continue
             entry = self._autopsy_float(row.get("entry"))
             orig = self._autopsy_float(row.get("original_sl"))
