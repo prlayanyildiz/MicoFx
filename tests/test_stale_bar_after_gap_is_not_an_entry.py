@@ -18,7 +18,7 @@ from __future__ import annotations
 import threading
 from types import SimpleNamespace
 
-from micofx.engine import Engine, SymbolState, _MAX_SIGNAL_BAR_AGE_BARS
+from micofx.engine import _MAX_SIGNAL_BAR_AGE_BARS, Engine, SymbolState
 from micofx.models import SymbolConfig
 from micofx.mt5client import timeframe_seconds
 
