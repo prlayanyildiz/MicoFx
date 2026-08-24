@@ -439,7 +439,8 @@ function renderCards() {
   // Absent is not zero. A backend that predates this field would otherwise
   // paint an empty bar over a book that is actually carrying risk, which is
   // the one reading this card exists to prevent.
-  const riskKnown = cap.open_risk_pct != null;
+  const unbounded = cap.open_risk_unbounded === true;
+  const riskKnown = unbounded || cap.open_risk_pct != null;
   const riskPct = Number(cap.open_risk_pct || 0);
   const riskRatio = riskKnown && riskCap > 0
     ? Math.min(100, Math.max(0, (riskPct / riskCap) * 100)) : 0;
@@ -471,13 +472,19 @@ function renderCards() {
       // This one answers "how much is still at risk right now" - the number
       // can_open() refuses on. They move independently: a book of trailed
       // stops carries almost no remaining risk while the day's loss stays.
-      lbl: "Eszamanli Risk", val: riskKnown ? `%${num(riskPct, 2)}` : "-",
-      foot: !riskKnown
-        ? "sunucu bu alani vermiyor - yeniden baslatma gerekiyor"
-        : (riskCap > 0
-          ? `tavan %${num(riskCap, 2)} | acik risk ${num(cap.open_risk)}`
-          : "tavan kapali"),
-      bar: riskRatio, barClass: riskRatio > 80 ? "bad" : riskRatio > 50 ? "warn" : "",
+      lbl: "Eszamanli Risk",
+      val: unbounded ? "STOPSUZ"
+        : (riskKnown ? `%${num(riskPct, 2)}` : "-"),
+      foot: unbounded
+        ? "ciplak pozisyon - tavan olculemiyor"
+        : (!riskKnown
+          ? "sunucu bu alani vermiyor - yeniden baslatma gerekiyor"
+          : (riskCap > 0
+            ? `tavan %${num(riskCap, 2)} | acik risk ${num(cap.open_risk)}`
+            : "tavan kapali")),
+      bar: unbounded ? 100 : riskRatio,
+      barClass: unbounded || riskRatio > 80 ? "bad" : riskRatio > 50 ? "warn" : "",
+      accent: unbounded ? "red" : "",
     },
     {
       lbl: "Acilabilir Islem", val: `${cap.global_free_slots ?? 0}`,

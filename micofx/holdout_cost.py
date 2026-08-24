@@ -153,7 +153,9 @@ def capture(*, client: Any, store: Any, symbol: str, timeframe: str,
     """
     from .bar_snapshot import snapshot_path, write
     from .engine import (
-        SPREAD_RATIO_BUCKETS, SPREAD_RATIO_MIN_SAMPLES, _ratio_percentile,
+        SPREAD_RATIO_BUCKETS,
+        SPREAD_RATIO_MIN_SAMPLES,
+        _ratio_percentile,
     )
     from .optimizer import Optimizer
 

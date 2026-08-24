@@ -121,3 +121,15 @@ def test_reported_risk_and_the_gate_agree_on_the_same_book():
                                sl_distance=headroom_r - 1.0)
     assert not just_over.ok and "eszamanli risk" in just_over.reason
     assert just_under.ok, just_under.reason
+
+
+def test_a_naked_stop_does_not_serialise_infinity():
+    """/api/state is json.dumps; Infinity is not valid JSON (execution RATIO)."""
+    import json
+    risk = RiskManager(_Store(), _Client())
+    cap = risk.capacity([_pos(sl=0.0)], ACCOUNT)
+    assert cap["open_risk_unbounded"] is True
+    assert cap["open_risk"] is None
+    assert cap["open_risk_pct"] is None
+    encoded = json.dumps(cap)
+    assert "Infinity" not in encoded and "NaN" not in encoded, encoded

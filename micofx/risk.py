@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import statistics
 import time
 from dataclasses import dataclass
@@ -694,13 +695,26 @@ class RiskManager:
         # can read the ceiling and the projection but never the live number the
         # refusal is decided on. Same expression as the gate, deliberately: a
         # second way of computing it is a second thing that can drift.
-        open_risk = sum(self.remaining_position_risk(p) for p in mine)
+        #
+        # A naked stop is unbounded (``remaining_position_risk`` returns inf).
+        # ``json.dumps`` would write Infinity and /api/state would 500 the
+        # whole panel - the same class as execution's RATIO_ALL_ADVERSE.
+        risks = [self.remaining_position_risk(p) for p in mine]
+        unbounded = any(not math.isfinite(r) for r in risks)
+        if unbounded:
+            open_risk = None
+            open_risk_pct = None
+        else:
+            open_risk = round(sum(risks), 2)
+            open_risk_pct = (round(open_risk / equity * 100.0, 2)
+                             if equity > 0 else 0.0)
 
         return {
             "rows": rows,
             "open_total": len(mine),
-            "open_risk": round(open_risk, 2),
-            "open_risk_pct": round(open_risk / equity * 100.0, 2) if equity > 0 else 0.0,
+            "open_risk": open_risk,
+            "open_risk_pct": open_risk_pct,
+            "open_risk_unbounded": unbounded,
             "total_risk_per_trade": round(total_risk, 2),
             "total_risk_pct": round(total_risk / equity * 100.0, 2) if equity > 0 else 0.0,
             "total_margin_if_all_open": round(total_margin, 2),
