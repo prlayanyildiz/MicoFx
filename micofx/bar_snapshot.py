@@ -16,9 +16,13 @@ from typing import Any
 
 import numpy as np
 
-from .engine import SPREAD_RATIO_MIN_SAMPLES
-from .mt5client import Bars
+from .bars import Bars
 from .paths import DATA_DIR
+
+# Copied from engine.SPREAD_RATIO_MIN_SAMPLES. Do not import engine here:
+# that module pulls MetaTrader5 (review 24.08 09:00). A test asserts they
+# stay equal. The silent 1.0 this floor refuses lives in _spread_scale.
+SPREAD_RATIO_MIN_SAMPLES = 400
 
 SNAPSHOT_VERSION = 2
 SNAPSHOT_DIR = DATA_DIR / "holdout_bars"

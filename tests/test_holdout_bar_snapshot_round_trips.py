@@ -1,10 +1,13 @@
 """Holdout bars round-trip on disk without an MT5 call."""
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import numpy as np
 
 from micofx.bar_snapshot import read, write
-from micofx.mt5client import Bars
+from micofx.bars import Bars
 
 
 def _bars(n=8):
@@ -53,3 +56,26 @@ def test_a_thin_histogram_is_refused_not_stored_as_one(tmp_path):
     write(tmp_path / "ok.npz", symbol="GER40", timeframe="M30", bars=_bars(),
           info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
           min_stop=0.5, spread_scale=1.0, spread_scale_n=400)
+
+
+def test_importing_the_snapshot_does_not_load_metatrader5():
+    """Replay process must not import the MT5 binding. Isolated so other
+    tests that already imported engine cannot poison sys.modules."""
+    script = (
+        "import sys\n"
+        "assert 'MetaTrader5' not in sys.modules\n"
+        "import micofx.bar_snapshot\n"
+        "loaded = [k for k in sys.modules if k == 'MetaTrader5' "
+        "or k.startswith('MetaTrader5.') or k == 'micofx.engine' "
+        "or k == 'micofx.mt5client']\n"
+        "assert not loaded, loaded\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_pinned_floor_matches_the_live_histogram_floor():
+    from micofx.bar_snapshot import SPREAD_RATIO_MIN_SAMPLES as snap
+    from micofx.engine import SPREAD_RATIO_MIN_SAMPLES as live
+    assert snap == live == 400
