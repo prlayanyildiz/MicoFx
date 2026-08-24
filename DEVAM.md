@@ -3850,6 +3850,8 @@ Canlı kod doğrulandı: `/api/analysis/trade-autopsies` `after_1h_*` anahtarlar
 
 Claude 14:24: GER40 14:00 SELL `risk_ters_yon` (açık BUY). 14:40: JPN225 3,5 dk, mfe 0, kayma −0,16 R, net gün **−224,74** sonra altın +23.
 
+**24.08 15:10 — WEB-1 Claude'da (operatör).** Terminal kullanış + tavan. Fail-first: `max_concurrent_risk_pct` Sistem'de var (`app.js` 1717), çift yok. Eksik: Panel kart/özet tavanı göstermiyor; Tani otopsi API'sini çizmiyor; STOPSUZ satır `dim`. Yeşil, sayı 30 oynanmaz.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.
