@@ -67,6 +67,7 @@ class Result:
     cost_r: float = 0.0              # total spread+commission drag, in R
     exits: dict[str, int] = field(default_factory=dict)
     trade_rs: list = field(default_factory=list)  # per-trade R, for diagnostics only
+    trade_cost_rs: list = field(default_factory=list)  # per-trade cost/R; not a score input
     trade_events: list = field(default_factory=list)  # (entry_ts, exit_ts, r)
 
     @property
@@ -545,6 +546,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         res.trades += 1
         res.net_r += r
         res.trade_rs.append(r)
+        res.trade_cost_rs.append(float((commission_price + s) / sl_dist))
         res.trade_events.append((int(cache.times[j0]), int(cache.times[exit_bar]), r))
         bar_total += exit_bar - j0 + 1
         exits[reason] = exits.get(reason, 0) + 1
@@ -961,6 +963,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         res.trades += 1
         res.net_r += r
         res.trade_rs.append(r)
+        res.trade_cost_rs.append(float((commission_price + s) / sl_dist))
         res.trade_events.append((int(cache.times[j0]), int(cache.times[exit_bar]), r))
         bar_total += exit_bar - j0 + 1
         exits[reason] = exits.get(reason, 0) + 1
@@ -1106,6 +1109,7 @@ def _merge(results: list[Result]) -> Result:
         total.longest_loss_streak = max(total.longest_loss_streak, r.longest_loss_streak)
         total.cost_r += r.cost_r
         total.trade_rs.extend(r.trade_rs)
+        total.trade_cost_rs.extend(r.trade_cost_rs)
         for k, v in r.exits.items():
             total.exits[k] = total.exits.get(k, 0) + v
     bars = sum(r.avg_bars * r.trades for r in results)
