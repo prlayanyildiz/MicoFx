@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_a_hand_closed_position_is_reported import BOOK, _Client, _deal, _tracker
 
 from micofx import execution
-from micofx.engine import TRADE_AUTOPSY_LIMIT, Engine
+from micofx.engine import TRADE_AUTOPSY_LIMIT, Engine, SymbolState, after_stop_excursions
 from micofx.models import SymbolConfig
 
 
@@ -105,6 +105,10 @@ def test_a_broker_stop_appends_an_autopsy_row():
     assert "r_realised" in row
     assert "mfe_r" in row
     assert "left_on_table_r" in row
+    assert "entry" in row
+    assert "sl" in row
+    assert "original_sl" in row
+    assert "exit_price" in row
 
 
 def test_the_autopsy_ring_drops_the_oldest_past_the_cap():
@@ -148,6 +152,10 @@ def test_a_moved_stop_is_labelled_trail_not_sl():
     ))
     assert eng._trade_autopsies[-1]["exit_reason"] == "trail"
     assert eng._trade_autopsies[-1]["left_on_table_r"] == 1.4
+    assert eng._trade_autopsies[-1]["entry"] == 100.0
+    assert eng._trade_autopsies[-1]["sl"] == 99.4
+    assert eng._trade_autopsies[-1]["original_sl"] == 99.0
+    assert eng._trade_autopsies[-1]["exit_price"] == 99.4
 
 
 def test_the_autopsy_report_is_on_the_panel():
@@ -190,4 +198,141 @@ def test_flush_persists_the_row_derived_since():
     eng.record_trade_autopsy({"symbol": "GER40", "ticket": 1, "exit_time": 5000})
     eng._flush_trade_autopsies()
     assert eng.store.settings["trade_autopsies_since"] == 5000
+
+
+def test_the_evaluate_path_fills_after_stop():
+    src = inspect.getsource(Engine._evaluate)
+    assert "_fill_after_stop" in src, (
+        "stop-sonrasi otopsi _evaluate'de yok - yarin yine logdan keseriz"
+    )
+
+
+def test_a_buy_stop_that_comes_back_through_entry_is_a_shakeout():
+    out = after_stop_excursions(
+        "buy", 100.0, 99.0, 99.0,
+        [1000, 1300, 2200, 5000],
+        [100.0, 99.2, 101.5, 102.0],
+        [99.0, 98.5, 99.1, 99.0],
+        exit_time=1000,
+    )
+    assert out is not None
+    assert out["after_1h_bars"] == 2
+    assert out["after_1h_extra_r"] == 0.5
+    assert out["after_1h_recovery_r"] == 2.5
+    assert out["after_1h_through_entry"] is True
+
+
+def test_a_buy_stop_that_keeps_falling_is_continuation():
+    out = after_stop_excursions(
+        "buy", 100.0, 99.0, 99.0,
+        [1000, 1600, 2800],
+        [100.0, 98.9, 98.4],
+        [99.0, 97.0, 95.2],
+        exit_time=1000,
+    )
+    assert out is not None
+    assert out["after_1h_extra_r"] == 3.8
+    assert out["after_1h_recovery_r"] == 0.0
+    assert out["after_1h_through_entry"] is False
+
+
+def test_a_sell_stop_recovery_through_entry_is_a_shakeout():
+    out = after_stop_excursions(
+        "sell", 100.0, 101.0, 101.0,
+        [50, 200, 800],
+        [100.5, 102.5, 101.2],
+        [99.8, 99.0, 99.5],
+        exit_time=50,
+    )
+    assert out is not None
+    assert out["after_1h_extra_r"] == 1.5
+    assert out["after_1h_recovery_r"] == 2.0
+    assert out["after_1h_through_entry"] is True
+
+
+def test_missing_prices_or_an_empty_window_return_none():
+    assert after_stop_excursions(
+        "buy", 100.0, 100.0, 99.0, [1], [1], [1], exit_time=0,
+    ) is None
+    assert after_stop_excursions(
+        "buy", 100.0, 99.0, 99.0, [1], [101], [98], exit_time=100,
+    ) is None
+
+
+def test_fill_after_stop_waits_until_the_hour_has_closed():
+    eng = _engine()
+    eng._trade_autopsies = [_priced_row(exit_time=1000)]
+    state = SymbolState("GER40")
+    state.bars = _bars(last=2000)
+    eng._fill_after_stop("GER40", state)
+    assert "after_1h_bars" not in eng._trade_autopsies[0]
+    assert eng._trade_autopsies_dirty is False
+
+
+def test_fill_after_stop_writes_the_hour_once_bars_exist():
+    eng = _engine()
+    eng._trade_autopsies = [_priced_row(exit_time=1000)]
+    state = SymbolState("GER40")
+    state.bars = _bars(last=5000)
+    eng._fill_after_stop("GER40", state)
+    row = eng._trade_autopsies[0]
+    assert row["after_1h_bars"] == 2
+    assert row["after_1h_through_entry"] is True
+    assert row["after_1h_extra_r"] == 0.5
+    assert row["after_1h_recovery_r"] == 2.5
+    assert eng._trade_autopsies_dirty is True
+
+
+def test_fill_after_stop_marks_a_row_without_prices_done():
+    eng = _engine()
+    eng._trade_autopsies = [{"symbol": "GER40", "exit_time": 1000, "side": "buy"}]
+    state = SymbolState("GER40")
+    state.bars = _bars(last=5000)
+    eng._fill_after_stop("GER40", state)
+    assert eng._trade_autopsies[0]["after_1h_bars"] == 0
+
+
+def test_fill_after_stop_does_not_raise_on_broken_bars():
+    eng = _engine()
+    eng._trade_autopsies = [_priced_row(exit_time=1000)]
+    state = SymbolState("GER40")
+    state.bars = object()  # type: ignore[assignment]
+    eng._fill_after_stop("GER40", state)
+
+
+def test_the_autopsy_report_counts_after_stop_shakeouts():
+    eng = _engine()
+    eng._trade_autopsies = [
+        {**_priced_row(exit_time=1), "after_1h_bars": 4,
+         "after_1h_through_entry": True, "after_1h_extra_r": 0.2,
+         "after_1h_recovery_r": 1.1},
+        {**_priced_row(exit_time=2), "after_1h_bars": 3,
+         "after_1h_through_entry": False, "after_1h_extra_r": 1.4,
+         "after_1h_recovery_r": 0.0},
+        {**_priced_row(exit_time=3), "after_1h_bars": 0},
+    ]
+    report = eng.trade_autopsy_report()
+    assert report["after_1h_n"] == 2
+    assert report["after_1h_through_entry"] == 1
+    assert report["after_1h_extra_ge_0_5r"] == 1
+    assert report["after_1h_recovery_ge_0_5r"] == 1
+
+
+def _priced_row(*, exit_time: int) -> dict:
+    return {
+        "symbol": "GER40", "side": "buy", "ticket": 1,
+        "entry": 100.0, "sl": 99.4, "original_sl": 99.0,
+        "exit_price": 99.0, "exit_time": exit_time,
+    }
+
+
+class _bars:
+    def __init__(self, *, last: int) -> None:
+        self.time = [1000, 1300, 2200, last]
+        self.high = [100.0, 99.2, 101.5, 102.0]
+        self.low = [99.0, 98.5, 99.1, 99.0]
+
+    @property
+    def last_closed_time(self) -> int:
+        return int(self.time[-1])
 

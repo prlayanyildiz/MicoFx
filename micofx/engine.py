@@ -254,6 +254,66 @@ class SymbolState:
         }
 
 
+def after_stop_excursions(
+    side: str,
+    entry: float,
+    sl: float,
+    exit_px: float,
+    times: Any,
+    high: Any,
+    low: Any,
+    *,
+    exit_time: float,
+    horizon_sec: float = 3600.0,
+) -> dict[str, Any] | None:
+    """What price did in the hour after a stop, in the trade's own R.
+
+    ``extra_r`` is continuation past the stop (the stop saved this).
+    ``recovery_r`` is the bounce back from the stop. ``through_entry``
+    is a shakeout: the original thesis was right again inside the hour.
+    Missing prices or an empty window return None so callers skip.
+    """
+    r = abs(float(entry) - float(sl))
+    if r <= 0:
+        return None
+    try:
+        t_arr = [float(x) for x in times]
+        h_arr = [float(x) for x in high]
+        l_arr = [float(x) for x in low]
+    except (TypeError, ValueError):
+        return None
+    if not t_arr or len(t_arr) != len(h_arr) or len(t_arr) != len(l_arr):
+        return None
+    hi_cut = float(exit_time) + float(horizon_sec)
+    window_h: list[float] = []
+    window_l: list[float] = []
+    for t, h, lo in zip(t_arr, h_arr, l_arr, strict=True):
+        if t <= float(exit_time):
+            continue
+        if t > hi_cut:
+            continue
+        window_h.append(h)
+        window_l.append(lo)
+    if not window_h:
+        return None
+    mx = max(window_h)
+    mn = min(window_l)
+    if str(side).lower() == "buy":
+        extra_r = max(0.0, (float(exit_px) - mn) / r)
+        recovery_r = max(0.0, (mx - float(exit_px)) / r)
+        through_entry = mx >= float(entry)
+    else:
+        extra_r = max(0.0, (mx - float(exit_px)) / r)
+        recovery_r = max(0.0, (float(exit_px) - mn) / r)
+        through_entry = mn <= float(entry)
+    return {
+        "after_1h_extra_r": round(extra_r, 4),
+        "after_1h_recovery_r": round(recovery_r, 4),
+        "after_1h_through_entry": bool(through_entry),
+        "after_1h_bars": len(window_h),
+    }
+
+
 class Engine:
     """Polling engine over every configured symbol.
 
@@ -1508,7 +1568,69 @@ class Engine:
             "adx": _round(self._autopsy_float(book.get("adx")), 2),
             "atr_pct": _round(self._autopsy_float(book.get("atr_pct")), 6),
             "profit": _round(self._autopsy_float(profit), 2),
+            # Frozen prices so the hour after the stop can be scored later
+            # without parsing TRADE lines. Missing values stay None; the
+            # sweeper then marks the row done rather than retrying forever.
+            "entry": _round(entry, 6),
+            "sl": _round(self._autopsy_float(book.get("sl")), 6),
+            "original_sl": _round(self._autopsy_float(book.get("original_sl")), 6),
+            "exit_price": _round(px, 6),
         }
+
+    def _fill_after_stop(self, symbol: str, state: SymbolState) -> None:
+        """Score the hour after a close once that hour's bars exist.
+
+        Observation only. Never raises into ``_evaluate``. A row without
+        prices, or whose hour contained no closed bars, is marked
+        ``after_1h_bars=0`` so the sweeper does not retry it forever.
+        R is the frozen original stop, not a later trail.
+        """
+        bars = getattr(state, "bars", None)
+        if bars is None:
+            return
+        last_closed = float(getattr(bars, "last_closed_time", 0) or 0)
+        if last_closed <= 0:
+            return
+        times = getattr(bars, "time", None)
+        high = getattr(bars, "high", None)
+        low = getattr(bars, "low", None)
+        if times is None or high is None or low is None:
+            return
+        rows = getattr(self, "_trade_autopsies", None)
+        if not rows:
+            return
+        dirty = False
+        horizon = 3600.0
+        for row in rows:
+            if str(row.get("symbol") or "") != symbol:
+                continue
+            if row.get("after_1h_bars") is not None:
+                continue
+            exit_t = self._autopsy_float(row.get("exit_time"))
+            if exit_t is None or exit_t <= 0:
+                continue
+            if last_closed < float(exit_t) + horizon:
+                continue
+            entry = self._autopsy_float(row.get("entry"))
+            orig = self._autopsy_float(row.get("original_sl"))
+            sl = orig if orig and orig > 0 else self._autopsy_float(row.get("sl"))
+            exit_px = self._autopsy_float(row.get("exit_price"))
+            side = str(row.get("side") or "")
+            if entry is None or sl is None or exit_px is None or not side:
+                row["after_1h_bars"] = 0
+                dirty = True
+                continue
+            filled = after_stop_excursions(
+                side, entry, sl, exit_px, times, high, low,
+                exit_time=float(exit_t), horizon_sec=horizon,
+            )
+            if filled is None:
+                row["after_1h_bars"] = 0
+            else:
+                row.update(filled)
+            dirty = True
+        if dirty:
+            self._trade_autopsies_dirty = True
 
     def trade_autopsy_report(self) -> dict[str, Any]:
         """Symbol x exit_reason x hold-time bucket, plus left-on-table total.
@@ -1552,10 +1674,31 @@ class Engine:
                                     if cell["left_n"] else None),
             })
         summary.sort(key=lambda r: (r["symbol"], r["exit_reason"], r["held"]))
+        after_n = 0
+        through_n = 0
+        extra_ge = 0
+        recov_ge = 0
+        for row in rows:
+            bars_n = self._autopsy_float(row.get("after_1h_bars"))
+            if bars_n is None or bars_n <= 0:
+                continue
+            after_n += 1
+            if row.get("after_1h_through_entry"):
+                through_n += 1
+            extra = self._autopsy_float(row.get("after_1h_extra_r"))
+            if extra is not None and extra >= 0.5:
+                extra_ge += 1
+            recov = self._autopsy_float(row.get("after_1h_recovery_r"))
+            if recov is not None and recov >= 0.5:
+                recov_ge += 1
         return {
             "since": float(self._autopsy_window_start(rows)),
             "n": len(rows),
             "left_on_table_r": round(left_total, 4) if left_n else None,
+            "after_1h_n": after_n,
+            "after_1h_through_entry": through_n,
+            "after_1h_extra_ge_0_5r": extra_ge,
+            "after_1h_recovery_ge_0_5r": recov_ge,
             "summary": summary,
             "rows": rows,
         }
@@ -1732,6 +1875,10 @@ class Engine:
             state.spread_atr = tick["spread"] / state.atr if state.atr > 0 else 0.0
 
         primary_fresh = self._refresh_signals(cfg, state, params)
+        try:
+            self._fill_after_stop(cfg.symbol, state)
+        except Exception:
+            pass
         self._merge_signals(cfg, state)
         fresh = primary_fresh
         bar_key = state.last_bar

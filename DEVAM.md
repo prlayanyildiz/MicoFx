@@ -3836,6 +3836,10 @@ Nautilus saati (açık kaynak okuma, broker binary değil): zaman global `time.t
 
 Bugün kapanan: `capture` üç katman · `required_bars` 960→640 · EDGE_MAX kapasite uyarısı · push kuyruğu · trail 15/15 · iletim 13/15 tam 0.
 
+**24.08 14:30 — stop olduktan sonra piyasa (Cursor, n=15 bugün).** Soru: stoplar hatalı mı. Cevap: **hayır, sistematik değil.** M5, stop+1 saat: **10/15** fiyat girişin ötesine döndü (silkme) · **11/15** stop'tan ≥0,5 R toparlandı · **10/15** ≥1 R · **7/15** aynı pencerede stop'un ötesine ≥0,5 R devam etti (stop para kurtardı). 4 saatte 13/15 girişten geçti. Karşı örnek NAS100 #363713911 BUY: stop sonrası native 12 barda **+3,71 R aleyhe**, toparlanma 0,21, son −3,40 R — SL'yi genişletmek büyük ekstra zarar. GER40 11:07 çifti (#363891851 trail −0,29 R MFE 2,17 · #364080413 SL −1,00 R MFE 1,65) 1s sonra ikisi de girişten geçti **ve** extra ≥1,5 R — kırık formül değil, chop kırbacı. **SL genişletilmedi, BE/TP eklenmedi** (MASTER_PROMPT `breakeven_atr` yasak; BE-2 GER40 −32 R). Payoff 25–37% WR, kaybeden ~−1 R, kuyruk öder.
+
+Otopsi halkası n=65 bu fiyatları taşımıyordu (`entry`/`sl`/`exit_price` yoktu; bugünün 15'i log+MT5'ten kesildi). Yeşil: kapanış satırı artık bu dört fiyatı dondurur; `_evaluate` bir saatlik bar kapanınca `after_1h_*` doldurur, istisna yutar. Canlı süreç 11:22 import — gece restart'ta işler. Sarı kapı duruyor.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.
