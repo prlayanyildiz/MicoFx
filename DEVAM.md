@@ -3222,6 +3222,32 @@ artık yalnız engel değil, kararı almanın yolu.
 Uyarı: `signals` mandalı bellekte, restart yeni epizot başlatır; sayı hafif
 yukarı sapabilir, yön değil büyüklük etkilenir.
 
+## 6a-2 · KURAL (24.08) — sebep söylemeden önce onu ÇÜRÜTECEK kontrolü yap
+
+§6a "emin olmadan kalkışma" dedi ve yetmedi. 22–24.08 arasında yedi hata
+yapıldı ve **hepsinin şekli aynı**: ilk uyan kanıttan sonuç çıkarıp
+söylemek, çürütecek kontrolü yapmadan.
+
+| iddia | çürüten kontrol | süre |
+|---|---|---|
+| "32 saat işlemsiz kaldık" | piyasa takvimi — hafta sonuydu | 1 dk |
+| "cumartesi değişikliği suçlu" | 3 slot hiç bağladı mı — hayır | 1 dk |
+| "0,28 SE bir sonuç" | gerçek `std` | 1 dk |
+| "tek-pozisyon kolunda cooldown yok" | ikinci değişken adı | 1 dk |
+| "tavan lot belirleyici olmuş" | 30 günlük dağılım — 1/79 | 2 dk |
+| "kaynağı okuyamıyorum" | ağacı okuyup doğru yol | 1 dk |
+| "K = 28.800" | damgadaki `combos` | 1 dk |
+
+**Yedisi de bir dakikalık bir kontrolle ölürdü.** Sorun dikkat değil sıra:
+doğrulayan kanıt aranıyor, çürüten aranmıyor.
+
+**Kural: bir sebep söylemeden önce, o sebebi YANLIŞLAYACAK tek kontrolü
+yap.** "Bunu doğrulayan ne var" değil, **"bu yanlışsa ne görürdüm, ve
+görüyor muyum"**. Sonuç ancak o kontrol geçildikten sonra cümleye girer.
+
+Ve **araştırma bitmeden konuşulmaz** — 24.08'de "32 saat" cümlesi tam
+ortasında söylendi.
+
 ## 6a · KURAL (22.08, operatör) — çıktıdan emin olmadan işe kalkışma
 
 > *"ikiniz için de yeni kural. çıktılardan emin olmadan işe kalkışmayın,
