@@ -3824,6 +3824,18 @@ Nautilus saati (açık kaynak okuma, broker binary değil): zaman global `time.t
 
 **24.08 12:15 — ölü dial `required_bars`'a sızıyordu.** Claude: SpotBrent 960 vs 640 (+320, %50). Bağımsız aynı sayı. `searchable_axes` buduyor, fetch boyutu budamıyordu. `required_bars` artık yalnız ailenin okuduğu `htf_factor`'ü çarpar. Sinyal formülü değişmez; taze geçmiş çekimi kısalır. Restart yok.
 
+**24.08 12:47 — açık uçlar (kitap sessiz, tarama uydurulmadı).** Claude köprüde dağılan ölçümleri derledi. Karar:
+
+*Bu gece, işlem yok:* `b776360` yalnız `strategy.py` — 25.08 00:00 restart. Capture hiç koşmamış; ön-uçuş histogramı geçer, `data/holdout_bars/` boş, canlıda `capture()` yok.
+
+*Ölçüldü, sarı/kapı, dokunulmadı:* ima maliyet tavanı 6,7× (makas vs %18) · yalnız GER40 step-trail (1,70×), NAS100 0,02 dibinde · GER40 `trail_start` 0,50 ölü (fiili 1,42) · korelasyonlu stoplar (JPN225 4 sn, GER40 0,88 puan) · asgari lot niyeti (XAUUSD 1,9×) · tavan %30 DB, kitap azami 28,16, kapı bağlanmaz · XAUUSD makas medyanı 1,15→1,25.
+
+*Ölçülemedi:* `N_eff` · komisyon (GER40/US30/XAUUSD) · açık MFE · canlı-ATR trail sapması (otopsi tek ATR).
+
+*Sayaç:* 3-slot 30 işlem · NAS100 50 · lot çarpanı 100 · `daily_loss_pct` 22 · `auto_reoptimize`.
+
+Bugün kapanan: `capture` üç katman · `required_bars` 960→640 · EDGE_MAX kapasite uyarısı · push kuyruğu · trail 15/15 · iletim 13/15 tam 0.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.
