@@ -11,6 +11,7 @@ venv/
 # local backup folder every evening. That is where account state is kept.
 data/*.db
 data/*.db-journal
+data/holdout_bars/
 logs/
 snapshot/
 _probe_*.py
