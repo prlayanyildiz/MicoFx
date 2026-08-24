@@ -498,9 +498,14 @@ class MT5Client:
         broker = getattr(info, "company", "?")
         login = getattr(acc, "login", "?") if acc is not None else "?"
         server = getattr(acc, "server", "?") if acc is not None else "?"
-        LOG.emit(f"MT5 baglandi | {broker} | hesap {login} @ {server}", "INFO")
+        # WARN, not INFO: INFO never reaches disk (_PERSIST). The 22.08
+        # incident - terminal back in a minute, bot blind for 32 hours - was
+        # diagnosed from a log that could not have shown a successful
+        # reconnect even if one had happened. This line is the audit trail
+        # for that question; it fires once per attach, not per poll.
+        LOG.emit(f"MT5 baglandi | {broker} | hesap {login} @ {server}", "WARN")
         if expected:
-            LOG.emit(f"MT5 terminal: {expected}", "INFO")
+            LOG.emit(f"MT5 terminal: {expected}", "WARN")
         if not getattr(info, "trade_allowed", True):
             LOG.emit("MT5 terminalinde AutoTrading kapali - emirler reddedilir.", "WARN")
         return True
