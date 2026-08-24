@@ -259,6 +259,20 @@ def test_missing_prices_or_an_empty_window_return_none():
     ) is None
 
 
+def test_the_bar_the_stop_landed_on_counts_when_bar_sec_is_known():
+    """Open-stamp window dropped gold's 14:45 M15; overlap keeps it."""
+    out = after_stop_excursions(
+        "buy", 100.0, 99.0, 99.0,
+        [1000, 1300, 2200, 5000],
+        [100.0, 99.2, 101.5, 102.0],
+        [99.0, 98.5, 99.1, 99.0],
+        exit_time=1000,
+        bar_sec=900,
+    )
+    assert out is not None
+    assert out["after_1h_bars"] == 3
+
+
 def test_fill_after_stop_waits_until_the_hour_has_closed():
     eng = _engine()
     eng._trade_autopsies = [_priced_row(exit_time=1000)]
@@ -283,7 +297,7 @@ def test_fill_after_stop_uses_the_bar_close_not_its_open_stamp():
     state = SymbolState("GER40")
     state.bars = _bars(last=last_open)
     eng._fill_after_stop("GER40", state)
-    assert eng._trade_autopsies[0].get("after_1h_bars") == 3
+    assert eng._trade_autopsies[0].get("after_1h_bars") == 4
 
 
 def test_fill_after_stop_writes_the_hour_once_bars_exist():
@@ -293,7 +307,7 @@ def test_fill_after_stop_writes_the_hour_once_bars_exist():
     state.bars = _bars(last=5000)
     eng._fill_after_stop("GER40", state)
     row = eng._trade_autopsies[0]
-    assert row["after_1h_bars"] == 2
+    assert row["after_1h_bars"] == 3
     assert row["after_1h_through_entry"] is True
     assert row["after_1h_extra_r"] == 0.5
     assert row["after_1h_recovery_r"] == 2.5

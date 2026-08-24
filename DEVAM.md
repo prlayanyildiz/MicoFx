@@ -3875,6 +3875,8 @@ M5 + native, giriş=sinyal kapanışı, SL=`sl_atr_mult`×ATR, trail canlı form
 
 **24.08 16:08 — `after_1h` bar kapanışını bekler (yeşil).** `last_closed_time` açılış damgası. Eşik `open >= exit+3600` altının 14:46 saatini 16:15'e itiyordu; 15:45 M15 16:00'te bitmişti (97 sn). Artık `open + tf`. Gözlem, emir yok. Operatör TF/scalp: M1 ve TF indirme kapalı; işlem sayısı bugün dar değildi.
 
+**24.08 16:16 — pencere de çakışma.** Altın 16:14'te doldu, `after_1h_bars=4` (16:15'ten önce → `tf_sec` işledi). 16:12 boşluğu restart'ın 1 dk saat penceresi. Claude: 4 = kaydırılmış saat. `after_stop_excursions` artık `bar_sec` ile çıkış barını da alır; hazır-olma ile aynı tanım. Eski altın satırı 4'te donuk (yeniden yazılmaz).
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.

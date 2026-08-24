@@ -265,6 +265,7 @@ def after_stop_excursions(
     *,
     exit_time: float,
     horizon_sec: float = 3600.0,
+    bar_sec: float = 0.0,
 ) -> dict[str, Any] | None:
     """What price did in the hour after a stop, in the trade's own R.
 
@@ -272,6 +273,11 @@ def after_stop_excursions(
     ``recovery_r`` is the bounce back from the stop. ``through_entry``
     is a shakeout: the original thesis was right again inside the hour.
     Missing prices or an empty window return None so callers skip.
+
+    Bar stamps are opens. ``bar_sec`` is the bar length so a candle that
+    was still open at the stop (and the one that closes the hour) count
+    as overlapping the hour, matching ``_fill_after_stop``'s ready gate.
+    ``bar_sec=0`` keeps the open-stamp window used by the unit tests.
     """
     r = abs(float(entry) - float(sl))
     if r <= 0:
@@ -285,10 +291,11 @@ def after_stop_excursions(
     if not t_arr or len(t_arr) != len(h_arr) or len(t_arr) != len(l_arr):
         return None
     hi_cut = float(exit_time) + float(horizon_sec)
+    span = max(0.0, float(bar_sec))
     window_h: list[float] = []
     window_l: list[float] = []
     for t, h, lo in zip(t_arr, h_arr, l_arr, strict=True):
-        if t <= float(exit_time):
+        if t + span <= float(exit_time):
             continue
         if t > hi_cut:
             continue
@@ -1631,6 +1638,7 @@ class Engine:
             filled = after_stop_excursions(
                 side, entry, sl, exit_px, times, high, low,
                 exit_time=float(exit_t), horizon_sec=horizon,
+                bar_sec=float(tf_sec),
             )
             if filled is None:
                 row["after_1h_bars"] = 0
