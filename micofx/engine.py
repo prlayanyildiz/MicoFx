@@ -42,6 +42,15 @@ _COOLDOWN_BARS = 2
 # Swing / higher-TF families already wait a full bar between signals; one bar of
 # post-fill silence is enough. Two H1 bars would idle the symbol for two hours.
 _COOLDOWN_BARS_SWING = 1
+# A closed bar is only an entry candidate while we are still inside the bar
+# that follows it, plus one extra bar of poll slack. After a restart the last
+# closed stamp can be Friday's: SymbolState is empty, so _refresh_signals
+# treats that stamp as a new bar, and the session-close chain-clear never ran
+# in this process (there was nothing in memory to clear). Measured 24.08:
+# GER40 BUY 363660277, Friday 22:30 UTC bar, Monday 03:15 UTC fill, -1R in
+# 12 minutes. The process that stays up across the weekend is already
+# protected - this only covers the restart-into-a-gap case.
+_MAX_SIGNAL_BAR_AGE_BARS = 2
 
 
 def _round_or_none(value: float | None, digits: int) -> float | None:
@@ -1778,6 +1787,19 @@ class Engine:
         # samples than a whole trading day, all of it from hours no entry can
         # happen in.
         self._sample_spread_ratio(cfg, state, tick)
+        tf_sec = timeframe_seconds(cfg.timeframe)
+        if (state.last_bar > 0
+                and (server_now - state.last_bar) > _MAX_SIGNAL_BAR_AGE_BARS * tf_sec):
+            # Friday's last closed M30 arriving at Monday session open after a
+            # restart. Session-close clearing does not cover this: last_bar
+            # was 0, so the still-last-closed Friday stamp looked fresh.
+            state.note = "sinyal bari gecmis (bosluk)"
+            state.signal = ""
+            state.signal_source = ""
+            state.primary_signal = ""
+            state.pending_bar_key = (0, 0)
+            state.entry_block = "bar_bosluk"
+            return False
         if not fresh and state.signal == "":
             state.note = state.note or "bekliyor"
             return False
