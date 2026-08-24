@@ -130,3 +130,15 @@ def test_a_poisoned_future_last_bar_does_not_silence_the_symbol():
 
     assert fresh is True
     assert state.last_bar == closed
+
+
+def test_bar_stamp_latch_prunes_dead_symbols_and_caps():
+    eng = Engine.__new__(Engine)
+    eng.store = type("S", (), {"symbols": {"NAS100": object()}})()
+    for i in range(70):
+        eng._note_bar_stamp("NAS100", "rewind", i, "x")
+    assert len(eng._bar_rewind_logged) <= 64
+    eng._note_bar_stamp("DEAD", "rewind", 1, "x")
+    # DEAD is not in store.symbols; the next live call drops it.
+    eng._note_bar_stamp("NAS100", "rewind", 99, "x")
+    assert all(k[1] == "NAS100" for k in eng._bar_rewind_logged)

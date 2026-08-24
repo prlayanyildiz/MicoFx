@@ -1878,6 +1878,30 @@ class Engine:
             float(info.get("tick_size", 0.0) or 0.0))
         return bars.spread * point + commission
 
+    def _note_bar_stamp(self, symbol: str, kind: str, stamp: int | float,
+                        message: str) -> None:
+        """WARN once per (kind, symbol, stamp). Prune and cap so it cannot grow.
+
+        Review 24.08 08:30: the rewind latch was unbounded, and the future
+        escape reset last_bar with no line. Same class as the silent refuse.
+        Bound is small because these events are rare; clearing on overflow
+        may re-WARN, which is the safe direction.
+        """
+        key = (kind, str(symbol), int(stamp))
+        logged = getattr(self, "_bar_rewind_logged", None)
+        if logged is None:
+            self._bar_rewind_logged = logged = set()
+        symbols = getattr(getattr(self, "store", None), "symbols", None)
+        if symbols is not None:
+            live = set(symbols)
+            logged.intersection_update(k for k in logged if k[1] in live)
+        if len(logged) > 64:
+            logged.clear()
+        if key in logged:
+            return
+        logged.add(key)
+        LOG.emit(message, "WARN", symbol)
+
     def _refresh_signals(self, cfg: SymbolConfig, state: SymbolState, params: Params) -> bool:
         """Pull bars and recompute indicators when a new bar has closed."""
         now = time.time()
@@ -1941,9 +1965,16 @@ class Engine:
             # and the symbol never signals again. The tick path already
             # drops those stamps (_MAX_TICK_AHEAD_SEC); bars did not, and
             # 6c3de07 made a poisoned last_bar fatal. Review 24.08 07:55.
+            poisoned = state.last_bar
             state.last_bar = 0
+            self._note_bar_stamp(
+                cfg.symbol, "future", poisoned,
+                "bar damgasi ileri tarih - last_bar sifirlandi")
         if broker_now > 0.0 and bars.last_closed_time > broker_now + tf_sec:
             state.note = "bar damgasi ileri tarih"
+            self._note_bar_stamp(
+                cfg.symbol, "future_fetch", bars.last_closed_time,
+                "bar damgasi ileri tarih - last_bar yazilmadi")
             return False
 
         if state.last_bar > 0 and bars.last_closed_time < state.last_bar:
@@ -1954,14 +1985,9 @@ class Engine:
             # an older last-closed stamp; the equality check below only
             # catches "same stamp". Keep the in-memory bar, do not re-fire it.
             state.note = "bar gecmisi geri sarildi"
-            key = (cfg.symbol, int(bars.last_closed_time))
-            logged = getattr(self, "_bar_rewind_logged", None)
-            if logged is None:
-                self._bar_rewind_logged = logged = set()
-            if key not in logged:
-                logged.add(key)
-                LOG.emit("bar gecmisi geri sarildi - taze sinyal sayilmadi",
-                         "WARN", cfg.symbol)
+            self._note_bar_stamp(
+                cfg.symbol, "rewind", bars.last_closed_time,
+                "bar gecmisi geri sarildi - taze sinyal sayilmadi")
             return False
 
         state.bars_ready = len(bars)
