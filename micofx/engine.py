@@ -270,8 +270,9 @@ def after_stop_excursions(
     """What price did in the hour after a stop, in the trade's own R.
 
     ``extra_r`` is continuation past the stop (the stop saved this).
-    ``recovery_r`` is the bounce back from the stop. ``through_entry``
-    is a shakeout: the original thesis was right again inside the hour.
+    ``recovery_r`` is the bounce back from the stop.     ``through_entry`` is a shakeout after a *losing* exit: price came back
+    through the original entry. A winner already closed on the profit side
+    of entry, so ``mx >= entry`` is tautological and is not a shakeout.
     Missing prices or an empty window return None so callers skip.
 
     Bar stamps are opens. ``bar_sec`` is the bar length so a candle that
@@ -305,14 +306,19 @@ def after_stop_excursions(
         return None
     mx = max(window_h)
     mn = min(window_l)
+    entry_px = float(entry)
+    out_px = float(exit_px)
     if str(side).lower() == "buy":
-        extra_r = max(0.0, (float(exit_px) - mn) / r)
-        recovery_r = max(0.0, (mx - float(exit_px)) / r)
-        through_entry = mx >= float(entry)
+        extra_r = max(0.0, (out_px - mn) / r)
+        recovery_r = max(0.0, (mx - out_px) / r)
+        # Shakeout: price came back through entry after a losing exit.
+        # A winner already closed above entry, so mx >= entry is tautological
+        # (gold trail 24.08 14:46, dip still 13.75 above entry). Claude 16:16.
+        through_entry = out_px <= entry_px and mx >= entry_px
     else:
-        extra_r = max(0.0, (mx - float(exit_px)) / r)
-        recovery_r = max(0.0, (float(exit_px) - mn) / r)
-        through_entry = mn <= float(entry)
+        extra_r = max(0.0, (mx - out_px) / r)
+        recovery_r = max(0.0, (out_px - mn) / r)
+        through_entry = out_px >= entry_px and mn <= entry_px
     return {
         "after_1h_extra_r": round(extra_r, 4),
         "after_1h_recovery_r": round(recovery_r, 4),

@@ -222,6 +222,19 @@ def test_a_buy_stop_that_comes_back_through_entry_is_a_shakeout():
     assert out["after_1h_through_entry"] is True
 
 
+def test_a_winning_trail_is_not_a_shakeout_just_because_price_stayed_above_entry():
+    """Gold 24.08 14:46: dip 13.75 above entry, through_entry was True anyway."""
+    out = after_stop_excursions(
+        "buy", 100.0, 99.0, 102.0,
+        [1000, 1600, 2800],
+        [103.0, 103.5, 102.8],
+        [101.5, 101.2, 101.8],
+        exit_time=1000,
+    )
+    assert out is not None
+    assert out["after_1h_through_entry"] is False
+
+
 def test_a_buy_stop_that_keeps_falling_is_continuation():
     out = after_stop_excursions(
         "buy", 100.0, 99.0, 99.0,
