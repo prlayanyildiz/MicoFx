@@ -145,6 +145,7 @@ _RISK_BLOCK_KEYS: tuple[tuple[str, str], ...] = (
     ("serbest marj yetersiz", "risk_serbest_marj"),
     ("marj kullanimi limiti", "risk_marj_kullanimi"),
     ("eszamanli risk limiti", "risk_eszamanli"),
+    ("stopsuz acik pozisyon", "risk_stopsuz"),
 )
 
 
@@ -2493,9 +2494,18 @@ class Engine:
                 risk_dist=float(sl_dist or 0),
                 original_sl=float(result.get("sl") or 0) or None,
             )
+        cost_bit = ""
+        vol = float(result["volume"])
+        mpu = self.client.money_per_price_unit(cfg.symbol, vol)
+        r_value = float(sl_dist or 0.0) * mpu
+        if r_value > 0:
+            cost = cfg.commission_per_lot * vol
+            cost += float((tick or {}).get("spread") or 0.0) * mpu
+            cost_bit = f" maliyet %{cost / r_value * 100.0:.1f}"
         LOG.emit(
-            f"#{ticket} {side.upper()} {result['volume']:g} lot @ {result['price']:.5f} "
-            f"SL={result['sl']:.5f} TP={result['tp']:.5f} | lot: {note}",
+            f"#{ticket} {side.upper()} {vol:g} lot @ {result['price']:.5f} "
+            f"SL={result['sl']:.5f} TP={result['tp']:.5f} magic={cfg.magic}"
+            f"{cost_bit} | lot: {note}",
             "TRADE", cfg.symbol,
         )
 
@@ -3545,14 +3555,27 @@ class Engine:
         under a 12.8% book. Same shape as max_total_positions defaulting to
         thirteen under a sixteen-position book, found earlier today.
 
+        A third way is already live and was silent here: ``size_by_edge``
+        scales every lot up to ``EDGE_MAX`` (2.2). The 12.8% book is then a
+        28.16% ask against the same 15% cap. Counting only ``risk_percent``
+        made today's configuration look like it fitted.
+
         Latched on the pair, so a steady configuration is silent and a change
         speaks once.
         """
         try:
             sys_cfg = self.store.system
             cap = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
+            # size_by_edge scales lots between EDGE_MIN and EDGE_MAX. The
+            # notice is about the book's configured ceiling, not last hour's
+            # realised edges: with the flag on, 12.8% of risk_percent is not
+            # the number that can actually be asked for.
+            edge_ceil = (float(RiskManager.EDGE_MAX)
+                         if bool(getattr(sys_cfg, "size_by_edge", False)) else 1.0)
+            lot_mult = max(0.1, float(getattr(sys_cfg, "lot_multiplier", 1.0) or 1.0))
             nominal = sum(
                 float(c.risk_percent or 0.0) * max(1, int(c.max_positions or 1))
+                * edge_ceil * lot_mult
                 for c in list(self.store.symbols.values()) if c.enabled)
             state = (round(nominal, 2), round(cap, 2))
             if state == getattr(self, "_risk_capacity_noted", None):

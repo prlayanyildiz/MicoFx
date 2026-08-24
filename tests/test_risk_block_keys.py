@@ -40,6 +40,7 @@ from micofx.engine import _risk_block_key
     ("serbest marj yetersiz (10 < 20+5)", "risk_serbest_marj"),
     ("marj kullanimi limiti (%80.0 > %70)", "risk_marj_kullanimi"),
     ("eszamanli risk limiti (%8.5 > %8)", "risk_eszamanli"),
+    ("stopsuz acik pozisyon", "risk_stopsuz"),
 ])
 def test_each_refusal_gets_its_own_bucket(reason, key):
     assert _risk_block_key(reason) == key
