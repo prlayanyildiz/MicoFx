@@ -3846,6 +3846,10 @@ Açık 3, broker SL aynı: XAUUSD #363789447 0,01 BUY 4617,64 · GER40 #36418529
 
 Canlı kod doğrulandı: `/api/analysis/trade-autopsies` `after_1h_*` anahtarlarını taşıyor (`297bbd6`). `after_1h_n=0` — eski 66 satırda fiyat yok; yeni kapanışlar doldurur. `b776360` `required_bars` de bu süreçte. 14:35 JPN225 #364350603 −8,59 restart'tan önce kapandı. Sarı kapı duruyor.
 
+**24.08 14:46 — XAUUSD trail kilidi, ilk fiyatlı otopsi.** Restart'tan ~1 dk sonra #363789447 SL `4654,66` (2,62×ATR); 14:46:38 o trail'de **+23,18**. Satır: `entry` 4631,44 · `original_sl` 4617,64 · `exit_reason` trail · mfe 2,17 R · +1,68 R · masada 0,49 R · 586 dk. `after_1h` 15:46'da. Açık kalan 2 (GER40 / SpotBrent). Claude'un restart listesi: 25 anahtar, `day_start_balance` 2395,52, olay 272, makas n=6 — düşen yok.
+
+Claude 14:24: GER40 14:00 SELL `risk_ters_yon` (açık BUY). 14:40: JPN225 3,5 dk, mfe 0, kayma −0,16 R, net gün **−224,74** sonra altın +23.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.
