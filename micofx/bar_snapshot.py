@@ -11,6 +11,7 @@ shape _bars_for_holdout already produces in memory.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from .paths import DATA_DIR
 # stay equal. The silent 1.0 this floor refuses lives in _spread_scale.
 SPREAD_RATIO_MIN_SAMPLES = 400
 
-SNAPSHOT_VERSION = 2
+SNAPSHOT_VERSION = 3
 SNAPSHOT_DIR = DATA_DIR / "holdout_bars"
 
 
@@ -35,7 +36,10 @@ def snapshot_path(symbol: str, timeframe: str) -> Path:
 
 def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
           info: dict[str, Any], min_stop: float,
-          spread_scale: float, spread_scale_n: int) -> None:
+          spread_scale: float, spread_scale_n: int,
+          segments: int, trade_all_hours: bool, day_end_flatten_min: int,
+          charge_costs: bool, max_cost_pct_of_risk: float,
+          config: dict[str, Any]) -> None:
     """Persist bars plus the cost inputs a replay must not re-read live.
 
     ``spread_scale`` is the live-tick/bar median at fetch time. Leaving it
@@ -43,6 +47,10 @@ def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
     different histogram (review 24.08 08:55). Replay must not call
     ``_spread_scale``: that helper returns 1.0 on failure, which shrinks
     cost/R and hides the 18% live refusals this measurement exists to count.
+
+    Version 3 also pins the store-side knobs (Claude 24.08 09:15). They are
+    not MT5, but ``segments`` moves the holdout edges and ``charge_costs``
+    off zeros the spread - same file, different number, without them.
     """
     scale = float(spread_scale)
     n = int(spread_scale_n)
@@ -52,6 +60,17 @@ def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
         raise ValueError(
             f"spread_scale_n {n} < {SPREAD_RATIO_MIN_SAMPLES} - refusing a "
             "thin histogram that _spread_scale would silently call 1.0")
+    if not charge_costs:
+        raise ValueError("charge_costs must be True - a cost-free file cannot "
+                         "count the 18% refusals")
+    segs = int(segments)
+    if segs < 2:
+        raise ValueError(f"segments must be >= 2, got {segments!r}")
+    threshold = float(max_cost_pct_of_risk)
+    if not np.isfinite(threshold) or threshold <= 0:
+        raise ValueError(f"max_cost_pct_of_risk must be positive, got {max_cost_pct_of_risk!r}")
+    if not isinstance(config, dict) or not config:
+        raise ValueError("config must be a non-empty dict (SymbolConfig.to_dict)")
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         path,
@@ -72,6 +91,12 @@ def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
         min_stop=np.float64(min_stop),
         spread_scale=np.float64(scale),
         spread_scale_n=np.int64(n),
+        segments=np.int32(segs),
+        trade_all_hours=np.bool_(bool(trade_all_hours)),
+        day_end_flatten_min=np.int32(int(day_end_flatten_min)),
+        charge_costs=np.bool_(True),
+        max_cost_pct_of_risk=np.float64(threshold),
+        config_json=np.asarray(json.dumps(config, default=str)),
     )
 
 
@@ -93,6 +118,9 @@ def read(path: Path) -> dict[str, Any]:
         rates["spread"] = blob["spread"]
         rates["tick_volume"] = blob["volume"]
         bars = Bars(rates, int(blob["forming_time"]))
+        config = json.loads(str(blob["config_json"]))
+        if not isinstance(config, dict) or not config:
+            raise ValueError("holdout bar snapshot config_json is not an object")
         return {
             "symbol": str(blob["symbol"]),
             "timeframe": str(blob["timeframe"]),
@@ -105,4 +133,10 @@ def read(path: Path) -> dict[str, Any]:
             "min_stop": float(blob["min_stop"]),
             "spread_scale": float(blob["spread_scale"]),
             "spread_scale_n": int(blob["spread_scale_n"]),
+            "segments": int(blob["segments"]),
+            "trade_all_hours": bool(blob["trade_all_hours"]),
+            "day_end_flatten_min": int(blob["day_end_flatten_min"]),
+            "charge_costs": bool(blob["charge_costs"]),
+            "max_cost_pct_of_risk": float(blob["max_cost_pct_of_risk"]),
+            "config": config,
         }

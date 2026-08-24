@@ -5,9 +5,11 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 
 from micofx.bar_snapshot import read, write
 from micofx.bars import Bars
+from micofx.models import SymbolConfig
 
 
 def _bars(n=8):
@@ -26,12 +28,20 @@ def _bars(n=8):
     return Bars(rates, int(rates["time"][-1] + 1800))
 
 
+def _pin():
+    return {
+        "segments": 5, "trade_all_hours": False, "day_end_flatten_min": 0,
+        "charge_costs": True, "max_cost_pct_of_risk": 18.0,
+        "config": SymbolConfig(symbol="GER40", timeframe="M30").to_dict(),
+    }
+
+
 def test_a_snapshot_round_trips_the_holdout_window(tmp_path):
     bars = _bars()
     path = tmp_path / "GER40_M30.npz"
     write(path, symbol="GER40", timeframe="M30", bars=bars,
           info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
-          min_stop=0.5, spread_scale=3.35, spread_scale_n=277_649)
+          min_stop=0.5, spread_scale=3.35, spread_scale_n=277_649, **_pin())
     got = read(path)
     assert got["symbol"] == "GER40"
     assert got["timeframe"] == "M30"
@@ -44,18 +54,30 @@ def test_a_snapshot_round_trips_the_holdout_window(tmp_path):
     assert got["min_stop"] == 0.5
     assert got["spread_scale"] == 3.35
     assert got["spread_scale_n"] == 277_649
+    assert got["segments"] == 5
+    assert got["charge_costs"] is True
+    assert got["max_cost_pct_of_risk"] == 18.0
+    assert got["config"]["symbol"] == "GER40"
 
 
 def test_a_thin_histogram_is_refused_not_stored_as_one(tmp_path):
     """Replay must not inherit _spread_scale's silent 1.0 on failure."""
-    import pytest
     with pytest.raises(ValueError, match="spread_scale_n"):
         write(tmp_path / "x.npz", symbol="GER40", timeframe="M30", bars=_bars(),
               info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
-              min_stop=0.5, spread_scale=1.0, spread_scale_n=0)
+              min_stop=0.5, spread_scale=1.0, spread_scale_n=0, **_pin())
     write(tmp_path / "ok.npz", symbol="GER40", timeframe="M30", bars=_bars(),
           info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
-          min_stop=0.5, spread_scale=1.0, spread_scale_n=400)
+          min_stop=0.5, spread_scale=1.0, spread_scale_n=400, **_pin())
+
+
+def test_a_cost_free_snapshot_is_refused(tmp_path):
+    pin = _pin()
+    pin["charge_costs"] = False
+    with pytest.raises(ValueError, match="charge_costs"):
+        write(tmp_path / "x.npz", symbol="GER40", timeframe="M30", bars=_bars(),
+              info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
+              min_stop=0.5, spread_scale=3.35, spread_scale_n=400, **pin)
 
 
 def test_importing_the_snapshot_does_not_load_metatrader5():
