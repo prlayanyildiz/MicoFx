@@ -94,3 +94,68 @@ def test_capture_refuses_the_silent_one(tmp_path):
         capture(client=client, store=store, symbol="GER40", timeframe="M30",
                 path=tmp_path / "x.npz")
     assert client.inits == 0
+
+
+def test_capture_refuses_a_thin_histogram(tmp_path):
+    """A handful of samples is the reading that already misled us once."""
+    cfg = SymbolConfig(symbol="GER40", timeframe="M30")
+    client = _Client()
+    store = _Store(cfg, {"GER40": _hist(33, 50)})
+    with pytest.raises(ValueError, match="no measured median"):
+        capture(client=client, store=store, symbol="GER40", timeframe="M30",
+                path=tmp_path / "thin.npz")
+    assert client.inits == 0
+
+
+def test_capture_accepts_a_clamped_floor_on_a_fat_histogram(tmp_path):
+    """SpotBrent 24.08: median 0.95, n~310k, scale floors to 1.0.
+
+    That 1.0 is the search's conservative floor, not a missing histogram.
+    Refusing it would skip a symbol whose tick is tighter than the bar.
+    """
+    cfg = SymbolConfig(symbol="SpotBrent", timeframe="M30")
+    client = _Client()
+    # Bucket 9 centre is 0.95; _spread_scale clamps that to 1.0.
+    store = _Store(cfg, {"SpotBrent": _hist(9, 309_624)})
+    path = capture(client=client, store=store, symbol="SpotBrent",
+                   timeframe="M30", path=tmp_path / "SpotBrent_M30.npz")
+    from micofx.bar_snapshot import read
+    got = read(path)
+    assert got["spread_scale"] == pytest.approx(1.0)
+    assert got["spread_scale_n"] == 309_624
+    assert client.inits == 0
+
+
+def test_capture_refuses_when_spread_scale_disagrees_with_the_histogram(tmp_path, monkeypatch):
+    """_spread_scale's except path returns 1.0; this blob still has a median."""
+    cfg = SymbolConfig(symbol="GER40", timeframe="M30")
+    client = _Client()
+    store = _Store(cfg, {"GER40": _hist(33, 277_649)})
+    monkeypatch.setattr(
+        "micofx.optimizer.Optimizer._spread_scale", lambda self, symbol: 1.0)
+    with pytest.raises(ValueError, match="_spread_scale returned"):
+        capture(client=client, store=store, symbol="GER40", timeframe="M30",
+                path=tmp_path / "disagree.npz")
+    assert client.inits == 0
+
+
+def test_capture_refuses_a_failed_read_even_when_the_floor_is_already_one(
+        tmp_path, monkeypatch):
+    """SpotBrent's clamped expectation is 1.0; an except-path 1.0 matches it.
+
+    The numeric disagreement gate cannot see that. _spread_scale_warned is
+    the event: a fresh Optimizer only sets it on the except return.
+    """
+    cfg = SymbolConfig(symbol="SpotBrent", timeframe="M30")
+    client = _Client()
+    store = _Store(cfg, {"SpotBrent": _hist(9, 309_624)})
+
+    def _fail(self, symbol):
+        self._spread_scale_warned = True
+        return 1.0
+
+    monkeypatch.setattr("micofx.optimizer.Optimizer._spread_scale", _fail)
+    with pytest.raises(ValueError, match="not a measurement"):
+        capture(client=client, store=store, symbol="SpotBrent",
+                timeframe="M30", path=tmp_path / "fail.npz")
+    assert client.inits == 0

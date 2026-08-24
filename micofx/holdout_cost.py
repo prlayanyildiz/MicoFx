@@ -143,11 +143,18 @@ def capture(*, client: Any, store: Any, symbol: str, timeframe: str,
     holds the only bind, or the bot is stopped and this process is the only
     initialize. A second process would drop the live connection.
 
-    ``spread_scale == 1.0`` is refused here even with a fat histogram:
-    write() treats that as a real bar=tick reading, but GER40/NAS100 are
-    not that market (review 24.08 09:35). A 1.0 at fetch is a bad read.
+    Silent ``1.0`` (thin or unreadable histogram) is refused: that is the
+    cheap-search path that hides the 18% gate. A **clamped** 1.0 is not
+    the same number - ``_spread_scale`` floors a measured median under 1.0
+    so the search never cheers cheaper than the bars. SpotBrent 24.08:
+    n=309624, median 0.95, scale 1.0. Refusing that would permanently skip
+    a symbol whose tick is tighter than the bar, which is a real market,
+    not a bad read. GER40/NAS100 tonight measure 1.05 and still pass.
     """
     from .bar_snapshot import snapshot_path, write
+    from .engine import (
+        SPREAD_RATIO_BUCKETS, SPREAD_RATIO_MIN_SAMPLES, _ratio_percentile,
+    )
     from .optimizer import Optimizer
 
     cfg = store.symbols.get(symbol)
@@ -162,17 +169,39 @@ def capture(*, client: Any, store: Any, symbol: str, timeframe: str,
     if bars is None or len(bars) < 800:
         raise ValueError(f"{symbol}: bar window too short to be a holdout")
     min_stop = float(client.min_stop_distance(symbol))
-    scale = float(Optimizer(store=store, client=client)._spread_scale(symbol))
+    scaler = Optimizer(store=store, client=client)
+    scale = float(scaler._spread_scale(symbol))
+    if getattr(scaler, "_spread_scale_warned", False):
+        # Except path returns 1.0 with the latch set. SpotBrent's floor is
+        # also 1.0, so the numeric check below cannot tell them apart
+        # (review 24.08 11:50). A fresh Optimizer starts unlatched; the
+        # flag after this call is exactly "this read failed".
+        raise ValueError(
+            f"{symbol}: _spread_scale could not read the histogram - "
+            "1.0 is not a measurement")
     blob = store.get_setting("spread_ratio", {}) or {}
     counts = blob.get(symbol) or []
     n = 0
+    median = None
     if isinstance(counts, (list, tuple)):
-        n = sum(int(v) for v in counts
-                if isinstance(v, (int, float)) and not isinstance(v, bool))
-    if scale <= 1.0:
+        cleaned = [int(v) for v in counts
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        n = sum(cleaned)
+        if (len(cleaned) == SPREAD_RATIO_BUCKETS
+                and n >= SPREAD_RATIO_MIN_SAMPLES):
+            median = _ratio_percentile(cleaned, 0.50)
+    if median is None or median <= 0:
         raise ValueError(
-            f"{symbol}: spread_scale {scale} at capture - refusing the silent "
-            "1.0 that would hide the 18% gate")
+            f"{symbol}: spread_scale {scale} at capture - no measured median "
+            f"(n={n}) - refusing the silent 1.0 that would hide the 18% gate")
+    expected = float(min(5.0, max(1.0, median)))
+    if abs(scale - expected) > 1e-9:
+        # _spread_scale's except path returns 1.0 while this read of the same
+        # blob still has a median. Writing that 1.0 would be the silent cheap
+        # path the gate exists to stop (review 24.08 11:25).
+        raise ValueError(
+            f"{symbol}: measured median {median} -> {expected} expected, "
+            f"_spread_scale returned {scale}")
     system = getattr(store, "system", None)
     dest = path or snapshot_path(symbol, timeframe)
     write(
