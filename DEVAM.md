@@ -3822,6 +3822,8 @@ Nautilus saati (açık kaynak okuma, broker binary değil): zaman global `time.t
 
 **24.08 12:07 — SpotBrent HTF=+0 ısınma değil.** Claude 20/20 `HTF=+0` ve aday sebep `t3_length×6×htf_factor`. Çürütüldü: ısınma yalnız `buy`/`sell` önekini keser, SIGNAL barı zaten geçmiş. SpotBrent ailesi **`dual_t3`** (`strategy.py:801`) `htf_up`/`htf_down` **düz False** döner; `_trend_gate` çağrılmaz. `htf_factor=12` okunmayan eksen (AUDIT-B). NAS100 `mtf_pullback` / XAUUSD `burst` kapıyı gerçekten hesaplar. dual_t3'e HTF eklenmedi — tasarım, ölçüm yok, sarı değil.
 
+**24.08 12:15 — ölü dial `required_bars`'a sızıyordu.** Claude: SpotBrent 960 vs 640 (+320, %50). Bağımsız aynı sayı. `searchable_axes` buduyor, fetch boyutu budamıyordu. `required_bars` artık yalnız ailenin okuduğu `htf_factor`'ü çarpar. Sinyal formülü değişmez; taze geçmiş çekimi kısalır. Restart yok.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.

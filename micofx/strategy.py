@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import inspect
 import textwrap
 from dataclasses import dataclass
@@ -1195,6 +1196,7 @@ def _p_fields_reachable(fn, seen: set | None = None) -> set[str]:
     return found
 
 
+@functools.cache
 def opt_fields_read(family: str) -> frozenset[str]:
     """OPT_FIELDS this family's compute path reads. Derived, not a table."""
     fn = _FAMILIES.get(family)
@@ -1223,7 +1225,12 @@ def stamp_fields(family: str) -> frozenset[str]:
 
 def required_bars(p: Params) -> int:
     """Lookback needed before the indicator stack is trustworthy."""
-    htf = max(1, p.htf_factor if p.htf_mode == "t3" else 1)
+    # searchable_axes already drops unread OPT axes. This fetch size used to
+    # scale by htf_factor even when the family never calls _trend_gate, so a
+    # leftover dial (SpotBrent dual_t3, factor 12) asked for 50% more bars
+    # than the indicator stack can use (review 24.08 12:15).
+    reads_htf = "htf_factor" in opt_fields_read(p.strategy)
+    htf = max(1, p.htf_factor if p.htf_mode == "t3" and reads_htf else 1)
     if p.strategy == "mtf_pullback":
         htf = max(htf, 6)            # the trend leg is mandatory for this family
     return int(max(400, p.t3_length * 20 * htf,
