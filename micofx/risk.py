@@ -688,9 +688,19 @@ class RiskManager:
         by_margin_all = margin_room / concurrent_margin if concurrent_margin > 0 else 0.0
         headroom = max(0.0, min(by_risk, by_margin_all))
 
+        # What the concurrent-risk gate in can_open() is actually comparing right
+        # now. ``concurrent_risk`` below is a projection - the worst case if every
+        # slot filled - and the panel already shows it; without this the operator
+        # can read the ceiling and the projection but never the live number the
+        # refusal is decided on. Same expression as the gate, deliberately: a
+        # second way of computing it is a second thing that can drift.
+        open_risk = sum(self.remaining_position_risk(p) for p in mine)
+
         return {
             "rows": rows,
             "open_total": len(mine),
+            "open_risk": round(open_risk, 2),
+            "open_risk_pct": round(open_risk / equity * 100.0, 2) if equity > 0 else 0.0,
             "total_risk_per_trade": round(total_risk, 2),
             "total_risk_pct": round(total_risk / equity * 100.0, 2) if equity > 0 else 0.0,
             "total_margin_if_all_open": round(total_margin, 2),

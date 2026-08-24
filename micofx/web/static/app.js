@@ -184,7 +184,7 @@ function selectTab(name) {
     else syncOptPicker();
   }
   if (name === "tani") {
-    loadGates(); loadBlocks(); loadSpreadRatio();
+    loadGates(); loadBlocks(); loadSpreadRatio(); loadAutopsies();
     renderExecution(); renderLive();
   }
   if (name === "log") pollLogs();
@@ -300,6 +300,51 @@ async function loadSpreadRatio() {
   if (note) note.textContent = data.note || "";
 }
 
+async function loadAutopsies() {
+  // The endpoint has existed since the autopsies did; nothing rendered it, so
+  // every question about an exit meant reading sqlite by hand. Rows only - the
+  // aggregate cells live in the note, because a cell under 30 samples is a
+  // count and putting it in a grid invites reading it as a finding.
+  const note = $("#autopsy-note");
+  let data;
+  try {
+    data = await api("/api/analysis/trade-autopsies");
+  } catch (err) {
+    if (note) note.textContent = `Otopsi okunamadi: ${err.message || err}`;
+    return;
+  }
+  const rows = (data.rows || []).slice().reverse().map((r) => {
+    const after = Number(r.after_1h_bars) > 0;
+    const tr = el("tr");
+    tr.innerHTML = `
+      <td class="sym">${esc(r.symbol || "")}</td>
+      <td class="num dim mono">${r.ticket != null ? esc(String(r.ticket)) : "-"}</td>
+      <td><span class="pill ${r.exit_reason === "trail" ? "on" : "off"}">${esc(r.exit_reason || "-")}</span></td>
+      <td class="num dim">${r.held_min != null ? num(r.held_min, 1) : "-"}</td>
+      <td class="num ${cls(r.r_realised)}">${r.r_realised != null ? signed(r.r_realised, 3) : "-"}</td>
+      <td class="num dim">${r.mfe_r != null ? num(r.mfe_r, 3) : "-"}</td>
+      <td class="num ${Number(r.left_on_table_r) >= 1 ? "neg" : "dim"}">${
+        r.left_on_table_r != null ? num(r.left_on_table_r, 3) : "-"}</td>
+      <td class="dim">${after
+        ? `${r.after_1h_through_entry ? '<span class="pill off">girise dondu</span>' : ""}`
+          + `${r.after_1h_extra_r != null ? ` devam ${num(r.after_1h_extra_r, 2)}R` : ""}`
+          + `${r.after_1h_recovery_r != null ? ` toparlanma ${num(r.after_1h_recovery_r, 2)}R` : ""}`
+        : '<span class="dim">-</span>'}</td>`;
+    return tr;
+  });
+  rowsInto($("#autopsy-table"), rows, "Henuz kapanis otopsisi yok", 8);
+  if (note) {
+    const n = Number(data.after_1h_n || 0);
+    note.innerHTML = esc(data.note || "")
+      + (n
+        ? ` | 1 saat olcumu ${n}: girise donen ${data.after_1h_through_entry}`
+          + `, >=0.5R devam ${data.after_1h_extra_ge_0_5r}`
+          + `, >=0.5R toparlanma ${data.after_1h_recovery_ge_0_5r}`
+        : ' | <span class="dim">1 saat olcumu henuz yok (kapanistan 1 saat sonra dolar)</span>')
+      + (Number(data.n || 0) < 30 ? ' | <b>n&lt;30: sayi, hukum degil</b>' : "");
+  }
+}
+
 async function loadBlocks() {
   const note = $("#blocks-note");
   let data;
@@ -390,6 +435,15 @@ function renderCards() {
   const dayPct = day.pnl_pct || 0;
   const lossRatio = lossLimit > 0 ? Math.min(100, Math.max(0, (-dayPct / lossLimit) * 100)) : 0;
 
+  const riskCap = Number(cap.max_concurrent_risk_pct || sys.max_concurrent_risk_pct || 0);
+  // Absent is not zero. A backend that predates this field would otherwise
+  // paint an empty bar over a book that is actually carrying risk, which is
+  // the one reading this card exists to prevent.
+  const riskKnown = cap.open_risk_pct != null;
+  const riskPct = Number(cap.open_risk_pct || 0);
+  const riskRatio = riskKnown && riskCap > 0
+    ? Math.min(100, Math.max(0, (riskPct / riskCap) * 100)) : 0;
+
   const ai = STATE.ai || {};
   const costCeiling = Number(sys.max_cost_pct_of_risk || cap.max_cost_pct_of_risk || 0);
 
@@ -411,6 +465,19 @@ function renderCards() {
         + ` | lot x${num(ai.risk_scale ?? 1, 2)}`,
       bar: lossRatio, barClass: lossRatio > 80 ? "bad" : lossRatio > 50 ? "warn" : "",
       accent: day.halted ? "red" : "",
+    },
+    {
+      // The daily-loss bar next to it answers "how much have I lost today".
+      // This one answers "how much is still at risk right now" - the number
+      // can_open() refuses on. They move independently: a book of trailed
+      // stops carries almost no remaining risk while the day's loss stays.
+      lbl: "Eszamanli Risk", val: riskKnown ? `%${num(riskPct, 2)}` : "-",
+      foot: !riskKnown
+        ? "sunucu bu alani vermiyor - yeniden baslatma gerekiyor"
+        : (riskCap > 0
+          ? `tavan %${num(riskCap, 2)} | acik risk ${num(cap.open_risk)}`
+          : "tavan kapali"),
+      bar: riskRatio, barClass: riskRatio > 80 ? "bad" : riskRatio > 50 ? "warn" : "",
     },
     {
       lbl: "Acilabilir Islem", val: `${cap.global_free_slots ?? 0}`,
@@ -542,7 +609,10 @@ function renderCapacity() {
     `lot carpani <b>x${num(cap.lot_multiplier, 2)}</b>` +
     `${cap.size_by_edge ? " + avantaj (holdout R/maxDD)" : ""} | ` +
     `hepsi acilirsa toplam risk ${num(cap.total_risk_per_trade)} (%${num(cap.total_risk_pct, 2)}) | ` +
-    `slot limitinde en kotu risk ${num(cap.concurrent_risk)} (%${num(cap.concurrent_risk_pct, 2)}), ` +
+    `slot limitinde en kotu risk ${num(cap.concurrent_risk)} (%${num(cap.concurrent_risk_pct, 2)})` +
+    `${cap.max_concurrent_risk_pct > 0
+      ? ` <b class="${cap.concurrent_risk_pct > cap.max_concurrent_risk_pct ? "neg" : "dim"}">tavan %${num(cap.max_concurrent_risk_pct, 2)}</b>`
+      : ' <span class="dim">tavan kapali</span>'}, ` +
     `marj ${num(cap.concurrent_margin)} | ` +
     `guvenli ust sinir <b>x${num(cap.safe_multiplier, 2)}</b> | ` +
     `marj butcesi ${num(cap.margin_budget)} | ` +
@@ -595,6 +665,10 @@ function renderPositions() {
   const now = Date.now() / 1000;
   const rows = (STATE.positions || []).map((p) => {
     const digits = (SYMBOLS.find((s) => s.resolved_symbol === p.symbol) || {}).digits ?? 5;
+    // A live position with no stop is the one row that must not read as a
+    // quiet blank. The log has said STOPSUZ since this morning; the table
+    // showed the same state as a dimmed zero (review 24.08 15:12).
+    const naked = !(Number(p.sl) > 0) && Number(p.volume) > 0;
     const tr = el("tr");
     tr.innerHTML = `
       <td class="sym">${esc(p.symbol)}${p.managed ? "" : ' <span class="pill off">harici</span>'}</td>
@@ -602,10 +676,13 @@ function renderPositions() {
       <td class="num">${num(p.volume, 2)}</td>
       <td class="num">${price(p.price_open, digits)}</td>
       <td class="num">${price(p.price_current, digits)}</td>
-      <td class="num ${p.sl ? "" : "dim"}">${price(p.sl, digits)}</td>
+      <td class="num ${naked ? "neg" : (p.sl ? "" : "dim")}">${
+        naked ? '<b>STOPSUZ</b>' : price(p.sl, digits)}</td>
       <td class="num ${p.tp ? "" : "dim"}">${price(p.tp, digits)}</td>
       <td class="num ${cls(p.profit + p.swap)}">${signed(p.profit + p.swap)}</td>
-      <td class="dim mono">${duration(now - p.time)}</td>`;
+      <td class="dim mono">${duration(now - p.time)}</td>
+      <td class="dim mono">${esc(String(p.ticket))}</td>
+      <td class="dim mono">${p.magic ? esc(String(p.magic)) : "-"}</td>`;
     tr.appendChild(el("td", {}, el("button", {
       class: "btn btn-sm btn-danger",
       text: "Kapat",
@@ -624,7 +701,7 @@ function renderPositions() {
     })));
     return tr;
   });
-  rowsInto($("#positions-table"), rows, "Acik pozisyon yok", 10);
+  rowsInto($("#positions-table"), rows, "Acik pozisyon yok", 12);
 }
 
 function renderDayTable() {
@@ -2208,6 +2285,8 @@ function wire() {
   if (blocksBtn) blocksBtn.onclick = () => loadBlocks();
   const ratioBtn = $("#btn-ratio-refresh");
   if (ratioBtn) ratioBtn.onclick = () => loadSpreadRatio();
+  const autopsyBtn = $("#btn-autopsy-refresh");
+  if (autopsyBtn) autopsyBtn.onclick = () => loadAutopsies();
   const blocksReset = $("#btn-blocks-reset");
   if (blocksReset) blocksReset.onclick = async () => {
     try {

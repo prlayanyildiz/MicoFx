@@ -151,6 +151,8 @@ const FIELD_HELP = {
   "th.pos.SL": "Stop. Bos = yok.",
   "th.pos.TP": "Take profit. Bos = yok (trail ile cikis).",
   "th.pos.KZ": "Acik kar/zarar + swap. Henuz gerceklesmedi.",
+  "th.pos.Ticket": "Broker bilet numarasi. Logdaki #numara ile ayni.",
+  "th.pos.Magic": "Botun sembol kimligi. Logdaki magic= ile ayni; bos ise pozisyon bota ait degil.",
   "th.pos.Sure": "Acildigindan beri gecen sure.",
 
   "th.day.Sembol": "Bugun kapanan islemlerin sembolu.",
@@ -174,6 +176,14 @@ const FIELD_HELP = {
   "th.cap.Beklenen": "Holdout expectancy x 1R. OPT projeksiyonu; canli sonuc degil.",
   "th.cap.AcikKZ": "Bu sembolun acik pozisyonlarinin yuzmemis K/Z'i.",
 
+  "th.autopsy.Sembol": "Kapanan islemin sembolu.",
+  "th.autopsy.Ticket": "Broker bilet numarasi.",
+  "th.autopsy.Sebep": "Cikisi ne yapti: sl (stop), trail (takip eden stop), flatten (zorunlu kapanis).",
+  "th.autopsy.Sure": "Acik kaldigi dakika.",
+  "th.autopsy.R": "Gerceklesen sonuc, baslangic riskinin kati. -1 = tam stop.",
+  "th.autopsy.MFE": "Islem sirasinda gorulen en iyi seviye, R cinsinden. 0 = hic lehe gitmedi.",
+  "th.autopsy.Masada": "MFE ile gerceklesen arasindaki fark - geri verilen kisim.",
+  "th.autopsy.Sonra": "Cikistan bir saat sonrasi: fiyat girise dondu mu, ayni yonde devam etti mi, toparladi mi. Kapanistan 1 saat sonra dolar.",
   "th.exec.Sembol": "Olculen emirlerin sembolu.",
   "th.exec.Ornek": "Istenen vs dolan fiyat karsilastirilan emir sayisi.",
   "th.exec.Aleyhte": "Aleyhte kayma sayisi (daha kotu dolum).",
