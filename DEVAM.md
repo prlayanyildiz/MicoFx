@@ -3676,7 +3676,47 @@ kalktı.
 
 ### Ama bu kemer, tamir değil — asıl kusur duruyor
 
-`mt5client.ensure()` içinde 5 saniyelik bekleme ile `connect()` çağıran
-yeniden bağlanma mekanizması **var**. Terminal bir dakika sonra geri
-gelmişti. **Neden 32 saat boyunca bağlanmadı, bilinmiyor** — ve logda
-tek bir yeniden deneme satırı bile yok. Bu ayrı bir soruşturma.
+**24.08 07:45 · İlk hüküm ("hiç denemedi") YANLIŞTI, düzeltildi.**
+
+Claude log arkeolojisinden "yeniden bağlanma hiç denenmedi" sonucuna vardı
+ve `7b6b601`'de kayda geçirdi. **Çürütüldü:** `_cycle`'ın **ilk satırı**
+`if not self.client.ensure(): return` — her turda, olay sırasındaki
+`bfe4435`'te de aynı. Yani `ensure()` sürekli çağrılıyordu.
+
+Ayrıca 01:00'deki SIGNAL yalnız `_refresh_signals`'tan yazılabiliyor ve
+oraya varmak `ensure()` True + hesap dolu + `connected` True istiyor. O
+satırın varlığı, "bağlantı yoktu" iddiasıyla **çelişiyor**.
+
+**Gerçek açıklama (Cursor):** `connect()` muhtemelen **oldu** — ama o gün
+başarı satırı INFO'ydu ve diske yazılmıyordu. Taze terminal `copy_rates`'e
+**geri sarılmış geçmiş** döndürdü: son kapanan bar 08:26'nın barına geri
+gitti, `last_closed != last_bar` olduğu için taze sanıldı ve SIGNAL yazıldı.
+01:30'daki sinyal farklı bir bar ve gerçek seans.
+
+Yani körlük = **log körlüğü + geçmiş sarımı**, "ensure çağrılmıyor" değil.
+
+**Claude'un hatasının şekli (§6a-2, sekizinci):** çürütecek kontrol tek bir
+grep'ti (`_cycle` içinde `ensure()` var mı), salt okumayla erişilebilirdi,
+**yapılmadı** — bunun yerine "kod tarafı sende" denip hüküm yine de
+söylendi. **Kanıtı devrederken sonucu söylemek**, aynı hatanın yeni kılığı.
+
+
+**24.08 07:50 — soruşturma kapandı, cevap "bağlanmadı" değilmiş.**
+
+`_cycle`'ın ilk satırı `if not self.client.ensure(): return` — her turda,
+olay sırasındaki kodda da. Yani yeniden bağlanma **sürekli deneniyordu**.
+Logda deneme satırı yoktu çünkü **başarı satırı o gün INFO'ydu** ve INFO
+diske yazılmıyor (`_PERSIST`).
+
+**Körlüğün iki bileşeni:**
+1. **Log körlüğü** — başarılı bağlanma diskte görünmüyordu. `7b6b601` ile
+   WARN'a çekildi; bir sonraki olayda aynı soru bir dakikada cevaplanır.
+2. **Geçmiş sarımı** — taze terminal `copy_rates`'e geri sarılmış geçmiş
+   döndürdü; son kapanan bar geriye gitti, `last_closed != last_bar` olduğu
+   için taze sanıldı. `6c3de07` ile geri sarım artık taze bar sayılmıyor.
+
+Üçüncü kapı `c519c2d`: iki bardan eski kapanmış bar giriş adayı olamaz
+(Cuma barının Pazartesi seans açılışında girmesi).
+
+**`ensure()` canlılık sondası ölçülmedi ve dokunulmadı** — körlük "ensure
+çağrılmıyor"dan gelmediği için oraya yama yapmak yanlış tamir olurdu.
