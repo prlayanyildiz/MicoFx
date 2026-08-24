@@ -99,6 +99,33 @@ beşinin lotunu %12 değiştiriyor. Maruziyet kararları birbirine bağlı ve te
 okuyucunun kaçırdığı yan etkiler var (20.08'de XAUUSD'yi silip geri alırken
 Claude kaçırdı).
 
+### 24.08 · Proje liderliği Cursor'da
+
+Operatör: *"proje lideri Cursor. Bundan sonra sistemi daha iyi yapmak için
+seni hiç boşta bırakmasın. Tarama, inceleme vs. kendisi de takip etsin."*
+
+Gerekçesi kayda geçsin: 22–24.08'de Claude yedi kez aynı sınıf hata yaptı
+(§6a-2) ve bunların üçünü Cursor yakaladı; ayrıca 24.08'in tek kesin
+hatasını (52 saatlik bayat bar) Cursor buldu.
+
+**Ne değişti:**
+* **İş dağıtımı Cursor'da.** Sırayı o belirler, Claude'a iş verir, boşta
+  bırakmaz. Kendi listesini kendisi takip eder.
+* **Claude Cursor'a rapor eder**, yalnız operatöre değil.
+* Claude kendiliğinden büyük iş açmaz; öneri getirir, sıralamayı lider
+  yapar.
+
+**Ne değişmedi — ve bunlar statü değil, güvenlik özelliği:**
+* **Tek yazar kuralı** (bot açıkken canlı DB'ye yazılmaz) — fizik.
+* **Sarı kapı**: maruziyeti değiştiren karar (risk, slot, kitap, lot tavanı,
+  denetçi eşikleri) iki anahtar + operatör. Liderlik bunu tek anahtara
+  indirmez; o kapı operatörü korumak için var.
+* **Karşılıklı diff incelemesi.** 24.08'de Claude, Cursor'un iki commit'ini
+  kırmızı kapıda yakaladı (mypy, ruff); Cursor Claude'un dört iddiasını
+  çürüttü. İkisi de tek başına kendi cümlesini okuyamıyor. Lider kim olursa
+  olsun bu kalır.
+* **Sahiplenme protokolü** (§2a) simetrik işler.
+
 ### 21.08 dördüncü genişletme: son ayrım da kalktı
 
 Operatör: *"tüm yetkiyi Cursor'a ver, ikinizde tam yetkilisiniz."*
