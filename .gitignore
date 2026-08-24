@@ -36,3 +36,6 @@ CLAUDE_ONERILERI.md
 # acar. Depoda isleri yok; git status onlarla kirlenmesin.
 .tmp.driveupload/
 .tmp.drivedownload/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
