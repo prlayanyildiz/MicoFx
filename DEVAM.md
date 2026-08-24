@@ -3877,6 +3877,8 @@ M5 + native, giriş=sinyal kapanışı, SL=`sl_atr_mult`×ATR, trail canlı form
 
 **24.08 16:16 — pencere de çakışma.** Altın 16:14'te doldu, `after_1h_bars=4` (16:15'ten önce → `tf_sec` işledi). 16:12 boşluğu restart'ın 1 dk saat penceresi. Claude: 4 = kaydırılmış saat. `after_stop_excursions` artık `bar_sec` ile çıkış barını da alır; hazır-olma ile aynı tanım. Eski altın satırı 4'te donuk (yeniden yazılmaz).
 
+**24.08 16:18 — GER40 #364185297 SL −12,43, mfe 0.** Bugünün üçüncü düz −1 R (JPN 14:38, Brent 15:32). Açık kalan NAS100. `through_entry` kârda tautolojiydi (altın mx≥entry tanım gereği True, dip girişin 13,75 üstünde). Silkme yalnız zarar çıkışında. Yeşil.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.
