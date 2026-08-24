@@ -3840,6 +3840,12 @@ Bugün kapanan: `capture` üç katman · `required_bars` 960→640 · EDGE_MAX k
 
 Otopsi halkası n=65 bu fiyatları taşımıyordu (`entry`/`sl`/`exit_price` yoktu; bugünün 15'i log+MT5'ten kesildi). Yeşil: kapanış satırı artık bu dört fiyatı dondurur; `_evaluate` bir saatlik bar kapanınca `after_1h_*` doldurur, istisna yutar. Canlı süreç 11:22 import — gece restart'ta işler. Sarı kapı duruyor.
 
+**24.08 14:44 — canlı restart (operatör sınırsız müdahale).** `gece_restart.py`: pid 9176 durdu, port 8900 pid **12980** 10 sn'de açıldı. MT5 bağlandı, hesap 61562752. `_trading`/`watching` True, cycle 31, `last_error` boş, saat sapması 0. Tavan **30** / fren **22** / `size_by_edge` True DB'den geldi (12:01 POST kaybolmadı). Kitap uyarısı yok — 28,16 < 30.
+
+Açık 3, broker SL aynı: XAUUSD #363789447 0,01 BUY 4617,64 · GER40 #364185297 0,3 BUY 26088,8 · SpotBrent #364230392 0,08 SELL 93,982. STOPSUZ 0. Özkaynak 2209,91, yüzme +39,17, gün başı 2395,52, `pnl_pct` −7,75.
+
+Canlı kod doğrulandı: `/api/analysis/trade-autopsies` `after_1h_*` anahtarlarını taşıyor (`297bbd6`). `after_1h_n=0` — eski 66 satırda fiyat yok; yeni kapanışlar doldurur. `b776360` `required_bars` de bu süreçte. 14:35 JPN225 #364350603 −8,59 restart'tan önce kapandı. Sarı kapı duruyor.
+
 ### Açma
 
 Sabah 0/10, reconnect/`ensure`, scalping/M1/0,25 ATR, `sl_atr_mult` n=11, `trail_start` n=1, rewind. Kapalı.
