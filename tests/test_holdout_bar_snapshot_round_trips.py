@@ -28,7 +28,7 @@ def test_a_snapshot_round_trips_the_holdout_window(tmp_path):
     path = tmp_path / "GER40_M30.npz"
     write(path, symbol="GER40", timeframe="M30", bars=bars,
           info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
-          min_stop=0.5)
+          min_stop=0.5, spread_scale=3.35, spread_scale_n=277_649)
     got = read(path)
     assert got["symbol"] == "GER40"
     assert got["timeframe"] == "M30"
@@ -39,3 +39,17 @@ def test_a_snapshot_round_trips_the_holdout_window(tmp_path):
     np.testing.assert_array_equal(got["bars"].spread, bars.spread)
     assert got["info"]["point"] == 0.1
     assert got["min_stop"] == 0.5
+    assert got["spread_scale"] == 3.35
+    assert got["spread_scale_n"] == 277_649
+
+
+def test_a_thin_histogram_is_refused_not_stored_as_one(tmp_path):
+    """Replay must not inherit _spread_scale's silent 1.0 on failure."""
+    import pytest
+    with pytest.raises(ValueError, match="spread_scale_n"):
+        write(tmp_path / "x.npz", symbol="GER40", timeframe="M30", bars=_bars(),
+              info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
+              min_stop=0.5, spread_scale=1.0, spread_scale_n=0)
+    write(tmp_path / "ok.npz", symbol="GER40", timeframe="M30", bars=_bars(),
+          info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
+          min_stop=0.5, spread_scale=1.0, spread_scale_n=400)

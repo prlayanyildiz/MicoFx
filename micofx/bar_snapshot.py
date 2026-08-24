@@ -16,10 +16,11 @@ from typing import Any
 
 import numpy as np
 
+from .engine import SPREAD_RATIO_MIN_SAMPLES
 from .mt5client import Bars
 from .paths import DATA_DIR
 
-SNAPSHOT_VERSION = 1
+SNAPSHOT_VERSION = 2
 SNAPSHOT_DIR = DATA_DIR / "holdout_bars"
 
 
@@ -29,7 +30,24 @@ def snapshot_path(symbol: str, timeframe: str) -> Path:
 
 
 def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
-          info: dict[str, Any], min_stop: float) -> None:
+          info: dict[str, Any], min_stop: float,
+          spread_scale: float, spread_scale_n: int) -> None:
+    """Persist bars plus the cost inputs a replay must not re-read live.
+
+    ``spread_scale`` is the live-tick/bar median at fetch time. Leaving it
+    out meant the same file, a week later, would multiply cost/R by a
+    different histogram (review 24.08 08:55). Replay must not call
+    ``_spread_scale``: that helper returns 1.0 on failure, which shrinks
+    cost/R and hides the 18% live refusals this measurement exists to count.
+    """
+    scale = float(spread_scale)
+    n = int(spread_scale_n)
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError(f"spread_scale must be a positive finite, got {spread_scale!r}")
+    if n < SPREAD_RATIO_MIN_SAMPLES:
+        raise ValueError(
+            f"spread_scale_n {n} < {SPREAD_RATIO_MIN_SAMPLES} - refusing a "
+            "thin histogram that _spread_scale would silently call 1.0")
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         path,
@@ -48,6 +66,8 @@ def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
         tick_value=np.float64(info.get("tick_value") or 0.0),
         tick_size=np.float64(info.get("tick_size") or 0.0),
         min_stop=np.float64(min_stop),
+        spread_scale=np.float64(scale),
+        spread_scale_n=np.int64(n),
     )
 
 
@@ -79,4 +99,6 @@ def read(path: Path) -> dict[str, Any]:
                 "tick_size": float(blob["tick_size"]),
             },
             "min_stop": float(blob["min_stop"]),
+            "spread_scale": float(blob["spread_scale"]),
+            "spread_scale_n": int(blob["spread_scale_n"]),
         }
