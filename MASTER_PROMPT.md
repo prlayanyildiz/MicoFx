@@ -295,7 +295,9 @@ are portfolio safety, not signal indicators.
 ### `cost_rank_max` (shared by the two scalping families)
 Adaptive cost-regime gate: the bar's cost-to-range ratio must sit inside the given
 percentile of its own trailing distribution. Unlike `max_spread_atr` it is not a fixed
-number, so it follows the symbol and the session.
+number, so it follows the symbol and the session. Measured 25.08 US30 M5: **1/44 fills**
+while ATR was ~12.5 (ceiling 2.21 → 1.51 pts). The ratio does not follow the session;
+`cost_rank_max` does, and is only wired on `micro_rev` / `burst`.
 
 **Cost series contract:** `IndicatorCache(..., cost=...)` carries `bar spread * point +
 commission_in_price` — the exact round turn the backtest charges. Callers that cannot
@@ -408,6 +410,7 @@ If tick value missing in risk mode: fall back to fixed lot **via normalize_volum
 Holdout expectancy vs median of enabled symbols with positive expectancy (≥3 such):  
 `clamp[0.6, 2.2](sqrt(mine / median))`.  
 Note: at broker min lot, scale often has nowhere to round — Panel shows both Avantaj and Lot.
+Measured overflow vs the risk lot: 1.0× · 1.3× · 1.9× · **2.7×** (four cases, three symbols).
 
 ### DailyGuard
 Day key from broker epoch GMT date; start balance persisted. Halt if `pnl_pct <= -daily_loss_pct` or (if set) `>= +daily_profit_pct`. Survives restart. Manual resume API.
