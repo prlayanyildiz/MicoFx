@@ -564,7 +564,9 @@ _CRITICAL_MUTATIONS = frozenset({
     "/api/app/shutdown", "/api/app/restart",
     "/api/positions-close-all",
     "/api/account-lock",
+    "/api/holdout/capture",
 })
+_holdout_capture_lock = threading.Lock()
 
 
 def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optimizer,
@@ -645,6 +647,26 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     # --------------------------------------------------------------- state
 
+    @app.get("/api/schema")
+    def schema() -> dict[str, Any]:
+        """Which OPT axes each family actually reads. Static per process.
+
+        These three blocks used to ride on every /api/state, which the panel
+        polls every ~3s (1.5s while a search runs). They are built from module
+        constants - OPT_FIELDS and _FAMILIES cannot change while the process is
+        up - so 2155 bytes and twelve sorted() calls were repeating for a
+        payload that never differed. The panel fetches this once on load, the
+        same way it already loads the gates and autopsy tables.
+        """
+        return {
+            "ok": True,
+            "opt_fields": list(OPT_FIELDS),
+            "engine_opt_fields": sorted(ENGINE_OPT_FIELDS),
+            "strategy_opt_fields": {
+                name: sorted(opt_fields_read(name)) for name in _FAMILIES
+            },
+        }
+
     @app.get("/api/state")
     def state() -> dict[str, Any]:
         return {
@@ -655,11 +677,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             "symbols": symbol_payload(),
             "system": store.system.to_dict(),
             "opt": optimizer.status(),
-            "opt_fields": list(OPT_FIELDS),
-            "engine_opt_fields": sorted(ENGINE_OPT_FIELDS),
-            "strategy_opt_fields": {
-                name: sorted(opt_fields_read(name)) for name in _FAMILIES
-            },
         }
 
     @app.get("/api/symbols")
@@ -2147,7 +2164,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             raise HTTPException(409, "optimizasyon calisirken holdout capture yok")
         if not client.connected:
             raise HTTPException(409, "MT5 baglantisi yok")
-        return capture_book(client=client, store=store)
+        if not _holdout_capture_lock.acquire(blocking=False):
+            raise HTTPException(409, "holdout capture zaten calisiyor")
+        try:
+            return capture_book(client=client, store=store)
+        finally:
+            _holdout_capture_lock.release()
 
     @app.get("/api/opt/history")
     def opt_history(symbol: str | None = None, limit: int = 60) -> dict[str, Any]:

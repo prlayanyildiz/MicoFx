@@ -300,6 +300,20 @@ async function loadSpreadRatio() {
   if (note) note.textContent = data.note || "";
 }
 
+let SCHEMA = {};
+
+async function loadSchema() {
+  // Which OPT axes each family reads. Static for the life of the process, so
+  // it is fetched once instead of riding on every ~3s /api/state poll. Failure
+  // is not fatal: optFieldVisible() falls back to showing the field, which is
+  // what an unknown axis did before this endpoint existed.
+  try {
+    SCHEMA = await api("/api/schema");
+  } catch (err) {
+    SCHEMA = {};
+  }
+}
+
 async function loadAutopsies() {
   // The endpoint has existed since the autopsies did; nothing rendered it, so
   // every question about an exit meant reading sqlite by hand. Rows only - the
@@ -946,10 +960,10 @@ const SECTIONS = [
 
 function optFieldVisible(cfg, k) {
   if (k === "strategy" || k === "timeframe") return true;
-  const all = STATE.opt_fields;
+  const all = SCHEMA.opt_fields;
   if (!all || !all.includes(k)) return true;
-  const read = (STATE.strategy_opt_fields || {})[cfg.strategy] || [];
-  const eng = STATE.engine_opt_fields || [];
+  const read = (SCHEMA.strategy_opt_fields || {})[cfg.strategy] || [];
+  const eng = SCHEMA.engine_opt_fields || [];
   return read.includes(k) || eng.includes(k);
 }
 
@@ -2605,4 +2619,7 @@ function wire() {
 
 wire();
 fillGroupSelects();
-refresh();
+// Schema first: buildSymbolCards() hides OPT axes a family never reads, and
+// with an empty SCHEMA every axis shows. Fetch before the first refresh so the
+// symbol form does not flash the full field list.
+loadSchema().then(refresh);
