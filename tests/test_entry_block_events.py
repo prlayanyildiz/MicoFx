@@ -36,6 +36,7 @@ def _engine(store=None):
     eng._entry_blocks_since = 1000.0
     eng._entry_blocks_dirty = False
     eng._entry_events_dirty = False
+    eng._entry_blocks_flushed_at = 0.0
     return eng
 
 
@@ -114,7 +115,11 @@ def test_evaluate_needles_the_two_silent_halts():
 
 
 def test_a_retry_does_not_rewrite_the_events_blob():
-    """The 222 KB ring must not hit disk on every 2s poll. Counters (1.3 KB) may."""
+    """The 222 KB ring must not hit disk on every 2s poll.
+
+    Counters used to (1.3 KB). They now wait 45s unless a new episode
+    marks the ring dirty, which is the write that must still be immediate.
+    """
     store = _Store()
     writes: list[str] = []
     orig = store.set_setting
@@ -134,7 +139,7 @@ def test_a_retry_does_not_rewrite_the_events_blob():
     eng._tally_entry("X", "spread", bar_key=(1, 0))
     eng._flush_entry_blocks()
     assert "entry_block_events" not in writes, "retry rewrote the events blob"
-    assert "entry_blocks" in writes, "counters must still persist each attempt"
+    assert "entry_blocks" not in writes, "counter retries must wait the debounce"
 
     writes.clear()
     eng._tally_entry("X", "spread", bar_key=(2, 0))

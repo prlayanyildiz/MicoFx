@@ -30,7 +30,9 @@ from .store import Store, as_dict, as_list, as_number
 from .strategy import IndicatorCache, Params, Signals, compute, required_bars
 from .supervisor import Supervisor
 
-_STALE_BAR_REFRESH = 45.0   # force a bar refresh at least this often
+_STALE_BAR_REFRESH = 45.0   # kept as a name; due uses the broker clock now
+_BAR_INTEGRITY_REFRESH = 900.0  # rare full copy_rates with no new bar
+_ENTRY_BLOCK_FLUSH_SEC = 45.0
 _ACCOUNT_TTL = 1.0
 
 # A cooldown is meant to stop the same setup re-firing on the next bar or two,
@@ -585,6 +587,8 @@ class Engine:
         self._trade_autopsies_dirty = False
         self._trade_autopsies_since = time.time()
         self._load_trade_autopsies()
+        self._rebuild_autopsy_pending()
+        self._entry_blocks_flushed_at = 0.0
         # How much wider the live tick's spread runs than the bar spread the
         # walk-forward charges, per symbol, as a coarse histogram of the ratio.
         #
@@ -1261,6 +1265,11 @@ class Engine:
             events_dirty = getattr(self, "_entry_events_dirty", False)
             if not blocks_dirty and not events_dirty:
                 return
+            now = time.time()
+            last = float(getattr(self, "_entry_blocks_flushed_at", 0.0) or 0.0)
+            if (blocks_dirty and not events_dirty and last
+                    and now - last < _ENTRY_BLOCK_FLUSH_SEC):
+                return
             live = set(self.store.symbols)
             if blocks_dirty:
                 self._entry_blocks = {s: c for s, c in self._entry_blocks.items()
@@ -1276,6 +1285,7 @@ class Engine:
                 self._entry_events = events[-limit:]
                 self.store.set_setting("entry_block_events", self._entry_events)
                 self._entry_events_dirty = False
+            self._entry_blocks_flushed_at = now
             self._flush_ok("entry_blocks")
         except Exception as exc:
             self._flush_failed("entry_blocks", exc)
@@ -1406,9 +1416,11 @@ class Engine:
             # still in the ring is the window the n>=50 gate actually has.
             self._trade_autopsies_since = self._autopsy_window_start(
                 self._trade_autopsies)
+            self._rebuild_autopsy_pending()
         except Exception:
             self._trade_autopsies = []
             self._trade_autopsies_since = time.time()
+            self._autopsy_pending = {}
 
     def _autopsy_safe(self, **fields: Any) -> None:
         """Record one close for diagnostics, and never let that break a close.
@@ -1436,6 +1448,9 @@ class Engine:
                     or TRADE_AUTOPSY_LIMIT)
         if len(events) > limit:
             self._trade_autopsies = events[-limit:]
+            self._rebuild_autopsy_pending()
+        else:
+            self._pending_autopsy_add(events[-1])
         self._trade_autopsies_since = self._autopsy_window_start()
         self._trade_autopsies_dirty = True
 
@@ -1448,6 +1463,7 @@ class Engine:
                         or TRADE_AUTOPSY_LIMIT)
             rows = list(getattr(self, "_trade_autopsies", []) or [])[-limit:]
             self._trade_autopsies = rows
+            self._rebuild_autopsy_pending()
             self.store.set_setting("trade_autopsies", rows)
             self._trade_autopsies_since = self._autopsy_window_start(rows)
             self.store.set_setting("trade_autopsies_since",
@@ -1590,6 +1606,41 @@ class Engine:
             "exit_price": _round(px, 6),
         }
 
+    def _rebuild_autopsy_pending(self) -> None:
+        """Index close rows that still need the hour-after-stop fill."""
+        pending: dict[str, list[dict[str, Any]]] = {}
+        for row in list(getattr(self, "_trade_autopsies", []) or []):
+            if row.get("after_1h_bars") is not None:
+                continue
+            pending.setdefault(str(row.get("symbol") or ""), []).append(row)
+        self._autopsy_pending = pending
+
+    def _pending_autopsy_add(self, row: dict[str, Any]) -> None:
+        if row.get("after_1h_bars") is not None:
+            return
+        idx = getattr(self, "_autopsy_pending", None)
+        if not isinstance(idx, dict):
+            self._autopsy_pending = {}
+            idx = self._autopsy_pending
+        idx.setdefault(str(row.get("symbol") or ""), []).append(row)
+
+    def _pending_autopsies(self, symbol: str) -> list[dict[str, Any]]:
+        idx = getattr(self, "_autopsy_pending", None)
+        if not isinstance(idx, dict):
+            return [r for r in list(getattr(self, "_trade_autopsies", []) or [])
+                    if str(r.get("symbol") or "") == symbol
+                    and r.get("after_1h_bars") is None]
+        return list(idx.get(symbol, ()))
+
+    def _drop_pending_autopsy(self, symbol: str, row: dict[str, Any]) -> None:
+        idx = getattr(self, "_autopsy_pending", None)
+        if not isinstance(idx, dict):
+            return
+        bucket = idx.get(symbol)
+        if not bucket:
+            return
+        idx[symbol] = [r for r in bucket if r is not row]
+
     def _fill_after_stop(self, symbol: str, state: SymbolState) -> None:
         """Score the hour after a close once that hour's bars exist.
 
@@ -1612,16 +1663,15 @@ class Engine:
         rows = getattr(self, "_trade_autopsies", None)
         if not rows:
             return
+        pending = self._pending_autopsies(symbol)
+        if not pending:
+            return
         dirty = False
         horizon = 3600.0
         store = getattr(self, "store", None)
         cfg = (getattr(store, "symbols", None) or {}).get(symbol) if store is not None else None
         tf_sec = int(timeframe_seconds(cfg.timeframe) or 0) if cfg is not None else 0
-        for row in rows:
-            if str(row.get("symbol") or "") != symbol:
-                continue
-            if row.get("after_1h_bars") is not None:
-                continue
+        for row in pending:
             exit_t = self._autopsy_float(row.get("exit_time"))
             if exit_t is None or exit_t <= 0:
                 continue
@@ -1640,6 +1690,7 @@ class Engine:
             if entry is None or sl is None or exit_px is None or not side:
                 row["after_1h_bars"] = 0
                 dirty = True
+                self._drop_pending_autopsy(symbol, row)
                 continue
             filled = after_stop_excursions(
                 side, entry, sl, exit_px, times, high, low,
@@ -1651,6 +1702,7 @@ class Engine:
             else:
                 row.update(filled)
             dirty = True
+            self._drop_pending_autopsy(symbol, row)
         if dirty:
             self._trade_autopsies_dirty = True
 
@@ -2093,8 +2145,11 @@ class Engine:
         # timer there is the behaviour that has been running all along.
         broker_now = self.client.broker_now()
         due = broker_now > 0.0 and broker_now >= state.next_bar_at
-        stale = now - state.last_fetch > _STALE_BAR_REFRESH
-        if not (due or stale or state.last_bar == 0):
+        # 15.08: stale-every-45s silently carried the system when `due` used
+        # the machine clock. `due` is broker-clock now. A full required_bars
+        # fetch with no new bar is an integrity pass, not a substitute for due.
+        integrity = now - state.last_fetch > _BAR_INTEGRITY_REFRESH
+        if not (due or integrity or state.last_bar == 0):
             return False
 
         need = required_bars(params)

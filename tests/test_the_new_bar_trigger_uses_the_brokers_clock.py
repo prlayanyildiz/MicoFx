@@ -38,7 +38,7 @@ def test_the_due_check_reads_the_broker_clock():
 
 
 def test_the_due_check_no_longer_reads_the_local_clock():
-    due = SRC[SRC.index("due ="):SRC.index("stale =")]
+    due = SRC[SRC.index("due ="):SRC.index("integrity =")]
     assert "server_now()" not in due, (
         "server_now() is a true epoch and leaves the broker's UTC offset in the answer")
 
@@ -227,3 +227,41 @@ def test_a_bar_that_has_not_closed_yet_does_not_refetch():
                                       timeframe="M5"), state, _params())
 
     assert client.bar_calls == 0, "refetched a bar that has not closed"
+
+
+def test_a_forty_five_second_timer_does_not_copy_rates_without_a_new_bar():
+    """due is broker-clock. The old 45s stale path fetched required_bars anyway."""
+    import time
+
+    from micofx.models import SymbolConfig
+
+    broker_last_closed = int(time.time() + _Client.OFFSET) - 60
+    client = _Client(broker_last_closed)
+    eng = _engine(client)
+    state = _state(next_bar_at=time.time() + _Client.OFFSET + 600,
+                   last_bar=broker_last_closed)
+    state.last_fetch = time.time() - 60
+
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+                                      timeframe="M5"), state, _params())
+
+    assert client.bar_calls == 0
+
+
+def test_an_integrity_refresh_still_fetches_without_a_new_bar():
+    import time
+
+    from micofx.engine import _BAR_INTEGRITY_REFRESH
+    from micofx.models import SymbolConfig
+
+    broker_last_closed = int(time.time() + _Client.OFFSET) - 60
+    client = _Client(broker_last_closed)
+    eng = _engine(client)
+    state = _state(next_bar_at=time.time() + _Client.OFFSET + 600,
+                   last_bar=broker_last_closed)
+    state.last_fetch = time.time() - (_BAR_INTEGRITY_REFRESH + 1)
+
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+                                      timeframe="M5"), state, _params())
+
+    assert client.bar_calls == 1

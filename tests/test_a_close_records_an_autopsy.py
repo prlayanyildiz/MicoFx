@@ -336,6 +336,21 @@ def test_fill_after_stop_marks_a_row_without_prices_done():
     assert eng._trade_autopsies[0]["after_1h_bars"] == 0
 
 
+def test_fill_after_stop_does_not_walk_rows_already_filled():
+    eng = _engine()
+    done = {**_priced_row(exit_time=1), "after_1h_bars": 4, "symbol": "GER40"}
+    pending = _priced_row(exit_time=1000)
+    eng._trade_autopsies = [done] * 200 + [pending]
+    eng._rebuild_autopsy_pending()
+    assert len(eng._pending_autopsies("GER40")) == 1
+    state = SymbolState("GER40")
+    state.bars = _bars(last=5000)
+    eng._fill_after_stop("GER40", state)
+    assert pending.get("after_1h_bars") is not None
+    assert done["after_1h_bars"] == 4
+    assert eng._pending_autopsies("GER40") == []
+
+
 def test_fill_after_stop_does_not_raise_on_broken_bars():
     eng = _engine()
     eng._trade_autopsies = [_priced_row(exit_time=1000)]

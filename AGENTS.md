@@ -51,8 +51,8 @@ Fail-first: write the test, watch it fail, then implement. `pyproject.toml` alre
 
 ## Known gotchas
 
-- `poll_interval_sec` default 2s; watch-only floor 3s. Panel `/api/state` every 3s (1.5s during opt) shares the MT5 lock with the engine.
+- Panel `/api/state` every 3s (does not speed up during a search) shares the MT5 lock with the engine.
 - Fill verifier can `sleep` ~2.1s **on the engine thread** (`mt5client.py`). Do not "fix" duplicate-entry protection while changing this.
-- `_STALE_BAR_REFRESH = 45s` can recompute full `required_bars` even with no new bar. `due` must use **broker** clock, not local minus naive bar time.
+- `_BAR_INTEGRITY_REFRESH = 900s` is the no-new-bar full `required_bars` fetch. `due` must use **broker** clock, not local minus naive bar time.
 - `cursor/` and `claude/` are gitignored; do not `git add` them. Tests that call `gece_restart.say()` must patch the log path.
 - `graft/` is stale sourcedump — do not treat line numbers there as live.

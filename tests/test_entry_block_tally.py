@@ -29,6 +29,7 @@ Read together they separate the two causes that look the same from outside:
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -63,6 +64,7 @@ def _engine(store=None):
     eng._entry_blocks_since = 1000.0
     eng._entry_blocks_dirty = False
     eng._entry_events_dirty = False
+    eng._entry_blocks_flushed_at = 0.0
     return eng
 
 
@@ -220,6 +222,31 @@ def test_a_clean_cycle_writes_nothing():
     eng = _engine(store)
     eng._flush_entry_blocks()
     assert store.saved == {}
+
+
+def test_counter_flush_waits_when_only_tallies_changed():
+    store = _Store()
+    eng = _engine(store)
+    eng._tally_entry("X", "spread", bar_key=(1, 0))
+    eng._flush_entry_blocks()
+    assert "entry_blocks" in store.saved
+    store.saved.clear()
+    eng._entry_blocks_flushed_at = time.time()
+    eng._tally_entry("X", "spread", bar_key=(1, 0))
+    eng._flush_entry_blocks()
+    assert store.saved == {}
+
+
+def test_a_new_episode_still_flushes_immediately():
+    store = _Store()
+    eng = _engine(store)
+    eng._tally_entry("X", "spread", bar_key=(1, 0))
+    eng._flush_entry_blocks()
+    store.saved.clear()
+    eng._entry_blocks_flushed_at = time.time()
+    eng._tally_entry("X", "spread", bar_key=(2, 0))
+    eng._flush_entry_blocks()
+    assert "entry_block_events" in store.saved
 
 
 def test_a_reset_starts_a_fresh_window():
