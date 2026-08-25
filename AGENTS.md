@@ -48,6 +48,7 @@ Fail-first: write the test, watch it fail, then implement. `pyproject.toml` alre
 - Preserve walk-forward score formula and fill-next-open honesty unless explicitly asked to change them.
 - Do not invent strategy families without holdout + `defaults.json` grid + UI + `STRATEGIES`.
 - Commit/push only when the operator asks (or a standing order in **this** conversation). Named files only; no secrets; no `--no-verify`.
+- Cursor is project lead: every product change needs Cursor approval. Claude may inspect anything (book, logs, autopsy, diff) and **must** question; Claude does not ship patches, PATCH, search, or restart without that approval. Yellow/red gates stay operator.
 
 ## Known gotchas
 

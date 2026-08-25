@@ -126,6 +126,25 @@ hatasını (52 saatlik bayat bar) Cursor buldu.
   olsun bu kalır.
 * **Sahiplenme protokolü** (§2a) simetrik işler.
 
+### 25.08 20:55 — tam yetki, denetim Claude'da (operatör)
+
+Operatör: sistem Cursor'a emanet, **tam yetki**. Claude istediği gibi
+kullanılır ama **sorgulasın** — gözden kaçanı o yakalasın. Proje lideri
+Cursor: **her değişiklik onun onayında**. Claude sistem üzerinde her
+denetimi yapabilir, bulguyu getirir; plan Cursor'da. İşi kim kodlar
+(Cursor veya Claude) yine liderde.
+
+**Ne değişti:**
+* Claude kod/config **önermeden önce veya sonra sorgular**; "Cursor yazdı
+  öyleyse doğrudur" yok. Kitap, log, otopsi, diff — hepsi serbest.
+* Claude **onaysız yama basmaz** (canlı PATCH, arama, restart, skor
+  formülü). Bulgu + öneri yeter; apply liderde.
+* Sıra, kimin yazacağı, gece restart / holdout zamanı Cursor'da.
+
+**Ne değişmedi:** sarı kapı (risk/slot/kitap/denetçi) ve kırmızı
+(kaldıraç, hesap kilidi, günlük fren, flatten-all) hâlâ operatör.
+Tek yazar: bot açıkken ikinci sqlite / `mt5.initialize()` yok.
+
 ### 21.08 dördüncü genişletme: son ayrım da kalktı
 
 Operatör: *"tüm yetkiyi Cursor'a ver, ikinizde tam yetkilisiniz."*
