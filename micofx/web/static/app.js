@@ -2303,9 +2303,10 @@ async function refresh() {
   } finally {
     refreshBusy = false;
     clearTimeout(pollTimer);
-    const fast = (STATE.opt || {}).state === "running";
     const hidden = typeof document !== "undefined" && document.hidden;
-    const delay = hidden ? 6000 : (fast ? 1500 : 3000);
+    // Do not drop to 1.5s while a search is running: that is when the
+    // engine, workers, and this poll already share one MT5 lock.
+    const delay = hidden ? 6000 : 3000;
     pollTimer = setTimeout(refresh, delay);
   }
 }
