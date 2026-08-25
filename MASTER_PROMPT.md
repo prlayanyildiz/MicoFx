@@ -1,7 +1,8 @@
 # MicoFX / MicoAi Family — Master Agent Prompt
 
 Use this prompt when working on any of:
-- `D:\MicoFX` (ops / portfolio / strict MT5 lock — primary live FX tree)
+- `C:\Users\Administrator\MicoFx` (ops / portfolio / strict MT5 lock — **primary live FX tree**)
+- `D:\MicoFX` (historical path for the same fx variant; may still exist)
 - `D:\MicoFX Orj` (lean baseline snapshot)
 - `D:\MicoAi` (richer exits / scoring / risk experiments)
 
@@ -343,7 +344,7 @@ score = net_r * min(1, trades/min_trades) * (net_r / (net_r + max_dd_r))
 
 7. Plateau blend with grid neighbors (weight `plateau_weight`, default 0.4):  
    if ≥3 neighbors: `(1-w)*own + w*mean_neighbors` else discount `own * (1 - w*0.75)`.
-8. Refine: top 12 seeds → ±1 axis neighbors, `refine_rounds` times (default 2).
+8. Refine: top 12 seeds → ±1 axis neighbors, `refine_rounds` times (this tree ships **5**; older text said 2).
 9. Top ~14 by blended → measure validation → sort by `(validation.score, blended)` → attach holdout → keep top 10.
 
 ### Cross TF × strategy pick
@@ -477,7 +478,7 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 | Default port | 8900 | Web |
 | Default lookback | 180 days | Opt |
 | Default segments | 5 | Opt |
-| Default max_combos | 1200 (FX/Orj) / 2000 (Ai) | Opt budget |
+| Default max_combos | 2000 (this live fx tree) / 1200 (historical FX/Orj note) / 2000 (Ai) | Opt budget |
 
 ---
 
@@ -540,13 +541,15 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 ### Shared core (always)
 4 strategies, ATR risk/exits (basic trail), sessions, DailyGuard, supervisor quarantine/bad hours/reopt_on_decay, walk-forward opt, web UI, SQLite, group presets, watch vs trade modes.
 
-### Variant `fx` → `D:\MicoFX`
+### Variant `fx` → `C:\Users\Administrator\MicoFx` (also `D:\MicoFX` if that checkout still exists)
 - Dynamic portfolio: add/remove symbols, broker mapping UI, wipe+seed defaults, purge orphan opt_runs.
 - Strict MT5 path lock + install verify + hot path update.
 - Optimizer preamble: path + overrides + ensure or abort.
 - Silent start / console / stop launchers.
-- defaults: `max_combos=1200`, ATR-only trail grid, no orb_retest.
-- models/supervisor lean (no hour_risk_scales, no trail_mode).
+- defaults: `max_combos=2000`, `refine_rounds=5`, no `orb_retest`.
+- Trailing: `trail_mode` (atr|structure|hybrid) + `trail_lookback` are **in this tree** (`OPT_FIELDS`; live rows `'atr'`). Do not treat their presence as a licence to copy the rest of Ai.
+- Supervisor: `hour_risk_scales` **in this tree**. Scoring/models stay FX (no Ai DD-penalty score).
+- Still not here, do not port: `orb_retest`, Ai score formula, `autostart_mt5` / terminal watchdog, `stale_exit_ratio`.
 
 ### Variant `orj` → `D:\MicoFX Orj`
 - Same models/defaults/supervisor as FX lean core.
@@ -557,17 +560,17 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 
 ### Variant `ai` → `D:\MicoAi`
 Experimental trading richness — **do not copy into FX unless asked**:
-- `orb_retest`, `trail_mode` (atr|structure|hybrid) + `trail_lookback`, swing H/L. (`stale_exit_ratio` used to be listed here too; it is removed from FX entirely — see §0 — so do not port it back.)
-- Backtest score with trade-R consistency / DD penalties (diverges from FX formula)
-- Supervisor `hour_risk_scales`, live PF edge-decay halving risk
+- `orb_retest`, swing-heavy defaults, backtest score with trade-R consistency / DD penalties (diverges from FX formula)
 - `autostart_mt5` / wait / terminal process helpers / watchdog scripts
 - defaults: `max_combos=2000`, wide stop/trail/retest grids
 - Fixed portfolio like Orj (no FX CRUD)
 - `supertrend` in indicators = unused
+- (`trail_mode` / `hour_risk_scales` already live on fx — remaining Ai extras are the ones above)
 
 ### Decision rule
 | Working directory | Variant |
 |---|---|
+| `C:\Users\Administrator\MicoFx` | `fx` (live) |
 | `D:\MicoFX` | `fx` |
 | `D:\MicoFX Orj` | `orj` |
 | `D:\MicoAi` | `ai` |
