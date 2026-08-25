@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from micofx import holdout_cost
 from micofx.bars import Bars
 from micofx.engine import SPREAD_RATIO_BUCKETS
-from micofx import holdout_cost
 from micofx.models import SymbolConfig, SystemConfig
 
 
