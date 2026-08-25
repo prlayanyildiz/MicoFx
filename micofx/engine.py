@@ -3492,9 +3492,12 @@ class Engine:
         return self._account
 
     def positions_view(self) -> list[dict[str, Any]]:
+        return self._decorate_positions(self.client.positions())
+
+    def _decorate_positions(self, raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         out = []
-        for pos in self.client.positions():
+        for pos in raw:
             cfg = by_magic.get(pos["magic"])
             item = dict(pos)
             item["managed"] = cfg is not None
@@ -3502,6 +3505,23 @@ class Engine:
             item["group"] = cfg.group if cfg else "-"
             out.append(item)
         return out
+
+    def _cycle_book_is_fresh(self) -> bool:
+        if not self.client.connected or not self.last_cycle_at:
+            return False
+        interval = float(getattr(self.store.system, "poll_interval_sec", 2.0) or 2.0)
+        return (time.time() - self.last_cycle_at) <= max(4.0, 2.0 * interval)
+
+    def _panel_positions(self) -> list[dict[str, Any]]:
+        """Positions for /api/state. Reuse the cycle book when it is fresh.
+
+        snapshot() used to call positions() on every panel poll, taking the
+        same MT5 lock the worker already held at cycle start. Empty is a
+        valid flat book, so this must not fall through with ``or``.
+        """
+        if self._cycle_book_is_fresh():
+            return self._decorate_positions(self._positions)
+        return self.positions_view()
 
     def _symbol_daily_halt(self, cfg: SymbolConfig) -> str:
         """Non-empty block reason once THIS symbol has lost its own daily cap.
@@ -3810,7 +3830,7 @@ class Engine:
 
     def snapshot(self) -> dict[str, Any]:
         account = self.refresh_account()
-        positions = self.positions_view()
+        positions = self._panel_positions()
         capacity = self.risk.capacity(positions, account,
                                       {s: st.atr for s, st in list(self.states.items())})
         equity = float(account.get("equity", 0.0))
