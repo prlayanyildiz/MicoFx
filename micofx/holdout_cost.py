@@ -50,6 +50,7 @@ def charged_holdout(*, bars, cfg: SymbolConfig, point: float, tick_value: float,
     spread_pts = backtest.imputed_spread_pts(bars.spread)
     spread_price = spread_pts * point * scale
     raw_spread_price = spread_pts * point
+    trigger_pad = (spread_pts * point).tolist()
     floor_const = backtest.stop_floor_const(min_stop, point)
     min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
     tradable = backtest.session_mask(cfg, bars.time, bool(trade_all_hours))
@@ -65,7 +66,7 @@ def charged_holdout(*, bars, cfg: SymbolConfig, point: float, tick_value: float,
         lo, hi, commission,
         spread_price=spread_price, min_stop=min_stop_series, flatten=flatten,
         max_open=backtest.max_open_from_cfg(cfg),
-        block_reverse=True)
+        block_reverse=True, trigger_pad=trigger_pad)
     return res, lo, hi
 
 

@@ -424,7 +424,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              reverse_on_signal: bool = False,
              breakeven_at_r: float | None = None,
              mae_close_bars: int = 0,
-             mae_close_r: float = 0.0) -> Result:
+             mae_close_r: float = 0.0,
+             trigger_pad: list[float] | np.ndarray | None = None) -> Result:
     """Replay one bar window using an already-computed signal set.
 
     ``entries`` and ``spread_price`` are optional precomputed views of values
@@ -455,6 +456,13 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     is not an exit. A positive bar count closes the trade at that bar's
     close if MAE through those bars exceeds the R threshold. Search and
     walk_forward never pass them.
+
+    ``trigger_pad`` is the short-stop ASK pad in price units, already
+    imputed × point. ``None`` (direct ``simulate`` / tests) builds it here
+    from ``spread_pts``. ``walk_forward`` and ``charged_holdout`` pass the
+    series they already imputed once — do not impute again on that path.
+    This is not ``spread_price``: that series can be scaled or zeroed when
+    costs are off; the pad is a trigger, not a cost.
     """
     n = cache.close.size if hi is None else int(hi)
     lo = max(0, int(lo))
@@ -484,8 +492,11 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     # high + this bar's spread. That pad is a price reference, not a cost:
     # charge_costs may zero ``spread_price`` (the fill), but the broker still
     # covers a short when ask trades through the SL. Exit price stays the SL.
-    trigger_pad = (imputed_spread_pts(np.asarray(spread_pts, dtype=np.float64))
-                   * float(point)).tolist()
+    if trigger_pad is None:
+        trigger_pad = (imputed_spread_pts(np.asarray(spread_pts, dtype=np.float64))
+                       * float(point)).tolist()
+    else:
+        trigger_pad = np.asarray(trigger_pad, dtype=np.float64).tolist()
     # Falls back to the old flat approximation when the caller doesn't know the
     # symbol's real broker floor (``mt5client.min_stop_distance`` - stops_level,
     # freeze_level, current spread) - live can legally require a wider stop than
@@ -1250,6 +1261,11 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     scale = float(spread_scale) if spread_scale and spread_scale > 0 else 1.0
     spread_pts = imputed_spread_pts(bars.spread)
     spread_price = spread_pts * point * scale
+    # Short-stop ASK pad. Already imputed; do not run imputed_spread_pts
+    # again (the series would not change, but the call is 6.9 ms at 90k bars
+    # and simulate() used to pay it per window). Not spread_price: that one
+    # is scaled and may be zeroed when costs are off.
+    trigger_pad = (spread_pts * float(point)).tolist()
     # The broker's own floor under any stop, per bar. mt5client.min_stop_distance
     # is max(stops_level, spread * 1.5, point * 10) and the caller passes the
     # value it read once at plan time; only the stops_level part of that is
@@ -1326,7 +1342,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                         min_stop=min_stop_series,
                         flatten=flatten,
                         max_open=slot_cap,
-                        block_reverse=True)
+                        block_reverse=True,
+                        trigger_pad=trigger_pad)
 
     def evaluate(p: Params, sig=None, entries: np.ndarray | None = None,
                  last: Result | None = None,
