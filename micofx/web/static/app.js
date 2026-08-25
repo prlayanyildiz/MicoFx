@@ -857,6 +857,7 @@ const SECTIONS = [
       { k: "sl_atr_mult", t: "num", label: "SL x ATR", step: 0.1, min: 0.1 },
       { k: "trail_start_atr", t: "num", label: "Trail baslangic x ATR", step: 0.1, min: 0.1 },
       { k: "trail_step_atr", t: "num", label: "Trail mesafe x ATR", step: 0.1, min: 0.1 },
+      { k: "breakeven_at_r", t: "num", label: "Basabas kilit (R, 0=kapali)", step: 0.5, min: 0, max: 5 },
       {
         k: "trail_mode", t: "select", label: "Trail modu",
         opts: [["atr", "ATR (klasik)"], ["structure", "Yapisal (swing H/L)"], ["hybrid", "Hibrit (en siki)"]],

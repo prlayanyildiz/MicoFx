@@ -77,11 +77,13 @@ grid axis or UI field that reimplements one:**
 | `partial_tp_r` / `partial2_tp_r` + fractions | Scale-outs truncate the same tail for the same reason, and split one trade's R across rungs. |
 | `max_bars_in_trade` (time stop) | Closes a position because the clock ran out — exactly the trends worth holding. |
 | `stale_exit_ratio` | Same, for losers; the hard stop already bounds them. |
-| `breakeven_atr` | A separate "snap to exact entry" step scratches winners on ordinary noise. The trail crosses entry on its own — see the exact rule above. |
+| `breakeven_atr` | An ATR-unit "snap to entry" stays gone. The live lock is `breakeven_at_r` (R multiples, 0 = off) — not a search axis, not 0.5 R (BE-2 GER40 −32 R). |
 
-Three numbers per symbol carry the whole model — `sl_atr_mult`,
+Three numbers per symbol carry the search — `sl_atr_mult`,
 `trail_start_atr`, `trail_step_atr` — and they are what the optimizer
-searches. `Store.opt_params()` filters saved grids down to `OPT_FIELDS`, so a
+searches. `breakeven_at_r` is a config overlay (operator 25.08: lock at
+1.5 R after BE-1), not an `OPT_FIELDS` axis; BE-3 (grid {0, 1.0, 1.5})
+is unpaid. `Store.opt_params()` filters saved grids down to `OPT_FIELDS`, so a
 stale saved blob cannot resurrect a removed axis; if you add an axis, add it
 to `OPT_FIELDS` or it will be silently dropped.
 

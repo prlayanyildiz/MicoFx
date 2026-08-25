@@ -25,6 +25,7 @@ const FIELD_HELP = {
   "sl_atr_mult": "Stop mesafesi = ATR x bu. Lot bu mesafeye gore hesaplanir; buyutmek lotu kucultur.",
   "trail_start_atr": "Fiyat ATR x bu kadar kara gecmeden trail baslamaz.",
   "trail_step_atr": "Trail, fiyatin ATR x bu kadar gerisinde durur. Buyutmek daha genis trail, daha seyrek cikis.",
+  "breakeven_at_r": "Acik kar bu kadar R olunca stop girise cekilir. 0 = kapali (sadece trail). 1.5, holdout'ta hicbir sembolu bozmayan esik; 0.5 GER40'ta -32 R verdi.",
   "trail_mode": "atr = klasik ATR trail. structure = swing H/L. hybrid = ikisinin en siki olanı.",
   "trail_lookback": "Yapisal/hibrit trail icin swing H/L penceresi (bar).",
 

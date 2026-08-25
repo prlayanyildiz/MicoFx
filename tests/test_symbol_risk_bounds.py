@@ -154,6 +154,26 @@ def test_patch_symbol_still_accepts_a_small_positive_trail_start():
     assert store.symbols["XAUUSD"].trail_step_atr == 1.6
 
 
+def test_patch_symbol_accepts_zero_breakeven_and_one_point_five():
+    """0 disables the lock; 1.5 is the live threshold. Both must pass the door."""
+    tc, store = _client()
+    res = tc.post("/api/symbols/XAUUSD", json={"breakeven_at_r": 0})
+    assert res.status_code == 200
+    assert store.symbols["XAUUSD"].breakeven_at_r == 0.0
+    res = tc.post("/api/symbols/XAUUSD", json={"breakeven_at_r": 1.5})
+    assert res.status_code == 200
+    assert store.symbols["XAUUSD"].breakeven_at_r == 1.5
+
+
+def test_patch_symbol_rejects_negative_and_oversize_breakeven():
+    tc, store = _client()
+    before = store.symbols["XAUUSD"].breakeven_at_r
+    for value in (-0.5, 5.1):
+        res = tc.post("/api/symbols/XAUUSD", json={"breakeven_at_r": value})
+        assert res.status_code == 400, value
+        assert store.symbols["XAUUSD"].breakeven_at_r == before
+
+
 # --------------------------------------------------------------- nested blob
 
 def test_patch_symbol_ignores_retired_secondary_params():

@@ -3318,18 +3318,28 @@ class Engine:
         min_stop = self.client.min_stop_distance(cfg.symbol)
         current_sl = pos["sl"]
         target: float | None = None
-        # Once the stop has been ratcheted past entry - by the trail, on this
-        # or any earlier bar - the live-quote min_stop clamp below must never
+        # Once the stop has been ratcheted past entry - by the trail, or by
+        # breakeven_at_r - the live-quote min_stop clamp below must never
         # be allowed to put it back on the losing side. That clamp exists to
         # respect the broker's distance rule, not to hand back protection the
-        # trade has already earned. There is no separate breakeven step: the
-        # trail target is ``ref - trail_step_atr * atr``, so it is above entry
-        # exactly when profit_dist exceeds ``trail_step_atr * atr`` - true
-        # regardless of trail_start_atr, which only decides how early the
+        # trade has already earned.
+        #
+        # The trail target is ``ref - trail_step_atr * atr``, so it is above
+        # entry exactly when profit_dist exceeds ``trail_step_atr * atr`` -
+        # true regardless of trail_start_atr, which only decides how early the
         # trail starts tightening the stop below entry. A config with
-        # trail_start_atr <= trail_step_atr is legal and reaches breakeven at
-        # the same point; see SymbolConfig's note.
+        # trail_start_atr <= trail_step_atr is legal and reaches trail
+        # breakeven at the same point; see SymbolConfig's note.
+        #
+        # ``breakeven_at_r`` is the separate lock: once profit_dist reaches
+        # that many original-risk units, the stop jumps to entry without
+        # waiting for the trail (and without pulling a trail already past
+        # entry). Zero is off. Not an OPT_FIELD.
         breakeven_locked = current_sl != 0 and (current_sl >= entry if is_buy else current_sl <= entry)
+        # Same original-risk the floor below uses, and the R unit the lock
+        # counts. Computed once so the threshold and the "don't trail behind
+        # the hard stop" check cannot drift apart inside one call.
+        original_risk = max(atr * cfg.sl_atr_mult, min_stop)
 
         if cfg.trail_start_atr > 0 and profit_dist >= atr * cfg.trail_start_atr:
             # ATR-based trailing (always computed as the baseline / fallback)
@@ -3358,6 +3368,14 @@ class Engine:
 
             if target is None or (trail > target if is_buy else trail < target):
                 target = trail
+
+        be_r = float(getattr(cfg, "breakeven_at_r", 0.0) or 0.0)
+        if be_r > 0 and original_risk > 0 and profit_dist >= be_r * original_risk:
+            be_sl = entry
+            if target is None:
+                target = be_sl
+            else:
+                target = max(target, be_sl) if is_buy else min(target, be_sl)
 
         if target is None:
             return settled
@@ -3388,7 +3406,6 @@ class Engine:
         # the bare ATR number here was tighter than the SL actually placed, so
         # on any symbol where min_stop binds this could refuse a trail update
         # that was still a genuine improvement over the real original stop.
-        original_risk = max(atr * cfg.sl_atr_mult, min_stop)
         if is_buy and target <= entry - original_risk:
             return settled
         if not is_buy and target >= entry + original_risk:

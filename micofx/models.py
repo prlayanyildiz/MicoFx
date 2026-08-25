@@ -219,9 +219,9 @@ class SymbolConfig:
     # they do fire on winners - "the trail is the only way out" is true of the
     # trade's own logic, not of the whole system.
     #
-    # Deliberately absent: take-profit, scale-out ladders, breakeven jumps,
-    # time stops and stale-trade exits. Every one of them caps or truncates a
-    # winner, which is the opposite of what a trailing system is for.
+    # Deliberately absent: take-profit, scale-out ladders, time stops and
+    # stale-trade exits. Every one of them caps or truncates a winner, which
+    # is the opposite of what a trailing system is for.
     #
     # BREAKEVEN, precisely - the earlier wording of this comment was loose
     # enough to invent a bug out of. The trail sits at
@@ -236,12 +236,22 @@ class SymbolConfig:
     # where a "start > step" 2.0/1.6 pair gives back the full 1.00R, and the
     # two are identical once past breakeven. Do NOT add a grid rule or apply
     # validation forbidding it; see test_trail_breakeven_invariant.py.
+    #
+    # ``breakeven_at_r`` is a separate lock, not a trail setting. Zero is off
+    # (the trail is the only way the stop crosses entry). A positive value
+    # jumps the stop to entry once open profit reaches that many R, without
+    # pulling a trail that is already past entry. It is not an OPT_FIELD: BE-3
+    # (searching {0, 1.0, 1.5}) is unpaid. 1.5 is the BE-1 holdout threshold
+    # that made no symbol worse; 0.5 is the value BE-2's validation picked on
+    # GER40 and holdout then lost 32 R on - do not apply 0.5 from a per-symbol
+    # "winner". An ATR-unit snap (``breakeven_atr``) stays gone.
     atr_period: int = 14
     sl_atr_mult: float = 1.2
     trail_start_atr: float = 0.8
     trail_step_atr: float = 0.6
     trail_mode: str = "atr"          # "atr" | "structure" | "hybrid"
     trail_lookback: int = 5          # bars to look back for swing high/low (structure/hybrid)
+    breakeven_at_r: float = 0.0      # 0 = off; lock SL at entry after this many R
     # ---- costs ----
     commission_per_lot: float = 0.0  # round-turn commission in account currency
 

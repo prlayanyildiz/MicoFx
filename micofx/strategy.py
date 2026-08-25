@@ -95,6 +95,7 @@ class Params:
     trail_step_atr: float = 0.6
     trail_mode: str = "atr"          # "atr" | "structure" | "hybrid"
     trail_lookback: int = 5          # bars to look back for swing high/low (structure/hybrid)
+    breakeven_at_r: float = 0.0      # 0 = off; lock SL at entry after this many R
     cooldown_sec: int = 0            # live engine caps to 2 bars of TF; BT mirrors that
     max_spread_atr: float = 0.0
     min_atr_ratio: float = 0.0

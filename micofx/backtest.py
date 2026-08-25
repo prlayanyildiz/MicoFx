@@ -422,7 +422,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              max_open: int = 1,
              block_reverse: bool = False,
              reverse_on_signal: bool = False,
-             breakeven_at_r: float = 0.0,
+             breakeven_at_r: float | None = None,
              mae_close_bars: int = 0,
              mae_close_r: float = 0.0) -> Result:
     """Replay one bar window using an already-computed signal set.
@@ -444,10 +444,12 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     any ``max_positions``. At ``max_open=1`` the flag is a no-op - the
     slot cap already drops the opposite fill.
 
-    ``breakeven_at_r`` is the same kind of switch (BE-1). Zero is live: the
-    trail is the only way the stop crosses entry. A positive value pulls the
-    stop to entry plus commission once unrealised gain reaches that many R,
-    without pulling a better trail back. Search/walk_forward never pass it.
+    ``breakeven_at_r`` is the BE-1 lock. ``None`` (the default) reads
+    ``Params.breakeven_at_r``, which ``from_config`` copies off the live row
+    so walk_forward of a locked config is the same trade. A numeric override
+    is for the measurement tests. Zero on the config is off: the trail is
+    then the only way the stop crosses entry. Search does not sweep this
+    (not an OPT_FIELD; BE-3 unpaid).
 
     ``mae_close_bars`` / ``mae_close_r`` are LOSS-3. Zero bars is live: MAE
     is not an exit. A positive bar count closes the trade at that bar's
@@ -521,7 +523,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     ptr = 0
     guard = 0
     max_open = max(1, int(max_open or 1))
-    breakeven_at_r = float(breakeven_at_r or 0.0)
+    if breakeven_at_r is None:
+        breakeven_at_r = float(getattr(p, "breakeven_at_r", 0.0) or 0.0)
+    else:
+        breakeven_at_r = float(breakeven_at_r or 0.0)
     mae_close_bars = max(0, int(mae_close_bars or 0))
     mae_close_r = float(mae_close_r or 0.0)
 
@@ -888,11 +893,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 # Mirrors engine._update_stop's breakeven_locked guard: once the
                 # trail has ratcheted the stop to or past entry, the min_stop
                 # clamp below must never put it back on the losing side. Live
-                # has no separate breakeven step - the trail is above entry
-                # once ``gain`` exceeds ``trail_step_atr * a``, whatever
-                # trail_start_atr is. ``breakeven_at_r`` (paper, default 0)
-                # is the BE-1 measurement: lock to entry+commission once
-                # gain reaches that many R, without pulling a better trail.
+                # trail is above entry once ``gain`` exceeds ``trail_step_atr * a``.
+                # ``breakeven_at_r`` (0 = off) is the separate lock: jump to
+                # entry+commission once gain reaches that many R, without
+                # pulling a better trail.
                 breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
                 if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
                     trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
