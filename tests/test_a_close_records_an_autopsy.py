@@ -158,6 +158,26 @@ def test_a_moved_stop_is_labelled_trail_not_sl():
     assert eng._trade_autopsies[-1]["exit_price"] == 99.4
 
 
+def test_autopsy_r_uses_the_original_stop_not_the_trailed_distance():
+    """Winning SL/trail exits must not report 1.0 R just because risk_dist is |entry-exit|.
+
+    25.08 GER40 trio: cash implied +3.66 / +2.98 / +2.34 R, autopsy wrote +1.000
+    because risk_dist was the close-time stop. original_sl is already on the row.
+    """
+    eng = _engine()
+    row = eng._autopsy_row(
+        book={"entry": 100.0, "side": "buy", "risk_dist": 3.0,
+              "original_sl": 99.0, "sl": 103.0, "mfe": 3.2, "mae": 0.2},
+        ticket=365162109, symbol="GER40", exit_price=103.0, exit_time=100,
+        profit=66.17, reason_code=execution.DEAL_REASON_SL, comment="",
+    )
+    assert row["r_realised"] == 3.0
+    assert row["mfe_r"] == 3.2
+    assert row["mae_r"] == 0.2
+    assert row["exit_reason"] == "trail"
+    assert row["left_on_table_r"] == 0.2
+
+
 def test_the_autopsy_report_is_on_the_panel():
     src = (Path(__file__).resolve().parents[1] / "micofx" / "web" / "app.py").read_text(
         encoding="utf-8")

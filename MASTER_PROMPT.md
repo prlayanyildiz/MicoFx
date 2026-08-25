@@ -88,7 +88,9 @@ is unpaid. `partial_at_r` is a second overlay (operator 25.08): **one**
 close of about one third of the ticket (snapped to broker min/step) at
 that R, remainder trails. Lot is not a dial — GER 0.70 → 0.20 is that
 rounding, not a 0.20 standard. Zero R is off. Not a search axis; paper
-uses the same third unless `partial_close_frac` is set. Do not
+uses the same third unless `partial_close_frac` is set. Mid-trade PATCH of
+`partial_at_r` / `breakeven_at_r` applies to already-open tickets — that is
+intended (not an `EXIT_RISK_FIELDS` 409). Do not
 bring back `partial_tp_r` rungs. `Store.opt_params()` filters saved grids down to `OPT_FIELDS`, so a
 stale saved blob cannot resurrect a removed axis; if you add an axis, add it
 to `OPT_FIELDS` or it will be silently dropped.

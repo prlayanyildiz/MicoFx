@@ -8,11 +8,11 @@ This tree is the live **fx** bot (`C:\Users\Administrator\MicoFx`). Constitution
 - Live process owns `data/micofx.db` and the MT5 terminal. No second sqlite writer. No `mt5.initialize()` sidecar. **Never** `mt5.shutdown()` except the dying process on `/api/app/restart`.
 - Live writes go through the running bot: `GET http://127.0.0.1:8900/` (session cookie) then API. Critical mutations need `Origin: http://127.0.0.1:8900`. Port busy → do not steal 8900.
 - No LLM / third-party coder **inside** the engine, optimizer, or supervisor. Panel "AI" is the rule supervisor.
-- Exit model: hard ATR stop + ATR trail. Do not reintroduce `tp_atr_mult`, partials, `max_bars_in_trade`, `stale_exit_ratio`, or `breakeven_atr`. `breakeven_at_r` is a config overlay (0 = off; live 1.5). **Not** an `OPT_FIELDS` axis. Do not apply 0.5 R (BE-2 GER40 −32 R).
+- Exit model: hard ATR stop + ATR trail. Do not reintroduce `tp_atr_mult`, `partial_tp_r` ladders, `max_bars_in_trade`, `stale_exit_ratio`, or `breakeven_atr`. Overlays (0 = off): `breakeven_at_r` (live 1.5; not 0.5 — BE-2 GER40 −32 R) and one-shot `partial_at_r` (lot from ticket × 1/3, broker min/step). Neither is an `OPT_FIELDS` axis.
 - `engine._update_stop` and `backtest.simulate` are the same exit rule twice. Change both. Cover identity tests.
 - Forming candle never signals. Buy∧sell on one bar → neither side.
 - Opt apply writes only `OPT_FIELDS` (plus documented secondary fields). Never silently enable `ensemble_enabled`. OOS `_slice_ok` / `_is_improvement` is the only apply gate; scheduled reopt uses the same path.
-- `EXIT_RISK_FIELDS` mid-trade → API 409. `breakeven_at_r` is currently **not** in that set (25.08 apply-with-opens). Do not add it while positions are open unless the operator accepts 409.
+- `EXIT_RISK_FIELDS` mid-trade → API 409. `breakeven_at_r` and `partial_at_r` are **not** in that set: overlays apply to already-open tickets (25.08 GER 0→1.5 then fired). Intended; do not add them unless the operator accepts 409.
 - Watch mode never opens. Wrong `broker_symbol` → unavailable, no fuzzy fallback.
 - Session flatten / day-end flatten / daily-loss flatten are settled (owner 09.08). Do not "fix" them.
 - `trail_start_atr <= trail_step_atr` is legal. Do not add a grid/UI ban.
@@ -51,6 +51,10 @@ Fail-first: write the test, watch it fail, then implement. `pyproject.toml` alre
 
 ## Known gotchas
 
+- Book / autopsy day cuts use **`gmtime` / UTC**, same as `risk.py` `day_key` (daily brake). Local UTC+3 calendar dates (00:00–03:00 closes) are the previous UTC day — that was the 44 vs 30 count.
+- Autopsy `r_realised` / `mfe_r` / `mae_r` divide by `|entry − original_sl|` (fallback `risk_dist`). **Do not rewrite** the pre-fix rows (25.08: five `sl`+`r=+1.0`, including the GER40 trio). Cash/`kar=` is the truth for those. First clean check is a ticket opened *after* the patch is live that then dies on a trailed SL — `r_realised` must not be 1.0 and must match cash R within 2%. Do not restart while opens exist just to load the patch — `track()` first-sight would freeze `original_sl` to the current trail.
+- Scale-out TRADE log is `kar={cash}, {R}R` (gate R = `profit_dist / original_risk`). Pre-fix lines were `NxATR` with no cash — do not derive P&L from those.
+- `scale_out_done` prunes to live tickets in `manage_positions` (same lock as weekend_pending). `remain` uses `fill["volume"]`; `done.add` stays one-shot even on IOC `DONE_PARTIAL`.
 - Panel `/api/state` every 3s (does not speed up during a search) shares the MT5 lock with the engine.
 - Fill verifier can `sleep` ~2.1s **on the engine thread** (`mt5client.py`). Do not "fix" duplicate-entry protection while changing this.
 - `_BAR_INTEGRITY_REFRESH = 900s` is the no-new-bar full `required_bars` fetch. `due` must use **broker** clock, not local minus naive bar time.

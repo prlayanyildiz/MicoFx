@@ -22,7 +22,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from test_trail_retry_within_bar import ATR, _Bars, _engine, _pos
 
+from micofx.engine import Engine
+from micofx.logbus import LOG
 from micofx.models import (
+    EXIT_RISK_FIELDS,
     OPT_FIELDS,
     SCALE_OUT_FRAC,
     SymbolConfig,
@@ -330,3 +333,72 @@ def test_min_lot_index_cannot_split():
     pos["symbol"] = "GER40"
     eng._maybe_scale_out(_ScaleCfg(), pos, ATR, _Bars(101.6))
     assert client.closes == []
+
+
+def test_scale_out_log_is_r_and_cash(monkeypatch):
+    """Gate R, not ATR multiples, and the cash the slice actually booked."""
+    lines: list[str] = []
+    monkeypatch.setattr(
+        LOG, "emit", lambda msg, *a, **k: lines.append(str(msg)))
+    client = _ScaleClient(bid=101.6)
+    eng = _eng(client)
+    pos = _pos(sl=100.0, entry=100.0, ticket=11)
+    pos["volume"] = 0.70
+    pos["symbol"] = "GER40"
+    assert eng._maybe_scale_out(_ScaleCfg(), pos, ATR, _Bars(101.6)) is True
+    text = " ".join(lines)
+    assert "xATR" not in text
+    assert "kar=" in text
+    assert "1.60R" in text or "1.6R" in text
+
+
+def test_remain_uses_filled_volume_not_requested():
+    """IOC can return DONE_PARTIAL; the book and the log must follow fill volume."""
+    class _Partial(_ScaleClient):
+        def close_position(self, ticket, slippage=20, comment="", volume=None, fill=None):
+            self.closes.append((int(ticket), volume, comment))
+            if fill is not None:
+                fill.update({
+                    "symbol": "GER40", "side": "buy", "requested": float(volume or 0),
+                    "price": self.bid, "volume": 0.10, "risk_dist": 1.0,
+                })
+            return True
+
+    client = _Partial(bid=101.6)
+    eng = _eng(client)
+    pos = _pos(sl=100.0, entry=100.0, ticket=11)
+    pos["volume"] = 0.70
+    pos["symbol"] = "GER40"
+    assert eng._maybe_scale_out(_ScaleCfg(), pos, ATR, _Bars(101.6)) is True
+    assert pos["volume"] == pytest.approx(0.60)
+    assert 11 in eng._scale_out_done
+
+
+def test_closed_tickets_drop_out_of_scale_out_done():
+    import threading
+    from types import SimpleNamespace
+
+    eng = object.__new__(Engine)
+    eng.client = SimpleNamespace(connected=True)
+    eng.store = _Store()
+    eng.store.symbols = {}
+    eng.entry_lock = threading.Lock()
+    eng._positions = [{"ticket": 11, "magic": 1, "symbol": "GER40"}]
+    eng._scale_out_done = {11, 999}
+    eng._weekend_pending = set()
+    eng._force_flat_pending = set()
+    eng._sec_tickets = set()
+    eng._orphan_tickets = set()
+    eng._stop_bar = {}
+    eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
+    eng.states = {}
+    Engine.manage_positions(eng, server_now=0.0)
+    assert eng._scale_out_done == {11}
+    assert eng.store.settings["scale_out_done"] == [11]
+
+
+def test_partial_at_r_is_a_live_overlay_not_a_mid_trade_409():
+    """14:02 wrote 0→1.5 with opens; 62s later GER fired. Same door as BE."""
+    assert "partial_at_r" not in EXIT_RISK_FIELDS
+    assert "breakeven_at_r" not in EXIT_RISK_FIELDS

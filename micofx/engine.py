@@ -1545,10 +1545,17 @@ class Engine:
         exit_time = int(self._autopsy_float(exit_time) or 0)
         reason_code = (None if reason_code is None
                        else int(self._autopsy_float(reason_code) or 0))
-        risk = self._autopsy_float(book.get("risk_dist")) or 0.0
         entry = self._autopsy_float(book.get("entry"))
         if entry is None:
             entry = self._autopsy_float(book.get("fill_price"))
+        # Original hard stop, not the close-time trail. A winning SL fill at a
+        # moved stop has |exit-entry| == |sl-entry|, so dividing by risk_dist
+        # from the close-time SL is tautologically 1.0 R (25.08 GER40 trio).
+        orig_sl = self._autopsy_float(book.get("original_sl"))
+        if entry is not None and orig_sl is not None and orig_sl > 0:
+            risk = abs(entry - orig_sl)
+        else:
+            risk = self._autopsy_float(book.get("risk_dist")) or 0.0
         side = str(book.get("side") or "")
         mfe = self._autopsy_float(book.get("mfe"))
         mae = self._autopsy_float(book.get("mae"))
@@ -2909,6 +2916,13 @@ class Engine:
                 # retry, or manually) - stop chasing it.
                 self._orphan_tickets &= live
                 self._save_orphan_tickets()
+            done = getattr(self, "_scale_out_done", None)
+            if isinstance(done, set) and done - live:
+                # One-shot overlay: a closed ticket must not occupy the set
+                # forever, or the blob grows without bound and a reused
+                # ticket id would never scale out again.
+                self._scale_out_done = done & live
+                self.store.set_setting("scale_out_done", sorted(self._scale_out_done))
         for pos in self._positions:
             if pos["ticket"] in self._orphan_tickets:
                 # An unresolved secondary fill from a prior cycle - never let it
@@ -3544,10 +3558,17 @@ class Engine:
         setter = getattr(getattr(self, "store", None), "set_setting", None)
         if callable(setter):
             setter("scale_out_done", sorted(done))
-        remain = float(pos.get("volume") or 0) - close_vol
+        # IOC can fill less than requested; remain and the log follow the
+        # broker print. done.add stays: one-shot, even on DONE_PARTIAL.
+        filled = float(fill.get("volume") or close_vol)
+        remain = float(pos.get("volume") or 0) - filled
+        r_now = profit_dist / original_risk if original_risk else 0.0
+        px = float(fill.get("price") or 0)
+        move = ((px - entry) if is_buy else (entry - px)) if px else profit_dist
+        cash = self.client.money_per_price_unit(cfg.symbol, filled) * move
         LOG.emit(
-            f"#{ticket} parca kapatildi {close_vol:g} lot "
-            f"(kar {profit_dist / atr:.2f}xATR, kalan {remain:g})",
+            f"#{ticket} parca kapatildi {filled:g} lot "
+            f"(kar={cash:.2f}, {r_now:.2f}R, kalan {remain:g})",
             "TRADE", cfg.symbol)
         pos["volume"] = remain
         return True

@@ -398,6 +398,12 @@ class SymbolConfig:
 # script hitting the API, moves an open position's whole stop geometry just
 # as surely as editing trail_step_atr does - it was the one input to that
 # math the mid-trade guard did not cover.
+#
+# Deliberately absent: ``breakeven_at_r`` and ``partial_at_r``. Both overlays
+# re-read cfg every cycle, so a mid-trade PATCH applies to already-open
+# tickets (25.08 GER: partial_at_r 0→1.5, then three slices at 3.66–5.04 R).
+# That is intended, same door as BE. Do not add them here unless the operator
+# accepts API 409 while positions are open.
 EXIT_RISK_FIELDS = frozenset({
     "sl_atr_mult", "trail_start_atr", "trail_step_atr", "trail_mode", "trail_lookback",
     "atr_period",
