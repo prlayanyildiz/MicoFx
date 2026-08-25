@@ -206,6 +206,7 @@ const FIELD_HELP = {
   "th.live.ADX": "ADX. Soluk = adx_min altinda veya olculmedi.",
   "th.live.ATR": "Son bar ATR (fiyat birimi).",
   "th.live.Spread": "Anlik spread / ATR. max_spread_atr asilirsa kirmizi.",
+  "th.live.Tavan": "Makas kapisinin su anki fiyat karsiligi: max_spread_atr x ATR. Ayar bir ORAN oldugu icin ayni yuzde, ATR dustugunde daha dar bir tavan demek - zaman dilimi degisince veya piyasa sakinlestiginde sembol islem yapamaz hale gelebilir. Yanindaki carpan canli makasin tavanin kac kati oldugunu soyler; 1'in ustu = giris reddedilir.",
   "th.live.Sinyal": "Son kapanan bardaki sinyal. Sembol kapaliysa 'kapali'.",
   "th.live.Not": "Motorun son notu (engel / bekleme).",
 

@@ -737,6 +737,24 @@ function renderLive() {
     } else if (sess.minutes_to_open != null) {
       sessionCell = `<span class="pill off">kapali</span> <span class="dim mono">${Math.floor(sess.minutes_to_open / 60)}s${sess.minutes_to_open % 60}dk</span>`;
     }
+    // The spread ceiling is a RATIO against ATR, so the same setting is a
+    // different price on every timeframe and in every volatility regime. US30
+    // moved M30 -> M5 on 24.08: ATR halved, the cap went 2.21 -> 1.51 points
+    // and 43 of 44 signals were refused on spread the next morning, with the
+    // ratio column beside this one reading a perfectly ordinary "1.4x".
+    // Showing the cap in the symbol's own price units is what makes that
+    // visible before a day of blocked entries does (measured 25.08 09:06).
+    const cap = (cfg.max_spread_atr > 0 && st.atr > 0) ? cfg.max_spread_atr * st.atr : null;
+    const digits = cfg.digits ?? 5;
+    const headroom = (cap && st.spread_atr > 0 && cfg.max_spread_atr > 0)
+      ? st.spread_atr / cfg.max_spread_atr : null;
+    const capCell = cap == null ? '<span class="dim">-</span>'
+      : `${cap.toFixed(digits)}${headroom ? ` <span class="dim">${num(headroom, 2)}x</span>` : ""}`;
+    const capCls = headroom == null ? "dim" : (headroom > 1 ? "neg" : (headroom > 0.8 ? "warn" : "dim"));
+    const capTitle = cap == null
+      ? "max_spread_atr kapali ya da ATR okunmadi"
+      : `Su anki makas tavani = max_spread_atr ${cfg.max_spread_atr} x ATR ${st.atr}`
+        + (headroom ? ` | canli makas tavanin ${num(headroom, 2)} kati` : "");
     const sig = st.signal ? `<span class="pill ${sideClass(st.signal)}">${st.signal === "buy" ? "AL" : "SAT"}</span>` : '<span class="dim">-</span>';
     const htf = !cfg.htf_factor ? '<span class="dim">kapali</span>'
       : st.htf > 0 ? '<span class="pos">yukari</span>'
@@ -760,11 +778,12 @@ function renderLive() {
       <td class="num ${st.adx != null && st.adx >= (cfg.adx_min || 0) ? "" : "dim"}">${st.adx != null ? num(st.adx, 0) : "-"}</td>
       <td class="num dim">${st.atr ? st.atr.toFixed(cfg.digits ?? 5) : "-"}</td>
       <td class="num ${st.spread_atr > cfg.max_spread_atr ? "neg" : "dim"}">${st.spread_atr ? num(st.spread_atr, 2) + "x" : "-"}</td>
+      <td class="num ${capCls}" title="${esc(capTitle)}">${capCell}</td>
       <td>${cfg.enabled ? sig : '<span class="pill off">kapali</span>'}</td>
       <td class="dim">${esc(st.note || "")}</td>`;
     return tr;
   });
-  rowsInto($("#live-table"), rows, "Sembol yok", 13);
+  rowsInto($("#live-table"), rows, "Sembol yok", 14);
 }
 
 /* --------------------------------------------------------- symbols: spec */
