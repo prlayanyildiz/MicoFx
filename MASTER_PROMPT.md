@@ -104,7 +104,7 @@ Local **MetaTrader 5** multi-symbol autotrader with a **FastAPI + browser termin
 ### Runtime process
 1. `ensure_dirs()` → load `config/defaults.json`
 2. Bind `web_host` / `web_port` (default `127.0.0.1:8900`). If port busy → exit (do not steal).
-3. `Store()` (SQLite) → `MT5Client(mt5_terminal_path)` → connect (clock is the machine's own local time, no broker-offset detection)
+3. `Store()` (SQLite) → `MT5Client(mt5_terminal_path)` → connect (clock is the machine's own local time, no broker-offset detection). Stamps are naive epochs in that clock — decode with `gmtime`, never `localtime` (`tests/test_server_datetime.py`).
 4. `Engine(store, client)` + `Optimizer(store, client)`; wire `engine.supervisor.optimizer`
 5. `create_app(...)` → `engine.start_watch()` (observation loop always on)
 6. Optional `autostart_bot` (3s timer) → open browser → `uvicorn.run` until shutdown
@@ -169,7 +169,7 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
 | Item | Path / rule |
 |---|---|
 | DB | `<ROOT>/data/micofx.db` |
-| Log | `<ROOT>/logs/micofx.log` (WARN/ERROR/TRADE/OPT/AI to disk; ring ~1500 in memory) |
+| Log | `<ROOT>/logs/micofx.log` (WARN/ERROR/TRADE/OPT/AI/SIGNAL/CFG to disk; ring ~1500 in memory) |
 | Defaults | `<ROOT>/config/defaults.json` — seed template only |
 | Writes | Immediate on every system/symbol/opt/AI/day change — **no separate Save** |
 
