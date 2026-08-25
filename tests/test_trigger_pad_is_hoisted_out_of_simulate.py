@@ -81,3 +81,26 @@ def test_passing_the_pad_matches_the_internal_impute():
                                 trigger_pad=pad)
     assert raw.trades == hoisted.trades == 1
     assert raw.trade_rs == pytest.approx(hoisted.trade_rs)
+
+
+@pytest.mark.parametrize("spread", [
+    np.concatenate([np.zeros(400), np.full(1600, 2.0)]),
+    np.concatenate([np.zeros(476), np.full(1524, 3.0)]),
+    np.full(2000, 2.0),
+    np.zeros(2000),
+    np.concatenate([np.zeros(1999), np.array([2.0])]),
+])
+def test_a_second_impute_does_not_change_the_pad(spread):
+    """Claude 25.08: walk_forward already imputed; a second pass is identity.
+
+    The hoist ``spread_pts * point`` equals simulate()'s None fallback
+    ``imputed(spread_pts) * point`` only because imputed_spread_pts is
+    idempotent. All-zero and single-quote are the two branches.
+    """
+    once = backtest.imputed_spread_pts(spread)
+    twice = backtest.imputed_spread_pts(once)
+    assert np.array_equal(once, twice)
+    point = 0.1
+    hoisted = once * point
+    inside = twice * point
+    assert np.array_equal(hoisted, inside)

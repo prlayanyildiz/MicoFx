@@ -1262,9 +1262,11 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     spread_pts = imputed_spread_pts(bars.spread)
     spread_price = spread_pts * point * scale
     # Short-stop ASK pad. Already imputed; do not run imputed_spread_pts
-    # again (the series would not change, but the call is 6.9 ms at 90k bars
-    # and simulate() used to pay it per window). Not spread_price: that one
-    # is scaled and may be zeroed when costs are off.
+    # again. A second pass is a no-op (zeros are gone after the first fill)
+    # but still costs ~6.9 ms at 90k bars. Equality with simulate()'s None
+    # fallback holds only while this spread_pts is that imputed series. If
+    # the line above ever passes raw bars.spread, rebuild the pad from a
+    # fresh impute times point or the ASK trigger diverges.
     trigger_pad = (spread_pts * float(point)).tolist()
     # The broker's own floor under any stop, per bar. mt5client.min_stop_distance
     # is max(stops_level, spread * 1.5, point * 10) and the caller passes the
