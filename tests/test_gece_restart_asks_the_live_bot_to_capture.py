@@ -20,7 +20,15 @@ def test_the_script_never_initializes_mt5():
     assert "MetaTrader5" not in src
 
 
-def test_request_holdout_capture_posts_the_live_endpoint():
+def test_request_holdout_capture_posts_the_live_endpoint(tmp_path, monkeypatch):
+    """The helper talks to a fake opener. It must not append the live night log.
+
+    25.08: five 'holdout capture: 1 yazildi' lines landed in logs/gece_restart.log
+    with no restart wrapper around them. The live bot had no /api/holdout/capture
+    yet and data/holdout_bars/ was never created. Those lines were this test
+    calling say() against the real file.
+    """
+    monkeypatch.setattr(gece_restart, "LOG", tmp_path / "gece_restart.log")
     hits = []
 
     class _Resp:
@@ -46,6 +54,9 @@ def test_request_holdout_capture_posts_the_live_endpoint():
 
     gece_restart.request_holdout_capture(_Op(), "http://127.0.0.1:8900")
     assert any(m == "POST" and u.endswith("/api/holdout/capture") for m, u in hits)
+    logged = (tmp_path / "gece_restart.log").read_text(encoding="utf-8")
+    assert "1 yazildi" in logged
+
 
 
 def test_a_successful_boot_asks_the_live_bot_to_capture(monkeypatch):
