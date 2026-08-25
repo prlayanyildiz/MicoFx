@@ -14,7 +14,7 @@ from .models import (
     SymbolConfig,
     invalid_exit_param,
     is_scalp_strategy,
-    scale_out_volume,
+    scale_out_slice,
     strategy_allows_timeframe,
     trail_min_step,
 )
@@ -3494,14 +3494,14 @@ class Engine:
 
     def _maybe_scale_out(self, cfg: SymbolConfig, pos: dict[str, Any], atr: float,
                          bars: Any = None) -> bool:
-        """Close ``partial_close_lots`` once when closed-bar profit hits the R gate.
+        """Bank about one third of the ticket once closed-bar profit hits the R gate.
 
-        Remainder keeps the trail. False means not this poll (below the gate,
-        unsplittable, already done, or the close was refused).
+        Size comes from the ticket and the broker min/step, not from
+        ``partial_close_lots``. Remainder keeps the trail. False means not
+        this poll (below the gate, unsplittable, already done, or refused).
         """
-        lots = float(getattr(cfg, "partial_close_lots", 0.0) or 0.0)
         at_r = float(getattr(cfg, "partial_at_r", 0.0) or 0.0)
-        if lots <= 0 or at_r <= 0 or atr <= 0:
+        if at_r <= 0 or atr <= 0:
             return False
         ticket = int(pos.get("ticket") or 0)
         if not ticket:
@@ -3528,9 +3528,8 @@ class Engine:
         if original_risk <= 0 or profit_dist < at_r * original_risk:
             return False
         info = self.client.info(cfg.symbol) or {}
-        close_vol = scale_out_volume(
+        close_vol = scale_out_slice(
             float(pos.get("volume") or 0),
-            lots,
             float(info.get("volume_min") or 0),
             float(info.get("volume_step") or 0),
         )

@@ -90,7 +90,7 @@ class Params:
     adx_period: int = 14
     adx_min: float = 0.0
     # Exit model: hard ATR stop + ATR trail. Scale-out overlay is
-    # partial_at_r / partial_close_frac (0 = off). See SymbolConfig.
+    # partial_at_r (0 = off); live lot is derived, paper frac 0 = same third.
     sl_atr_mult: float = 1.2
     trail_start_atr: float = 0.8
     trail_step_atr: float = 0.6

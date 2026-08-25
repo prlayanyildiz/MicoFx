@@ -1,10 +1,12 @@
-"""Operator 25.08: scale out a fixed lot once, remainder keeps the trail.
+"""One-shot scale-out: the ticket and the broker grid pick the lot, not 0.20.
 
-GER40 0.70 in profit → close 0.20, leave 0.50. Not a TP ladder (partial_tp_r
-stays gone). Not an OPT_FIELD. Zero lots / zero R is off.
+About one third of the position, snapped down to ``volume_step``, at least
+``volume_min``, remainder at least min. GER40 0.70 / min 0.10 lands on 0.20
+because that is what the grid allows, not because 0.20 is a product constant.
+A 0.01 gold or a 0.10 JPN cannot split and is skipped.
 
-Remainder must stay at least the broker min lot; otherwise the ticket is
-skipped (XAUUSD 0.01, JPN225 0.10 cannot shed 0.20).
+The R gate (``partial_at_r``) is the on-switch. ``partial_close_lots`` is
+leftover and must not drive the close. Not a TP ladder. Not an OPT_FIELD.
 """
 from __future__ import annotations
 
@@ -20,7 +22,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from test_trail_retry_within_bar import ATR, _Bars, _engine, _pos
 
-from micofx.models import OPT_FIELDS, SymbolConfig, scale_out_volume
+from micofx.models import (
+    OPT_FIELDS,
+    SCALE_OUT_FRAC,
+    SymbolConfig,
+    scale_out_slice,
+    scale_out_volume,
+)
 from micofx.strategy import Params
 from micofx.web.app import _SYMBOL_RISK_BOUNDS
 
@@ -35,7 +43,7 @@ class _ScaleCfg:
     trail_mode = "atr"
     trail_lookback = 5
     breakeven_at_r = 1.5
-    partial_close_lots = 0.20
+    partial_close_lots = 0.0
     partial_at_r = 1.5
     partial_close_frac = 0.0
 
@@ -131,6 +139,26 @@ def test_scale_out_volume_sheds_point_two_from_point_seven():
     assert scale_out_volume(0.70, 0.20, 0.1, 0.1) == pytest.approx(0.20)
 
 
+def test_the_slice_is_one_third_snapped_to_the_broker_grid():
+    assert SCALE_OUT_FRAC == pytest.approx(1.0 / 3.0)
+    # GER 0.70 → 0.233 → 0.20. The old 0.20 was this rounding, not a standard.
+    assert scale_out_slice(0.70, 0.1, 0.1) == pytest.approx(0.20)
+    assert scale_out_slice(0.80, 0.1, 0.1) == pytest.approx(0.20)
+    assert scale_out_slice(1.00, 0.1, 0.1) == pytest.approx(0.30)
+    assert scale_out_slice(0.50, 0.1, 0.1) == pytest.approx(0.10)
+
+
+def test_a_min_lot_ticket_cannot_split():
+    assert scale_out_slice(0.10, 0.1, 0.1) is None
+    assert scale_out_slice(0.01, 0.01, 0.01) is None
+
+
+def test_two_min_lots_banks_one():
+    """0.02 gold / 0.20 Brent: third snaps under min, so close exactly min."""
+    assert scale_out_slice(0.02, 0.01, 0.01) == pytest.approx(0.01)
+    assert scale_out_slice(0.20, 0.1, 0.1) == pytest.approx(0.10)
+
+
 def test_scale_out_volume_skips_when_remainder_would_be_under_min():
     assert scale_out_volume(0.10, 0.20, 0.1, 0.1) is None
     assert scale_out_volume(0.01, 0.20, 0.01, 0.01) is None
@@ -138,9 +166,10 @@ def test_scale_out_volume_skips_when_remainder_would_be_under_min():
 
 def test_scale_out_volume_skips_when_off():
     assert scale_out_volume(0.70, 0.0, 0.1, 0.1) is None
+    assert scale_out_slice(0.70, 0.1, 0.1, frac=0.0) is None
 
 
-def test_live_closes_point_two_once_past_the_r_gate():
+def test_live_closes_a_third_once_past_the_r_gate():
     client = _ScaleClient(bid=101.6)
     eng = _eng(client)
     pos = _pos(sl=100.0, entry=100.0, ticket=11)
@@ -150,6 +179,20 @@ def test_live_closes_point_two_once_past_the_r_gate():
     assert client.closes == [(11, pytest.approx(0.20), "MicoFX parca")]
     assert 11 in eng._scale_out_done
     assert eng.store.settings["scale_out_done"] == [11]
+
+
+def test_leftover_lots_field_does_not_pick_the_size():
+    """GER still has 0.20 in the DB from the first overlay. The ticket size
+    must win, not that leftover."""
+    client = _ScaleClient(bid=101.6)
+    eng = _eng(client)
+    pos = _pos(sl=100.0, entry=100.0, ticket=14)
+    pos["volume"] = 1.00
+    pos["symbol"] = "GER40"
+    cfg = _ScaleCfg()
+    cfg.partial_close_lots = 0.20
+    assert eng._maybe_scale_out(cfg, pos, ATR, _Bars(101.6)) is True
+    assert client.closes == [(14, pytest.approx(0.30), "MicoFX parca")]
 
 
 def test_a_second_poll_does_not_close_again():
@@ -236,6 +279,47 @@ def test_paper_off_still_dies_at_the_hard_stop():
         entries=np.array([entry_bar]), min_stop=0.01)
     assert res.trades == 1
     assert res.trade_rs[0] == pytest.approx(-1.0, abs=0.15)
+
+
+def test_paper_without_a_frac_uses_the_same_third():
+    """Live GER rows carry at_r=1.5 and frac=0. Paper must still bank a third
+    or the overlay is a live-only fiction."""
+    from micofx import backtest
+    from micofx.strategy import IndicatorCache, Params, Signals
+
+    n, entry_bar = 260, 30
+    close = np.empty(n)
+    close[:entry_bar + 1] = 100.0
+    up_end = entry_bar + 60
+    close[entry_bar + 1:up_end] = np.linspace(100.0, 103.0, up_end - entry_bar - 1)
+    close[up_end:] = np.linspace(103.0, 80.0, n - up_end)
+    open_ = np.empty(n)
+    open_[0] = close[0]
+    open_[1:] = close[:-1]
+    high = close + 0.5
+    low = close - 0.5
+    open_ = np.clip(open_, low, high)
+    buy = np.zeros(n, dtype=bool)
+    buy[entry_bar] = True
+    sig = Signals(t3=close, k=close, d=close, atr=np.full(n, 1.0), adx=np.zeros(n),
+                  buy=buy, sell=np.zeros(n, dtype=bool),
+                  htf_up=np.zeros(n, dtype=bool), htf_down=np.zeros(n, dtype=bool))
+    cache = IndicatorCache(high, low, close, times=np.arange(n) * 300,
+                           tf_seconds=300, open_=open_, volume=np.ones(n))
+    kwargs = {"open_": open_, "spread_pts": np.zeros(n), "point": 0.01,
+              "entries": np.array([entry_bar]), "min_stop": 0.01}
+    auto = backtest.simulate(
+        cache, sig,
+        p=Params(sl_atr_mult=1.0, trail_start_atr=9.0, trail_step_atr=2.2,
+                 partial_at_r=1.5),
+        **kwargs)
+    third = backtest.simulate(
+        cache, sig,
+        p=Params(sl_atr_mult=1.0, trail_start_atr=9.0, trail_step_atr=2.2,
+                 partial_at_r=1.5, partial_close_frac=SCALE_OUT_FRAC),
+        **kwargs)
+    assert auto.trades == third.trades == 1
+    assert auto.trade_rs[0] == pytest.approx(third.trade_rs[0])
 
 
 def test_min_lot_index_cannot_split():

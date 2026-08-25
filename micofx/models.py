@@ -222,8 +222,9 @@ class SymbolConfig:
     #
     # Deliberately absent: take-profit *ladders* (``partial_tp_r`` rungs),
     # time stops and stale-trade exits. A one-shot scale-out
-    # (``partial_close_lots`` / ``partial_at_r``, operator 25.08) is an
-    # overlay like ``breakeven_at_r``: remainder still trails. Zero is off.
+    # (``partial_at_r``, operator 25.08) is an overlay like
+    # ``breakeven_at_r``: remainder still trails. The lot is derived from the
+    # ticket and the broker grid, not a 0.20 standard. Zero R is off.
     #
     # BREAKEVEN, precisely - the earlier wording of this comment was loose
     # enough to invent a bug out of. The trail sits at
@@ -255,13 +256,14 @@ class SymbolConfig:
     trail_lookback: int = 5          # bars to look back for swing high/low (structure/hybrid)
     breakeven_at_r: float = 0.0      # 0 = off; lock SL at entry after this many R
     # One-shot scale-out (operator 25.08). Not a TP ladder: ``partial_tp_r``
-    # stays gone. Zero lots or zero R is off. Live closes ``partial_close_lots``
-    # once when closed-bar profit reaches ``partial_at_r`` R, then the
-    # remainder trails. Paper uses ``partial_close_frac`` of the unit position
-    # (same R split, no lot grid). Not an OPT_FIELD.
-    partial_close_lots: float = 0.0  # 0 = off; lots to close once (GER 0.20)
+    # stays gone. The R gate is the on-switch. Lot size is *not* a dial: live
+    # closes about one third of the ticket, snapped to the broker min/step,
+    # and skips when the remainder would be under min. ``partial_close_lots``
+    # is leftover from the first GER 0.20 overlay and is not read. Paper uses
+    # the same third when ``partial_close_frac`` is 0. Not an OPT_FIELD.
+    partial_close_lots: float = 0.0  # leftover; not read (was GER 0.20)
     partial_at_r: float = 0.0        # 0 = off; fire at this many original R
-    partial_close_frac: float = 0.0  # 0 = off; paper weight closed at the rung
+    partial_close_frac: float = 0.0  # 0 = paper uses SCALE_OUT_FRAC
     # ---- costs ----
     commission_per_lot: float = 0.0  # round-turn commission in account currency
 
@@ -462,13 +464,18 @@ def trail_min_step(min_stop: float, atr: float, trail_step_atr: float) -> float:
     return max(float(min_stop) * 0.25, float(atr) * float(trail_step_atr) * 0.1)
 
 
+# One-shot scale-out closes about this fraction of the ticket. Snapped to the
+# broker step it is why GER40 0.70 banks 0.20 — not because 0.20 is a standard.
+SCALE_OUT_FRAC = 1.0 / 3.0
+
+
 def scale_out_volume(position_volume: float, close_lots: float,
                      volume_min: float, volume_step: float) -> float | None:
     """Lots to close once, or None when the ticket cannot split.
 
     Remainder and the closed slice must each stay at least ``volume_min``
     after snapping ``close_lots`` down to ``volume_step``. Does not clamp
-    *up* to min lot — that would close more than the operator asked.
+    *up* to min lot — that would close more than was asked.
     """
     if close_lots <= 0 or position_volume <= 0 or volume_min <= 0 or volume_step <= 0:
         return None
@@ -482,6 +489,24 @@ def scale_out_volume(position_volume: float, close_lots: float,
     if remain + 1e-12 < float(volume_min):
         return None
     return close
+
+
+def scale_out_slice(position_volume: float, volume_min: float, volume_step: float,
+                    frac: float = SCALE_OUT_FRAC) -> float | None:
+    """Lots this ticket should bank, from its size and the broker grid.
+
+    About ``frac`` of the position, snapped down to ``volume_step``. If that
+    snap falls below min lot but the ticket can still leave a min-lot
+    remainder, close exactly one min lot. A 0.01 gold or 0.10 JPN cannot
+    split and returns None.
+    """
+    if frac <= 0 or frac >= 1:
+        return None
+    wanted = float(position_volume) * float(frac)
+    close = scale_out_volume(position_volume, wanted, volume_min, volume_step)
+    if close is not None:
+        return close
+    return scale_out_volume(position_volume, volume_min, volume_min, volume_step)
 
 # Parameters the optimizer is allowed to overwrite on a SymbolConfig.
 OPT_FIELDS = [

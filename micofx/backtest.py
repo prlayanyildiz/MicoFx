@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from . import indicators as ind
-from .models import SymbolConfig, trail_min_step
+from .models import SCALE_OUT_FRAC, SymbolConfig, trail_min_step
 from .sessions import WEEKEND_OPEN_GROUPS
 from .strategy import IndicatorCache, Params, compute
 
@@ -655,11 +655,15 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
 
     def _scale_one(is_buy, entry, sl_dist, j, scaled, weight, banked):
         # One-shot overlay. Same closed-bar gain the trail/BE read. Books
-        # ``partial_close_frac`` of R at this close; remainder keeps trailing.
+        # about one third of R at this close (or ``partial_close_frac`` when
+        # set); remainder keeps trailing. ``frac=0`` is not "off" — off is
+        # ``partial_at_r=0``, matching live where the lot is derived.
         frac = float(getattr(p, "partial_close_frac", 0.0) or 0.0)
         at_r = float(getattr(p, "partial_at_r", 0.0) or 0.0)
-        if scaled or frac <= 0 or frac >= 1 or at_r <= 0 or sl_dist <= 0:
+        if scaled or at_r <= 0 or sl_dist <= 0:
             return scaled, weight, banked
+        if frac <= 0 or frac >= 1:
+            frac = SCALE_OUT_FRAC
         gain = (close[j] - entry) if is_buy else (entry - close[j])
         if gain < at_r * sl_dist:
             return scaled, weight, banked
