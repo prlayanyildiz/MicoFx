@@ -581,13 +581,14 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             cooldown_bars = max(0, capped // int(cache.tf_seconds))
         return cooldown_bars
 
-    def _record_trade(is_buy, entry, sl_dist, s, j0, exit_bar, exit_price, reason):
+    def _record_trade(is_buy, entry, sl_dist, s, j0, exit_bar, exit_price, reason,
+                      banked=0.0, weight=1.0):
         nonlocal equity, peak, streak, bar_total
         if exit_price is None:
             exit_price = close[exit_bar] + (0.0 if is_buy else s)
             reason = "time"
         move = (exit_price - entry) if is_buy else (entry - exit_price)
-        r = float((move - commission_price) / sl_dist)
+        r = float(banked + weight * (move - commission_price) / sl_dist)
         res.cost_r += float((commission_price + s) / sl_dist)
         res.trades += 1
         res.net_r += r
@@ -652,6 +653,19 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 return new_sl, True
         return sl, trailing
 
+    def _scale_one(is_buy, entry, sl_dist, j, scaled, weight, banked):
+        # One-shot overlay. Same closed-bar gain the trail/BE read. Books
+        # ``partial_close_frac`` of R at this close; remainder keeps trailing.
+        frac = float(getattr(p, "partial_close_frac", 0.0) or 0.0)
+        at_r = float(getattr(p, "partial_at_r", 0.0) or 0.0)
+        if scaled or frac <= 0 or frac >= 1 or at_r <= 0 or sl_dist <= 0:
+            return scaled, weight, banked
+        gain = (close[j] - entry) if is_buy else (entry - close[j])
+        if gain < at_r * sl_dist:
+            return scaled, weight, banked
+        slice_r = frac * (gain - commission_price) / sl_dist
+        return True, weight * (1.0 - frac), banked + slice_r
+
     def _exit_check(is_buy, sl, trailing, j, s):
         # Four corners, live:
         #   long stop / long trail  — bid vs SL  → bar_low <= sl
@@ -692,7 +706,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 px, reason = _exit_check(pos["is_buy"], pos["sl"], pos["trailing"], j, pos["s"])
                 if px is not None:
                     _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
-                                  pos["s"], pos["j0"], j, px, reason)
+                                  pos["s"], pos["j0"], j, px, reason,
+                                  banked=pos.get("banked", 0.0),
+                                  weight=pos.get("weight", 1.0))
                     continue
                 mae_px, mae_hit = _mae_tick(
                     pos["is_buy"], pos["entry"], pos["sl_dist"],
@@ -703,17 +719,28 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         pos["is_buy"], pos["entry"], pos["sl_dist"],
                         pos["s"], pos["j0"], j,
                         close[j] + (0.0 if pos["is_buy"] else pos["s"]),
-                        "mae")
+                        "mae",
+                        banked=pos.get("banked", 0.0),
+                        weight=pos.get("weight", 1.0))
                     continue
                 if j >= n - 1:
                     _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
-                                  pos["s"], pos["j0"], j, None, "time")
+                                  pos["s"], pos["j0"], j, None, "time",
+                                  banked=pos.get("banked", 0.0),
+                                  weight=pos.get("weight", 1.0))
                     continue
                 sl, trailing = _trail_one(pos["is_buy"], pos["entry"], pos["sl"],
                                           pos["trailing"], j, pos["s"],
                                           pos["sl_dist"])
                 pos["sl"] = sl
                 pos["trailing"] = trailing
+                scaled, weight, banked = _scale_one(
+                    pos["is_buy"], pos["entry"], pos["sl_dist"], j,
+                    pos.get("scaled", False), pos.get("weight", 1.0),
+                    pos.get("banked", 0.0))
+                pos["scaled"] = scaled
+                pos["weight"] = weight
+                pos["banked"] = banked
                 still.append(pos)
             opens = still
 
@@ -766,7 +793,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                             pos["is_buy"], pos["entry"], pos["sl_dist"],
                             pos["s"], pos["j0"], j,
                             float(open_l[j] + (0.0 if pos["is_buy"] else s)),
-                            "reverse")
+                            "reverse",
+                            banked=pos.get("banked", 0.0),
+                            weight=pos.get("weight", 1.0))
                     opens = kept
                 if block_reverse and any(pos["is_buy"] != is_buy for pos in opens):
                     # The live rule the stacked path was missing. With
@@ -788,7 +817,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 opens.append({
                     "is_buy": is_buy, "entry": entry, "sl": sl,
                     "sl_dist": sl_dist, "trailing": False, "j0": j0, "s": s,
-                    "mae_px": 0.0,
+                    "mae_px": 0.0, "scaled": False, "weight": 1.0, "banked": 0.0,
                 })
                 cd = _cooldown_bars()
                 if cd:
@@ -845,6 +874,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # had already gone our way.
         trailing = False
         mae_px = 0.0
+        scaled = False
+        weight = 1.0
+        banked = 0.0
 
         exit_price = None
         exit_bar = j0
@@ -911,7 +943,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         can_open = False
                     if can_open:
                         _record_trade(is_buy, entry, sl_dist, s, j0,
-                                      exit_bar, exit_price, reason)
+                                      exit_bar, exit_price, reason,
+                                      banked=banked, weight=weight)
                         sl_dist = max(atr_next * p.sl_atr_mult,
                                       float(min_stop_at[j]))
                         entry = price_ref
@@ -923,6 +956,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         exit_price = None
                         reason = "time"
                         mae_px = 0.0
+                        scaled = False
+                        weight = 1.0
+                        banked = 0.0
                         continue
                     break
 
@@ -996,6 +1032,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                                 and not (breakeven_locked and new_sl > entry)):
                             sl = new_sl
                             trailing = True
+            scaled, weight, banked = _scale_one(
+                is_buy, entry, sl_dist, j, scaled, weight, banked)
             exit_bar = j
 
         if exit_price is None:
@@ -1003,7 +1041,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             reason = "time"
 
         move = (exit_price - entry) if is_buy else (entry - exit_price)
-        r = float((move - commission_price) / sl_dist)
+        r = float(banked + weight * (move - commission_price) / sl_dist)
         res.cost_r += float((commission_price + s) / sl_dist)
         res.trades += 1
         res.net_r += r

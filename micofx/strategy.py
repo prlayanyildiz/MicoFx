@@ -89,13 +89,16 @@ class Params:
     atr_period: int = 14
     adx_period: int = 14
     adx_min: float = 0.0
-    # Exit model: hard ATR stop + ATR trail, nothing else. See SymbolConfig.
+    # Exit model: hard ATR stop + ATR trail. Scale-out overlay is
+    # partial_at_r / partial_close_frac (0 = off). See SymbolConfig.
     sl_atr_mult: float = 1.2
     trail_start_atr: float = 0.8
     trail_step_atr: float = 0.6
     trail_mode: str = "atr"          # "atr" | "structure" | "hybrid"
     trail_lookback: int = 5          # bars to look back for swing high/low (structure/hybrid)
     breakeven_at_r: float = 0.0      # 0 = off; lock SL at entry after this many R
+    partial_at_r: float = 0.0        # 0 = off; paper scale-out rung in R
+    partial_close_frac: float = 0.0  # 0 = off; fraction booked at the rung
     cooldown_sec: int = 0            # live engine caps to 2 bars of TF; BT mirrors that
     max_spread_atr: float = 0.0
     min_atr_ratio: float = 0.0

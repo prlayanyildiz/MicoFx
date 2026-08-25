@@ -26,6 +26,9 @@ const FIELD_HELP = {
   "trail_start_atr": "Fiyat ATR x bu kadar kara gecmeden trail baslamaz.",
   "trail_step_atr": "Trail, fiyatin ATR x bu kadar gerisinde durur. Buyutmek daha genis trail, daha seyrek cikis.",
   "breakeven_at_r": "Acik kar bu kadar R olunca stop girise cekilir. 0 = kapali (sadece trail). 1.5, holdout'ta hicbir sembolu bozmayan esik; 0.5 GER40'ta -32 R verdi.",
+  "partial_close_lots": "Kar esigine gelince bir kez kapatilacak lot. 0 = kapali. GER40 0.70 -> 0.20 ornegi. Kalan min lotun altina duserse hic kapatmaz. TP merdiveni degil; kalan trail ile devam eder.",
+  "partial_at_r": "Kapali bar kari bu kadar R olunca parca kapanir. 0 = kapali. Canlida 1.5, BE kilidi ile ayni runde.",
+  "partial_close_frac": "Kagit agirligi (0-0.9). Arama ekseni degil. 0 = kagit parca yok.",
   "trail_mode": "atr = klasik ATR trail. structure = swing H/L. hybrid = ikisinin en siki olanı.",
   "trail_lookback": "Yapisal/hibrit trail icin swing H/L penceresi (bar).",
 

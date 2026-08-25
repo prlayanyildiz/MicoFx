@@ -219,9 +219,10 @@ class SymbolConfig:
     # they do fire on winners - "the trail is the only way out" is true of the
     # trade's own logic, not of the whole system.
     #
-    # Deliberately absent: take-profit, scale-out ladders, time stops and
-    # stale-trade exits. Every one of them caps or truncates a winner, which
-    # is the opposite of what a trailing system is for.
+    # Deliberately absent: take-profit *ladders* (``partial_tp_r`` rungs),
+    # time stops and stale-trade exits. A one-shot scale-out
+    # (``partial_close_lots`` / ``partial_at_r``, operator 25.08) is an
+    # overlay like ``breakeven_at_r``: remainder still trails. Zero is off.
     #
     # BREAKEVEN, precisely - the earlier wording of this comment was loose
     # enough to invent a bug out of. The trail sits at
@@ -252,6 +253,14 @@ class SymbolConfig:
     trail_mode: str = "atr"          # "atr" | "structure" | "hybrid"
     trail_lookback: int = 5          # bars to look back for swing high/low (structure/hybrid)
     breakeven_at_r: float = 0.0      # 0 = off; lock SL at entry after this many R
+    # One-shot scale-out (operator 25.08). Not a TP ladder: ``partial_tp_r``
+    # stays gone. Zero lots or zero R is off. Live closes ``partial_close_lots``
+    # once when closed-bar profit reaches ``partial_at_r`` R, then the
+    # remainder trails. Paper uses ``partial_close_frac`` of the unit position
+    # (same R split, no lot grid). Not an OPT_FIELD.
+    partial_close_lots: float = 0.0  # 0 = off; lots to close once (GER 0.20)
+    partial_at_r: float = 0.0        # 0 = off; fire at this many original R
+    partial_close_frac: float = 0.0  # 0 = off; paper weight closed at the rung
     # ---- costs ----
     commission_per_lot: float = 0.0  # round-turn commission in account currency
 
@@ -450,6 +459,28 @@ def trail_min_step(min_stop: float, atr: float, trail_step_atr: float) -> float:
     engine._update_stop and backtest.simulate are the only callers.
     """
     return max(float(min_stop) * 0.25, float(atr) * float(trail_step_atr) * 0.1)
+
+
+def scale_out_volume(position_volume: float, close_lots: float,
+                     volume_min: float, volume_step: float) -> float | None:
+    """Lots to close once, or None when the ticket cannot split.
+
+    Remainder and the closed slice must each stay at least ``volume_min``
+    after snapping ``close_lots`` down to ``volume_step``. Does not clamp
+    *up* to min lot — that would close more than the operator asked.
+    """
+    if close_lots <= 0 or position_volume <= 0 or volume_min <= 0 or volume_step <= 0:
+        return None
+    step = float(volume_step)
+    close = math.floor(float(close_lots) / step + 1e-9) * step
+    decimals = max(0, len(f"{step:.8f}".rstrip("0").split(".")[-1]))
+    close = round(close, decimals)
+    if close + 1e-12 < float(volume_min):
+        return None
+    remain = round(float(position_volume) - close, decimals)
+    if remain + 1e-12 < float(volume_min):
+        return None
+    return close
 
 # Parameters the optimizer is allowed to overwrite on a SymbolConfig.
 OPT_FIELDS = [

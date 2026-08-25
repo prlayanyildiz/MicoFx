@@ -14,6 +14,7 @@ from .models import (
     SymbolConfig,
     invalid_exit_param,
     is_scalp_strategy,
+    scale_out_volume,
     strategy_allows_timeframe,
     trail_min_step,
 )
@@ -482,12 +483,13 @@ class Engine:
         }
         self._netting_warned = False
         self._account_lock_reason = ""
-        # A position opened before the scale-out ladder was removed can still
-        # be open right now, and its old partial_state row is meaningless to
-        # the current exit model - drop the setting once rather than carry a
-        # reader for a feature that no longer exists.
+        # Retired ladder key. The one-shot overlay lives in scale_out_done.
         if store.get_setting("partial_state"):
             store.set_setting("partial_state", {})
+        self._scale_out_done: set[int] = {
+            int(t) for t in (as_list(store.get_setting("scale_out_done"), "scale_out_done"))
+            if str(t).isdigit()
+        }
         # Leftover tagged tickets from the retired secondary leg (persisted
         # because positions outlive the process). Nothing mints new tags.
         # The set is still loaded so a non-empty row is visible; it does not
@@ -3055,6 +3057,7 @@ class Engine:
                     # away an earned trail update until the next bar closed.
                     if self._update_stop(cfg, pos, atr, bars):
                         self._stop_bar[ticket] = last_bar
+                self._maybe_scale_out(cfg, pos, atr, bars)
 
     # ------------------------------------------------------ execution quality
 
@@ -3488,6 +3491,67 @@ class Engine:
         # trade server) must not cost the position its trail for the rest of
         # the bar - that is exactly the update the trade earned.
         return False
+
+    def _maybe_scale_out(self, cfg: SymbolConfig, pos: dict[str, Any], atr: float,
+                         bars: Any = None) -> bool:
+        """Close ``partial_close_lots`` once when closed-bar profit hits the R gate.
+
+        Remainder keeps the trail. False means not this poll (below the gate,
+        unsplittable, already done, or the close was refused).
+        """
+        lots = float(getattr(cfg, "partial_close_lots", 0.0) or 0.0)
+        at_r = float(getattr(cfg, "partial_at_r", 0.0) or 0.0)
+        if lots <= 0 or at_r <= 0 or atr <= 0:
+            return False
+        ticket = int(pos.get("ticket") or 0)
+        if not ticket:
+            return False
+        done = getattr(self, "_scale_out_done", None)
+        if done is None:
+            self._scale_out_done = set()
+            done = self._scale_out_done
+        if ticket in done:
+            return False
+        if bars is None or not hasattr(bars, "close") or len(bars.close) == 0:
+            return False
+        opened_at = int(pos.get("time", 0) or 0)
+        closed_at = getattr(bars, "last_closed_time", None)
+        if (opened_at and closed_at is not None
+                and int(closed_at) + timeframe_seconds(cfg.timeframe) <= opened_at):
+            return False
+        is_buy = pos["side"] == "buy"
+        ref = float(bars.close[-1])
+        entry = pos["price_open"]
+        profit_dist = (ref - entry) if is_buy else (entry - ref)
+        min_stop = self.client.min_stop_distance(cfg.symbol)
+        original_risk = max(atr * cfg.sl_atr_mult, min_stop)
+        if original_risk <= 0 or profit_dist < at_r * original_risk:
+            return False
+        info = self.client.info(cfg.symbol) or {}
+        close_vol = scale_out_volume(
+            float(pos.get("volume") or 0),
+            lots,
+            float(info.get("volume_min") or 0),
+            float(info.get("volume_step") or 0),
+        )
+        if close_vol is None:
+            return False
+        fill: dict[str, Any] = {}
+        ok = self._close_tracked(pos, "MicoFX parca", "scale_out",
+                                 volume=close_vol, fill=fill)
+        if not ok:
+            return False
+        done.add(ticket)
+        setter = getattr(getattr(self, "store", None), "set_setting", None)
+        if callable(setter):
+            setter("scale_out_done", sorted(done))
+        remain = float(pos.get("volume") or 0) - close_vol
+        LOG.emit(
+            f"#{ticket} parca kapatildi {close_vol:g} lot "
+            f"(kar {profit_dist / atr:.2f}xATR, kalan {remain:g})",
+            "TRADE", cfg.symbol)
+        pos["volume"] = remain
+        return True
 
     def _enforce_account_lock(self, account: dict[str, Any]) -> str:
         """Bind on first sight, or block new entries when the terminal moved.

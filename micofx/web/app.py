@@ -139,6 +139,9 @@ _SYMBOL_RISK_BOUNDS = {
     # Zero disables the lock (trail is the only way the stop crosses entry).
     # 1.5 is the BE-1 holdout threshold; 5 R is past any trail the book runs.
     "breakeven_at_r": (0.0, 5.0, True),
+    "partial_close_lots": (0.0, 20.0, True),
+    "partial_at_r": (0.0, 5.0, True),
+    "partial_close_frac": (0.0, 0.9, True),
     # The per-symbol daily loss gate, and the only live-risk field the panel
     # let through unbounded (found 15.08, audit slice 7). Zero disables it, so
     # the minimum is inclusive; above 100 it can never fire, which reads as
