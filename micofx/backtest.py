@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import math
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -369,6 +370,35 @@ def stop_floor_const(min_stop: float | None, point: float) -> float:
     value = float(min_stop)
     if value == 0.0:
         return float(point) * 10.0
+    return value
+
+
+def spread_cost_series(spread, point: float, scale: float,
+                       min_stop: float | None):
+    """One impute, then the four series walk_forward and charged_holdout share.
+
+    ``trigger_pad`` is unscaled (ASK trigger, not a cost). ``spread_price``
+    is scaled. Built from the same imputed points so a second impute is
+    never paid on the search path.
+    """
+    pts = imputed_spread_pts(np.asarray(spread, dtype=np.float64))
+    point_f = float(point)
+    spread_price = pts * point_f * float(scale)
+    raw = pts * point_f
+    trigger_pad = raw.tolist()
+    min_stop_series = np.maximum(stop_floor_const(min_stop, point_f), raw * 1.5)
+    return pts, spread_price, trigger_pad, min_stop_series
+
+
+_SIG_CACHE_CAP = 4
+
+
+def _store_sig_cache(cache, key, value, cap: int = _SIG_CACHE_CAP):
+    """Keep the last ``cap`` signal keys. Evict oldest, do not clear the map."""
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > cap:
+        cache.popitem(last=False)
     return value
 
 
@@ -1259,27 +1289,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     # had it. A p90 would make the search far more pessimistic than the
     # backtest has ever been, on no evidence that it should be.
     scale = float(spread_scale) if spread_scale and spread_scale > 0 else 1.0
-    spread_pts = imputed_spread_pts(bars.spread)
-    spread_price = spread_pts * point * scale
-    # Short-stop ASK pad. Already imputed; do not run imputed_spread_pts
-    # again. A second pass is a no-op (zeros are gone after the first fill)
-    # but still costs ~6.9 ms at 90k bars. Equality with simulate()'s None
-    # fallback holds only while this spread_pts is that imputed series. If
-    # the line above ever passes raw bars.spread, rebuild the pad from a
-    # fresh impute times point or the ASK trigger diverges.
-    trigger_pad = (spread_pts * float(point)).tolist()
-    # The broker's own floor under any stop, per bar. mt5client.min_stop_distance
-    # is max(stops_level, spread * 1.5, point * 10) and the caller passes the
-    # value it read once at plan time; only the stops_level part of that is
-    # actually constant. Rebuilding the spread-driven part from each bar's own
-    # recorded spread makes the trail as constrained here as it is live.
-    #
-    # Deliberately built from the RAW bar spread, not from ``spread_price`` -
-    # that series is zeroed when costs are switched off, and this is not a cost.
-    # A stop cannot sit inside the spread whatever the accounting says.
-    raw_spread_price = spread_pts * point
-    floor_const = stop_floor_const(min_stop, point)
-    min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
+    _, spread_price, trigger_pad, min_stop_series = spread_cost_series(
+        bars.spread, point, scale, min_stop)
 
     if not charge_costs:
         # Fill at the printed price: buy the open, sell the close. The spread
@@ -1317,18 +1328,17 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     # repeating identical work. The sweep below walks the grid grouped by signal
     # key and this holds the current group's series, so the cache never grows
     # past a couple of entries no matter how large the grid is.
-    _sig_cache: dict[tuple, tuple[Any, np.ndarray]] = {}
+    _sig_cache: OrderedDict[tuple, tuple[Any, np.ndarray]] = OrderedDict()
 
     def signals_for(p: Params) -> tuple[Any, np.ndarray]:
         key = p.key()
         hit = _sig_cache.get(key)
-        if hit is None:
-            sig = compute(cache, p)
-            hit = (sig, np.flatnonzero(sig.buy | sig.sell))
-            if len(_sig_cache) > 4:
-                _sig_cache.clear()
-            _sig_cache[key] = hit
-        return hit
+        if hit is not None:
+            _sig_cache.move_to_end(key)
+            return hit
+        sig = compute(cache, p)
+        hit = (sig, np.flatnonzero(sig.buy | sig.sell))
+        return _store_sig_cache(_sig_cache, key, hit)
 
     slot_cap = max_open_from_cfg(cfg)
 

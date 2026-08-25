@@ -37,7 +37,8 @@ def test_simulate_accepts_a_precomputed_trigger_pad():
 def test_walk_forward_passes_the_pad_and_imputes_once():
     src = inspect.getsource(backtest.walk_forward)
     assert "trigger_pad=" in src
-    assert src.count("imputed_spread_pts(") == 1
+    assert "spread_cost_series(" in src
+    assert src.count("imputed_spread_pts(") == 0
 
 
 def test_holdout_replay_passes_the_pad_without_reimputing():
@@ -104,3 +105,17 @@ def test_a_second_impute_does_not_change_the_pad(spread):
     hoisted = once * point
     inside = twice * point
     assert np.array_equal(hoisted, inside)
+
+
+def test_sig_cache_evicts_the_oldest_key_not_the_whole_map():
+    from collections import OrderedDict
+
+    cache = OrderedDict()
+    for i in range(4):
+        backtest._store_sig_cache(cache, i, i)
+    backtest._store_sig_cache(cache, 4, 4)
+    assert list(cache) == [1, 2, 3, 4]
+    backtest._store_sig_cache(cache, 2, "hit")
+    backtest._store_sig_cache(cache, 5, 5)
+    assert list(cache.keys()) == [3, 4, 2, 5]
+    assert cache[2] == "hit"

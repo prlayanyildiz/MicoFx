@@ -47,12 +47,8 @@ def charged_holdout(*, bars, cfg: SymbolConfig, point: float, tick_value: float,
     commission = backtest.commission_in_price(
         cfg.commission_per_lot, float(tick_value or 0), float(tick_size or 0))
     scale = float(spread_scale)
-    spread_pts = backtest.imputed_spread_pts(bars.spread)
-    spread_price = spread_pts * point * scale
-    raw_spread_price = spread_pts * point
-    trigger_pad = (spread_pts * point).tolist()
-    floor_const = backtest.stop_floor_const(min_stop, point)
-    min_stop_series = np.maximum(floor_const, raw_spread_price * 1.5)
+    _, spread_price, trigger_pad, min_stop_series = backtest.spread_cost_series(
+        bars.spread, point, scale, min_stop)
     tradable = backtest.session_mask(cfg, bars.time, bool(trade_all_hours))
     flatten = backtest.flatten_mask(
         cfg, bars.time, bool(trade_all_hours), int(day_end_flatten_min))

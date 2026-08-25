@@ -37,5 +37,6 @@ def test_the_search_and_the_charged_replay_both_impute():
           ).read_text(encoding="utf-8")
     slice_src = (Path(__file__).resolve().parents[1] / "micofx" / "holdout_cost.py"
                  ).read_text(encoding="utf-8")
-    assert "imputed_spread_pts(bars.spread)" in wf
-    assert "imputed_spread_pts(bars.spread)" in slice_src
+    assert "spread_cost_series(" in wf
+    assert "bars.spread" in wf
+    assert "spread_cost_series(" in slice_src
