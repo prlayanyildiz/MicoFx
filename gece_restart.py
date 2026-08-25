@@ -134,9 +134,11 @@ def wait_mt5_connected(opener, base: str, seconds: int = MT5_WAIT_SEC) -> bool:
 
 
 def request_holdout_capture(opener, base: str) -> None:
+    # Capture is on the CSRF origin list. The session cookie alone is 403.
+    origin = base.rstrip("/")
     req = urllib.request.Request(
         base + "/api/holdout/capture", data=b"{}", method="POST",
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "Origin": origin},
     )
     with opener.open(req, timeout=CAPTURE_TIMEOUT_SEC) as resp:
         body = json.loads(resp.read())

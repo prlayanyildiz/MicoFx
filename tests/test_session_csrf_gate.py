@@ -105,12 +105,14 @@ CRITICAL = (
     ("/api/app/shutdown", {}),
     ("/api/app/restart", {}),
     ("/api/positions-close-all", {}),
+    ("/api/holdout/capture", {}),
 )
 LIVE_CRITICAL = (
     ("/api/bot/panic", {}),
     ("/api/bot/start", {}),
     ("/api/bot/stop", {}),
     ("/api/positions-close-all", {}),
+    ("/api/holdout/capture", {}),
 )
 
 
@@ -129,6 +131,7 @@ def test_shutdown_and_restart_are_on_the_origin_list():
     from micofx.web import app as web_app
     assert "/api/app/shutdown" in web_app._CRITICAL_MUTATIONS
     assert "/api/app/restart" in web_app._CRITICAL_MUTATIONS
+    assert "/api/holdout/capture" in web_app._CRITICAL_MUTATIONS
 
 
 @pytest.mark.parametrize("path,body", LIVE_CRITICAL)

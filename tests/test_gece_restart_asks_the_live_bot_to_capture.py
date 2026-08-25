@@ -48,12 +48,17 @@ def test_request_holdout_capture_posts_the_live_endpoint(tmp_path, monkeypatch):
         def open(self, req, timeout=0):
             url = req if isinstance(req, str) else req.full_url
             method = "GET" if isinstance(req, str) else req.get_method()
-            hits.append((method, url))
+            origin = None if isinstance(req, str) else req.get_header("Origin")
+            hits.append((method, url, origin))
             assert "/api/holdout/capture" in str(url)
             return _Resp(b'{"ok":true,"captured":1,"results":[{"symbol":"GER40","ok":true}]}')
 
     gece_restart.request_holdout_capture(_Op(), "http://127.0.0.1:8900")
-    assert any(m == "POST" and u.endswith("/api/holdout/capture") for m, u in hits)
+    assert any(
+        m == "POST" and u.endswith("/api/holdout/capture")
+        and o == "http://127.0.0.1:8900"
+        for m, u, o in hits
+    )
     logged = (tmp_path / "gece_restart.log").read_text(encoding="utf-8")
     assert "1 yazildi" in logged
 

@@ -108,11 +108,18 @@ def _tc(opt=None, client=None):
     return TestClient(create_app(_Store(), client or _Cli(), _Eng(), opt or _Opt()))
 
 
+def _capture(tc):
+    """CSRF gate: GET / for the cookie, Origin matching TestClient's host."""
+    tc.get("/")
+    return tc.post("/api/holdout/capture",
+                   headers={"Origin": "http://testserver"})
+
+
 def test_capture_endpoint_uses_the_live_client(tmp_path, monkeypatch):
     monkeypatch.setattr("micofx.bar_snapshot.SNAPSHOT_DIR", tmp_path)
     client = _Cli()
     tc = _tc(client=client)
-    res = tc.post("/api/holdout/capture")
+    res = _capture(tc)
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["captured"] == 1
@@ -122,7 +129,7 @@ def test_capture_endpoint_uses_the_live_client(tmp_path, monkeypatch):
 def test_capture_endpoint_refuses_while_opt_is_busy():
     opt = _Opt()
     opt.busy = True
-    res = _tc(opt=opt).post("/api/holdout/capture")
+    res = _capture(_tc(opt=opt))
     assert res.status_code == 409
     assert "optimizasyon" in res.json()["detail"].lower()
 
@@ -130,6 +137,56 @@ def test_capture_endpoint_refuses_while_opt_is_busy():
 def test_capture_endpoint_refuses_when_mt5_is_down():
     client = _Cli()
     client.connected = False
-    res = _tc(client=client).post("/api/holdout/capture")
+    res = _capture(_tc(client=client))
     assert res.status_code == 409
     assert "mt5" in res.json()["detail"].lower()
+
+
+def test_a_second_capture_is_refused_while_one_runs(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def _slow(**kw):
+        started.set()
+        assert release.wait(2)
+        return {"ok": True, "captured": 0, "failed": []}
+
+    monkeypatch.setattr("micofx.web.app.capture_book", _slow)
+    tc = _tc()
+    first = {}
+
+    def _run():
+        first["res"] = _capture(tc)
+
+    t = threading.Thread(target=_run)
+    t.start()
+    assert started.wait(2)
+    res = _capture(_tc())
+    assert res.status_code == 409
+    assert "zaten" in res.json()["detail"].lower()
+    release.set()
+    t.join(3)
+    assert first["res"].status_code == 200
+
+
+def test_capture_without_origin_is_403():
+    tc = _tc()
+    tc.get("/")
+    res = tc.post("/api/holdout/capture")
+    assert res.status_code == 403
+
+
+def test_capture_from_a_foreign_origin_is_403():
+    tc = _tc()
+    tc.get("/")
+    res = tc.post(
+        "/api/holdout/capture",
+        headers={"Origin": "https://kotu-site.example",
+                 "Sec-Fetch-Site": "cross-site"},
+    )
+    assert res.status_code == 403
+
+
+def test_capture_is_on_the_origin_list():
+    from micofx.web import app as web_app
+    assert "/api/holdout/capture" in web_app._CRITICAL_MUTATIONS
