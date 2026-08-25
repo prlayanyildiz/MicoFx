@@ -20,13 +20,23 @@ something that is quietly blind costs a session.
 
 Verifies afterwards and says so either way, in its own log, because a
 recovery step whose failure is silent is the thing it was written to prevent.
+
+After the port is up, asks the live process (GET / cookie, then POST
+/api/holdout/capture) to pin holdout bars through its own MT5 client. This
+script never calls initialize() - a second bind would drop the trading
+process. Capture failure is visible here and does not fail the restart: the
+bot is already up.
 """
 from __future__ import annotations
 
+import http.cookiejar
+import json
 import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -35,6 +45,9 @@ LOG = ROOT / "logs" / "gece_restart.log"
 PORT = 8900
 BOOT_WAIT_SEC = 45
 RETRIES = 2
+PANEL = f"http://127.0.0.1:{PORT}"
+MT5_WAIT_SEC = 60
+CAPTURE_TIMEOUT_SEC = 300
 
 
 def say(text: str) -> None:
@@ -94,6 +107,59 @@ def start() -> None:
                      creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
 
 
+def panel_session(base: str):
+    """Cookie from GET /. The panel rejects /api without it."""
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    opener.open(base + "/", timeout=15)
+    return opener
+
+
+def wait_mt5_connected(opener, base: str, seconds: int = MT5_WAIT_SEC) -> bool:
+    deadline = time.time() + seconds
+    last = ""
+    while time.time() < deadline:
+        try:
+            with opener.open(base + "/api/state", timeout=10) as resp:
+                data = json.loads(resp.read())
+            if (data.get("mt5") or {}).get("connected"):
+                return True
+            last = "mt5.connected=false"
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
+                json.JSONDecodeError, OSError) as exc:
+            last = f"{type(exc).__name__}"
+        time.sleep(2)
+    say(f"MT5 beklenirken son durum: {last}")
+    return False
+
+
+def request_holdout_capture(opener, base: str) -> None:
+    req = urllib.request.Request(
+        base + "/api/holdout/capture", data=b"{}", method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with opener.open(req, timeout=CAPTURE_TIMEOUT_SEC) as resp:
+        body = json.loads(resp.read())
+    results = body.get("results") or []
+    fails = [row for row in results if not row.get("ok")]
+    say(f"holdout capture: {int(body.get('captured') or 0)} yazildi"
+        + (f", atlanan {len(fails)}" if fails else ""))
+    for row in fails:
+        say(f"HATA holdout {row.get('symbol')}: {row.get('error')}")
+
+
+def _pin_holdout_after_boot(base: str) -> None:
+    """Best-effort. Restart already succeeded if we got here."""
+    try:
+        opener = panel_session(base)
+        if not wait_mt5_connected(opener, base):
+            say("HATA: bot ayakta ama MT5 baglanmadi - holdout capture atlandi")
+            return
+        request_holdout_capture(opener, base)
+    except Exception as exc:
+        say(f"HATA: holdout capture basarisiz ({type(exc).__name__}: {exc})")
+
+
 def main() -> int:
     say("--- gece restart basliyor ---")
     pid = port_owner()
@@ -110,6 +176,7 @@ def main() -> int:
             time.sleep(1)
             if port_open():
                 say(f"bot ayakta, port {PORT} dinliyor (deneme {attempt})")
+                _pin_holdout_after_boot(PANEL)
                 say("--- tamamlandi ---")
                 return 0
         say(f"deneme {attempt}: {BOOT_WAIT_SEC} sn icinde port acilmadi")

@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, create_model
 
 from .. import APP_NAME, __version__
 from ..engine import Engine
+from ..holdout_cost import capture_book
 from ..logbus import LOG
 from ..models import (
     EXIT_PARAM_BOUNDS,
@@ -2130,6 +2131,20 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/opt/cancel")
     def opt_cancel() -> dict[str, Any]:
         return optimizer.cancel()
+
+    @app.post("/api/holdout/capture")
+    def holdout_capture() -> dict[str, Any]:
+        """Pin holdout bars through the live client. Night restart calls this.
+
+        A second process calling initialize() would drop the trading bind.
+        Optimizer busy is a 409: the search already holds the terminal for
+        tens of thousands of bars per combo.
+        """
+        if optimizer.busy:
+            raise HTTPException(409, "optimizasyon calisirken holdout capture yok")
+        if not client.connected:
+            raise HTTPException(409, "MT5 baglantisi yok")
+        return capture_book(client=client, store=store)
 
     @app.get("/api/opt/history")
     def opt_history(symbol: str | None = None, limit: int = 60) -> dict[str, Any]:

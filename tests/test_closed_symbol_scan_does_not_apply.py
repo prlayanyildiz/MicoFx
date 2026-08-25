@@ -177,3 +177,23 @@ def test_an_open_symbol_still_applies_the_same_winner():
     assert report.get("applied") is True, report
     assert store.symbols["JPN225"].sl_atr_mult == 2.0
     assert store.runs[-1]["applied"] is True
+
+
+def test_a_cancelled_run_does_not_apply_a_winner():
+    """Parallel harvest still close_out()s a finished symbol after cancel().
+
+    25.08 08:35: NAS100 was flat while GER40/US30 were still sweeping. The
+    cancel flag does not abort already-done futures, so apply_best would
+    rewrite the flat name. A family swap there is a live-book change the
+    operator just asked to stop.
+    """
+    opt, store = _finish_opt()
+    plan, stamped = _finish_plan(enabled=True)
+    store.symbols[plan["cfg"].symbol] = plan["cfg"]
+    opt._cancel.set()
+    report = opt._finish_symbol(plan, apply_best=True)
+    assert report.get("applied") is False, report
+    assert store.symbols["JPN225"].sl_atr_mult == 0.9
+    assert store.symbols["JPN225"].opt_summary == stamped
+    assert "iptal" in (report.get("keep_reason") or "").lower()
+    assert store.runs[-1]["applied"] is False

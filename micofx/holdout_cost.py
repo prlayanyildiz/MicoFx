@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from . import backtest
+from .logbus import LOG
 from .models import SymbolConfig
 from .strategy import IndicatorCache, Params, compute
 
@@ -222,3 +223,34 @@ def capture(*, client: Any, store: Any, symbol: str, timeframe: str,
         config=cfg.to_dict(),
     )
     return dest
+
+
+def capture_book(*, client: Any, store: Any) -> dict[str, Any]:
+    """Pin every enabled symbol through the already-connected client.
+
+    Does not initialize or shutdown. One symbol's failure is a WARN row, not
+    a stop: a thin histogram on one name must not leave the rest of the book
+    without a pin for the night.
+    """
+    rows: list[dict[str, Any]] = []
+    symbols = getattr(store, "symbols", None) or {}
+    if not isinstance(symbols, dict):
+        symbols = {}
+    for cfg in list(symbols.values()):
+        if not getattr(cfg, "enabled", False):
+            continue
+        symbol = str(cfg.symbol)
+        timeframe = str(cfg.timeframe)
+        try:
+            path = capture(client=client, store=store, symbol=symbol,
+                           timeframe=timeframe)
+            rows.append({"symbol": symbol, "ok": True, "path": str(path)})
+            LOG.emit(f"Holdout snapshot yazildi | {symbol} {timeframe} | {path}", "OPT")
+        except Exception as exc:
+            rows.append({
+                "symbol": symbol, "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+            LOG.emit(f"Holdout snapshot atlandi | {symbol}: {exc}", "WARN")
+    n_ok = sum(1 for r in rows if r.get("ok"))
+    return {"ok": True, "captured": n_ok, "results": rows}

@@ -325,6 +325,23 @@ class Optimizer:
                 name="micofx-optimizer", daemon=True,
             )
             self._thread.start()
+            src = str(self.job.get("source") or "manual")
+            LOG.emit(
+                f"Optimizasyon istendi | kaynak={src} "
+                f"apply_best={str(bool(apply_best)).lower()} "
+                f"force={str(bool(force)).lower()} | "
+                f"{len(targets)} sembol ({', '.join(targets)})",
+                "OPT")
+            setter = getattr(self.store, "set_setting", None)
+            if callable(setter):
+                setter("last_opt_job", {
+                    "source": src,
+                    "apply_best": bool(apply_best),
+                    "force": bool(force),
+                    "symbols": list(targets),
+                    "started_at": self.job.get("started_at"),
+                    "state": "running",
+                })
         return {"ok": True, "job": self.status()}
 
     # ------------------------------------------------------------------ work
@@ -399,7 +416,8 @@ class Optimizer:
         if not isinstance(tf_allow, dict):
             tf_allow = STRATEGY_TIMEFRAMES
 
-        LOG.emit(f"Optimizasyon basladi | {len(targets)} sembol | son {lookback_days} gun | "
+        src = str((self.job or {}).get("source") or "manual")
+        LOG.emit(f"Optimizasyon basladi | kaynak={src} | {len(targets)} sembol | son {lookback_days} gun | "
                  f"{segments} segment (son segment dogrulama) | "
                  f"zaman dilimleri {'/'.join(timeframes)} | stratejiler {'/'.join(families)} | "
                  f"cikis: sert ATR stop + ATR takip ({len(variants)} tarama/zaman dilimi) | "
@@ -415,16 +433,27 @@ class Optimizer:
         self._set(state="cancelled" if cancelled else "done", finished_at=time.time(), current="")
         with self._lock:
             results = list(self.job.get("results") or [])
-            tag = "Zamanlanmis optimizasyon" if self.job.get("source") == "scheduled" \
-                else "Optimizasyon"
+            src = str(self.job.get("source") or "manual")
+            tag = "Zamanlanmis optimizasyon" if src == "scheduled" else "Optimizasyon"
+        setter = getattr(self.store, "set_setting", None)
+        if callable(setter):
+            getter = getattr(self.store, "get_setting", None)
+            prev = getter("last_opt_job", {}) if callable(getter) else {}
+            setter("last_opt_job", {
+                **(prev or {}),
+                "source": src,
+                "state": "cancelled" if cancelled else "done",
+                "finished_at": time.time(),
+                "applied": [r.get("symbol") for r in results if r.get("applied")],
+            })
         if cancelled:
-            LOG.emit(f"{tag} iptal edildi.", "OPT")
+            LOG.emit(f"{tag} iptal edildi | kaynak={src}.", "OPT")
         else:
             applied = [r["symbol"] for r in results if r.get("applied")]
             rejected = [r.get("symbol", "?") for r in results if not r.get("applied")]
             applied_txt = " (" + ", ".join(applied) + ")" if applied else ""
             rejected_txt = " (" + ", ".join(rejected) + ")" if rejected else ""
-            LOG.emit(f"{tag} tamamlandi | uygulanan {len(applied)}{applied_txt} | "
+            LOG.emit(f"{tag} tamamlandi | kaynak={src} | uygulanan {len(applied)}{applied_txt} | "
                      f"uygulanmayan {len(rejected)}{rejected_txt}", "OPT")
 
     @staticmethod
@@ -766,7 +795,8 @@ class Optimizer:
 
         def close_out(plan: dict[str, Any]) -> None:
             nonlocal finished
-            report = self._finish_symbol(plan, apply_best)
+            apply = apply_best and not self._cancel.is_set()
+            report = self._finish_symbol(plan, apply)
             finished += 1
             with self._lock:
                 self.job["results"].append(report)
@@ -973,6 +1003,13 @@ class Optimizer:
         # Named up front so the UI can explain a red number instead of leaving
         # it looking like the symbol's live setup is the thing losing money.
         reason = self.reject_reason(cfg, best)
+        if self._cancel.is_set():
+            # Harvest still close_out()s symbols whose last sweep already
+            # returned. Cancel means stop writing the live book, not "finish
+            # applying whoever happened to drain first".
+            apply_best = False
+            if not reason:
+                reason = "iptal - uygulanmadi"
         report["keep_reason"] = reason
         report["holdout_retention"] = round(self.holdout_retention(best), 3)
         incumbent = ((getattr(cfg, "opt_summary", None) or {}).get("holdout") or {})
