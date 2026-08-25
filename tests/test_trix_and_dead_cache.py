@@ -65,7 +65,8 @@ def test_every_living_family_still_computes_without_those_helpers():
     assert sorted(STRATEGIES) == sorted(
         ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3", "st_trend",
          "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
-         "parabolic_flip", "aroon_flip"])
+         "parabolic_flip", "aroon_flip",
+         "alpha_trend", "mavilim", "ichimoku"])
     for family in STRATEGIES:
         sig = compute(cache, Params(strategy=family))
         assert sig.buy.size == n and sig.sell.size == n

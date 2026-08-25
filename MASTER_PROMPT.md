@@ -246,7 +246,9 @@ Bars where both `buy` and `sell` are True must be **dropped** (neither side). Do
 
 ## 7. Strategy families (shared)
 
-`STRATEGIES = ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3", "st_trend", "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip", "parabolic_flip", "aroon_flip"]` — 12 aile.
+`STRATEGIES = ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3", "st_trend", "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip", "parabolic_flip", "aroon_flip", "alpha_trend", "mavilim", "ichimoku"]` — 15 aile.
+
+Kivanc combo (25.08): `alpha_trend` is RSI-mode AlphaTrend (SMA of TR, RSI>=50 ratchet, cross vs line[2]); `mavilim` is nested WMA 3-5-8-13-21-34 slope flip; `ichimoku` is TK cross vs the cloud from i-26 (no forward displacement). BBW is not a family (`atr_pct_min` already gates dead regimes). TD Sequential is a fade counter and was skipped. None of the three is applied live until holdout.
 
 `flow_rev` ve `trix_flip` 14.08 emekli edildi; gostergeleri de silindi ve
 `test_retired_indicators_stay_gone.py` geri gelmelerini engelliyor.

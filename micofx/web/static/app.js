@@ -818,6 +818,9 @@ const STRATEGY_LABEL = {
   stoch_flip: "Stochastic Yon Donusu",
   parabolic_flip: "Parabolic SAR Yon Donusu",
   aroon_flip: "Aroon Yon Donusu",
+  alpha_trend: "AlphaTrend RSI (Kivanc, trail cizgi)",
+  mavilim: "MavilimW Yon Donusu",
+  ichimoku: "Ichimoku TK + bulut (gecikmeli, ileri bakissiz)",
 };
 
 // Visible on every symbol card without expanding anything: pure risk/sizing

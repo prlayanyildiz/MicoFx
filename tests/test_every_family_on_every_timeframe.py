@@ -101,7 +101,10 @@ def test_the_registry_is_the_whole_book():
     # neither was live, and their best holdout score ever was 2.7 and 5.0
     # against a field whose next-worst is 23.2. This number is a tripwire for
     # an ACCIDENTAL change, so it moves only with a reason written beside it.
-    assert len(FAMILIES) == 12, f"aile sayisi degisti: {FAMILIES}"
+    # 12 -> 15 on 25.08: alpha_trend, mavilim, ichimoku (Kivanc combo).
+    # BBW and TD Sequential were measured out of the set: atr_pct_min already
+    # gates dead regimes, and TD is a fade counter against an ATR-trail book.
+    assert len(FAMILIES) == 15, f"aile sayisi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

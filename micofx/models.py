@@ -93,7 +93,8 @@ class SymbolConfig:
     broker_symbol: str = ""          # override when the broker renames an instrument
     # t3_stoch | mtf_pullback | micro_rev | burst | dual_t3
     # | st_trend | t3_flip | macd_flip | wavetrend_flip | stoch_flip
-    # | parabolic_flip | aroon_flip   (see models.STRATEGIES)
+    # | parabolic_flip | aroon_flip | alpha_trend | mavilim | ichimoku
+    # (see models.STRATEGIES)
     strategy: str = "t3_stoch"
 
     # ---- higher-timeframe trend pullback ----
@@ -512,7 +513,8 @@ OPT_FIELDS = [
 STRATEGIES = ["t3_stoch", "mtf_pullback",
               "micro_rev", "burst", "dual_t3", "st_trend",
               "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
-              "parabolic_flip", "aroon_flip"]
+              "parabolic_flip", "aroon_flip",
+              "alpha_trend", "mavilim", "ichimoku"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
 # Longer TFs turn them into slow mean-reversion with the wrong cost geometry.

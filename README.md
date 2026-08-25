@@ -52,7 +52,7 @@ veritabani ve gunlukler uzerine yazilmaz.
 
 | Asama | Ne olur |
 |---|---|
-| Sinyal | 12 strateji ailesinden sembole atanmis olani, kapanmis bar uzerinde calisir |
+| Sinyal | 15 strateji ailesinden sembole atanmis olani, kapanmis bar uzerinde calisir |
 | Filtre | Seans saatleri, spread/ATR orani, ADX rejimi, gunluk zarar kesici |
 | Boyut | Risk yuzdesi ve ATR stop mesafesinden lot; AI denetleyici gerekirse kucultur |
 | Giris | Piyasa emri + sert ATR stop (broker'da durur, hicbir kosulda kaldirilmaz) |

@@ -26,6 +26,8 @@ FLIP = (
     "stoch_flip",
     "parabolic_flip",
     "aroon_flip",
+    "mavilim",
+    "ichimoku",
 )
 
 # Values a family that *does* call ``_regime`` / ``_trend_gate`` would act on.

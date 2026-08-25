@@ -411,7 +411,10 @@
       "wavetrend_flip",
       "stoch_flip",
       "parabolic_flip",
-      "aroon_flip"
+      "aroon_flip",
+      "alpha_trend",
+      "mavilim",
+      "ichimoku"
     ],
     "strategy_grids": {
       "t3_stoch": {
@@ -885,6 +888,86 @@
           21,
           25
         ],
+        "sl_atr_mult": [
+          1.0,
+          1.5,
+          2.0,
+          2.5,
+          3.0
+        ],
+        "trail_start_atr": [
+          0.3,
+          0.5,
+          0.8,
+          1.0,
+          1.4,
+          2.0
+        ],
+        "trail_step_atr": [
+          0.4,
+          0.6,
+          0.8,
+          1.2,
+          1.6,
+          2.2
+        ]
+      },
+      "alpha_trend": {
+        "rsi_length": [
+          10,
+          14,
+          21
+        ],
+        "sl_atr_mult": [
+          1.0,
+          1.5,
+          2.0,
+          2.5,
+          3.0
+        ],
+        "trail_start_atr": [
+          0.3,
+          0.5,
+          0.8,
+          1.0,
+          1.4,
+          2.0
+        ],
+        "trail_step_atr": [
+          0.4,
+          0.6,
+          0.8,
+          1.2,
+          1.6,
+          2.2
+        ]
+      },
+      "mavilim": {
+        "sl_atr_mult": [
+          1.0,
+          1.5,
+          2.0,
+          2.5,
+          3.0
+        ],
+        "trail_start_atr": [
+          0.3,
+          0.5,
+          0.8,
+          1.0,
+          1.4,
+          2.0
+        ],
+        "trail_step_atr": [
+          0.4,
+          0.6,
+          0.8,
+          1.2,
+          1.6,
+          2.2
+        ]
+      },
+      "ichimoku": {
         "sl_atr_mult": [
           1.0,
           1.5,

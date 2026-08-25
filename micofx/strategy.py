@@ -1156,6 +1156,100 @@ def _aroon_flip(cache: IndicatorCache, p: Params) -> Signals:
                    htf_up=flat, htf_down=flat)
 
 
+def _cross_over(fast: np.ndarray, slow: np.ndarray) -> np.ndarray:
+    """True on the bar ``fast`` goes from below ``slow`` to above it."""
+    prev_fast = np.roll(fast, 1)
+    prev_slow = np.roll(slow, 1)
+    out = (prev_fast < prev_slow) & (fast > slow)
+    out[0] = False
+    return out
+
+
+def _alpha_trend(cache: IndicatorCache, p: Params) -> Signals:
+    """Kivanc AlphaTrend, RSI mode, traded as a lag-2 cross of its own line.
+
+    SuperTrend already lives as ``st_trend``. This is the other Kivanc trailing
+    line: SMA of true range, RSI>=50 ratchet, buy/sell = crossover versus the
+    line two bars ago. Coefficient stays at the published 1.0; the only search
+    axis is ``rsi_length`` (shared as Pine's Common Period). The plotshape
+    O1>K2 alternate filter is display-only and is not applied here.
+    """
+    close = cache.close
+    size = close.size
+    line = ind.alpha_trend_rsi(cache.high, cache.low, close, p.rsi_length, 1.0)
+    lagged = np.empty_like(line)
+    lagged[:2] = line[:2]
+    if size > 2:
+        lagged[2:] = line[:-2]
+    atr_series = cache.atr(p.atr_period)
+    zeros = np.zeros(size, dtype=np.float64)
+    flat = np.zeros(size, dtype=bool)
+
+    buy = _cross_over(line, lagged)
+    sell = _cross_over(lagged, line)
+    warmup = min(size, max(p.rsi_length * 5, p.atr_period * 3, 2))
+    buy[:warmup] = False
+    sell[:warmup] = False
+    buy, sell = _resolve_conflicts(buy, sell)
+    return Signals(t3=line, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
+                   htf_up=flat, htf_down=flat)
+
+
+def _mavilim(cache: IndicatorCache, p: Params) -> Signals:
+    """Kivanc MavilimW slope flip: nested WMA 3-5-8-13-21-34.
+
+    Lengths are the published defaults, not a search axis - nesting already
+    spends the lookback. Buy is the bar the outer line turns up, sell the bar
+    it turns down. Same shape as ``t3_flip`` on a different curve.
+    """
+    close = cache.close
+    size = close.size
+    line = ind.mavilim_w(close, 3, 5)
+    atr_series = cache.atr(p.atr_period)
+    zeros = np.zeros(size, dtype=np.float64)
+    flat = np.zeros(size, dtype=bool)
+    prev = np.roll(line, 1)
+    prev[0] = line[0]
+    rising = line > prev
+    was_rising = np.roll(rising, 1)
+    was_rising[0] = False
+    buy = rising & ~was_rising
+    sell = ~rising & was_rising
+    warmup = min(size, max(84, p.atr_period * 3))
+    buy[:warmup] = False
+    sell[:warmup] = False
+    buy, sell = _resolve_conflicts(buy, sell)
+    return Signals(t3=line, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
+                   htf_up=flat, htf_down=flat)
+
+
+def _ichimoku(cache: IndicatorCache, p: Params) -> Signals:
+    """Classic TK cross against the cloud that already exists.
+
+    Tenkan 9 / Kijun 26 / Span B 52. The cloud at this bar is the spans from
+    26 bars ago - the TradingView forward plot is not used, so a live bar
+    cannot see future highs. Long needs a TK cross up *and* close above the
+    cloud top; short is the mirror. Periods are constants; adding them to
+    OPT_FIELDS would pay a grid the first holdout has not earned.
+    """
+    close = cache.close
+    size = close.size
+    tenkan, kijun, cloud_top, cloud_bot = ind.ichimoku_lines(cache.high, cache.low)
+    atr_series = cache.atr(p.atr_period)
+    zeros = np.zeros(size, dtype=np.float64)
+    flat = np.zeros(size, dtype=bool)
+    above = np.isfinite(cloud_top) & (close > cloud_top)
+    below = np.isfinite(cloud_bot) & (close < cloud_bot)
+    buy = _cross_over(tenkan, kijun) & above
+    sell = _cross_over(kijun, tenkan) & below
+    warmup = min(size, max(52 + 26, p.atr_period * 3))
+    buy[:warmup] = False
+    sell[:warmup] = False
+    buy, sell = _resolve_conflicts(buy, sell)
+    return Signals(t3=tenkan, k=kijun, d=zeros, atr=atr_series, adx=zeros,
+                   buy=buy, sell=sell, htf_up=flat, htf_down=flat)
+
+
 _FAMILIES = {
     "t3_stoch": _t3_stoch,
     "mtf_pullback": _mtf_pullback,
@@ -1169,6 +1263,9 @@ _FAMILIES = {
     "stoch_flip": _stoch_flip,
     "parabolic_flip": _parabolic_flip,
     "aroon_flip": _aroon_flip,
+    "alpha_trend": _alpha_trend,
+    "mavilim": _mavilim,
+    "ichimoku": _ichimoku,
 }
 
 # Exit / live-entry axes the family function never names. The search and the
