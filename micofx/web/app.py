@@ -147,6 +147,8 @@ _SYMBOL_RISK_BOUNDS = {
     "partial_close_lots": (0.0, 20.0, True),
     "partial_at_r": (0.0, 5.0, True),
     "partial_close_frac": (0.0, 0.9, True),
+    "harvest_at_r": (0.0, 5.0, True),
+    "harvest_step_atr": (0.0, 20.0, True),
     # The per-symbol daily loss gate, and the only live-risk field the panel
     # let through unbounded (found 15.08, audit slice 7). Zero disables it, so
     # the minimum is inclusive; above 100 it can never fire, which reads as
@@ -187,7 +189,7 @@ _SYMBOL_RISK_BOUNDS = {
 # carry "0 disables" in models.py - and bounding those at 1 would refuse the
 # live US500 config. A length has no such reading: an average over no bars is
 # a mistake, not a disabled filter.
-_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "macd_fast", "macd_slow", "macd_signal", "wt_channel_len", "wt_avg_len", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "aroon_length", "adx_length", "atr_length", "trail_lookback"), (1, 10000, True))
+_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "wt_channel_len", "wt_avg_len", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "aroon_length", "adx_length", "atr_length", "trail_lookback"), (1, 10000, True))
 
 
 _SYSTEM_RISK_BOUNDS = {
@@ -567,14 +569,6 @@ def _coerce_symbol_patch(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 SESSION_COOKIE = "mico_session"
-_CRITICAL_MUTATIONS = frozenset({
-    "/api/bot/panic", "/api/bot/start", "/api/bot/stop",
-    "/api/app/shutdown", "/api/app/restart",
-    "/api/positions-close-all",
-    "/api/account-lock",
-    "/api/holdout/capture",
-    "/api/opt/run", "/api/opt/cancel",
-})
 _holdout_capture_lock = threading.Lock()
 
 
@@ -644,6 +638,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
         html = (TEMPLATES / "index.html").read_text(encoding="utf-8")
+        # Bust the browser cache when the file on disk changes. Operators
+        # were Ctrl+F5'ing after every panel landing; a query stamp is the
+        # same GET the StaticFiles mount already serves.
+        for name in ("style.css", "field_help.js", "app.js"):
+            path = STATIC / name
+            stamp = int(path.stat().st_mtime_ns) if path.is_file() else 0
+            html = html.replace(f"/static/{name}", f"/static/{name}?v={stamp}", 1)
         resp = HTMLResponse(html)
         resp.set_cookie(
             SESSION_COOKIE, api_token,
@@ -684,7 +685,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             "ts": time.time(),
             "version": __version__,
             **engine.snapshot(),
-            "symbols_sig": ",".join(sorted(store.symbols)),
+            "symbols_sig": ",".join(sorted(store.symbols)) + ":" + str(
+                int(getattr(store, "symbols_rev", 0) or 0)),
             "system": store.system.to_dict(),
             "opt": optimizer.status(),
         }
@@ -2368,6 +2370,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/app/shutdown")
     def app_shutdown() -> dict[str, Any]:
         LOG.emit("Kapatma istegi alindi.", "WARN")
+        optimizer.cancel()
         engine.shutdown()
 
         def _kill() -> None:
@@ -2381,6 +2384,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/app/restart")
     def app_restart() -> dict[str, Any]:
         LOG.emit("Yeniden baslatma istegi alindi.", "WARN")
+        # Kill used to skip this: last_opt_job stayed "running" and the OPT
+        # cancel line never landed. Persist happens inside cancel() so a
+        # 0.3s race to SIGTERM still leaves an honest blob.
+        optimizer.cancel()
         engine.shutdown()
 
         def _restart() -> None:

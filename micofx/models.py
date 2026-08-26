@@ -92,7 +92,7 @@ class SymbolConfig:
     timeframe: str = "M5"
     broker_symbol: str = ""          # override when the broker renames an instrument
     # t3_stoch | mtf_pullback | micro_rev | burst | dual_t3
-    # | st_trend | t3_flip | macd_flip | wavetrend_flip | stoch_flip
+    # | t3_flip | wavetrend_flip | stoch_flip
     # | parabolic_flip | aroon_flip | ichimoku
     # (see models.STRATEGIES)
     strategy: str = "t3_stoch"
@@ -151,11 +151,6 @@ class SymbolConfig:
 
     # ---- reversion regime ceiling (_regime) ----
     adx_max: float = 0.0             # reversion only; 0 disables
-
-    # ---- MACD histogram zero-cross ----
-    macd_fast: int = 12
-    macd_slow: int = 26
-    macd_signal: int = 9
 
     # ---- WaveTrend crossover ----
     wt_channel_len: int = 10
@@ -264,6 +259,13 @@ class SymbolConfig:
     partial_close_lots: float = 0.0  # leftover; not read (was GER 0.20)
     partial_at_r: float = 0.0        # 0 = off; fire at this many original R
     partial_close_frac: float = 0.0  # 0 = paper uses SCALE_OUT_FRAC
+    # Harvest overlay (operator 26.08). Not a TP and not an OPT axis. Once
+    # open profit reaches harvest_at_r original R, overlay_stop uses the
+    # tighter of trail_step_atr and harvest_step_atr. Zero on either field
+    # is off — existing walk-forward stamps stay bit-identical. 1.5 / 0.4
+    # is the BE-1 threshold plus XAUUSD's proven tight step.
+    harvest_at_r: float = 0.0        # 0 = off; tighten trail after this many R
+    harvest_step_atr: float = 0.0    # 0 = off; ATR distance once harvest_at_r hits
     # ---- costs ----
     commission_per_lot: float = 0.0  # round-turn commission in account currency
 
@@ -399,11 +401,11 @@ class SymbolConfig:
 # as surely as editing trail_step_atr does - it was the one input to that
 # math the mid-trade guard did not cover.
 #
-# Deliberately absent: ``breakeven_at_r`` and ``partial_at_r``. Both overlays
-# re-read cfg every cycle, so a mid-trade PATCH applies to already-open
-# tickets (25.08 GER: partial_at_r 0→1.5, then three slices at 3.66–5.04 R).
-# That is intended, same door as BE. Do not add them here unless the operator
-# accepts API 409 while positions are open.
+# Deliberately absent: ``breakeven_at_r``, ``partial_at_r``, ``harvest_at_r``
+# and ``harvest_step_atr``. Overlays re-read cfg every cycle, so a mid-trade
+# PATCH applies to already-open tickets (25.08 GER: partial_at_r 0→1.5, then
+# three slices at 3.66–5.04 R). That is intended, same door as BE. Do not add
+# them here unless the operator accepts API 409 while positions are open.
 EXIT_RISK_FIELDS = frozenset({
     "sl_atr_mult", "trail_start_atr", "trail_step_atr", "trail_mode", "trail_lookback",
     "atr_period",
@@ -531,7 +533,6 @@ OPT_FIELDS = [
     # the search is allowed to tune the spread/ATR entry gate per symbol rather
     # than leaving it disabled at the group default.
     "max_spread_atr",
-    "macd_fast", "macd_slow", "macd_signal",
     "wt_channel_len", "wt_avg_len",
     "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
     "psar_af_step", "psar_af_max", "aroon_length",
@@ -545,9 +546,12 @@ OPT_FIELDS = [
 # produced 7 trades against MIN_TEST_TRADES=12 (structural, lag-2 cross),
 # mavilim had enough trades and lost (GER -20.2 R / PF 0.92). ichimoku stayed
 # - it passed the same gates (GER 208 trades, +27.9 R, PF 1.21).
+# st_trend and macd_flip retired 26.08: neither was live, neither was ever
+# applied (1 and 5 searches), and each still consumed a full max_combos slot
+# per TF. Dropping them is 2/13 of every sweep's work.
 STRATEGIES = ["t3_stoch", "mtf_pullback",
-              "micro_rev", "burst", "dual_t3", "st_trend",
-              "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
+              "micro_rev", "burst", "dual_t3",
+              "t3_flip", "wavetrend_flip", "stoch_flip",
               "parabolic_flip", "aroon_flip",
               "ichimoku"]
 

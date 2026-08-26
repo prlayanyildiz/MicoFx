@@ -331,7 +331,7 @@ def test_can_open_symbol_limit_counts_every_ticket():
     """
     store = _FakeStore()
     store.system = _FakeSystem()
-    cfg = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=1)
+    cfg = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=1)
     store.symbols = {"XAUUSD": cfg}
     store.system.max_scalp_positions = 10
     store.system.max_swing_positions = 10
@@ -347,7 +347,7 @@ def test_can_open_symbol_limit_counts_every_ticket():
     assert not blocked.ok
     assert "sembol pozisyon limiti" in blocked.reason
 
-    room = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=2)
+    room = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=2)
     store.symbols = {"XAUUSD": room}
     allowed = risk.can_open(room, "buy", 0.1, existing, account)
     assert allowed.ok
@@ -360,7 +360,7 @@ def test_can_open_bucket_uses_primary_strategy_only():
     """
     store = _FakeStore()
     store.system = _FakeSystem()
-    primary = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=5)
+    primary = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=5)
     store.symbols = {"XAUUSD": primary}
     store.system.max_scalp_positions = 1
     store.system.max_swing_positions = 1
@@ -376,7 +376,7 @@ def test_can_open_bucket_uses_primary_strategy_only():
     scalp = risk.can_open(scalp_cfg, "buy", 0.1, existing, account)
     assert scalp.ok  # leftover sits in the swing bucket now
 
-    swing_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=5)
+    swing_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=5)
     swing = risk.can_open(swing_cfg, "buy", 0.1, existing, account)
     assert not swing.ok
     assert "swing" in swing.reason
@@ -384,7 +384,7 @@ def test_can_open_bucket_uses_primary_strategy_only():
 
 def test_can_open_allows_when_bucket_not_full():
     store = _FakeStore()
-    primary = _cfg(symbol="XAUUSD", magic=1, strategy="st_trend", max_positions=5)
+    primary = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=5)
     store.symbols = {"XAUUSD": primary}
     store.system.max_scalp_positions = 2
     store.system.max_swing_positions = 5

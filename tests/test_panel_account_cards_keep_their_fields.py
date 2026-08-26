@@ -65,17 +65,22 @@ def test_the_cards_in_a_row_share_one_height():
 
 
 def test_the_column_count_divides_the_cards():
-    """Eight cards, and every column count divides eight.
+    """Six cards, and every column count divides six.
 
     auto-fill chose the count from the width, so the last row held whatever did
     not divide - at 1590px the strip came out four, four and a single card
-    stranded on a third row. Eight cards against 8/4/2 columns leaves no
+    stranded on a third row. A fixed count that divides the strip leaves no
     remainder at any breakpoint, and the widest case puts them all on one row,
     which is what the strip is for.
+
+    Was eight against 8/4/2 until the operator asked (26.08) for the numbers
+    already in the top bar to stop being printed twice. Balance, equity and the
+    day's cash went first; free margin and free slots followed when the split
+    settled into "top bar carries scalars, the strip carries gauges". Four
+    gauges left, so the count that has to divide is four.
     """
-    assert "grid-template-columns: repeat(8, 1fr);" in CSS
-    for count in (4, 2):
-        assert f"grid-template-columns: repeat({count}, 1fr);" in CSS
+    assert "grid-template-columns: repeat(4, 1fr);" in CSS
+    assert "grid-template-columns: repeat(2, 1fr);" in CSS
     # The word appears in the comment explaining why it went; check the rule.
     rules = [ln for ln in CSS.splitlines()
              if "grid-template-columns" in ln and not ln.lstrip().startswith(("/*", "*"))]

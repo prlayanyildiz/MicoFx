@@ -305,6 +305,21 @@ class Optimizer:
 
     def cancel(self) -> dict[str, Any]:
         self._cancel.set()
+        running = False
+        with self._lock:
+            running = bool(self.busy) or str((self.job or {}).get("state") or "") == "running"
+        if running:
+            # Restart used to SIGTERM before _run noticed the event, so
+            # last_opt_job stayed "running" with no OPT cancel line. Write
+            # now; _run's finish overwrites the same cancelled state.
+            setter = getattr(self.store, "set_setting", None)
+            if callable(setter):
+                getter = getattr(self.store, "get_setting", None)
+                prev = getter("last_opt_job", {}) if callable(getter) else {}
+                if not isinstance(prev, dict):
+                    prev = {}
+                setter("last_opt_job", {**prev, "state": "cancelled",
+                                        "finished_at": time.time()})
         return {"ok": True, "message": "Iptal istegi gonderildi."}
 
     def start(self, symbols: list[str] | None = None, apply_best: bool = True,

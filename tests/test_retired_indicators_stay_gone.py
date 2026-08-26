@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def test_retired_indicator_helpers_are_gone():
-    for name in ("trix", "delta_proxy", "zscore"):
+    for name in ("trix", "delta_proxy", "zscore", "macd", "macd_periods"):
         assert not hasattr(ind, name), name
 
 
@@ -32,6 +32,25 @@ def test_retired_kivanc_losers_are_gone():
         assert name not in STRATEGIES, name
         assert name not in _FAMILIES, name
     assert "ichimoku" in STRATEGIES and "ichimoku" in _FAMILIES
+
+
+def test_never_applied_scan_waste_is_gone():
+    """26.08 opt history: st_trend 1/0 apply, macd_flip 5/0 apply, neither
+    live. Each still ate a full max_combos slot per TF. ichimoku stays -
+    it cleared the same holdout gate (GER +27.9 R).
+    """
+    from micofx.models import OPT_FIELDS, STRATEGIES
+    from micofx.strategy import _FAMILIES, IndicatorCache, Params
+
+    for name in ("st_trend", "macd_flip"):
+        assert name not in STRATEGIES, name
+        assert name not in _FAMILIES, name
+    for field in ("macd_fast", "macd_slow", "macd_signal"):
+        assert field not in OPT_FIELDS, field
+        assert field not in Params.__dataclass_fields__
+    assert not hasattr(IndicatorCache, "macd")
+    assert "ichimoku" in STRATEGIES
+    assert len(STRATEGIES) == 11
 
 
 def test_autostart_is_a_real_feature_not_a_stub():

@@ -137,13 +137,15 @@ def test_critical_post_without_secret_is_401(path, body):
     assert res.status_code == 401, (path, res.status_code, res.text)
 
 
-def test_shutdown_and_restart_are_on_the_origin_list():
-    from micofx.web import app as web_app
-    assert "/api/app/shutdown" in web_app._CRITICAL_MUTATIONS
-    assert "/api/app/restart" in web_app._CRITICAL_MUTATIONS
-    assert "/api/holdout/capture" in web_app._CRITICAL_MUTATIONS
-    assert "/api/opt/run" in web_app._CRITICAL_MUTATIONS
-    assert "/api/opt/cancel" in web_app._CRITICAL_MUTATIONS
+def test_shutdown_and_restart_without_origin_are_403():
+    """The named frozenset used to be the Origin gate. Every mutation is
+    gated now; these two cannot be POSTed with a valid Origin in tests
+    because the handler would kill the process, so missing-Origin is the
+    assert that they still cannot run from a foreign page."""
+    tc = TestClient(_app(), unauth=True)
+    for path in ("/api/app/shutdown", "/api/app/restart"):
+        res = tc.post(path, json={}, headers={"X-Mico-Token": "secret123"})
+        assert res.status_code == 403, (path, res.status_code, res.text)
 
 
 @pytest.mark.parametrize("path,body", LIVE_CRITICAL)
@@ -183,6 +185,14 @@ def test_index_sets_httponly_cookie_and_does_not_embed_the_secret():
     raw = res.headers.get("set-cookie", "")
     assert "httponly" in raw.lower()
     assert "samesite=strict" in raw.lower()
+
+
+def test_index_stamps_static_assets_so_the_browser_does_not_need_ctrl_f5():
+    tc = TestClient(_app(), unauth=True)
+    html = tc.get("/").text
+    assert "/static/style.css?v=" in html
+    assert "/static/app.js?v=" in html
+    assert "/static/field_help.js?v=" in html
 
 
 def test_a_mutating_post_without_origin_is_403():

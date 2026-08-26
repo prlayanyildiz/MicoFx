@@ -87,3 +87,22 @@ def test_start_persists_last_opt_job_before_the_worker_runs():
     assert job.get("force") is False
     assert job.get("state") == "running"
     assert job.get("started_at")
+
+
+def test_cancel_persists_so_a_kill_does_not_leave_running():
+    opt = _opt(BOOK)
+    opt.job = {"state": "running", "source": "manual"}
+    opt.store.settings["last_opt_job"] = {"state": "running", "source": "manual"}
+    opt.cancel()
+    assert opt._cancel.is_set()
+    blob = opt.store.settings["last_opt_job"]
+    assert blob["state"] == "cancelled"
+    assert blob.get("finished_at")
+
+
+def test_idle_cancel_does_not_rewrite_a_finished_job():
+    opt = _opt(BOOK)
+    opt.job = {"state": "done"}
+    opt.store.settings["last_opt_job"] = {"state": "done", "source": "manual"}
+    opt.cancel()
+    assert opt.store.settings["last_opt_job"]["state"] == "done"

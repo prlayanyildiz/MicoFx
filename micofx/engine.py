@@ -9,7 +9,7 @@ from typing import Any
 from . import account_lock, backtest, execution, sessions
 from . import indicators as ind
 from .execution import ExecutionMonitor
-from .exits import overlay_stop
+from .exits import harvest_trail_step, overlay_stop
 from .logbus import LOG
 from .models import (
     SymbolConfig,
@@ -426,6 +426,10 @@ class Engine:
         # and permanent. Latched per ticket because the poll runs every few
         # seconds and the warning is worth exactly once.
         self._unmanaged_seen: set[int] = set()
+        # One INFO after boot: which live tickets this process claimed by
+        # magic. manage_positions already maps that way; the line is so a
+        # restart is visible in the log instead of only in the book.
+        self._open_resume_logged = False
         # Tickets seen open with no stop attached. This system's one and only
         # intended exit is the stop, so a position without one has no exit at
         # all - and the trail cannot supply the missing one, because it
@@ -3162,6 +3166,19 @@ class Engine:
                 # ticket id would never scale out again.
                 self._scale_out_done = done & live
                 self.store.set_setting("scale_out_done", sorted(self._scale_out_done))
+        if not getattr(self, "_open_resume_logged", False):
+            self._open_resume_logged = True
+            claimed = [
+                f"#{int(p['ticket'])} {by_magic[p['magic']].symbol}"
+                for p in self._positions
+                if p.get("magic") in by_magic
+            ]
+            if claimed:
+                LOG.emit(
+                    "Restart: magic ile "
+                    f"{len(claimed)} acik ticket devam ediyor: "
+                    + ", ".join(claimed),
+                    "INFO")
         for pos in self._positions:
             if pos["ticket"] in self._orphan_tickets:
                 # An unresolved secondary fill from a prior cycle - never let it
@@ -3563,6 +3580,35 @@ class Engine:
                 )
         return ok
 
+    def _fill_time_risk(self, pos: dict[str, Any], cfg: SymbolConfig,
+                        atr: float, min_stop: float) -> float:
+        """Original R unit: fill-time stop distance, not this bar's ATR.
+
+        Paper freezes ``sl_dist`` at entry. Live used ``atr * sl_atr_mult``
+        every trail poll, so an expanding ATR delayed harvest/BE/partial
+        (the leftover the autopsy kept counting) and a shrinking ATR fired
+        them early. Only the persisted ``open_original_sl`` blob counts —
+        first-sight of a trailed stop after restart is not original risk.
+        """
+        fallback = max(float(atr) * float(cfg.sl_atr_mult), float(min_stop))
+        try:
+            ticket = int(pos.get("ticket") or 0)
+        except (TypeError, ValueError):
+            return fallback
+        if not ticket:
+            return fallback
+        originals = getattr(getattr(self, "execution", None), "_originals", None)
+        if not isinstance(originals, dict):
+            return fallback
+        saved = originals.get(ticket)
+        if not isinstance(saved, dict):
+            return fallback
+        try:
+            rd = float(saved.get("risk_dist") or 0.0)
+        except (TypeError, ValueError):
+            return fallback
+        return rd if rd > 0 else fallback
+
     def _update_stop(self, cfg: SymbolConfig, pos: dict[str, Any], atr: float,
                      bars: Any = None) -> bool:
         """Ratchet one position's stop. Returns whether this bar is settled.
@@ -3650,7 +3696,9 @@ class Engine:
         # Same original-risk the floor below uses, and the R unit the lock
         # counts. Computed once so the threshold and the "don't trail behind
         # the hard stop" check cannot drift apart inside one call.
-        original_risk = max(atr * cfg.sl_atr_mult, min_stop)
+        # Fill-time when we have it (paper freezes sl_dist at entry);
+        # current ATR is only the fallback for a pre-persist ticket.
+        original_risk = self._fill_time_risk(pos, cfg, atr, min_stop)
 
         struct_sl = None
         if cfg.trail_mode in ("structure", "hybrid"):
@@ -3667,13 +3715,16 @@ class Engine:
                     struct_sl = swings[-1] + atr * 0.15
 
         be_r = float(getattr(cfg, "breakeven_at_r", 0.0) or 0.0)
+        harvest_at = float(getattr(cfg, "harvest_at_r", 0.0) or 0.0)
+        harvest_step = float(getattr(cfg, "harvest_step_atr", 0.0) or 0.0)
         target = overlay_stop(
             is_buy=is_buy, entry=entry, ref=ref, atr=atr,
             trail_start_atr=float(cfg.trail_start_atr),
             trail_step_atr=float(cfg.trail_step_atr),
             trail_mode=str(cfg.trail_mode or "atr"),
             struct_sl=struct_sl, breakeven_at_r=be_r,
-            original_risk=original_risk, be_offset=0.0)
+            original_risk=original_risk, be_offset=0.0,
+            harvest_at_r=harvest_at, harvest_step_atr=harvest_step)
 
         if target is None:
             return settled
@@ -3695,10 +3746,15 @@ class Engine:
             # anyway would place a stop worse than breakeven. Skip this
             # cycle; retry once price allows it.
             return False
-        step = trail_min_step(min_stop, atr, cfg.trail_step_atr)
+        active_step = harvest_trail_step(
+            trail_step_atr=float(cfg.trail_step_atr),
+            harvest_at_r=harvest_at, harvest_step_atr=harvest_step,
+            profit=profit_dist, original_risk=original_risk)
+        step = trail_min_step(min_stop, atr, active_step)
         if current_sl != 0 and (target - current_sl < step if is_buy else current_sl - target < step):
             return settled
-        # The position's real initial risk is max(atr*sl_atr_mult, min_stop) -
+        # The position's real initial risk is the fill-time stop (or
+        # max(atr*sl_atr_mult, min_stop) when that blob is missing) -
         # open_market sizes it that way (see the entry path above) whenever the
         # broker's own floor is wider than the ATR distance. Comparing against
         # the bare ATR number here was tighter than the SL actually placed, so
@@ -3764,7 +3820,7 @@ class Engine:
         entry = pos["price_open"]
         profit_dist = (ref - entry) if is_buy else (entry - ref)
         min_stop = self.client.min_stop_distance(cfg.symbol)
-        original_risk = max(atr * cfg.sl_atr_mult, min_stop)
+        original_risk = self._fill_time_risk(pos, cfg, atr, min_stop)
         if original_risk <= 0 or profit_dist < at_r * original_risk:
             return False
         info = self.client.info(cfg.symbol) or {}
@@ -3873,6 +3929,9 @@ class Engine:
 
     def _decorate_positions(self, raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
+        done = getattr(self, "_scale_out_done", None) or set()
+        execu = getattr(self, "execution", None)
+        snap = getattr(execu, "snapshot", None) if execu is not None else None
         out = []
         for pos in raw:
             cfg = by_magic.get(pos["magic"])
@@ -3880,8 +3939,103 @@ class Engine:
             item["managed"] = cfg is not None
             item["config_symbol"] = cfg.symbol if cfg else pos["symbol"]
             item["group"] = cfg.group if cfg else "-"
+            book = None
+            if callable(snap):
+                try:
+                    book = snap(int(pos.get("ticket") or 0))
+                except (TypeError, ValueError):
+                    book = None
+            try:
+                ticket = int(pos.get("ticket") or 0)
+            except (TypeError, ValueError):
+                ticket = 0
+            item.update(self.live_open_metrics(
+                item, book, partial_done=ticket in done))
             out.append(item)
         return out
+
+    @staticmethod
+    def live_open_metrics(pos: dict[str, Any], book: dict[str, Any] | None,
+                          *, partial_done: bool = False) -> dict[str, Any]:
+        """Live R against the fill-time stop. Cash P/L is a different unit.
+
+        ``original_sl`` from the open book wins; a trailed broker SL would
+        make a winner read as ~1R. Missing book (pre-persist ticket) falls
+        back to the live stop — same first-sight rule as ``track()``.
+        """
+        book = book or {}
+        side = str(pos.get("side") or "")
+        try:
+            entry = float(pos.get("price_open") or 0)
+            cur = float(pos.get("price_current") or 0)
+            live_sl = float(pos.get("sl") or 0)
+        except (TypeError, ValueError):
+            entry = cur = live_sl = 0.0
+        orig = Engine._autopsy_float(book.get("original_sl"))
+        if orig is None or orig <= 0:
+            orig = live_sl if live_sl > 0 else None
+        if entry > 0 and orig is not None and orig > 0:
+            risk = abs(entry - orig)
+        else:
+            risk = Engine._autopsy_float(book.get("risk_dist")) or 0.0
+        r_open = None
+        if risk > 0 and entry > 0 and cur > 0 and side in ("buy", "sell"):
+            move = (cur - entry) if side == "buy" else (entry - cur)
+            r_open = round(move / risk, 4)
+        mfe = Engine._autopsy_float(book.get("mfe"))
+        mfe_r = (round(mfe / risk, 4) if mfe is not None and risk > 0 else None)
+        trail_moved = bool(
+            orig and live_sl
+            and abs(live_sl - orig) > max(1e-9, abs(orig) * 1e-8))
+        be_locked = False
+        if live_sl > 0 and entry > 0:
+            if side == "buy":
+                be_locked = live_sl >= entry
+            elif side == "sell":
+                be_locked = live_sl <= entry
+        return {
+            "r_open": r_open,
+            "mfe_r": mfe_r,
+            "trail_moved": trail_moved,
+            "be_locked": be_locked,
+            "partial_done": bool(partial_done),
+        }
+
+    def _harvest_view(self) -> dict[str, Any]:
+        """Closed-winner leftover plus which symbols have the one-shot scale-out on.
+
+        Observation only. Does not change entries, exits, or apply gates.
+        """
+        report = self.trade_autopsy_report()
+        by_sym: dict[str, float] = {}
+        for cell in report.get("summary") or []:
+            left = cell.get("left_on_table_r")
+            if left:
+                sym = str(cell.get("symbol") or "")
+                if not sym:
+                    continue
+                by_sym[sym] = round(by_sym.get(sym, 0.0) + float(left), 4)
+        partial_on: list[str] = []
+        harvest_on: list[str] = []
+        store = getattr(self, "store", None)
+        symbols = getattr(store, "symbols", None) if store is not None else None
+        if symbols:
+            for cfg in symbols.values():
+                name = str(getattr(cfg, "symbol", "") or "")
+                if not name:
+                    continue
+                if float(getattr(cfg, "partial_at_r", 0) or 0) > 0:
+                    partial_on.append(name)
+                if (float(getattr(cfg, "harvest_at_r", 0) or 0) > 0
+                        and float(getattr(cfg, "harvest_step_atr", 0) or 0) > 0):
+                    harvest_on.append(name)
+        return {
+            "n": int(report.get("n") or 0),
+            "left_on_table_r": report.get("left_on_table_r"),
+            "by_symbol": dict(sorted(by_sym.items(), key=lambda kv: -kv[1])),
+            "partial_on": partial_on,
+            "harvest_on": harvest_on,
+        }
 
     def _cycle_book_is_fresh(self) -> bool:
         if not self.client.connected or not self.last_cycle_at:
@@ -4299,6 +4453,7 @@ class Engine:
             "reopt": self.reopt_status(),
             "execution": self.execution.stats(),
             "positions": positions,
+            "harvest": self._harvest_view(),
             "states": self._states_view(),
             "ai": self.supervisor.status(),
         }

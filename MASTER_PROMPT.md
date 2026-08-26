@@ -88,8 +88,13 @@ is unpaid. `partial_at_r` is a second overlay (operator 25.08): **one**
 close of about one third of the ticket (snapped to broker min/step) at
 that R, remainder trails. Lot is not a dial — GER 0.70 → 0.20 is that
 rounding, not a 0.20 standard. Zero R is off. Not a search axis; paper
-uses the same third unless `partial_close_frac` is set. Mid-trade PATCH of
-`partial_at_r` / `breakeven_at_r` applies to already-open tickets — that is
+uses the same third unless `partial_close_frac` is set. `harvest_at_r` /
+`harvest_step_atr` is a third overlay (operator 26.08): once paid, the
+closed-bar trail uses `min(trail_step_atr, harvest_step_atr)` so a
+1.8-step NAS trail can hug like XAUUSD 0.4 without rewriting the searched
+step. Zero on either field is off. Mid-trade PATCH of
+`partial_at_r` / `breakeven_at_r` / `harvest_at_r` / `harvest_step_atr`
+applies to already-open tickets — that is
 intended (not an `EXIT_RISK_FIELDS` 409). Do not
 bring back `partial_tp_r` rungs. `Store.opt_params()` filters saved grids down to `OPT_FIELDS`, so a
 stale saved blob cannot resurrect a removed axis; if you add an axis, add it
@@ -250,9 +255,9 @@ Bars where both `buy` and `sell` are True must be **dropped** (neither side). Do
 
 ## 7. Strategy families (shared)
 
-`STRATEGIES = ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3", "st_trend", "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip", "parabolic_flip", "aroon_flip", "ichimoku"]` — 13 aile.
+`STRATEGIES = ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3", "t3_flip", "wavetrend_flip", "stoch_flip", "parabolic_flip", "aroon_flip", "ichimoku"]` — 11 aile.
 
-Kivanc combo (25.08): `ichimoku` is TK cross vs the cloud from i-26 (no forward displacement). `alpha_trend` and `mavilim` retired 26.08 (emekli): AlphaTrend could not clear `MIN_TEST_TRADES` (7 vs 12, lag-2 cross); MavilimW had enough trades and lost (GER −20.2 R / PF 0.92). BBW is not a family (`atr_pct_min` already gates dead regimes). TD Sequential is a fade counter and was skipped. `ichimoku` is not applied live until holdout beats the same-TF incumbent.
+Kivanc combo (25.08): `ichimoku` is TK cross vs the cloud from i-26 (no forward displacement). `alpha_trend` and `mavilim` retired 26.08 (emekli): AlphaTrend could not clear `MIN_TEST_TRADES` (7 vs 12, lag-2 cross); MavilimW had enough trades and lost (GER −20.2 R / PF 0.92). `st_trend` and `macd_flip` retired 26.08 (emekli): neither was live, neither was ever applied, and each still consumed a full `max_combos` slot per TF. BBW is not a family (`atr_pct_min` already gates dead regimes). TD Sequential is a fade counter and was skipped. `ichimoku` is not applied live until holdout beats the same-TF incumbent.
 
 `flow_rev` ve `trix_flip` 14.08 emekli edildi; gostergeleri de silindi ve
 `test_retired_indicators_stay_gone.py` geri gelmelerini engelliyor.

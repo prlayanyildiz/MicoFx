@@ -10,15 +10,12 @@ from typing import Any
 import numpy as np
 
 from . import indicators as ind
-from .exits import overlay_stop
+from .exits import harvest_trail_step, overlay_stop
 from .models import SCALE_OUT_FRAC, SymbolConfig, trail_min_step
 from .sessions import WEEKEND_OPEN_GROUPS
 from .strategy import IndicatorCache, Params, compute
 
 _DAY = 24 * 60
-
-# Grid axis that is not a Params field: it only rewrites the entry mask.
-SESSION_GRID_FIELDS = frozenset({"blocked_entry_hours"})
 
 
 def _blocked_entry_hours(cfg: SymbolConfig) -> list[int]:
@@ -641,12 +638,20 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             trail_start_atr=p.trail_start_atr, trail_step_atr=p.trail_step_atr,
             trail_mode=p.trail_mode, struct_sl=struct_sl,
             breakeven_at_r=breakeven_at_r, original_risk=sl_dist,
-            be_offset=commission_price)
+            be_offset=commission_price,
+            harvest_at_r=float(getattr(p, "harvest_at_r", 0.0) or 0.0),
+            harvest_step_atr=float(getattr(p, "harvest_step_atr", 0.0) or 0.0))
         if target is None:
             return sl, trailing
         breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
         ms = float(min_stop_at[j])
-        step = trail_min_step(ms, a, p.trail_step_atr)
+        profit = (c - entry) if is_buy else (entry - c)
+        active_step = harvest_trail_step(
+            trail_step_atr=p.trail_step_atr,
+            harvest_at_r=float(getattr(p, "harvest_at_r", 0.0) or 0.0),
+            harvest_step_atr=float(getattr(p, "harvest_step_atr", 0.0) or 0.0),
+            profit=profit, original_risk=sl_dist)
+        step = trail_min_step(ms, a, active_step)
         if is_buy and target > sl:
             new_sl = min(target, c - ms)
             if (new_sl - sl >= step

@@ -79,3 +79,15 @@ def test_the_comment_in_app_py_matches_what_the_script_does():
     spawn = APP[APP.index("restart.bat"):][:400]
     assert "polls until the port" in spawn or "port is actually free" in spawn
     assert "waits for this process to release the port before" not in spawn
+
+
+def test_restart_cancels_a_running_search_before_mt5_dies():
+    """12:32 search, 12:51 restart, no OPT iptal line, last_opt_job still running."""
+    body = APP[APP.index("def app_restart"):APP.index("return app")]
+    assert "optimizer.cancel()" in body
+    assert body.index("optimizer.cancel()") < body.index("client.shutdown()")
+
+
+def test_shutdown_cancels_too():
+    body = APP[APP.index("def app_shutdown"):APP.index("def app_restart")]
+    assert "optimizer.cancel()" in body

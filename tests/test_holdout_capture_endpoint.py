@@ -185,8 +185,3 @@ def test_capture_from_a_foreign_origin_is_403():
                  "Sec-Fetch-Site": "cross-site"},
     )
     assert res.status_code == 403
-
-
-def test_capture_is_on_the_origin_list():
-    from micofx.web import app as web_app
-    assert "/api/holdout/capture" in web_app._CRITICAL_MUTATIONS

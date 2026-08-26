@@ -178,3 +178,14 @@ def test_update_symbol_still_returns_the_updated_config(tmp_path, monkeypatch):
     assert updated.risk_percent == 0.75
     assert s.symbols[symbol].risk_percent == 0.75
     assert s.update_symbol("YOK_BOYLE_BIR_SEMBOL", {"risk_percent": 1.0}) is None
+
+
+def test_saving_a_symbol_bumps_the_panel_stamp(tmp_path, monkeypatch):
+    s = _fresh_store(tmp_path, monkeypatch)
+    before = s.symbols_rev
+    symbol = next(iter(s.symbols))
+    s.update_symbol(symbol, {"risk_percent": 0.5})
+    assert s.symbols_rev == before + 1
+    s.delete_symbol(symbol)
+    assert s.symbols_rev == before + 2
+

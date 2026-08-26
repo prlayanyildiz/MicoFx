@@ -52,7 +52,7 @@ def test_the_panel_does_not_edit_trix_length():
 
 
 def test_indicator_cache_has_no_retired_family_helpers():
-    for name in ("flow", "delta", "trix"):
+    for name in ("flow", "delta", "trix", "macd"):
         assert not hasattr(IndicatorCache, name), name
 
 
@@ -63,8 +63,8 @@ def test_every_living_family_still_computes_without_those_helpers():
     times = np.arange(n, dtype=np.int64) * 300
     cache = IndicatorCache(high, low, close, times, 300, open_, np.ones(n), np.zeros(n))
     assert sorted(STRATEGIES) == sorted(
-        ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3", "st_trend",
-         "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
+        ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3",
+         "t3_flip", "wavetrend_flip", "stoch_flip",
          "parabolic_flip", "aroon_flip",
          "ichimoku"])
     for family in STRATEGIES:

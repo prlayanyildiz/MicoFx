@@ -19,8 +19,10 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Exit model is hard ATR stop + ATR trail. Do not bring back
   `tp_atr_mult`, `partial_tp_r` ladders, `max_bars_in_trade`,
   `stale_exit_ratio`, `breakeven_atr`. Overlays (0 = off):
-  `breakeven_at_r` (live 1.5, not 0.5 — BE-2 GER40 −32 R) and one-shot
-  `partial_at_r` (ticket lot × 1/3, broker min/step). Neither is an
+  `breakeven_at_r` (live 1.5, not 0.5 — BE-2 GER40 −32 R), one-shot
+  `partial_at_r` (ticket lot × 1/3, broker min/step), and
+  `harvest_at_r` / `harvest_step_atr` (tighten trail_step once paid;
+  live 1.5 / 0.4 on the leaky book, off on XAUUSD). None is an
   `OPT_FIELDS` axis.
 - `exits.overlay_stop` is the closed-bar trail/BE level. Live still owns
   broker clamp + modify. Change the helper or both callers. Cover
@@ -29,8 +31,9 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Opt apply writes `OPT_FIELDS` only (plus documented secondary fields).
   Never silently enable `ensemble_enabled`. `_slice_ok` /
   `_is_improvement` is the only gate; scheduled reopt uses the same path.
-- `EXIT_RISK_FIELDS` mid-trade → **409**. `breakeven_at_r` and
-  `partial_at_r` are deliberately **not** in that set.
+- `EXIT_RISK_FIELDS` mid-trade → **409**. `breakeven_at_r`,
+  `partial_at_r`, `harvest_at_r` and `harvest_step_atr` are
+  deliberately **not** in that set.
 - Watch mode never opens. Wrong `broker_symbol` → unavailable, no fuzzy
   fallback.
 - Session / day-end / daily-loss flatten are settled (owner 09.08).
@@ -39,7 +42,8 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   unasked.
 - Tests must not append `logs/micofx.log` or `logs/gece_restart.log`.
   `gece_restart.say()` tests must patch the log path.
-- **13 families.** Do not re-add `alpha_trend` or `mavilim`. `ichimoku`
+- **11 families.** Do not re-add `alpha_trend` or `mavilim`. `st_trend`
+  and `macd_flip` retired 26.08 (never applied, not live). `ichimoku`
   stays. Leftover DB names fail closed (no signal), they do not crash.
 - **No restart while positions are open.** `track()` first-sights
   missing `open_original_sl` to the *current trail*.

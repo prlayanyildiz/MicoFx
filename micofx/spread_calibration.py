@@ -36,11 +36,6 @@ import numpy as np
 HORIZON_BARS = 8
 ATR_PERIOD = 14
 
-# A band has to hold its direction at least this well to be worth admitting.
-# Below a coin flip the family is paying the spread for the privilege of being
-# wrong slightly more often than right.
-MIN_CONTINUATION = 0.485
-
 # Never propose a cap outside this range whatever the bars say: 0 would disable
 # the gate entirely and the upper end is past any spread the book has recorded.
 MIN_CAP, MAX_CAP = 0.03, 0.50

@@ -162,56 +162,17 @@ def rolling_sum(src: np.ndarray, length: int) -> np.ndarray:
     return out
 
 
-def macd_periods(fast: int, slow: int) -> tuple[int, int]:
-    """Order MACD periods so the first is the shorter EMA.
-
-    Grid axes and POST /api/opt/params range-check each period independently,
-    so ``macd_fast=26, macd_slow=12`` stores with HTTP 200. ``macd()`` already
-    swaps those before computing; warmup and ``required_bars`` used to read
-    the raw ``macd_slow`` and under-warm the same swapped input. One helper,
-    every reader.
-    """
-    fast_n = max(1, int(fast))
-    slow_n = max(1, int(slow))
-    if fast_n > slow_n:
-        fast_n, slow_n = slow_n, fast_n
-    elif fast_n == slow_n:
-        slow_n = fast_n + 1
-    return fast_n, slow_n
-
-
-def macd(close: np.ndarray, fast: int, slow: int, signal: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Classic MACD: fast/slow EMA spread, its own EMA as the signal line.
-
-    Genuinely different information from the T3 families already in this file:
-    T3 reads a single smoothed price line's own direction, MACD reads the
-    *spread* between two EMAs of different speed - a momentum divergence
-    read, not a price-smoothing read. Two lines converging/diverging can flip
-    ahead of a slow line's own direction change.
-
-    ``fast`` must be the shorter period. See ``macd_periods``. The shipped
-    grid (fast 6..16, slow 18..34) never hits a swap or an equal-period bump.
-    """
-    fast_n, slow_n = macd_periods(fast, slow)
-    fast_ema = ema(close, fast_n)
-    slow_ema = ema(close, slow_n)
-    line = fast_ema - slow_ema
-    sig = ema(line, max(1, int(signal)))
-    return line, sig, line - sig
-
-
 def wavetrend(high: np.ndarray, low: np.ndarray, close: np.ndarray,
              channel_len: int, avg_len: int) -> tuple[np.ndarray, np.ndarray]:
     """WaveTrend oscillator (LazyBear's formula): wt1 (fast) and wt2 (its SMA-4 signal).
 
-    A third read on the same OHLC data, mathematically distinct from both T3
-    (single smoothed price line) and MACD (spread of two same-input EMAs):
-    WaveTrend normalises price against its own *mean absolute deviation* from
-    a smoothed typical price, so its scale is bounded and comparable across
-    symbols/volatility regimes rather than a raw price-unit spread. wt1
-    crossing wt2 is the flip; nothing here reads the classic +-60/100
-    overbought/oversold bands, that is a separate, optional read a family can
-    still add on top.
+    A third read on the same OHLC data, mathematically distinct from T3
+    (single smoothed price line): WaveTrend normalises price against its own
+    *mean absolute deviation* from a smoothed typical price, so its scale is
+    bounded and comparable across symbols/volatility regimes rather than a
+    raw price-unit spread. wt1 crossing wt2 is the flip; nothing here reads
+    the classic +-60/100 overbought/oversold bands, that is a separate,
+    optional read a family can still add on top.
     """
     channel_len = max(1, int(channel_len))
     avg_len = max(1, int(avg_len))

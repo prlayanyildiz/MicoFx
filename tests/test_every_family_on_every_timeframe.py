@@ -106,7 +106,9 @@ def test_the_registry_is_the_whole_book():
     # lost on GER holdout (-20.2 R / PF 0.92). ichimoku passed the same gates.
     # BBW and TD Sequential were measured out of the set: atr_pct_min already
     # gates dead regimes, and TD is a fade counter against an ATR-trail book.
-    assert len(FAMILIES) == 13, f"aile sayisi degisti: {FAMILIES}"
+    # 13 -> 11 on 26.08: st_trend and macd_flip never applied (1 and 5
+    # searches), neither live, each still paid a full max_combos slot.
+    assert len(FAMILIES) == 11, f"aile sayisi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

@@ -27,6 +27,7 @@ import numpy as np
 import pytest
 
 from micofx.engine import Engine
+from micofx.exits import harvest_trail_step
 from micofx.models import trail_min_step
 
 TF_SEC = 300
@@ -69,13 +70,18 @@ class _Cfg:
     symbol = "FUZZ"
     magic = 7
     timeframe = "M5"
+    harvest_at_r = 0.0
+    harvest_step_atr = 0.0
 
-    def __init__(self, sl_mult, start, step, mode, lookback):
+    def __init__(self, sl_mult, start, step, mode, lookback,
+                 harvest_at_r=0.0, harvest_step_atr=0.0):
         self.sl_atr_mult = sl_mult
         self.trail_start_atr = start
         self.trail_step_atr = step
         self.trail_mode = mode
         self.trail_lookback = lookback
+        self.harvest_at_r = harvest_at_r
+        self.harvest_step_atr = harvest_step_atr
 
 
 def _engine(client) -> Engine:
@@ -85,13 +91,15 @@ def _engine(client) -> Engine:
     return eng
 
 
-def _walk(rng: random.Random, side: str, mode: str) -> int:
+def _walk(rng: random.Random, side: str, mode: str, *,
+          harvest_at_r: float = 0.0, harvest_step_atr: float = 0.0) -> int:
     atr = rng.uniform(0.2, 3.0)
     min_stop = rng.choice([0.0, 0.05, 0.5, 1.0, 2.5])
     cfg = _Cfg(sl_mult=rng.uniform(0.5, 3.0),
                start=rng.choice([0.1, 0.3, 0.5, 1.0, 2.0]),
                step=rng.choice([0.4, 0.8, 1.2, 1.6, 3.0]),
-               mode=mode, lookback=rng.choice([3, 5, 10]))
+               mode=mode, lookback=rng.choice([3, 5, 10]),
+               harvest_at_r=harvest_at_r, harvest_step_atr=harvest_step_atr)
     client = _Client(min_stop)
     eng = _engine(client)
 
@@ -126,7 +134,14 @@ def _walk(rng: random.Random, side: str, mode: str) -> int:
         if len(client.modifies) == sent or not client.modify_ok:
             continue
         placed = client.modifies[-1]
-        step = trail_min_step(min_stop, atr, cfg.trail_step_atr)
+        ref = float(closes[i])
+        profit = (ref - ENTRY) if is_buy else (ENTRY - ref)
+        active = harvest_trail_step(
+            trail_step_atr=cfg.trail_step_atr,
+            harvest_at_r=cfg.harvest_at_r,
+            harvest_step_atr=cfg.harvest_step_atr,
+            profit=profit, original_risk=original_risk)
+        step = trail_min_step(min_stop, atr, active)
 
         if before != 0:
             assert (placed > before) if is_buy else (placed < before), \
@@ -161,3 +176,13 @@ def test_the_ratchet_holds_over_random_price_paths(side, mode):
     # Guards the fixture itself: a run that never placed a stop would pass
     # every assertion above without testing anything at all.
     assert placed > 100, f"only {placed} stops placed - the walk is not exercising the trail"
+
+
+@pytest.mark.parametrize("mode", ["atr", "structure", "hybrid"])
+@pytest.mark.parametrize("side", ["buy", "sell"])
+def test_the_harvest_ratchet_holds_over_random_price_paths(side, mode):
+    rng = random.Random(f"{side}-{mode}-harvest-20260826")
+    placed = sum(
+        _walk(rng, side, mode, harvest_at_r=1.5, harvest_step_atr=0.4)
+        for _ in range(40))
+    assert placed > 20, f"only {placed} harvest stops placed - walk is idle"

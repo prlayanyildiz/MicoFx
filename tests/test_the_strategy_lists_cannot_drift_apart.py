@@ -16,7 +16,7 @@ holdout would look consistent and nothing would ever contradict the label. The
 opposite direction is merely wasteful: a family present in _FAMILIES but absent
 from STRATEGIES cannot be reached by any route.
 
-They match today (twenty each). This exists so they still match after the next
+They match today (eleven each). This exists so they still match after the next
 family is added - the same reason test_risk_block_keys_cover_every_reason.py
 exists for the other pair of hand-kept lists in this codebase.
 

@@ -21,7 +21,6 @@ from micofx.strategy import IndicatorCache, Params, compute, opt_fields_read
 
 FLIP = (
     "t3_flip",
-    "macd_flip",
     "wavetrend_flip",
     "stoch_flip",
     "parabolic_flip",

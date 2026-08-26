@@ -81,6 +81,18 @@ def test_state_does_not_include_symbol_rows():
     assert "GER40" in body["symbols_sig"]
 
 
+def test_symbols_sig_moves_when_params_change_not_only_the_name_set():
+    store = _Store()
+    store.symbols_rev = 0
+    tc = TestClient(create_app(store, _Cli(), _Eng(), _Opt()))
+    first = tc.get("/api/state").json()["symbols_sig"]
+    store.symbols_rev = 3
+    second = tc.get("/api/state").json()["symbols_sig"]
+    assert first != second
+    assert first.startswith("GER40:")
+    assert second.endswith(":3")
+
+
 def test_state_poll_does_not_call_symbol_info():
     _Cli.info_calls = 0
     _tc().get("/api/state")

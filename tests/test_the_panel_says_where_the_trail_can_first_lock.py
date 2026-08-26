@@ -102,10 +102,12 @@ def test_uk100_the_one_that_actually_trailed_is_reachable():
 
 def test_the_engine_demands_a_minimum_improvement_not_merely_any():
     """Stronger than "must improve": the move has to clear trail_min_step,
-    which is itself built from trail_step_atr. That is why the step, and not
-    the advertised start, decides when anything can first be locked - and it
-    means the real point can sit even higher than max(start, step)."""
-    assert "step = trail_min_step(min_stop, atr, cfg.trail_step_atr)" in ENGINE_SRC
+    which is itself built from the *active* trail step (OPT step, or the
+    harvest overlay once paid). That is why the step, and not the advertised
+    start, decides when anything can first be locked - and it means the real
+    point can sit even higher than max(start, step)."""
+    assert "trail_min_step(" in ENGINE_SRC
+    assert "active_step" in ENGINE_SRC
     assert "target - current_sl < step" in ENGINE_SRC
 
 

@@ -18,7 +18,8 @@ from micofx.models import STRATEGIES, TIMEFRAMES
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ["README.md", "MASTER_PROMPT.md"]
 RETIRED = ("trix_flip", "flow_rev", "t3_ribbon", "squeeze_brk", "orb",
-           "vwap_rev", "donchian", "liq_sweep", "alpha_trend", "mavilim")
+           "vwap_rev", "donchian", "liq_sweep", "alpha_trend", "mavilim",
+           "st_trend", "macd_flip")
 RETIRED_TF = ("H1", "H4", "M10", "M1 ", "M3 ")
 
 

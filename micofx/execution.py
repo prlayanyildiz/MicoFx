@@ -221,11 +221,19 @@ class ExecutionMonitor:
                 if isinstance(row, dict):
                     sl = float(row.get("original_sl") or 0.0)
                     rd = float(row.get("risk_dist") or 0.0)
+                    entry: dict[str, float] = {"original_sl": sl, "risk_dist": rd}
+                    mfe = float(row.get("mfe") or 0.0)
+                    mae = float(row.get("mae") or 0.0)
+                    if mfe > 0:
+                        entry["mfe"] = mfe
+                    if mae > 0:
+                        entry["mae"] = mae
+                    self._originals[ticket] = entry
                 elif isinstance(row, (int, float)) and not isinstance(row, bool):
-                    sl, rd = float(row), 0.0
+                    self._originals[ticket] = {
+                        "original_sl": float(row), "risk_dist": 0.0}
                 else:
                     continue
-                self._originals[ticket] = {"original_sl": sl, "risk_dist": rd}
 
     def _persist(self, force: bool = False) -> None:
         # Writing every sample would put an SQLite round trip on the fill path;
@@ -246,11 +254,20 @@ class ExecutionMonitor:
             return
         if live is not None:
             self._originals = {t: v for t, v in self._originals.items() if t in live}
-        setter("open_original_sl", {
-            str(t): {"original_sl": float(v.get("original_sl") or 0.0),
-                     "risk_dist": float(v.get("risk_dist") or 0.0)}
-            for t, v in self._originals.items()
-        })
+        blob: dict[str, dict[str, float]] = {}
+        for t, v in self._originals.items():
+            row = {
+                "original_sl": float(v.get("original_sl") or 0.0),
+                "risk_dist": float(v.get("risk_dist") or 0.0),
+            }
+            mfe = float(v.get("mfe") or 0.0)
+            mae = float(v.get("mae") or 0.0)
+            if mfe > 0:
+                row["mfe"] = mfe
+            if mae > 0:
+                row["mae"] = mae
+            blob[str(t)] = row
+        setter("open_original_sl", blob)
 
     # --------------------------------------------------------------- recording
 
@@ -313,6 +330,12 @@ class ExecutionMonitor:
                 book.setdefault("original_sl", float(saved.get("original_sl") or 0.0))
                 if float(saved.get("risk_dist") or 0.0) > 0:
                     book.setdefault("risk_dist", float(saved["risk_dist"]))
+                saved_mfe = float(saved.get("mfe") or 0.0)
+                saved_mae = float(saved.get("mae") or 0.0)
+                if saved_mfe > 0:
+                    book["mfe"] = max(float(book.get("mfe") or 0.0), saved_mfe)
+                if saved_mae > 0:
+                    book["mae"] = max(float(book.get("mae") or 0.0), saved_mae)
             book.update({
                 "symbol": pos["symbol"], "side": pos["side"], "sl": float(pos["sl"]),
                 "tp": float(pos["tp"]), "entry": float(pos["price_open"]),
@@ -336,7 +359,21 @@ class ExecutionMonitor:
                 book["mfe"] = max(float(book.get("mfe") or 0.0), max(0.0, fav))
                 book["mae"] = max(float(book.get("mae") or 0.0), max(0.0, -fav))
         originals = getattr(self, "_originals", None)
-        if isinstance(originals, dict) and originals.keys() - seen:
+        grew = False
+        if isinstance(originals, dict):
+            for ticket in seen:
+                blob = originals.get(ticket)
+                book = self._open.get(ticket)
+                if not isinstance(blob, dict) or not isinstance(book, dict):
+                    continue
+                new_mfe = float(book.get("mfe") or 0.0)
+                new_mae = float(book.get("mae") or 0.0)
+                if (new_mfe > float(blob.get("mfe") or 0.0) + 1e-12
+                        or new_mae > float(blob.get("mae") or 0.0) + 1e-12):
+                    blob["mfe"] = new_mfe
+                    blob["mae"] = new_mae
+                    grew = True
+        if isinstance(originals, dict) and (grew or originals.keys() - seen):
             self._persist_originals(live=seen)
         return set(self._open) - seen
 

@@ -34,6 +34,7 @@
   <button class="tab" data-tab="sistem">Sistem</button>
   <button class="tab" data-tab="log">Log</button>
   <span class="tabs-spacer"></span>
+  <button class="btn btn-sm btn-ghost" id="btn-density" type="button" title="Arayuz yogunlugu: sik / ferah">Ferah</button>
   <span class="pulse" id="pulse" title="Son guncelleme"></span>
 </nav>
 
@@ -42,6 +43,7 @@
     <div class="split">
       <div class="panel">
         <div class="panel-head"><h2>Acik Pozisyonlar</h2>
+          <div class="panel-note" id="harvest-note"></div>
           <button class="btn btn-sm btn-danger" id="btn-close-all">Tumunu Kapat</button>
         </div>
         <div class="table-wrap">
@@ -54,8 +56,10 @@
                 <th class="num" data-help="th.pos.Giris">Giris</th>
                 <th class="num" data-help="th.pos.Fiyat">Fiyat</th>
                 <th class="num" data-help="th.pos.SL">SL</th>
-                <th class="num" data-help="th.pos.TP">TP</th>
+                <th class="num" data-help="th.pos.R">R</th>
+                <th class="num" data-help="th.pos.MFE">MFE</th>
                 <th class="num" data-help="th.pos.KZ">K/Z</th>
+                <th data-help="th.pos.Durum">Durum</th>
                 <th data-help="th.pos.Sure">Sure</th>
                 <th data-help="th.pos.Ticket">Ticket</th>
                 <th data-help="th.pos.Magic">Magic</th>
@@ -255,7 +259,11 @@
         <div class="panel-note" id="autopsy-note">Yukleniyor...</div>
         <button class="btn btn-sm" id="btn-autopsy-refresh">Yenile</button>
       </div>
-      <div class="table-wrap">
+      <!-- Same reason the opt history scrolls in place: this list is every
+           close the ring holds (149 rows = 3870px today) and it grew the Tani
+           page to five screens, pushing the five diagnostic panels above it
+           off the top. Fixed height + sticky header keeps the panel constant. -->
+      <div class="table-wrap table-wrap-scroll">
         <table class="grid" id="autopsy-table">
           <thead>
             <tr>
@@ -388,6 +396,11 @@
 
   <section class="page" id="page-sistem">
     <div class="split">
+      <!-- Bot Kontrolu is four buttons; MT5 Baglantisi beside it is a twelve
+           row table, so the left column used to end in ~200px of empty panel.
+           Tehlikeli Islemler was a lone panel at the very bottom of the page
+           and is the same kind of thing - a row of buttons that stops the
+           bot - so it moves up here and fills the column instead. -->
       <div class="panel">
         <div class="panel-head"><h2>Bot Kontrolu</h2></div>
         <div class="btn-row">
@@ -397,6 +410,17 @@
           <button class="btn btn-danger" id="sys-panic">Acil Durdurma</button>
         </div>
         <div class="panel-note" id="sys-bot-note"></div>
+
+        <div class="danger-block">
+          <h3>Tehlikeli Islemler</h3>
+          <div class="btn-row">
+            <button class="btn btn-sm btn-danger" id="sys-close-all">Tum Pozisyonlari Kapat</button>
+            <button class="btn btn-sm btn-ghost" id="sys-resume-day">Gunu Devam Ettir</button>
+            <button class="btn btn-sm btn-danger" id="sys-shutdown">Uygulamayi Kapat</button>
+            <button class="btn btn-sm btn-danger" id="sys-restart">Yeniden Baslat</button>
+          </div>
+          <div class="panel-note" id="sys-day-note"></div>
+        </div>
       </div>
 
       <div class="panel">
@@ -409,6 +433,18 @@
           <button class="btn btn-sm btn-danger" id="sys-lock-confirm">Bagli hesabi kilitle (onay)</button>
         </div>
       </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Sembol Basi Islem Limiti</h2>
+        <div class="panel-group">
+          <span class="panel-note" id="sys-limit-risk"></span>
+          <input class="filter" id="portfolio-maxpos-bulk" type="number" step="1" min="1" max="50"
+                 placeholder="orn. 3" style="width:92px" title="Tum sembollere uygulanacak deger">
+          <button class="btn btn-sm btn-ghost" id="btn-maxpos-bulk">Tumune Uygula</button>
+        </div>
+      </div>
+      <div class="limit-grid" id="sys-symbol-limits"></div>
     </div>
 
     <div class="panel">
@@ -426,10 +462,8 @@
           <button class="btn btn-sm btn-ghost" id="btn-portfolio-defaults">Varsayilan listeye don</button>
         </div>
       </div>
-      <div class="panel-note">
-        Urun ekle / sil / ac-kapa buradan. Bagli MT5 terminalindeki isimler farkliysa
-        broker esleme alanina yazin veya asagidan arayip ekleyin. Yol degisince
-        (Pepperstone/NCM) urun listesini bu ekrandan guncelleyebilirsiniz.
+      <div class="panel-note" title="Bagli MT5 terminalindeki isimler farkliysa broker esleme alanina yazin veya asagidan arayip ekleyin. Yol degisince (Pepperstone/NCM) urun listesini bu ekrandan guncelleyebilirsiniz.">
+        Urun ekle / sil / ac-kapa buradan. <span class="dim">Broker adlari farkliysa esleme alanini kullanin (ayrinti icin uzerine gelin).</span>
       </div>
       <div class="portfolio-add">
         <input class="filter" id="portfolio-symbol" placeholder="Sembol (orn. EURUSD)" spellcheck="false">
@@ -448,12 +482,6 @@
         <button class="btn btn-sm btn-ghost" data-lotmode-bulk="fixed">Hepsini Sabit Yap</button>
         <button class="btn btn-sm btn-ghost" data-lotmode-bulk="risk">Hepsini Risk% Yap</button>
         <button class="btn btn-sm btn-ghost" id="btn-lotmode-check">Risk Modu Kontrolu</button>
-      </div>
-      <div class="panel-note">
-        Maks pozisyon (tumu):
-        <input class="filter" id="portfolio-maxpos-bulk" type="number" step="1" min="1" max="50"
-               placeholder="orn. 5" style="width:110px">
-        <button class="btn btn-sm btn-ghost" id="btn-maxpos-bulk">Tumune Uygula</button>
       </div>
       <div class="table-wrap">
         <table class="grid" id="portfolio-table">
@@ -479,16 +507,6 @@
       <div id="broker-results"></div>
     </div>
 
-    <div class="panel danger-zone">
-      <div class="panel-head"><h2>Tehlikeli Islemler</h2></div>
-      <div class="btn-row">
-        <button class="btn btn-danger" id="sys-close-all">Tum Pozisyonlari Kapat</button>
-        <button class="btn btn-ghost" id="sys-resume-day">Gunu Devam Ettir (Limit Kilidini Ac)</button>
-        <button class="btn btn-danger" id="sys-shutdown">Uygulamayi Kapat</button>
-        <button class="btn btn-danger" id="sys-restart">Uygulamayi Yeniden Baslat</button>
-      </div>
-      <div class="panel-note" id="sys-day-note"></div>
-    </div>
   </section>
 
   <section class="page" id="page-log">

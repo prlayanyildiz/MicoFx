@@ -125,7 +125,7 @@ class _Optimizer:
 
 
 def _get(connected: bool, positions=()):
-    cfg = SymbolConfig(symbol="GER40", magic=1, timeframe="M15", strategy="st_trend")
+    cfg = SymbolConfig(symbol="GER40", magic=1, timeframe="M15", strategy="stoch_flip")
     store = _Store(cfg)
     client = _Client(connected, positions)
     tc = TestClient(create_app(store, client, _Engine(client, store), _Optimizer()))
@@ -169,7 +169,7 @@ def test_open_positions_are_still_returned_unchanged():
 def test_the_route_does_not_refuse_on_a_disconnect():
     """A display route must not 503 the dashboard on a blip - unlike the
     mutating guards, there is nothing here to fail closed on."""
-    cfg = SymbolConfig(symbol="GER40", magic=1, timeframe="M15", strategy="st_trend")
+    cfg = SymbolConfig(symbol="GER40", magic=1, timeframe="M15", strategy="stoch_flip")
     store = _Store(cfg)
     client = _Client(False, ())
     tc = TestClient(create_app(store, client, _Engine(client, store), _Optimizer()))

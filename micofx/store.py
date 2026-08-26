@@ -123,6 +123,9 @@ class Store:
         self._load_symbols()
         if not self.symbols:
             self.seed_symbols()
+        # Panel /api/state stamp. Names alone stayed put when apply_best
+        # rewrote OPT_FIELDS, so the 3s poll never refetched /api/symbols.
+        self.symbols_rev = 0
 
     # ------------------------------------------------------------------ misc
 
@@ -273,6 +276,7 @@ class Store:
             # and the lock is already held for the write above, so closing it
             # costs nothing.
             self.symbols = {**self.symbols, cfg.symbol: cfg}
+            self.symbols_rev = int(getattr(self, "symbols_rev", 0) or 0) + 1
 
     # Bulk blobs and their timestamps: they change on every optimizer apply and
     # say nothing a human is auditing for. The fields that actually decide what
@@ -351,6 +355,7 @@ class Store:
             # could otherwise resurrect the deleted symbol in memory.
             if symbol in self.symbols:
                 self.symbols = {k: v for k, v in self.symbols.items() if k != symbol}
+                self.symbols_rev = int(getattr(self, "symbols_rev", 0) or 0) + 1
         if removed > 0:
             LOG.emit(f"{symbol} silindi: {removed} opt_runs kaydi gitti.", "WARN", symbol)
         return removed

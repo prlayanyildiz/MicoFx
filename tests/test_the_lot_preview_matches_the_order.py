@@ -103,7 +103,7 @@ BALANCE = 100.0
 
 
 def _cfg(symbol="GER40", risk=0.2, sl_mult=1.0, edge_ready=True):
-    c = SymbolConfig(symbol=symbol, magic=1, timeframe="M15", strategy="st_trend")
+    c = SymbolConfig(symbol=symbol, magic=1, timeframe="M15", strategy="stoch_flip")
     c.lot_mode = "risk"
     c.risk_percent = risk
     c.sl_atr_mult = sl_mult

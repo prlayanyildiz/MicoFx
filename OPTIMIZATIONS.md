@@ -61,7 +61,7 @@ Do not restart while opens exist just to load `open_original_sl`.
 * 900s integrity still fetches full `required_bars` (chunked; no compute). Stamp-only fetch needs verification.
 * Search wall: Numba still unpaid if `OPT_FIELDS` grows 3× — re-profile a GER40 worker then, not now.
 * `/api/state` during a 14-worker search: measured **148s** this page (shared MT5 `RLock`). Serve-stale / skip-lock needs identity tests. Not a second `initialize()`.
-* O-1/O-2/O-3 settings blob rewrite: still measure-first (SCAN-1). O-4 CSRF frozenset stays until tests rewritten.
+* O-1/O-2/O-3 settings blob rewrite: still measure-first (SCAN-1). **O-4 landed 26.08:** Origin-less POST 403 is the gate; the unused `_CRITICAL_MUTATIONS` frozenset is gone.
 
 ---
 

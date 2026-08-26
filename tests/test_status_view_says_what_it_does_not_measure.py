@@ -5,7 +5,7 @@ things:
 
   * most families put the T3 level itself there (a price - 89.48 on SpotBrent,
     68464 on JPN225);
-  * ``_st_trend`` and ``_parabolic_flip`` put a -1/0/+1 DIRECTION in the same
+  * ``_parabolic_flip`` puts a -1/0/+1 DIRECTION in the same
     field, so GER40 showed "t3 = -1.0" against a 26,400 instrument and UK100
     showed 1.0 against 10,800;
   * the flip families pass ``zeros`` and never populate it at all.

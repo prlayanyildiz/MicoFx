@@ -55,11 +55,6 @@ class Params:
     # ---- reversion regime ceiling (_regime) ----
     adx_max: float = 0.0             # 0 disables; reversion dies in strong trends
 
-    # ---- MACD histogram zero-cross ----
-    macd_fast: int = 12
-    macd_slow: int = 26
-    macd_signal: int = 9
-
     # ---- WaveTrend crossover ----
     wt_channel_len: int = 10
     wt_avg_len: int = 21
@@ -99,6 +94,8 @@ class Params:
     breakeven_at_r: float = 0.0      # 0 = off; lock SL at entry after this many R
     partial_at_r: float = 0.0        # 0 = off; paper scale-out rung in R
     partial_close_frac: float = 0.0  # 0 = off; fraction booked at the rung
+    harvest_at_r: float = 0.0        # 0 = off; tighten trail after this many R
+    harvest_step_atr: float = 0.0    # 0 = off; ATR distance once harvest_at_r hits
     cooldown_sec: int = 0            # live engine caps to 2 bars of TF; BT mirrors that
     max_spread_atr: float = 0.0
     min_atr_ratio: float = 0.0
@@ -132,7 +129,6 @@ class Params:
                 self.t3_accel_min,
                 self.st_period, self.st_mult,
                 self.cost_rank_max,
-                self.macd_fast, self.macd_slow, self.macd_signal,
                 self.wt_channel_len, self.wt_avg_len,
                 self.stoch_k_period, self.stoch_k_smooth, self.stoch_d_smooth,
                 self.psar_af_step, self.psar_af_max,
@@ -167,7 +163,6 @@ class IndicatorCache:
         self._body: np.ndarray | None = None
         self._ema: dict[int, np.ndarray] = {}
         self._supertrend: dict[tuple, np.ndarray] = {}
-        self._macd: dict[tuple, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
         self._wavetrend: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._stoch_slow: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._psar: dict[tuple, np.ndarray] = {}
@@ -255,12 +250,6 @@ class IndicatorCache:
         if key not in self._atr:
             self._atr[key] = ind.atr(self.high, self.low, self.close, key)
         return self._atr[key]
-
-    def macd(self, fast: int, slow: int, signal: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        key = (*ind.macd_periods(fast, slow), int(signal))
-        if key not in self._macd:
-            self._macd[key] = ind.macd(self.close, *key)
-        return self._macd[key]
 
     def wavetrend(self, channel_len: int, avg_len: int) -> tuple[np.ndarray, np.ndarray]:
         key = (int(channel_len), int(avg_len))
@@ -806,76 +795,6 @@ def _dual_t3(cache: IndicatorCache, p: Params) -> Signals:
                    htf_up=flat, htf_down=flat)
 
 
-def _st_trend(cache: IndicatorCache, p: Params) -> Signals:
-    """SuperTrend flip: one indicator that is entry, direction and trail in one.
-
-    The entry is the bar on which the SuperTrend line changes side - the close
-    breaks the active ATR band, the band jumps to the other side of price, and
-    that flip *is* the trend inception. Nothing is stacked on top of it: no T3,
-    no Stochastic RSI, no higher-timeframe agreement, no order-flow proxy, no
-    body-ratio or ATR-percentile screen. Those series are never computed here.
-
-    Why this signal rather than a moving-average cross: a cross fires on every
-    wobble of two smoothed lines, so in a flat market it fires constantly and
-    each fire is a fresh trade. SuperTrend has hysteresis built into it - once
-    it is long, price has to close a full ``st_mult * ATR`` band below the
-    ratcheted low band before it will go short - so a range that never travels
-    that distance produces *no* signal at all instead of a stream of them. That
-    is the structural answer to the flat-market whipsaw a crossover family
-    cannot dodge, and it is the reason this family is paired with a no-target,
-    trail-only exit: the same ATR band that admitted the trade is the shape the
-    trailing stop is trying to follow out of it.
-
-    The one permitted regime gate is ADX (``adx_min``, 0 disables and the grid
-    is free to keep it off). It is a single scalar threshold on trend strength,
-    not a second signal - it can only veto a flip, never create one.
-
-    Exits are the shared ATR mechanics, and there is only one set of them: a
-    hard ATR stop opens the trade and the ATR trail is the only thing that
-    closes a winner. Nothing here is special-cased - every family gets that
-    same exit - but it is the exit this entry was built for.
-    """
-    close = cache.close
-    size = close.size
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-
-    period = max(2, int(p.st_period))
-    # Unlike dual_t3 - where SuperTrend is an optional confirmation and 0 turns
-    # it off - here it is the whole signal, so a zero/negative multiple would
-    # leave nothing to trade. Clamp to a usable floor instead.
-    mult = max(0.5, float(p.st_mult) if float(p.st_mult) > 0 else 2.0)
-    direction = cache.supertrend(period, mult)
-    prev = np.roll(direction, 1)
-    prev[0] = direction[0]
-    buy = (direction > 0) & (prev <= 0)
-    sell = (direction < 0) & (prev >= 0)
-
-    need_adx = p.adx_min > 0 or p.adx_max > 0
-    adx_series = cache.adx(p.adx_period) if need_adx else zeros
-    if need_adx:
-        ok = _regime(p, adx_series, size)
-        buy &= ok
-        sell &= ok
-
-    # Wilder's ATR needs its own cascade before the bands mean anything, and the
-    # ratcheting line needs a run of bars before its level is history-driven
-    # rather than seed-driven.
-    warmup = min(size, max(period * 10, p.atr_period * 3,
-                           p.adx_period * 4 if need_adx else 0))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    # ``t3`` is a UI display slot; this family computes no T3 of its own, so the
-    # SuperTrend line's own direction is reported instead of a series it never
-    # looked at.
-    return Signals(t3=direction.astype(np.float64), k=zeros, d=zeros, atr=atr_series,
-                   adx=adx_series, buy=buy, sell=sell, htf_up=flat, htf_down=flat,
-                   t3_kind="direction")
-
-
 def _t3_flip(cache: IndicatorCache, p: Params) -> Signals:
     """ONE Tillson T3 line. The line's own direction change IS the entry.
 
@@ -959,67 +878,16 @@ def _t3_flip(cache: IndicatorCache, p: Params) -> Signals:
                    htf_up=flat, htf_down=flat)
 
 
-def _macd_flip(cache: IndicatorCache, p: Params) -> Signals:
-    """MACD histogram zero-cross - the same edge-trigger idea as ``t3_flip``,
-    read off genuinely different information.
-
-    ``t3_flip`` asks "did this one smoothed price line just change direction?"
-    MACD's histogram is the *spread* between a fast and a slow EMA of price -
-    a momentum-divergence read, not a price-smoothing read. Two EMAs pulling
-    apart or converging can flip sign before a single slower line's own slope
-    does, and it can also stay flat through a chop a single line would still
-    wiggle across. It is not a T3 variant wearing a different name: nothing
-    about it is derived from the T3 cascade or its source series.
-
-    Same discipline as t3_flip: the histogram crossing zero is the whole
-    signal, no state, no filter menu. The entry is the transition bar only
-    (was on the other side of zero last bar), never every bar the histogram
-    happens to sit positive or negative - that is a trend-following state,
-    not a flip.
-
-    Exits are the shared ATR mechanics, same as every other family here -
-    this adds a signal, not a new exit model.
-    """
-    close = cache.close
-    size = close.size
-    _, _, hist = cache.macd(p.macd_fast, p.macd_slow, p.macd_signal)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-
-    above = hist > 0
-    below = hist < 0
-    was_above = np.roll(above, 1)
-    was_below = np.roll(below, 1)
-    was_above[0] = False
-    was_below[0] = False
-    buy = above & ~was_above
-    sell = below & ~was_below
-
-    # MACD needs the slow EMA plus its own signal EMA to settle, and the ATR
-    # the exits are sized from needs its own warmup. Use the ordered slow so
-    # a swapped payload does not under-warm while macd() itself uses 34.
-    _, slow_n = ind.macd_periods(p.macd_fast, p.macd_slow)
-    warmup = min(size, max(slow_n + p.macd_signal, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=zeros, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
-
-
 def _wavetrend_flip(cache: IndicatorCache, p: Params) -> Signals:
-    """WaveTrend wt1/wt2 crossover - a third, independent flip read.
+    """WaveTrend wt1/wt2 crossover - an independent flip read.
 
-    ``t3_flip`` reads a smoothed price line's own direction. ``macd_flip``
-    reads the spread of two same-input EMAs. This reads price normalised
-    against its own mean absolute deviation from a smoothed typical price -
-    a bounded, volatility-relative oscillator rather than a raw price-unit
-    spread, so its crossovers are on a comparable scale across symbols and
-    regimes instead of needing per-symbol re-scaling.
+    ``t3_flip`` reads a smoothed price line's own direction. This reads price
+    normalised against its own mean absolute deviation from a smoothed typical
+    price - a bounded, volatility-relative oscillator rather than a raw
+    price-unit spread, so its crossovers are on a comparable scale across
+    symbols and regimes instead of needing per-symbol re-scaling.
 
-    Same rule as the other two flip families: wt1 crossing wt2 is the whole
+    Same rule as the other flip families: wt1 crossing wt2 is the whole
     entry, transition bar only, no state, no filter menu, no zone (the
     classic +-60/100 overbought/oversold read is a different, separately
     justified strategy and not bolted on here).
@@ -1093,11 +961,11 @@ def _stoch_flip(cache: IndicatorCache, p: Params) -> Signals:
 def _parabolic_flip(cache: IndicatorCache, p: Params) -> Signals:
     """Parabolic SAR side flip - a fifth, independent flip read.
 
-    Same family shape as ``st_trend`` (a trailing band whose own side change
-    is the entry) but a genuinely different band: SuperTrend's width is a
-    fixed ATR multiple, SAR's is its own accelerating step toward the last
-    extreme - it tightens the longer a trend runs, so it can flip on a
-    shallower pullback late in a move than an ATR band of fixed width would.
+    A trailing band whose own side change is the entry, like SuperTrend, but
+    a genuinely different band: SuperTrend's width is a fixed ATR multiple,
+    SAR's is its own accelerating step toward the last extreme - it tightens
+    the longer a trend runs, so it can flip on a shallower pullback late in a
+    move than an ATR band of fixed width would.
     """
     close = cache.close
     size = close.size
@@ -1198,9 +1066,7 @@ _FAMILIES = {
     "micro_rev": _micro_rev,
     "burst": _burst,
     "dual_t3": _dual_t3,
-    "st_trend": _st_trend,
     "t3_flip": _t3_flip,
-    "macd_flip": _macd_flip,
     "wavetrend_flip": _wavetrend_flip,
     "stoch_flip": _stoch_flip,
     "parabolic_flip": _parabolic_flip,
@@ -1282,9 +1148,7 @@ def required_bars(p: Params) -> int:
                    p.mr_fast * 8 + 260, p.brst_lookback * 6 + 260,
                    # dual_t3's slow line is a cascade over t3_fast * mult.
                    int(p.t3_fast * max(1.2, p.t3_slow_mult)) * 20,
-                   int(p.st_period) * 10
-                   if (p.st_mult > 0 or p.strategy == "st_trend") else 0,
-                   (ind.macd_periods(p.macd_fast, p.macd_slow)[1] + p.macd_signal) * 10,
+                   int(p.st_period) * 10 if p.st_mult > 0 else 0,
                    (p.wt_channel_len + p.wt_avg_len) * 10,
                    (p.stoch_k_period + p.stoch_k_smooth + p.stoch_d_smooth) * 8,
                    p.aroon_length * 8))

@@ -82,7 +82,7 @@ def test_max_positions_change_is_recorded(captured):
 
 def test_the_optimizer_door_is_recorded(captured):
     """The exact gap Cursor #065 found: the book changed, CFG was silent."""
-    s = _store(strategy="st_trend", timeframe="M15")
+    s = _store(strategy="stoch_flip", timeframe="M15")
     s.update_symbol("NAS100", {"strategy": "t3_stoch", "timeframe": "M5"},
                     source="opt apply")
 

@@ -198,9 +198,20 @@ function selectTab(name) {
     renderExecution(); renderLive();
   }
   if (name === "panel" && STATE && STATE.bot) {
-    renderTop(); renderCards(); renderCapacity(); renderPositions(); renderDayTable();
+    renderTop(); renderCards(); renderCapacity(); renderPositions(); renderHarvest(); renderDayTable();
     renderExecution(); renderLive();
   }
+  // These three used to render only on the next poll, so switching to them
+  // showed an empty panel for up to one interval - 3s focused, 6s when the
+  // window is in the background, which is exactly when an operator tabs back
+  // to it. panel/tani/opt already painted on the switch; this makes the rest
+  // behave the same instead of three tabs being slower for no stated reason.
+  if (name === "sistem" && STATE && STATE.system) renderSystem();
+  if (name === "semboller") {
+    if (!cardsBuilt && SYMBOLS.length) buildSymbolCards();
+    updateSymbolCards();
+  }
+  if (name === "ai" && STATE && STATE.ai) renderAI();
   if (name === "log") pollLogs();
 }
 
@@ -430,11 +441,20 @@ function renderTop() {
     ["Bot", botText, bot.running ? "pos" : (bot.watching ? "muted" : "dim")],
     ["MT5", mt5.connected ? "BAGLI" : "KOPUK", mt5.connected ? "pos" : "neg"],
     ["Saat", (mt5.server_time || "").slice(11, 16), ""],
-    ["Bakiye", num(acc.balance), ""],
+    // Currency and leverage ride in the label, not a second line: the top bar
+    // has spare width and no spare height, and these two never change while
+    // the account is up - they are context for the number, not a reading.
+    ["Bakiye", num(acc.balance), "", `${acc.currency || ""} 1:${acc.leverage || "-"}`],
     ["Varlik", num(acc.equity), ""],
     ["Acik K/Z", signed(acc.profit), cls(acc.profit)],
     ["Gun", `${signed(day.realised)} (${signed(day.pnl_pct, 2)}%)`, cls(day.realised)],
-    ["Pozisyon", `${cap.open_total ?? 0} / ${cap.max_total_positions ?? 0}`, ""],
+    // Operator 26.08: the strip below is for gauges (a bar, a ceiling, a
+    // projection). Plain scalars belong up here, where they are on screen on
+    // every tab - so Serbest Marj moved up, and Acilabilir Islem folded into
+    // the Pozisyon chip it was already half-repeating (3/100 on both).
+    ["Serbest Marj", num(acc.margin_free), "", `kullanilan ${num(acc.margin)}`],
+    ["Pozisyon", `${cap.open_total ?? 0} / ${cap.max_total_positions ?? 0}`, "",
+      `${cap.global_free_slots ?? 0} bos | sembol basi ${cap.max_positions_per_symbol ?? "-"}`],
   ];
   if (acc.netting) {
     items.push(["Hesap modu", "NETTING - ISLEM DURDU", "neg"]);
@@ -443,8 +463,9 @@ function renderTop() {
     items.push(["Hesap", "GERCEK PARA", "neg"]);
   }
 
-  $("#topstats").innerHTML = items.map(([lbl, val, klass]) =>
-    `<div class="tstat" title="${esc(helpTitle("top." + lbl))}"><div class="lbl">${lbl}</div><div class="val ${klass}">${val}</div></div>`
+  $("#topstats").innerHTML = items.map(([lbl, val, klass, sub]) =>
+    `<div class="tstat" title="${esc(helpTitle("top." + lbl))}"><div class="lbl">${lbl}${
+      sub ? ` <span class="dim">${esc(sub)}</span>` : ""}</div><div class="val ${klass}">${val}</div></div>`
   ).join("");
 
   $("#btn-start").disabled = !!bot.running;
@@ -492,21 +513,23 @@ function renderCards() {
   const ai = STATE.ai || {};
   const costCeiling = Number(sys.max_cost_pct_of_risk || cap.max_cost_pct_of_risk || 0);
 
+  // Bakiye / Varlik / Gunluk Sonuc used to sit here AND in the top bar, which
+  // is on screen on every tab - the same three numbers read twice, costing a
+  // full card row. The bar keeps them (balance now carries currency+leverage
+  // in its label); what stays below is only what the bar has no room for: the
+  // margin pair, the three gauges with progress bars, and the projection.
   const cards = [
-    { lbl: "Bakiye", val: num(acc.balance), foot: `${esc(acc.currency || "")} | kaldirac 1:${acc.leverage || "-"}`, accent: "blue" },
-    { lbl: "Varlik", val: num(acc.equity), foot: `acik k/z ${signed(acc.profit)}`, accent: Number(acc.profit) >= 0 ? "green" : "red" },
-    { lbl: "Serbest Marj", val: num(acc.margin_free), foot: `kullanilan ${num(acc.margin)}`, accent: "blue" },
     {
       lbl: "Marj Kullanimi", val: `%${num(marginPct, 1)}`, foot: `limit %${num(marginMax, 0)}`,
       bar: marginRatio, barClass: marginRatio > 85 ? "bad" : marginRatio > 60 ? "warn" : "",
     },
     {
-      lbl: "Gunluk Sonuc", val: signed(day.realised), accent: Number(day.realised) >= 0 ? "green" : "red",
-      foot: `${day.closed_trades || 0} islem | %${num(day.win_rate, 0)} basari`,
-    },
-    {
+      // Absorbs the old Gunluk Sonuc card: the cash figure is in the top bar,
+      // but trade count and win rate are nowhere else, so they move into this
+      // card's foot rather than disappearing with it.
       lbl: "Gunluk Limit", val: `${signed(dayPct, 2)}%`,
       foot: `${lossLimit > 0 ? `zarar limiti %${num(lossLimit, 1)}` : "limit kapali"}`
+        + ` | ${day.closed_trades || 0} islem %${num(day.win_rate, 0)} basari`
         + ` | lot x${num(ai.risk_scale ?? 1, 2)}`,
       bar: lossRatio, barClass: lossRatio > 80 ? "bad" : lossRatio > 50 ? "warn" : "",
       accent: day.halted ? "red" : "",
@@ -529,11 +552,6 @@ function renderCards() {
       bar: unbounded ? 100 : riskRatio,
       barClass: unbounded || riskRatio > 80 ? "bad" : riskRatio > 50 ? "warn" : "",
       accent: unbounded ? "red" : "",
-    },
-    {
-      lbl: "Acilabilir Islem", val: `${cap.global_free_slots ?? 0}`,
-      foot: `${cap.open_total ?? 0}/${cap.max_total_positions ?? 0} dolu | sembol basi ${cap.max_positions_per_symbol ?? "-"}`,
-      accent: "amber",
     },
     {
       lbl: "Beklenen Aylik",
@@ -645,8 +663,6 @@ function renderCapacity() {
   });
   rowsInto($("#capacity-table"), rows, "Sembol yok", 13);
 
-  const enabled = (cap.rows || []).filter((r) => r.enabled);
-  const openable = enabled.filter((r) => r.free_slots > 0).length;
   // Deliberately does NOT repeat the cards above it. Open/total positions, free
   // slots and the monthly projection all have their own card; saying them twice
   // made the longest line on the page out of numbers the operator had already
@@ -655,21 +671,27 @@ function renderCapacity() {
   const costedNote = cap.projected_costed_negative
     ? ` <span class="pill bad" title="En az bir sembolun maliyetli holdout dilimi negatif - toplam artida olsa bile">bazi semboller maliyetli dilimde negatif</span>`
     : "";
+  // Operator 26.08: the line wrapped to three right-aligned rows and pushed
+  // the table down. Two numbers stay on screen - the risk if every slot fills,
+  // and the regime the projection was measured under. The rest is not deleted:
+  // sizing multipliers and the margin budget have no card and no column, so
+  // they move into the hover title. Out of the way, still one gesture away.
+  $("#capacity-summary").title =
+    `lot carpani x${num(cap.lot_multiplier, 2)}`
+    + `${cap.size_by_edge ? " + avantaj (holdout R/maxDD)" : ""}`
+    + ` | guvenli ust sinir x${num(cap.safe_multiplier, 2)}`
+    + ` | marj butcesi ${num(cap.margin_budget)}`
+    + ` | slot limitinde marj ${num(cap.concurrent_margin)}`
+    + ` | hepsi acilirsa toplam risk ${num(cap.total_risk_per_trade)}`
+    + ` (%${num(cap.total_risk_pct, 2)})`
+    + (cap.projected_costed_monthly
+      ? ` | maliyetli dilim ${signed(cap.projected_costed_monthly)}` : "");
   $("#capacity-summary").innerHTML =
-    `${enabled.length} aktif sembol | ${openable} acilabilir | ` +
-    `lot carpani <b>x${num(cap.lot_multiplier, 2)}</b>` +
-    `${cap.size_by_edge ? " + avantaj (holdout R/maxDD)" : ""} | ` +
-    `hepsi acilirsa toplam risk ${num(cap.total_risk_per_trade)} (%${num(cap.total_risk_pct, 2)}) | ` +
     `slot limitinde en kotu risk ${num(cap.concurrent_risk)} (%${num(cap.concurrent_risk_pct, 2)})` +
     `${cap.max_concurrent_risk_pct > 0
       ? ` <b class="${cap.concurrent_risk_pct > cap.max_concurrent_risk_pct ? "neg" : "dim"}">tavan %${num(cap.max_concurrent_risk_pct, 2)}</b>`
-      : ' <span class="dim">tavan kapali</span>'}, ` +
-    `marj ${num(cap.concurrent_margin)} | ` +
-    `guvenli ust sinir <b>x${num(cap.safe_multiplier, 2)}</b> | ` +
-    `marj butcesi ${num(cap.margin_budget)} | ` +
+      : ' <span class="dim">tavan kapali</span>'} | ` +
     `projeksiyon ${cap.projected_charge_costs ? "maliyetli" : "maliyetsiz"} OPT'ten` +
-    (cap.projected_costed_monthly
-      ? `, maliyetli dilim ${signed(cap.projected_costed_monthly)}` : "") +
     costedNote;
 }
 
@@ -720,6 +742,17 @@ function renderPositions() {
     // quiet blank. The log has said STOPSUZ since this morning; the table
     // showed the same state as a dimmed zero (review 24.08 15:12).
     const naked = !(Number(p.sl) > 0) && Number(p.volume) > 0;
+    const give = (p.mfe_r != null && p.r_open != null) ? p.mfe_r - p.r_open : 0;
+    const cfg = SYMBOLS.find((s) => s.symbol === p.config_symbol
+      || s.resolved_symbol === p.symbol) || {};
+    const harvestAt = Number(cfg.harvest_at_r || 0);
+    const status = [
+      p.partial_done ? '<span class="pill on">1/3</span>' : "",
+      p.be_locked ? '<span class="pill on">BE</span>' : "",
+      p.trail_moved && !p.be_locked ? '<span class="pill on">trail</span>' : "",
+      harvestAt > 0 && Number(p.r_open) >= harvestAt
+        ? '<span class="pill on">hasat</span>' : "",
+    ].filter(Boolean).join(" ") || '<span class="dim">ham</span>';
     const tr = el("tr");
     tr.innerHTML = `
       <td class="sym">${esc(p.symbol)}${p.managed ? "" : ' <span class="pill off">harici</span>'}</td>
@@ -729,8 +762,11 @@ function renderPositions() {
       <td class="num">${price(p.price_current, digits)}</td>
       <td class="num ${naked ? "neg" : (p.sl ? "" : "dim")}">${
         naked ? '<b>STOPSUZ</b>' : price(p.sl, digits)}</td>
-      <td class="num ${p.tp ? "" : "dim"}">${price(p.tp, digits)}</td>
+      <td class="num ${cls(p.r_open)}">${p.r_open != null ? signed(p.r_open, 2) : "-"}</td>
+      <td class="num ${Number(p.r_open) > 0 && give >= 1 ? "neg" : "dim"}">${
+        p.mfe_r != null ? num(p.mfe_r, 2) : "-"}</td>
       <td class="num ${cls(p.profit + p.swap)}">${signed(p.profit + p.swap)}</td>
+      <td>${status}</td>
       <td class="dim mono">${duration(now - p.time)}</td>
       <td class="dim mono">${esc(String(p.ticket))}</td>
       <td class="dim mono">${p.magic ? esc(String(p.magic)) : "-"}</td>`;
@@ -752,7 +788,25 @@ function renderPositions() {
     })));
     return tr;
   });
-  rowsInto($("#positions-table"), rows, "Acik pozisyon yok", 12);
+  rowsInto($("#positions-table"), rows, "Acik pozisyon yok", 14);
+}
+
+function renderHarvest() {
+  const node = $("#harvest-note");
+  if (!node) return;
+  const h = STATE.harvest || {};
+  const n = Number(h.n || 0);
+  if (!n) { node.textContent = ""; return; }
+  const left = h.left_on_table_r;
+  const on = (h.partial_on || []).filter(Boolean);
+  const harvest = (h.harvest_on || []).filter(Boolean);
+  const by = h.by_symbol || {};
+  const worst = Object.entries(by).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+  let text = `${n} kapanis; kazananlarda masada ${left != null ? num(left, 1) : "-"} R`;
+  if (worst) text += ` | en cok ${String(worst[0])} ${num(worst[1], 1)}R`;
+  text += ` | parca acik: ${on.length ? on.map((s) => String(s)).join(", ") : "yok"}`;
+  text += ` | hasat trail: ${harvest.length ? harvest.map((s) => String(s)).join(", ") : "yok"}`;
+  node.textContent = text;
 }
 
 function renderDayTable() {
@@ -838,12 +892,10 @@ const STRATEGY_LABEL = {
   micro_rev: "Mikro Ortalamaya Donus (maliyet olcekli)",
   burst: "Momentum Patlamasi Devami",
   dual_t3: "Ikili T3 + ATR (sade cekirdek)",
-  st_trend: "SuperTrend Donusu (hedefsiz, sadece trail)",
   t3_flip: "Tek Tillson T3 Yon Donusu (tek cizgi)",
   // The flip families were missing here entirely, so four of the ten live
   // symbols showed a raw key instead of a name. Must stay in step with
   // models.STRATEGIES - the dropdown below is the same list.
-  macd_flip: "MACD Yon Donusu",
   wavetrend_flip: "WaveTrend Yon Donusu",
   stoch_flip: "Stochastic Yon Donusu",
   parabolic_flip: "Parabolic SAR Yon Donusu",
@@ -904,6 +956,8 @@ const SECTIONS = [
       { k: "trail_step_atr", t: "num", label: "Trail mesafe x ATR", step: 0.1, min: 0.1 },
       { k: "breakeven_at_r", t: "num", label: "Basabas kilit (R, 0=kapali)", step: 0.5, min: 0, max: 5 },
       { k: "partial_at_r", t: "num", label: "Parca esigi (R, 0=kapali; lot otomatik)", step: 0.5, min: 0, max: 5 },
+      { k: "harvest_at_r", t: "num", label: "Hasat esigi (R, 0=kapali)", step: 0.5, min: 0, max: 5 },
+      { k: "harvest_step_atr", t: "num", label: "Hasat trail x ATR (0=kapali)", step: 0.1, min: 0, max: 20 },
       {
         k: "trail_mode", t: "select", label: "Trail modu",
         opts: [["atr", "ATR (klasik)"], ["structure", "Yapisal (swing H/L)"], ["hybrid", "Hibrit (en siki)"]],
@@ -1549,7 +1603,10 @@ function renderOptJob() {
       <td class="num dim">${v.net_r != null ? signed(v.net_r, 1) + "R" : "-"}</td>
       <td class="num">${h.trades}</td>
       <td class="num ${h.profit_factor >= 1.1 ? "pos" : "neg"}">${num(h.profit_factor, 2)}</td>
-      <td class="num ${cls(h.net_r)}"><b>${signed(h.net_r, 1)}R</b></td>
+      <td class="num ${cls(h.net_r)}" title="${h.capture != null
+        ? esc("Hasat (net R / MFE toplami) " + num(h.capture * 100, 0) + "% — skor girdisi degil")
+        : ""}"><b>${signed(h.net_r, 1)}R</b>${
+          h.capture != null ? ` <span class="dim">${num(h.capture * 100, 0)}%</span>` : ""}</td>
       <td class="num ${retCls}" title="${retTitle}">${ret != null ? num(ret * 100, 0) + "%" : "-"}</td>
       <td>${status}</td>
       <td class="dim mono" style="white-space:normal;max-width:380px">${
@@ -1973,6 +2030,63 @@ function buildSysField(f) {
   return titled(field, f.k);
 }
 
+function renderSymbolLimits() {
+  // Operator 26.08: per-symbol max_positions was only reachable by opening a
+  // symbol card on another tab, so the number that decides how much of the
+  // book can stack was the hardest one to see. Same field, same POST as the
+  // card - this is a second view, not a second source of truth.
+  const box = $("#sys-symbol-limits");
+  if (!box) return;
+  const rows = (SYMBOLS || []).slice().sort((a, b) => a.symbol.localeCompare(b.symbol));
+  const sig = rows.map((c) => c.symbol).join(",");
+  if (box.dataset.sig !== sig) {
+    box.innerHTML = "";
+    rows.forEach((cfg) => {
+      const input = el("input", {
+        type: "number", step: "1", min: "1", max: "10",
+        "data-limit-symbol": cfg.symbol,
+      });
+      input.value = cfg.max_positions ?? 1;
+      input.addEventListener("change", () => {
+        const val = parseInt(input.value, 10);
+        if (!(val >= 1 && val <= 10)) {
+          toast(`${cfg.symbol}: sembol basi limit 1-10 arasinda olmali`, "err");
+          input.value = cfg.max_positions ?? 1;
+          return;
+        }
+        saveSymbol(cfg.symbol, { max_positions: val }, input);
+      });
+      const cell = el("div", { class: "limit-cell" + (cfg.enabled ? "" : " off") });
+      cell.appendChild(el("span", { class: "limit-sym", text: cfg.symbol }));
+      cell.appendChild(input);
+      box.appendChild(cell);
+    });
+    box.dataset.sig = sig;
+  }
+  $$("[data-limit-symbol]", box).forEach((input) => {
+    if (input === document.activeElement) return;
+    const cfg = (SYMBOLS || []).find((s) => s.symbol === input.dataset.limitSymbol);
+    if (cfg && String(input.value) !== String(cfg.max_positions)) {
+      input.value = cfg.max_positions ?? 1;
+    }
+  });
+
+  // Raising these is exactly what walks the book into the concurrent-risk
+  // ceiling, and that ceiling refuses entries one at a time rather than
+  // rejecting the configuration - so say the arithmetic here, where the
+  // number is actually being typed.
+  const note = $("#sys-limit-risk");
+  const cap = STATE.capacity || {};
+  if (note) {
+    const want = Number(cap.concurrent_risk_pct || 0);
+    const ceil = Number(cap.max_concurrent_risk_pct || 0);
+    note.className = "panel-note" + (ceil > 0 && want > ceil ? " neg" : "");
+    note.textContent = ceil > 0
+      ? `slot limitinde en kotu risk %${num(want, 2)} / tavan %${num(ceil, 2)}`
+      : `slot limitinde en kotu risk %${num(want, 2)} - tavan kapali`;
+  }
+}
+
 function renderSystem() {
   const sys = STATE.system || {};
   const box = $("#sys-settings");
@@ -1996,26 +2110,42 @@ function renderSystem() {
     else if (String(input.value) !== String(sys[key])) input.value = sys[key];
   });
   syncSysDangerNotes(sys);
+  renderSymbolLimits();
 
   const mt5 = STATE.mt5 || {};
   const acc = STATE.account || {};
   const bot = STATE.bot || {};
+  // "Durum: Bagli" repeated the MT5 chip in the top bar, which is on screen on
+  // every tab; a green pill and a word saying the same thing cost a row. The
+  // row earns its place only when it carries something the chip cannot - the
+  // broker's reason for the disconnect. Same for the lock: it is printed
+  // verbatim under this table and, when it matches the account above, says the
+  // account number a third time.
+  const account = `${acc.login || "-"} @ ${acc.server || "-"}`;
+  // Not `lock` - that name is taken further down by STATE.account_lock.
+  const lockedAccount = sys.account_lock_login
+    ? `${sys.account_lock_login} @ ${sys.account_lock_server || "-"}`
+    : "";
   const rows = [
-    ["Durum", mt5.connected ? "Bagli" : `Kopuk - ${mt5.error || ""}`],
+    ...(mt5.connected ? [] : [["Durum", `Kopuk - ${mt5.error || ""}`]]),
     ["Broker", mt5.company || "-"],
-    ["Hesap", `${acc.login || "-"} @ ${acc.server || "-"}`],
+    ["Hesap", account],
     ["Hesap turu", Number(acc.trade_mode) === 2 ? "GERCEK PARA" : (acc.trade_mode == null || acc.trade_mode === "" ? "-" : "demo/contest")],
-    ["Kilit", (sys.account_lock_login
-      ? `${sys.account_lock_login} @ ${sys.account_lock_server || "-"}`
-      : "(bos - demo otomatik, gercek para operator onayi)")],
+    ["Kilit", (!lockedAccount
+      ? "(bos - demo otomatik, gercek para operator onayi)"
+      : (lockedAccount === account ? "hesapla ayni" : lockedAccount))],
     ["Isim", acc.name || "-"],
     ["AutoTrading", mt5.trade_allowed ? "Acik" : "KAPALI"],
     ["Terminal build", mt5.build || "-"],
     ["Terminal saati", mt5.server_time || "-"],
-    ["Ayarlanan yol", sys.mt5_terminal_path || "(bos - baglanmaz)"],
-    ["Bagli terminal", mt5.path || "-"],
+    // Full filesystem paths. In a shared column they wrapped onto three lines
+    // and dragged every neighbouring row's height with them, so they take the
+    // whole width and wrap on their own.
+    ["Ayarlanan yol", sys.mt5_terminal_path || "(bos - baglanmaz)", true],
+    ["Bagli terminal", mt5.path || "-", true],
   ];
-  $("#sys-mt5").innerHTML = rows.map(([k, v]) => `<div><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("");
+  $("#sys-mt5").innerHTML = rows.map(([k, v, wide]) =>
+    `<div${wide ? ' class="kv-wide"' : ""}><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("");
 
   $("#sys-bot-note").textContent =
     (bot.running ? "Islem aciyor" : bot.watching ? "Sadece izliyor - islem acmiyor" : "Motor durdu") +
@@ -2029,7 +2159,12 @@ function renderSystem() {
     if (lock.reason) {
       lockNote.innerHTML = `<span class="pill bad">KILIT</span> ${esc(lock.reason)}`;
     } else if (sys.account_lock_login) {
-      lockNote.textContent = `Kilitli hesap: ${sys.account_lock_login} @ ${sys.account_lock_server || "-"}`;
+      // The Kilit row above already carries this. Repeating the account
+      // number verbatim under a table that just said "hesapla ayni" is the
+      // third printing of one number; say it only when it disagrees, which
+      // is the case actually worth noticing.
+      lockNote.textContent = lockedAccount === account
+        ? "" : `Kilitli hesap: ${lockedAccount}`;
     } else {
       lockNote.textContent = "Hesap kilidi bos - demo ilk baglanista yazilir; gercek para operator onayi ister.";
     }
@@ -2468,7 +2603,7 @@ async function pollLogs() {
 
 function viewPulse(s) {
   const pos = (s.positions || []).map(
-    (p) => `${p.ticket}:${p.sl}:${p.profit}:${p.volume}`).join("|");
+    (p) => `${p.ticket}:${p.sl}:${p.profit}:${p.volume}:${p.r_open}`).join("|");
   const st = s.states || {};
   const notes = Object.keys(st).sort().map(
     (k) => `${k}:${st[k].signal || ""}:${st[k].note || ""}:${st[k].k}:${st[k].atr}`
@@ -2477,8 +2612,10 @@ function viewPulse(s) {
   const acc = s.account || {};
   const bot = s.bot || {};
   const mt5 = s.mt5 || {};
+  const hv = s.harvest || {};
   return [bot.last_cycle_at, bot.running, mt5.connected, acc.equity, acc.profit,
-          day.realised, day.halted, pos, notes, s.ai && s.ai.last_review].join("\0");
+          day.realised, day.halted, pos, notes, s.ai && s.ai.last_review,
+          hv.left_on_table_r, (hv.partial_on || []).join(",")].join("\0");
 }
 
 async function refresh() {
@@ -2504,7 +2641,7 @@ async function refresh() {
     if (!same) {
       renderTop();
       if (activeTab === "panel") {
-        renderCards(); renderCapacity(); renderPositions(); renderDayTable();
+        renderCards(); renderCapacity(); renderPositions(); renderHarvest(); renderDayTable();
       }
       if (activeTab === "panel" || activeTab === "tani") {
         renderExecution(); renderLive();
@@ -2911,3 +3048,33 @@ fillGroupSelects();
 // with an empty SCHEMA every axis shows. Fetch before the first refresh so the
 // symbol form does not flash the full field list.
 loadSchema().then(loadSymbols).then(refresh);
+
+/* --------------------------------------------------------------- density */
+// Operator request 26.08: the terminal is read all day, so it ships tight and
+// the roomier set is a choice. Kept as a self-contained block at the end
+// rather than a branch inside wire() so it stays out of the way of the log
+// toolbar work in the same file. The stylesheet holds every number; this only
+// writes the attribute that picks a column of them.
+(function density() {
+  const KEY = "micofx-density";
+  const btn = $("#btn-density");
+  const apply = (mode) => {
+    // Compact is the default, so it is the ABSENCE of the attribute - that
+    // way a stylesheet that ever loads without this script still renders the
+    // dense set instead of falling back to a layout nobody chose.
+    if (mode === "cozy") document.documentElement.dataset.density = "cozy";
+    else delete document.documentElement.dataset.density;
+    if (btn) btn.textContent = mode === "cozy" ? "Sik" : "Ferah";
+  };
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (_) { /* private mode */ }
+  apply(saved === "cozy" ? "cozy" : "compact");
+  if (btn) {
+    btn.onclick = () => {
+      const next = document.documentElement.dataset.density === "cozy"
+        ? "compact" : "cozy";
+      apply(next);
+      try { localStorage.setItem(KEY, next); } catch (_) { /* private mode */ }
+    };
+  }
+})();

@@ -108,10 +108,12 @@ def _eng(client=None):
 
 
 def test_not_a_search_axis():
-    for name in ("partial_close_lots", "partial_at_r", "partial_close_frac"):
+    for name in ("partial_close_lots", "partial_at_r", "partial_close_frac",
+                 "harvest_at_r", "harvest_step_atr"):
         assert name not in OPT_FIELDS
     src = inspect.getsource(Params.key)
     assert "partial_close" not in src and "partial_at_r" not in src
+    assert "harvest_at_r" not in src and "harvest_step_atr" not in src
 
 
 def test_zero_is_off():
@@ -425,3 +427,5 @@ def test_partial_at_r_is_a_live_overlay_not_a_mid_trade_409():
     """14:02 wrote 0→1.5 with opens; 62s later GER fired. Same door as BE."""
     assert "partial_at_r" not in EXIT_RISK_FIELDS
     assert "breakeven_at_r" not in EXIT_RISK_FIELDS
+    assert "harvest_at_r" not in EXIT_RISK_FIELDS
+    assert "harvest_step_atr" not in EXIT_RISK_FIELDS

@@ -289,7 +289,7 @@ def test_patch_refuses_strategy_change_with_open_position():
     positions = [{"ticket": 1, "symbol": "XAUUSD", "magic": 990021, "side": "sell"}]
     tc, store = _client(symbols, positions)
 
-    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "st_trend", "timeframe": "M30"})
+    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "stoch_flip", "timeframe": "M30"})
     assert res.status_code == 409
     assert store.symbols["XAUUSD"].strategy == "t3_stoch"  # unchanged
 
@@ -298,9 +298,9 @@ def test_patch_allows_strategy_change_with_no_open_position():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
-    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "st_trend", "timeframe": "M30"})
+    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "stoch_flip", "timeframe": "M30"})
     assert res.status_code == 200
-    assert store.symbols["XAUUSD"].strategy == "st_trend"
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
 def test_bulk_patch_skips_symbol_with_open_position_but_changes_the_rest():
@@ -313,14 +313,14 @@ def test_bulk_patch_skips_symbol_with_open_position_but_changes_the_rest():
 
     res = tc.post("/api/symbols-bulk", json={
         "symbols": ["XAUUSD", "COPPER"],
-        "patch": {"strategy": "st_trend", "timeframe": "M30"},
+        "patch": {"strategy": "stoch_flip", "timeframe": "M30"},
     })
     assert res.status_code == 200
     body = res.json()
     assert body["rejected"] == ["XAUUSD"]
     assert body["changed"] == 1
     assert store.symbols["XAUUSD"].strategy == "t3_stoch"  # untouched, open position
-    assert store.symbols["COPPER"].strategy == "st_trend"  # changed, no open position
+    assert store.symbols["COPPER"].strategy == "stoch_flip"  # changed, no open position
 
 
 def test_bulk_patch_allows_non_strategy_fields_with_open_position():
