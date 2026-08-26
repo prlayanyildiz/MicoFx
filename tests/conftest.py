@@ -26,6 +26,7 @@ class TestClient(_ftc.TestClient):
         token = getattr(getattr(app, "state", None), "api_token", "") or ""
         if token:
             self.headers["x-mico-token"] = token
+            self.headers.setdefault("origin", "http://testserver")
 
 
 _ftc.TestClient = TestClient

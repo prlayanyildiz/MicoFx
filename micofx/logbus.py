@@ -58,6 +58,10 @@ class LogBus:
         self._file = LOG_DIR / "micofx.log"
 
     def emit(self, message: str, level: Level = "INFO", symbol: str = "") -> None:
+        # One physical line: a payload with CR/LF must not mint a second
+        # timestamped TRADE row that rotation would keep as a whole line.
+        message = str(message).replace("\r", " ").replace("\n", " ")
+        symbol = str(symbol).replace("\r", " ").replace("\n", " ")
         ts = time.time()
         with self._lock:
             self._seq += 1

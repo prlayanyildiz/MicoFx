@@ -9,6 +9,7 @@ from typing import Any
 from . import account_lock, backtest, execution, sessions
 from . import indicators as ind
 from .execution import ExecutionMonitor
+from .exits import overlay_stop
 from .logbus import LOG
 from .models import (
     SymbolConfig,
@@ -34,7 +35,8 @@ from .supervisor import Supervisor
 _STALE_BAR_REFRESH = 45.0   # kept as a name; due uses the broker clock now
 _BAR_INTEGRITY_REFRESH = 900.0  # rare full copy_rates with no new bar
 _ENTRY_BLOCK_FLUSH_SEC = 45.0
-_ACCOUNT_TTL = 1.0
+_ACCOUNT_TTL = 2.0
+_CAPACITY_TTL = 3.0
 
 # A cooldown is meant to stop the same setup re-firing on the next bar or two,
 # so it belongs on the strategy's own clock. The stored seconds were written for
@@ -357,6 +359,10 @@ class Engine:
         # before this cycle's fill lands, orphaning the fresh position from
         # trail/BE the moment it exists.
         self.entry_lock = threading.Lock()
+        self._supervisor_gate = threading.Lock()
+        self._verify_inflight: set[str] = set()
+        self._fill_verify_done: list[dict[str, Any]] = []
+        self._fill_verify_lock = threading.Lock()
         self._account: dict[str, Any] = {}
         self._account_at = 0.0
         self._positions: list[dict[str, Any]] = []
@@ -391,6 +397,9 @@ class Engine:
             self._session_clock_skew = None
         self._day_cache: dict[str, Any] = {}
         self._day_cache_at = 0.0
+        self._capacity_cache: dict[str, Any] = {}
+        self._capacity_cache_at = 0.0
+        self._capacity_pos_sig: tuple = ()
         # ticket -> {"rungs": how many scale-out steps already banked,
         #            "orig": the volume the position opened with}. Fractions are
         #            of the *original* size, matching the backtest ladder.
@@ -748,9 +757,19 @@ class Engine:
             LOG.emit(f"ACIL DURDURMA: {closed} pozisyon kapatildi.", "WARN")
         return {"ok": remaining == 0, "closed": closed, "remaining": remaining}
 
-    def close_all(self, symbol: str | None = None) -> tuple[int, int]:
-        """Returns ``(closed, remaining)`` - see ``MT5Client.close_all``."""
+    def close_all(self, symbol: str | None = None, *,
+                  reason: str = "") -> tuple[int, int]:
+        """Returns ``(closed, remaining)`` - see ``MT5Client.close_all``.
+
+        ``reason`` is the caller name for the log. Panic / session / daily-loss
+        already emit their own line; the panel doors did not, so a flatten
+        showed up as six ``Pozisyon kapatildi kar~`` rows and nothing else
+        (26.08 12:22). Empty keeps the broker call silent for those paths.
+        """
         magics = {c.magic for c in list(self.store.symbols.values())}
+        if reason:
+            target = symbol or "tum"
+            LOG.emit(f"{reason}: flatten basladi ({target}).", "WARN")
         return self.client.close_all(magics=magics, symbol=symbol)
 
     def _reload_positions(self) -> bool:
@@ -824,6 +843,7 @@ class Engine:
             # it; the next cycle's ensure() will reconnect first.
             return
         self._reap_execution()
+        self.day_stats()
         self._apply_pending_exits()
         self._scan_orphan_candidates()
         if not self.client.connected:
@@ -875,9 +895,10 @@ class Engine:
                 LOG.emit(f"Gunluk zarar limiti: flatten sonrasi {remaining} pozisyon hala acik.", "ERROR")
         if self.supervisor.due():
             try:
-                self.supervisor.review(self.risk.daily.pnl_pct(account.get("equity", 0.0)))
-            except Exception as exc:
-                LOG.emit(f"AI denetleyici hatasi: {exc}", "ERROR")
+                pnl = self.risk.daily.pnl_pct(account.get("equity", 0.0))
+            except Exception:
+                pnl = 0.0
+            self._kick_supervisor_review(pnl)
 
         self._maybe_schedule_reopt()
 
@@ -935,6 +956,7 @@ class Engine:
                 state.note = f"hata: {exc}"
                 LOG.emit(f"Degerlendirme hatasi: {exc}", "ERROR", cfg.symbol)
 
+        self._drain_fill_verify()
         if allow_entry and ready:
             ready.sort(key=lambda c: self.supervisor.priority(c), reverse=True)
             for cfg in ready:
@@ -972,6 +994,166 @@ class Engine:
         self._flush_entry_blocks()
         self._flush_trade_autopsies()
         self._flush_spread_ratio()
+
+    def _kick_supervisor_review(self, pnl: float) -> None:
+        """14d deals_since must not sit in front of evaluate/entry.
+
+        review() still runs; it just does not hold this cycle. Quarantine
+        can lag one interval (already 120s).
+        """
+        gate = getattr(self, "_supervisor_gate", None)
+        if gate is None:
+            self._supervisor_gate = threading.Lock()
+            gate = self._supervisor_gate
+        if not gate.acquire(blocking=False):
+            return
+
+        def _run() -> None:
+            try:
+                self.supervisor.review(pnl)
+            except Exception as exc:
+                LOG.emit(f"AI denetleyici hatasi: {exc}", "ERROR")
+            finally:
+                gate.release()
+
+        threading.Thread(target=_run, name="micofx-supervisor", daemon=True).start()
+
+    def _run_fill_verify(self, pending: dict[str, Any]) -> None:
+        kwargs = dict(pending.get("verify_kwargs") or {})
+        try:
+            result = self.client._verify_ambiguous_send(**kwargs)
+        except Exception as exc:
+            result = {"ok": False, "ambiguous": True,
+                      "error": f"dogrulama hatasi: {exc}"}
+        item = {**pending, "result": result}
+        lock = getattr(self, "_fill_verify_lock", None)
+        if lock is None:
+            self._fill_verify_lock = threading.Lock()
+            lock = self._fill_verify_lock
+        with lock:
+            done = getattr(self, "_fill_verify_done", None)
+            if done is None:
+                self._fill_verify_done = []
+                done = self._fill_verify_done
+            done.append(item)
+
+    def _drain_fill_verify(self) -> None:
+        lock = getattr(self, "_fill_verify_lock", None)
+        if lock is None:
+            return
+        with lock:
+            done = list(getattr(self, "_fill_verify_done", []) or [])
+            self._fill_verify_done = []
+        inflight = getattr(self, "_verify_inflight", None)
+        for item in done:
+            symbol = str(item.get("symbol") or "")
+            if isinstance(inflight, set):
+                inflight.discard(symbol)
+            result = item.get("result") or {}
+            state = self.states.get(symbol)
+            cfg = self.store.symbols.get(symbol) if getattr(self, "store", None) else None
+            if state is None:
+                continue
+            if result.get("ok"):
+                if cfg is None:
+                    continue
+                self._book_deferred_fill(cfg, state, result, item)
+                continue
+            state.note = result.get("error", "emir hatasi")
+            state.entry_block = "emir_hatasi"
+            if result.get("verified_unfilled") or result.get("retcode") in AMBIGUOUS_RETCODES:
+                self._link_backoff[symbol] = time.time() + LINK_BACKOFF_SEC
+            if result.get("verified_unfilled"):
+                bar = item.get("bar_key") or (int(state.last_bar or 0), 0)
+                count = int(item.get("probe_count") or 0)
+                self._unfilled_probe[symbol] = (tuple(bar), count)
+                LOG.emit(result.get("error", "emir hatasi"), "WARN", symbol)
+            else:
+                LOG.emit(result.get("error", "emir hatasi"), "ERROR", symbol)
+            if result.get("ambiguous"):
+                state.signal = ""
+                state.signal_source = ""
+                state.primary_signal = ""
+                state.pending_bar_key = (0, 0)
+                state.note = "emir sonucu belirsiz - tekrar denenmeyecek, MT5'i kontrol edin"
+                state.entry_block = "emir_belirsiz"
+
+    def _book_deferred_fill(self, cfg: SymbolConfig, state: SymbolState,
+                            result: dict[str, Any], item: dict[str, Any]) -> None:
+        """note_fill / cooldown for a fill the verifier found off-thread."""
+        side = str(item.get("side") or state.signal or "")
+        sl_dist = float(item.get("sl_dist") or 0.0)
+        lot = float(item.get("lot") or result.get("volume") or 0.0)
+        entry = float(item.get("entry") or result.get("requested") or 0.0)
+        note = str(item.get("note") or "")
+        if result.get("partial_fill"):
+            LOG.emit(f"Kismi dolum: {result['volume']:g} lot (istenen {lot:g} lot) - "
+                     f"kalan hacim iptal edildi, tekrar denenmedi.", "WARN", cfg.symbol)
+        info = self.client.info(cfg.symbol) or {}
+        self.execution.record(
+            cfg.symbol, "entry", result.get("requested", entry), result["price"],
+            deal_is_buy=(side == "buy"), risk_dist=sl_dist,
+            point=float(info.get("point", 0.0) or 0.0), volume=result["volume"],
+            money_per_price=self.client.money_per_price_unit(cfg.symbol, result["volume"]),
+        )
+        state.cooldown_until = time.time() + _cooldown_for(cfg)
+        self._save_cooldown(cfg.symbol, state.cooldown_until)
+        self._mark_bar_filled(cfg.symbol, state.signal_source, state.last_bar)
+        state.signal = ""
+        state.signal_source = ""
+        state.primary_signal = ""
+        state.note = "islem acildi"
+        state.entry_block = "acildi"
+        ticket = int(result.get("position", 0) or 0)
+        note_fill = getattr(self.execution, "note_fill", None)
+        if ticket and callable(note_fill):
+            sig_close = None
+            if state.bars is not None and len(state.bars.close):
+                sig_close = float(state.bars.close[-1])
+            fill_px = float(result["price"])
+            point = float(info.get("point") or 0)
+            fill_vs = None
+            if sig_close is not None and side:
+                fill_vs = (fill_px - sig_close) if side == "buy" else (sig_close - fill_px)
+            atr_pct = None
+            if state.atr and sig_close:
+                atr_pct = float(state.atr) / sig_close
+            note_fill(
+                ticket,
+                signal_bar_time=int(state.last_bar or 0) or None,
+                fill_time=self._broker_now_int(),
+                fill_price=fill_px,
+                signal_close=sig_close,
+                fill_vs_signal_close=fill_vs,
+                fill_vs_signal_close_pts=(fill_vs / point if point and fill_vs is not None else None),
+                fill_vs_signal_close_r=(fill_vs / sl_dist if sl_dist and fill_vs is not None else None),
+                spread_atr=float(state.spread_atr or 0),
+                adx=state.adx,
+                atr_pct=atr_pct,
+                tf_seconds=timeframe_seconds(cfg.timeframe),
+                side=side,
+                entry=fill_px,
+                risk_dist=float(sl_dist or 0),
+                original_sl=float(result.get("sl") or 0) or None,
+            )
+        cost_bit = ""
+        vol = float(result["volume"])
+        mpu = self.client.money_per_price_unit(cfg.symbol, vol)
+        r_value = float(sl_dist or 0.0) * mpu
+        if r_value > 0:
+            cost = cfg.commission_per_lot * vol
+            tick = item.get("tick") or {}
+            cost += float(tick.get("spread") or 0.0) * mpu
+            cost_bit = f" maliyet %{cost / r_value * 100.0:.1f}"
+        LOG.emit(
+            f"#{ticket} {side.upper()} {vol:g} lot @ {result['price']:.5f} "
+            f"SL={result['sl']:.5f} TP={result['tp']:.5f} magic={cfg.magic}"
+            f"{cost_bit} | lot: {note}",
+            "TRADE", cfg.symbol)
+        try:
+            self._reload_positions()
+        except Exception:
+            pass
 
     # ----------------------------------------------------- entry diagnostics
 
@@ -1153,6 +1335,24 @@ class Engine:
             self._entry_blocks_dirty = True
         except Exception:
             pass
+
+    def _tally_evaluate_refuse(self, cfg: SymbolConfig, state: SymbolState,
+                               reason: str, bar_key: int) -> None:
+        """Count an `_evaluate` refuse that already has a live signal.
+
+        The ready-loop tally only sees symbols that return True from here
+        and then hit `_try_entry`. Gates that return False after
+        `_merge_signals` (session closed, market halted, gap age,
+        already-filled bar, symbol halt) used to vanish from the panel
+        while still refusing correctly. No-signal returns stay silent.
+        """
+        if not state.signal:
+            return
+        self._tally_entry(
+            cfg.symbol, reason,
+            bar_key=state.pending_bar_key or (state.signal_source, bar_key),
+            source=state.signal_source,
+        )
 
     def forget_filled_bars(self, symbol: str) -> None:
         """Drop one symbol's filled-bar record at delete, not at the next prune.
@@ -1739,7 +1939,9 @@ class Engine:
                 cell["r_sum"] += realised
                 cell["r_n"] += 1
             left = self._autopsy_float(row.get("left_on_table_r"))
-            if left is not None:
+            # Loser left ≈ mfe + 1R: that is the loss, not giveback. Headline
+            # and cells that say "masada" only count winners (r > 0).
+            if (left is not None and realised is not None and realised > 0):
                 cell["left_sum"] += left
                 cell["left_n"] += 1
                 left_total += left
@@ -1973,30 +2175,33 @@ class Engine:
 
         if not sess.open:
             state.note = f"seans disi ({sess.window})"
-            # Clearing only ``state.signal`` left ``primary_signal``/``sec_signal``
-            # (and therefore ``pending_bar_key``) untouched across the closure.
-            # No new bar means no new bar_key either, so on the very next poll
-            # ``_merge_signals`` resurrected ``state.signal`` from the still-set
-            # primary_signal, matching the still-stale pending_bar_key - a signal
-            # from just before the close could fire the instant the session
-            # reopens, on whatever bar was still cached, before the first fresh
-            # bar of the new session had even been fetched. Clearing the whole
-            # signal chain here means reopening always starts from nothing.
+            # Merge already ran, so a live signal can sit here. Tally it
+            # before clearing: this is the same invisibility as bar_bosluk,
+            # one gate earlier. No-signal closed polls stay silent via the
+            # helper. Clearing the whole chain still matters: only
+            # ``state.signal`` used to be wiped, so ``_merge_signals``
+            # resurrected it from the still-set primary on the next poll
+            # and a pre-close signal could fire the instant the session
+            # reopened, on whatever bar was still cached.
+            self._tally_evaluate_refuse(cfg, state, "seans_disi", bar_key)
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
             state.pending_bar_key = (0, 0)
+            state.entry_block = "seans_disi"
             return False
         if not self.client.market_open(cfg.symbol):
             # Same staleness hazard as the sess.open branch above: with
             # trade_all_hours on, sess.open is true around the clock and this
             # is the only gate that actually catches an overnight index/
             # commodity halt, so it has to clear the whole signal chain too.
+            self._tally_evaluate_refuse(cfg, state, "piyasa_kapali", bar_key)
             state.note = "piyasa kapali / fiyat akmiyor"
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
             state.pending_bar_key = (0, 0)
+            state.entry_block = "piyasa_kapali"
             return False
         # Sampled here, past BOTH gates, rather than beside the tick read.
         #
@@ -2024,6 +2229,8 @@ class Engine:
             # Friday's last closed M30 arriving at Monday session open after a
             # restart. Session-close clearing does not cover this: last_bar
             # was 0, so the still-last-closed Friday stamp looked fresh.
+            # Tally before clearing: the ready-loop never sees this return.
+            self._tally_evaluate_refuse(cfg, state, "bar_bosluk", bar_key)
             state.note = "sinyal bari gecmis (bosluk)"
             state.signal = ""
             state.signal_source = ""
@@ -2049,10 +2256,7 @@ class Engine:
         symbol_halt = self._symbol_daily_halt(cfg)
         if symbol_halt:
             state.note = symbol_halt
-            if state.signal:
-                self._tally_entry(cfg.symbol, "sembol_halt",
-                                  bar_key=state.pending_bar_key or (state.signal_source, bar_key),
-                                  source=state.signal_source)
+            self._tally_evaluate_refuse(cfg, state, "sembol_halt", bar_key)
             return False
         if not state.signal:
             state.note = state.note if state.note else "sinyal yok"
@@ -2073,7 +2277,9 @@ class Engine:
             #   19:09:26 NAS100 BUY @ 29705.90   (same M30 bar, cooldown long gone)
             #
             # Both stopped out for -14.22 each.
+            self._tally_evaluate_refuse(cfg, state, "bar_doldu", bar_key)
             state.note = "bu barin sinyali zaten dolduruldu"
+            state.entry_block = "bar_doldu"
             return False
         if state.pending_bar_key == (state.signal_source, bar_key):
             # Same bar as when the signal first appeared (see the marking
@@ -2280,6 +2486,11 @@ class Engine:
     def _try_entry(self, base: SymbolConfig, state: SymbolState,
                    account: dict[str, Any]) -> None:
         state.entry_block = ""
+        inflight = getattr(self, "_verify_inflight", None)
+        if isinstance(inflight, set) and base.symbol in inflight:
+            state.note = "emir dogrulaniyor"
+            state.entry_block = "emir_dogrulaniyor"
+            return
         until = float(self._link_backoff.get(base.symbol, 0.0) or 0.0)
         if until > time.time():
             # The broker link refused this symbol's last order and the position
@@ -2463,7 +2674,35 @@ class Engine:
                 cfg.symbol, side, lot, sl, tp, cfg.magic,
                 slippage=self.store.system.slippage_points,
                 comment=f"MicoFX {cfg.timeframe}",
+                defer_verify=True,
             )
+            if result.get("pending_verify"):
+                inflight = getattr(self, "_verify_inflight", None)
+                if inflight is None:
+                    self._verify_inflight = set()
+                    inflight = self._verify_inflight
+                inflight.add(cfg.symbol)
+                pending = {
+                    "symbol": cfg.symbol,
+                    "side": side,
+                    "sl_dist": sl_dist,
+                    "lot": lot,
+                    "entry": entry,
+                    "note": note,
+                    "tick": dict(tick),
+                    "bar_key": (int(state.last_bar or 0),
+                                int(state.pending_bar_key[1] or 0)
+                                if state.pending_bar_key else 0),
+                    "probe_count": len(before_tickets),
+                    "verify_kwargs": result.get("verify_kwargs") or {},
+                }
+                state.note = "emir dogrulaniyor"
+                state.entry_block = "emir_dogrulaniyor"
+                threading.Thread(
+                    target=self._run_fill_verify, args=(pending,),
+                    name=f"micofx-fill-verify-{cfg.symbol}", daemon=True,
+                ).start()
+                return
             if result.get("ok"):
                 if not self._reload_positions():
                     # Fill reported ok but the book cannot be verified - do
@@ -3318,7 +3557,7 @@ class Engine:
                     symbol=pos.get("symbol") or book.get("symbol") or "",
                     exit_price=self._autopsy_float(fill.get("price")) if fill else None,
                     exit_time=self._broker_now_int(),
-                    profit=None,
+                    profit=(self._autopsy_float(fill.get("profit")) if fill else None),
                     reason_code=None,
                     comment=comment,
                 )
@@ -3413,41 +3652,28 @@ class Engine:
         # the hard stop" check cannot drift apart inside one call.
         original_risk = max(atr * cfg.sl_atr_mult, min_stop)
 
-        if cfg.trail_start_atr > 0 and profit_dist >= atr * cfg.trail_start_atr:
-            # ATR-based trailing (always computed as the baseline / fallback)
-            trail_atr = ref - atr * cfg.trail_step_atr if is_buy else ref + atr * cfg.trail_step_atr
-            trail = trail_atr
-
-            # Structure-based or hybrid trailing (opt-in via cfg.trail_mode)
-            if cfg.trail_mode in ("structure", "hybrid"):
-                if bars is None:
-                    state = self.states.get(cfg.symbol)
-                    bars = state.bars if state else None
-                if bars is not None and hasattr(bars, "low") and len(bars.low) > cfg.trail_lookback:
-                    lookback = max(3, cfg.trail_lookback)
-                    if is_buy:
-                        swings = ind.swing_lows(bars.low, lookback)
-                        struct_sl = swings[-1] - atr * 0.15  # small buffer below swing low
-                    else:
-                        swings = ind.swing_highs(bars.high, lookback)
-                        struct_sl = swings[-1] + atr * 0.15  # small buffer above swing high
-
-                    if cfg.trail_mode == "hybrid":
-                        # Use the tighter of ATR trail and structure trail
-                        trail = max(trail_atr, struct_sl) if is_buy else min(trail_atr, struct_sl)
-                    else:
-                        trail = struct_sl
-
-            if target is None or (trail > target if is_buy else trail < target):
-                target = trail
+        struct_sl = None
+        if cfg.trail_mode in ("structure", "hybrid"):
+            if bars is None:
+                state = self.states.get(cfg.symbol)
+                bars = state.bars if state else None
+            if bars is not None and hasattr(bars, "low") and len(bars.low) > cfg.trail_lookback:
+                lookback = max(3, cfg.trail_lookback)
+                if is_buy:
+                    swings = ind.swing_lows(bars.low, lookback)
+                    struct_sl = swings[-1] - atr * 0.15
+                else:
+                    swings = ind.swing_highs(bars.high, lookback)
+                    struct_sl = swings[-1] + atr * 0.15
 
         be_r = float(getattr(cfg, "breakeven_at_r", 0.0) or 0.0)
-        if be_r > 0 and original_risk > 0 and profit_dist >= be_r * original_risk:
-            be_sl = entry
-            if target is None:
-                target = be_sl
-            else:
-                target = max(target, be_sl) if is_buy else min(target, be_sl)
+        target = overlay_stop(
+            is_buy=is_buy, entry=entry, ref=ref, atr=atr,
+            trail_start_atr=float(cfg.trail_start_atr),
+            trail_step_atr=float(cfg.trail_step_atr),
+            trail_mode=str(cfg.trail_mode or "atr"),
+            struct_sl=struct_sl, breakeven_at_r=be_r,
+            original_risk=original_risk, be_offset=0.0)
 
         if target is None:
             return settled
@@ -3560,12 +3786,24 @@ class Engine:
             setter("scale_out_done", sorted(done))
         # IOC can fill less than requested; remain and the log follow the
         # broker print. done.add stays: one-shot, even on DONE_PARTIAL.
-        filled = float(fill.get("volume") or close_vol)
-        remain = float(pos.get("volume") or 0) - filled
+        filled_raw = float(fill.get("volume") or close_vol)
+        pos_vol = float(pos.get("volume") or 0)
+        filled = max(0.0, min(filled_raw, pos_vol)) if pos_vol > 0 else max(0.0, filled_raw)
+        if abs(filled_raw - filled) > 1e-9:
+            LOG.emit(
+                f"#{ticket} parca hacmi uyusmadi (broker {filled_raw:g}, "
+                f"pozisyon {pos_vol:g}) - {filled:g} kullanildi.",
+                "WARN", cfg.symbol)
+        remain = max(0.0, pos_vol - filled)
         r_now = profit_dist / original_risk if original_risk else 0.0
         px = float(fill.get("price") or 0)
         move = ((px - entry) if is_buy else (entry - px)) if px else profit_dist
-        cash = self.client.money_per_price_unit(cfg.symbol, filled) * move
+        tick_size = float(info.get("tick_size") or info.get("point") or 0)
+        tick_value = float(info.get("tick_value") or 0)
+        if tick_size > 0 and tick_value > 0:
+            cash = (tick_value / tick_size) * filled * move
+        else:
+            cash = self.client.money_per_price_unit(cfg.symbol, filled) * move
         LOG.emit(
             f"#{ticket} parca kapatildi {filled:g} lot "
             f"(kar={cash:.2f}, {r_now:.2f}R, kalan {remain:g})",
@@ -3662,6 +3900,40 @@ class Engine:
             return self._decorate_positions(self._positions)
         return self.positions_view()
 
+    def _panel_account(self) -> dict[str, Any]:
+        """Account for /api/state. Reuse the cycle snapshot when it is fresh.
+
+        Panel poll is 3s; ``refresh_account`` TTL used to be 1s, so every
+        visible poll took ``account_info`` on the same MT5 lock the cycle
+        already held. Empty is not a valid cached book (no reading yet),
+        so this *does* fall through on a missing snapshot.
+        """
+        if self._cycle_book_is_fresh() and self._account:
+            return self._account
+        return self.refresh_account()
+
+    def _panel_capacity(self, positions: list[dict[str, Any]],
+                        account: dict[str, Any],
+                        atrs: dict[str, float]) -> dict[str, Any]:
+        """Capacity for /api/state. Recompute on ticket/volume change, else TTL.
+
+        ``risk.capacity`` calls ``order_calc_margin`` per symbol under the
+        live MT5 lock. Equity can tick every poll; slot counts do not.
+        """
+        sig = tuple(sorted(
+            (int(p.get("ticket") or 0), round(float(p.get("volume") or 0), 4))
+            for p in positions))
+        now = time.time()
+        if (self._capacity_cache
+                and sig == self._capacity_pos_sig
+                and now - self._capacity_cache_at < _CAPACITY_TTL):
+            return self._capacity_cache
+        out = self.risk.capacity(positions, account, atrs)
+        self._capacity_cache = out
+        self._capacity_cache_at = now
+        self._capacity_pos_sig = sig
+        return out
+
     def _symbol_daily_halt(self, cfg: SymbolConfig) -> str:
         """Non-empty block reason once THIS symbol has lost its own daily cap.
 
@@ -3746,11 +4018,26 @@ class Engine:
             if self._symbol_halted:
                 self._symbol_halted = {}
                 self._save_symbol_halted()
+            self._day_cache = {}
+            self._day_cache_at = 0.0
 
-    def day_stats(self, max_age: float = 5.0) -> dict[str, Any]:
-        """Closed-trade totals for the current local (Windows) day, per symbol."""
+    def _empty_day_stats(self) -> dict[str, Any]:
+        guard = self.risk.daily
+        return {
+            "day_key": getattr(guard, "day_key", "") or "",
+            "start_balance": round(float(getattr(guard, "start_balance", 0.0) or 0.0), 2),
+            "closed_trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
+            "realised": 0.0, "per_symbol": [],
+            "halted": bool(getattr(guard, "halted", False)),
+            "halt_reason": getattr(guard, "halt_reason", "") or "",
+        }
+
+    def day_stats(self, max_age: float = 5.0, fetch: bool = True) -> dict[str, Any]:
+        """Closed-trade totals for the current broker-calendar day, per symbol."""
         if self._day_cache and time.time() - self._day_cache_at < max_age:
             return self._day_cache
+        if not fetch:
+            return self._day_cache or self._empty_day_stats()
         guard = self.risk.daily
         day_start = self._day_start_epoch()
 
@@ -3968,10 +4255,11 @@ class Engine:
             LOG.emit(warn, "WARN")
 
     def snapshot(self) -> dict[str, Any]:
-        account = self.refresh_account()
+        account = self._panel_account()
         positions = self._panel_positions()
-        capacity = self.risk.capacity(positions, account,
-                                      {s: st.atr for s, st in list(self.states.items())})
+        capacity = self._panel_capacity(
+            positions, account,
+            {s: st.atr for s, st in list(self.states.items())})
         equity = float(account.get("equity", 0.0))
         return {
             "bot": {
@@ -3999,7 +4287,7 @@ class Engine:
                 "expected_server": str(getattr(self.store.system, "account_lock_server", "") or ""),
             },
             "day": {
-                **self.day_stats(),
+                **self.day_stats(max_age=15.0, fetch=False),
                 "pnl_pct": round(self.risk.daily.pnl_pct(equity), 2),
                 "floating": round(float(account.get("profit", 0.0)), 2),
                 # Surfaced so a pnl_pct that no longer matches naive

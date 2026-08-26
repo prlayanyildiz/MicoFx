@@ -493,15 +493,31 @@
 
   <section class="page" id="page-log">
     <div class="panel">
-      <div class="panel-head"><h2>Terminal Kaydi</h2>
-        <div class="panel-group">
+      <div class="log-sticky">
+        <div class="panel-head"><h2>Terminal Kaydi</h2>
+          <div class="panel-group">
+            <input class="filter log-search" id="log-search" placeholder="Ara: ticket, sembol, metin" autocomplete="off">
+            <label class="chk"><input type="checkbox" id="log-follow" checked> Takip et</label>
+            <button class="btn btn-sm btn-ghost" id="btn-log-pause" type="button">Duraklat</button>
+            <button class="btn btn-sm btn-ghost" id="btn-log-density" type="button">Sik</button>
+            <button class="btn btn-sm btn-ghost" id="btn-log-clear" type="button" title="Yalniz bu sekmedeki gorunumu temizler; bellek halkasina dokunmaz">Temizle</button>
+            <a class="btn btn-sm btn-ghost" id="btn-log-download" href="/api/logs/download">Indir</a>
+          </div>
+        </div>
+        <div class="log-toolbar log-chips">
           <div class="chip-row" id="log-levels"></div>
-          <label class="chk"><input type="checkbox" id="log-follow" checked> Takip et</label>
-          <button class="btn btn-sm btn-ghost" id="btn-log-clear">Temizle</button>
-          <a class="btn btn-sm btn-ghost" id="btn-log-download" href="/api/logs/download">Indir</a>
+          <button class="btn btn-sm btn-ghost" id="btn-log-levels-all" type="button">Tum seviyeler</button>
+          <span class="log-sep" id="log-symbols-sep" hidden></span>
+          <span id="log-symbols-wrap" class="log-toolbar log-chips" hidden>
+            <div class="chip-row" id="log-symbols"></div>
+            <button class="btn btn-sm btn-ghost" id="btn-log-symbols-all" type="button">Tum semboller</button>
+          </span>
         </div>
       </div>
-      <div class="logview" id="logview"></div>
+      <div class="logview-wrap">
+        <div class="logview" id="logview"></div>
+        <button class="log-jump" id="btn-log-jump" type="button" hidden>0 yeni satir &#8595;</button>
+      </div>
     </div>
   </section>
 </main>

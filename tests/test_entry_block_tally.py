@@ -325,6 +325,27 @@ def test_the_panel_is_wired_to_the_endpoint():
     assert "loadBlocks()" in js
 
 
+def test_the_panel_compares_blocks_on_signals_not_poll_retries():
+    """attempts mixes bar-once gates with poll persistence; signals does not."""
+    web = Path(__file__).resolve().parents[1] / "micofx" / "web"
+    js = (web / "static" / "app.js").read_text(encoding="utf-8")
+    help_js = (web / "static" / "field_help.js").read_text(encoding="utf-8")
+    load = js.split("async function loadBlocks()", 1)[1].split("async function ", 1)[0]
+    assert "r.signals" in load
+    assert "r.attempts" not in load, "poll denemesi sinyal sutununda duruyor"
+    assert "Acilan / deneme" not in help_js
+    assert "poll denemesi" not in help_js.split('"th.block.Sinyal"', 1)[1][:200]
+
+
+def test_the_entry_blocks_note_uses_signals_not_poll_retries():
+    src = (Path(__file__).resolve().parents[1] / "micofx" / "web" / "app.py"
+           ).read_text(encoding="utf-8")
+    chunk = src.split("def entry_blocks()", 1)[1].split("\n    @app.", 1)[0]
+    assert 'total = data["signals"]' in chunk
+    assert 'total = data["attempts"]' not in chunk
+    assert "sinyal islemle sonuclandi" in chunk
+
+
 def test_the_state_field_exists_and_starts_empty():
     st = SymbolState("X")
     assert st.entry_block == ""

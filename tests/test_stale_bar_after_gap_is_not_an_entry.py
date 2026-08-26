@@ -49,6 +49,12 @@ def _make_engine():
     eng._spread_ratio = {}
     eng._spread_ratio_dirty = False
     eng.states = {}
+    eng._entry_blocks = {}
+    eng._entry_last_bar = {}
+    eng._entry_events = []
+    eng._entry_blocks_since = 0.0
+    eng._entry_blocks_dirty = False
+    eng._entry_events_dirty = False
     return eng
 
 
@@ -59,6 +65,11 @@ def _cfg():
 def _open_session():
     return SimpleNamespace(open=True, reason="", minutes_to_close=None,
                            minutes_to_open=None, window="03:15-22:59")
+
+
+def _closed_session():
+    return SimpleNamespace(open=False, reason="", minutes_to_close=None,
+                           minutes_to_open=61, window="01:00-23:59")
 
 
 def test_friday_bar_does_not_enter_on_monday_session_open(monkeypatch):
@@ -154,3 +165,167 @@ def test_exactly_two_timeframes_of_age_is_still_offered(monkeypatch):
 
     assert wants is True
     assert (now - last_bar) == _MAX_SIGNAL_BAR_AGE_BARS * tf_sec
+
+
+def test_a_stale_gap_bar_is_counted_as_bar_bosluk(monkeypatch):
+    """01:00 US30: the refuse was right, the counter never saw it.
+
+    _evaluate returns False at bar_bosluk before _try_entry, so the
+    ready-loop tally never ran. The first session bar every night is this
+    path; it must show up as a signal, not vanish.
+    """
+    from micofx import sessions as sessions_mod
+
+    eng = _make_engine()
+    monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: _open_session())
+    monkeypatch.setattr(sessions_mod, "should_flatten", lambda *a, **kw: False)
+
+    def _fake_refresh(cfg_arg, state_arg, params):
+        state_arg.last_bar = FRIDAY_BAR
+        state_arg.primary_signal = "buy"
+        state_arg.atr = 30.1
+        return True
+
+    eng._refresh_signals = _fake_refresh
+    state = SymbolState("GER40")
+    eng._evaluate(
+        _cfg(), state, server_now=float(MONDAY_OPEN),
+        account={"equity": 1000.0}, allow_entry=True,
+    )
+    data = eng.entry_blocks()
+    assert data["totals"].get("bar_bosluk") == 1, data
+    assert data["signals"] == 1
+
+
+def test_an_already_filled_bar_is_counted_as_bar_doldu(monkeypatch):
+    """Restart ghost of the same bar: refuse is right, counter never saw it.
+
+    Same-bar lock is _evaluate False before _try_entry. 01:04 US30 after
+    the 01:00 restart was this path; entry_block_events only later showed
+    the 01:10 spread.
+    """
+    from micofx import sessions as sessions_mod
+
+    eng = _make_engine()
+    monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: _open_session())
+    monkeypatch.setattr(sessions_mod, "should_flatten", lambda *a, **kw: False)
+
+    tf_sec = timeframe_seconds("M30")
+    now = float(MONDAY_OPEN + 30 * 60)
+    last_bar = int(now - tf_sec)
+
+    def _fake_refresh(cfg_arg, state_arg, params):
+        state_arg.last_bar = last_bar
+        state_arg.primary_signal = "buy"
+        state_arg.atr = 30.1
+        return True
+
+    eng._refresh_signals = _fake_refresh
+    eng._filled_bars = {"GER40": {"primary": last_bar}}
+    state = SymbolState("GER40")
+    wants = eng._evaluate(
+        _cfg(), state, server_now=now,
+        account={"equity": 1000.0}, allow_entry=True,
+    )
+    assert wants is False
+    assert state.entry_block == "bar_doldu"
+    data = eng.entry_blocks()
+    assert data["totals"].get("bar_doldu") == 1, data
+    assert data["signals"] == 1
+
+
+def test_a_signalled_closed_session_is_counted_as_seans_disi(monkeypatch):
+    """_merge_signals runs before the session gate, so a live signal can
+    be refused here. Same invisibility as bar_bosluk, one gate earlier.
+    US30 is closed 00:00-01:00 every night; those refusals must show up.
+    """
+    from micofx import sessions as sessions_mod
+
+    eng = _make_engine()
+    monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: _closed_session())
+    monkeypatch.setattr(sessions_mod, "should_flatten", lambda *a, **kw: False)
+
+    tf_sec = timeframe_seconds("M30")
+    now = float(MONDAY_OPEN - 30 * 60)
+    last_bar = int(now - tf_sec)
+
+    def _fake_refresh(cfg_arg, state_arg, params):
+        state_arg.last_bar = last_bar
+        state_arg.primary_signal = "buy"
+        state_arg.atr = 30.1
+        return True
+
+    eng._refresh_signals = _fake_refresh
+    state = SymbolState("GER40")
+    wants = eng._evaluate(
+        _cfg(), state, server_now=now,
+        account={"equity": 1000.0}, allow_entry=True,
+    )
+    assert wants is False
+    assert state.entry_block == "seans_disi"
+    data = eng.entry_blocks()
+    assert data["totals"].get("seans_disi") == 1, data
+    assert data["signals"] == 1
+
+
+def test_a_closed_session_without_a_signal_stays_silent(monkeypatch):
+    """The drown case: closed-session polls with nothing to refuse."""
+    from micofx import sessions as sessions_mod
+
+    eng = _make_engine()
+    monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: _closed_session())
+    monkeypatch.setattr(sessions_mod, "should_flatten", lambda *a, **kw: False)
+
+    def _fake_refresh(cfg_arg, state_arg, params):
+        state_arg.last_bar = FRIDAY_BAR
+        state_arg.primary_signal = ""
+        state_arg.atr = 30.1
+        return True
+
+    eng._refresh_signals = _fake_refresh
+    state = SymbolState("GER40")
+    eng._evaluate(
+        _cfg(), state, server_now=float(MONDAY_OPEN - 30 * 60),
+        account={"equity": 1000.0}, allow_entry=True,
+    )
+    data = eng.entry_blocks()
+    assert data["signals"] == 0, data
+    assert data["totals"] == {}
+
+
+def test_a_signalled_closed_market_is_counted_as_piyasa_kapali(monkeypatch):
+    """trade_all_hours makes sess.open true; this gate is the real halt."""
+    from micofx import sessions as sessions_mod
+
+    eng = _make_engine()
+    eng.client = SimpleNamespace(
+        connected=True,
+        resolve=lambda symbol: symbol,
+        tick=lambda symbol: None,
+        market_open=lambda symbol: False,
+    )
+    monkeypatch.setattr(sessions_mod, "evaluate", lambda *a, **kw: _open_session())
+    monkeypatch.setattr(sessions_mod, "should_flatten", lambda *a, **kw: False)
+
+    tf_sec = timeframe_seconds("M30")
+    now = float(MONDAY_OPEN + 30 * 60)
+    last_bar = int(now - tf_sec)
+
+    def _fake_refresh(cfg_arg, state_arg, params):
+        state_arg.last_bar = last_bar
+        state_arg.primary_signal = "sell"
+        state_arg.atr = 30.1
+        return True
+
+    eng._refresh_signals = _fake_refresh
+    state = SymbolState("GER40")
+    wants = eng._evaluate(
+        _cfg(), state, server_now=now,
+        account={"equity": 1000.0}, allow_entry=True,
+    )
+    assert wants is False
+    assert state.entry_block == "piyasa_kapali"
+    data = eng.entry_blocks()
+    assert data["totals"].get("piyasa_kapali") == 1, data
+    assert data["signals"] == 1
+

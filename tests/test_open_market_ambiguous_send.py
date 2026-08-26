@@ -465,3 +465,43 @@ def _entry_harness(open_market_result):
     state.atr = 0.001
     return eng, client, state, cfg
 
+
+def test_a_fill_already_in_the_book_does_not_sleep(monkeypatch):
+    """The 2.1s window is for lag. If the ticket is already there, return."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+    client = _make_client()
+
+    mt5_cls, _ = _mt5_stub(lambda request: None, [
+        (),
+        (_Pos(4321, magic=7),),
+    ])
+    _install(monkeypatch, mt5_cls)
+
+    out = MT5Client.open_market(client, "EURUSD", "buy", 0.10, 1.0950, 1.1050, magic=7)
+
+    assert out["ok"] is True
+    assert out["position"] == 4321
+    assert sleeps == []
+
+
+def test_defer_verify_returns_pending_when_the_book_is_still_empty(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+    client = _make_client()
+    result = types.SimpleNamespace(retcode=10012, price=0.0, order=0, deal=0,
+                                   volume=0.0, comment="timeout")
+    mt5_cls, _ = _mt5_stub(lambda request: result, [(), ()])
+    _install(monkeypatch, mt5_cls)
+
+    out = MT5Client.open_market(
+        client, "EURUSD", "buy", 0.10, 1.0950, 1.1050, magic=7,
+        defer_verify=True)
+
+    assert out["ok"] is False
+    assert out.get("pending_verify") is True
+    assert isinstance(out.get("verify_kwargs"), dict)
+    assert sleeps == []
+    assert not out.get("verified_unfilled")
+    assert not out.get("ambiguous")
+

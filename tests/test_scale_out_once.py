@@ -352,6 +352,29 @@ def test_scale_out_log_is_r_and_cash(monkeypatch):
     assert "1.60R" in text or "1.6R" in text
 
 
+def test_a_broker_overfill_cannot_write_negative_remain():
+    class _Over(_ScaleClient):
+        def close_position(self, ticket, slippage=20, comment="", volume=None, fill=None):
+            self.closes.append((int(ticket), volume, comment))
+            if fill is not None:
+                fill.update({
+                    "symbol": "GER40", "side": "buy", "requested": float(volume or 0),
+                    "price": self.bid, "volume": 9.99, "risk_dist": 1.0,
+                })
+            return True
+
+        def money_per_price_unit(self, symbol, volume):
+            return 1.0
+
+    client = _Over(bid=101.6)
+    eng = _eng(client)
+    pos = _pos(sl=100.0, entry=100.0, ticket=11)
+    pos["volume"] = 0.70
+    pos["symbol"] = "GER40"
+    assert eng._maybe_scale_out(_ScaleCfg(), pos, ATR, _Bars(101.6)) is True
+    assert pos["volume"] == pytest.approx(0.0)
+
+
 def test_remain_uses_filled_volume_not_requested():
     """IOC can return DONE_PARTIAL; the book and the log must follow fill volume."""
     class _Partial(_ScaleClient):

@@ -55,3 +55,5 @@ def test_merged_results_keep_every_trade_cost():
     merged = backtest._merge([a, b])
     assert len(merged.trade_cost_rs) == 2
     assert merged.cost_r == pytest.approx(sum(merged.trade_cost_rs))
+    assert len(merged.trade_mfes) == 2
+    assert len(merged.trade_events) == 2

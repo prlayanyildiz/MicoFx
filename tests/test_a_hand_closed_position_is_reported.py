@@ -49,6 +49,7 @@ def _tracker(book=None) -> ExecutionMonitor:
     t.store = None
     t._samples = {}
     t._dirty = False
+    t._originals = {}
     return t
 
 

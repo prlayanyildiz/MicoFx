@@ -35,7 +35,8 @@ class _FakeClient:
     def tick(self, symbol):
         return {"ask": 26482.2, "bid": 26481.6, "spread": 0.6}
 
-    def open_market(self, symbol, side, lot, sl, tp, magic, slippage=0, comment=""):
+    def open_market(self, symbol, side, lot, sl, tp, magic, slippage=0, comment="",
+                    defer_verify=False):
         self.open_market_calls += 1
         out = dict(self._open_result)
         out.setdefault("requested", 26482.2)

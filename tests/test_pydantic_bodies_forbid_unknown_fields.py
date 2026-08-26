@@ -114,7 +114,8 @@ def test_system_patch_unknown_field_is_422():
 
 
 def test_opt_run_unknown_field_is_422():
-    res = _tc().post("/api/opt/run", json={"nope": 1})
+    res = _tc().post("/api/opt/run", json={"nope": 1},
+                     headers={"Origin": "http://testserver"})
     assert res.status_code == 422, res.text
 
 

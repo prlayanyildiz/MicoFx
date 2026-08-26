@@ -117,8 +117,9 @@ def test_the_catalogues_are_gone_from_state():
 def test_state_still_carries_what_the_panel_polls_for():
     """The slimming must not take anything the 3s poll actually needs."""
     body = _get(_tc(), "/api/state")
-    for key in ("ok", "ts", "version", "symbols", "system", "opt"):
+    for key in ("ok", "ts", "version", "system", "opt", "symbols_sig"):
         assert key in body, f"/api/state lost {key}"
+    assert "symbols" not in body
 
 
 def test_schema_does_not_change_between_calls():

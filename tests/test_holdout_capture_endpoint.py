@@ -172,7 +172,7 @@ def test_a_second_capture_is_refused_while_one_runs(monkeypatch):
 def test_capture_without_origin_is_403():
     tc = _tc()
     tc.get("/")
-    res = tc.post("/api/holdout/capture")
+    res = tc.post("/api/holdout/capture", headers={"Origin": ""})
     assert res.status_code == 403
 
 

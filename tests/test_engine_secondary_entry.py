@@ -37,7 +37,8 @@ class _FakeClient:
         import time
         return time.time()
 
-    def open_market(self, symbol, side, lot, sl, tp, magic, slippage=0, comment=""):
+    def open_market(self, symbol, side, lot, sl, tp, magic, slippage=0, comment="",
+                    defer_verify=False):
         self.open_market_calls += 1
         return {"ok": True, "position": None, "requested": 1.1000, "price": 1.1000,
                 "volume": lot, "sl": sl, "tp": tp, "partial_fill": False,

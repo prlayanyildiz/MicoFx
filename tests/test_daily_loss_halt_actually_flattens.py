@@ -124,6 +124,12 @@ def _engine(equity, positions, flatten=True, profit_pct=0.0, remaining=0, closed
     eng._account_at = 0.0
     eng.cycle_count = 0
     eng.last_error = ""
+    # __init__ creates these; this fixture uses __new__. Empty cache is
+    # falsy, so day_stats() would fetch — stub it like the other cycle
+    # neighbors. This file tests the flatten wire, not the day book.
+    eng._day_cache = {}
+    eng._day_cache_at = 0.0
+    eng.day_stats = lambda *a, **k: {}
 
     guard = DailyGuard.__new__(DailyGuard)
     guard.store = store

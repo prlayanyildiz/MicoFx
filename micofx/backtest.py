@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from . import indicators as ind
+from .exits import overlay_stop
 from .models import SCALE_OUT_FRAC, SymbolConfig, trail_min_step
 from .sessions import WEEKEND_OPEN_GROUPS
 from .strategy import IndicatorCache, Params, compute
@@ -70,6 +71,7 @@ class Result:
     trade_rs: list = field(default_factory=list)  # per-trade R, for diagnostics only
     trade_cost_rs: list = field(default_factory=list)  # per-trade cost/R; not a score input
     trade_events: list = field(default_factory=list)  # (entry_ts, exit_ts, r)
+    trade_mfes: list = field(default_factory=list)  # per-trade MFE in R; not a score input
 
     @property
     def win_rate(self) -> float:
@@ -78,6 +80,20 @@ class Result:
     @property
     def expectancy(self) -> float:
         return self.net_r / self.trades if self.trades else 0.0
+
+    @property
+    def capture(self) -> float | None:
+        """Fraction of total MFE that became net R. None if no MFE to divide.
+
+        Visible column only. Not a walk-forward score input and not an apply
+        gate. capture = net_r / sum(mfe_r). Short MFE uses the coverable
+        ask (bar_low + pad); pre-26.08 shorts used the print low and are
+        not comparable.
+        """
+        total = float(sum(self.trade_mfes)) if self.trade_mfes else 0.0
+        if total <= 0.0:
+            return None
+        return self.net_r / total
 
     @property
     def profit_factor(self) -> float:
@@ -136,6 +152,7 @@ class Result:
             "cost_per_trade_r": float(round(self.cost_r / self.trades, 4)) if self.trades else 0.0,
             "score": self.score(min_trades),
             "score_consistency": self.score_consistency(min_trades),
+            "capture": None if self.capture is None else float(round(self.capture, 3)),
             "exits": {str(k): int(v) for k, v in self.exits.items()},
         }
 
@@ -582,7 +599,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         return cooldown_bars
 
     def _record_trade(is_buy, entry, sl_dist, s, j0, exit_bar, exit_price, reason,
-                      banked=0.0, weight=1.0):
+                      banked=0.0, weight=1.0, mfe_px=0.0):
         nonlocal equity, peak, streak, bar_total
         if exit_price is None:
             exit_price = close[exit_bar] + (0.0 if is_buy else s)
@@ -595,6 +612,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         res.trade_rs.append(r)
         res.trade_cost_rs.append(float((commission_price + s) / sl_dist))
         res.trade_events.append((int(cache.times[j0]), int(cache.times[exit_bar]), r))
+        mfe_r = (float(mfe_px) / sl_dist) if sl_dist > 0 else 0.0
+        res.trade_mfes.append(max(0.0, mfe_r))
         bar_total += exit_bar - j0 + 1
         exits[reason] = exits.get(reason, 0) + 1
         if r >= 0:
@@ -613,32 +632,19 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     def _trail_one(is_buy, entry, sl, trailing, j, s, sl_dist):
         c = close[j]
         a = atr[j]
-        gain = (c - entry) if is_buy else (entry - c)
-        if not (a > 0 and gain > 0):
-            return sl, trailing
-        target = None
-        breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
-        if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
-            trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
-            trail = trail_atr
-            if structural and swing_lo is not None and swing_hi is not None:
-                struct_sl = (swing_lo[j] - a * 0.15) if is_buy \
-                    else (swing_hi[j] + a * 0.15)
-                if p.trail_mode == "hybrid":
-                    trail = max(trail_atr, struct_sl) if is_buy else min(trail_atr, struct_sl)
-                else:
-                    trail = struct_sl
-            if target is None or (trail > target if is_buy else trail < target):
-                target = trail
-        if (breakeven_at_r > 0 and sl_dist > 0
-                and gain >= breakeven_at_r * sl_dist):
-            be_sl = entry + commission_price if is_buy else entry - commission_price
-            if target is None:
-                target = be_sl
-            else:
-                target = max(target, be_sl) if is_buy else min(target, be_sl)
+        struct_sl = None
+        if structural and swing_lo is not None and swing_hi is not None:
+            struct_sl = (swing_lo[j] - a * 0.15) if is_buy else (
+                swing_hi[j] + a * 0.15)
+        target = overlay_stop(
+            is_buy=is_buy, entry=entry, ref=c, atr=a,
+            trail_start_atr=p.trail_start_atr, trail_step_atr=p.trail_step_atr,
+            trail_mode=p.trail_mode, struct_sl=struct_sl,
+            breakeven_at_r=breakeven_at_r, original_risk=sl_dist,
+            be_offset=commission_price)
         if target is None:
             return sl, trailing
+        breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
         ms = float(min_stop_at[j])
         step = trail_min_step(ms, a, p.trail_step_atr)
         if is_buy and target > sl:
@@ -701,18 +707,32 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             return mae_px, True
         return mae_px, False
 
+    def _mfe_tick(is_buy, entry, mfe_px, j):
+        # Same ASK convention as _mae_tick / stop_fill_price: a short covers
+        # on bar_low + pad. Using the print low inflated short MFE by one
+        # spread and made capture look worse on the sell side.
+        bar_high, bar_low = high[j], low[j]
+        if is_buy:
+            fav = bar_high - entry
+        else:
+            fav = entry - (bar_low + float(trigger_pad[j]))
+        return fav if fav > mfe_px else mfe_px
+
     if max_open > 1:
         opens: list[dict] = []
         cool_until = -1
         for j in range(lo, n):
             still: list[dict] = []
             for pos in opens:
+                pos["mfe_px"] = _mfe_tick(
+                    pos["is_buy"], pos["entry"], pos.get("mfe_px", 0.0), j)
                 px, reason = _exit_check(pos["is_buy"], pos["sl"], pos["trailing"], j, pos["s"])
                 if px is not None:
                     _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
                                   pos["s"], pos["j0"], j, px, reason,
                                   banked=pos.get("banked", 0.0),
-                                  weight=pos.get("weight", 1.0))
+                                  weight=pos.get("weight", 1.0),
+                                  mfe_px=pos.get("mfe_px", 0.0))
                     continue
                 mae_px, mae_hit = _mae_tick(
                     pos["is_buy"], pos["entry"], pos["sl_dist"],
@@ -725,13 +745,15 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         close[j] + (0.0 if pos["is_buy"] else pos["s"]),
                         "mae",
                         banked=pos.get("banked", 0.0),
-                        weight=pos.get("weight", 1.0))
+                        weight=pos.get("weight", 1.0),
+                        mfe_px=pos.get("mfe_px", 0.0))
                     continue
                 if j >= n - 1:
                     _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
                                   pos["s"], pos["j0"], j, None, "time",
                                   banked=pos.get("banked", 0.0),
-                                  weight=pos.get("weight", 1.0))
+                                  weight=pos.get("weight", 1.0),
+                                  mfe_px=pos.get("mfe_px", 0.0))
                     continue
                 sl, trailing = _trail_one(pos["is_buy"], pos["entry"], pos["sl"],
                                           pos["trailing"], j, pos["s"],
@@ -799,7 +821,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                             float(open_l[j] + (0.0 if pos["is_buy"] else s)),
                             "reverse",
                             banked=pos.get("banked", 0.0),
-                            weight=pos.get("weight", 1.0))
+                            weight=pos.get("weight", 1.0),
+                            mfe_px=pos.get("mfe_px", 0.0))
                     opens = kept
                 if block_reverse and any(pos["is_buy"] != is_buy for pos in opens):
                     # The live rule the stacked path was missing. With
@@ -818,10 +841,12 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
                 entry = float(open_[j0] + s) if is_buy else float(open_[j0] - s)
                 sl = entry - sl_dist if is_buy else entry + sl_dist
+                mfe0 = _mfe_tick(is_buy, entry, 0.0, j0)
                 opens.append({
                     "is_buy": is_buy, "entry": entry, "sl": sl,
                     "sl_dist": sl_dist, "trailing": False, "j0": j0, "s": s,
-                    "mae_px": 0.0, "scaled": False, "weight": 1.0, "banked": 0.0,
+                    "mae_px": 0.0, "mfe_px": max(0.0, mfe0),
+                    "scaled": False, "weight": 1.0, "banked": 0.0,
                 })
                 cd = _cooldown_bars()
                 if cd:
@@ -878,6 +903,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # had already gone our way.
         trailing = False
         mae_px = 0.0
+        mfe_px = 0.0
         scaled = False
         weight = 1.0
         banked = 0.0
@@ -893,6 +919,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # exit bar, so no two simulated trades overlap and the loop still visits
         # each bar at most once per pass.
         for j in range(j0, n):
+            mfe_px = _mfe_tick(is_buy, entry, mfe_px, j)
             bar_high, bar_low = high[j], low[j]
             fill = stop_fill_price(is_buy, sl, open_l[j], bar_high, bar_low,
                                    float(trigger_pad[j]))
@@ -948,7 +975,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                     if can_open:
                         _record_trade(is_buy, entry, sl_dist, s, j0,
                                       exit_bar, exit_price, reason,
-                                      banked=banked, weight=weight)
+                                      banked=banked, weight=weight,
+                                      mfe_px=mfe_px)
                         sl_dist = max(atr_next * p.sl_atr_mult,
                                       float(min_stop_at[j]))
                         entry = price_ref
@@ -960,82 +988,14 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         exit_price = None
                         reason = "time"
                         mae_px = 0.0
+                        mfe_px = 0.0
                         scaled = False
                         weight = 1.0
                         banked = 0.0
                         continue
                     break
 
-            c = close[j]
-            a = atr[j]
-            gain = (c - entry) if is_buy else (entry - c)
-            if a > 0 and gain > 0:
-                target = None
-                # Mirrors engine._update_stop's breakeven_locked guard: once the
-                # trail has ratcheted the stop to or past entry, the min_stop
-                # clamp below must never put it back on the losing side. Live
-                # trail is above entry once ``gain`` exceeds ``trail_step_atr * a``.
-                # ``breakeven_at_r`` (0 = off) is the separate lock: jump to
-                # entry+commission once gain reaches that many R, without
-                # pulling a better trail.
-                breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
-                if p.trail_start_atr > 0 and gain >= a * p.trail_start_atr:
-                    trail_atr = c - a * p.trail_step_atr if is_buy else c + a * p.trail_step_atr
-                    trail = trail_atr
-                    # Both series or neither (line 341-342), so the short
-                    # leg's swing_hi cannot be None here. Named anyway: the
-                    # guard used to test only swing_lo while the body indexes
-                    # both, so the day those two stop being built together the
-                    # crash lands on shorts only, in the trail, under one
-                    # trail_mode - the least reproducible shape there is.
-                    if structural and swing_lo is not None and swing_hi is not None:
-                        struct_sl = (swing_lo[j] - a * 0.15) if is_buy \
-                            else (swing_hi[j] + a * 0.15)
-                        # Chained ternary here used to bind as
-                        # `(max(...) if is_buy else min(...)) if hybrid else struct_sl`
-                        # with a trailing `else struct_sl` reachable only from the
-                        # is_buy==False leg - every long with trail_mode="structure"
-                        # silently got the hybrid formula instead of pure struct_sl,
-                        # matching engine.py's live trailing was the whole point of
-                        # trail_mode existing. Mirrors _update_stop exactly now.
-                        if p.trail_mode == "hybrid":
-                            trail = max(trail_atr, struct_sl) if is_buy else min(trail_atr, struct_sl)
-                        else:
-                            trail = struct_sl
-                    if target is None or (trail > target if is_buy else trail < target):
-                        target = trail
-                if (breakeven_at_r > 0 and sl_dist > 0
-                        and gain >= breakeven_at_r * sl_dist):
-                    be_sl = (entry + commission_price if is_buy
-                             else entry - commission_price)
-                    if target is None:
-                        target = be_sl
-                    else:
-                        target = (max(target, be_sl) if is_buy
-                                  else min(target, be_sl))
-                if target is not None:
-                    # Live will not send a modify for an improvement smaller
-                    # than this. Without the same floor here the replay
-                    # ratcheted the stop on ANY improvement, so the simulated
-                    # trail rode closer behind price than live's ever can and
-                    # gave back less on the reversal that ends the trade - a
-                    # one-directional optimism in every number the apply gates
-                    # read, and net_r is what risk._edge_metric turns into a
-                    # live lot multiplier.
-                    ms = float(min_stop_at[j])
-                    step = trail_min_step(ms, a, p.trail_step_atr)
-                    if is_buy and target > sl:
-                        new_sl = min(target, c - ms)
-                        if (new_sl - sl >= step
-                                and not (breakeven_locked and new_sl < entry)):
-                            sl = new_sl
-                            trailing = True
-                    elif not is_buy and target < sl:
-                        new_sl = max(target, c + ms)
-                        if (sl - new_sl >= step
-                                and not (breakeven_locked and new_sl > entry)):
-                            sl = new_sl
-                            trailing = True
+            sl, trailing = _trail_one(is_buy, entry, sl, trailing, j, s, sl_dist)
             scaled, weight, banked = _scale_one(
                 is_buy, entry, sl_dist, j, scaled, weight, banked)
             exit_bar = j
@@ -1044,29 +1004,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             exit_price = close[exit_bar] + (0.0 if is_buy else s)
             reason = "time"
 
-        move = (exit_price - entry) if is_buy else (entry - exit_price)
-        r = float(banked + weight * (move - commission_price) / sl_dist)
-        res.cost_r += float((commission_price + s) / sl_dist)
-        res.trades += 1
-        res.net_r += r
-        res.trade_rs.append(r)
-        res.trade_cost_rs.append(float((commission_price + s) / sl_dist))
-        res.trade_events.append((int(cache.times[j0]), int(cache.times[exit_bar]), r))
-        bar_total += exit_bar - j0 + 1
-        exits[reason] = exits.get(reason, 0) + 1
-        if r >= 0:
-            res.wins += 1
-            res.gross_win_r += r
-            streak = 0
-        else:
-            res.losses += 1
-            res.gross_loss_r += -r
-            streak += 1
-            res.longest_loss_streak = max(res.longest_loss_streak, streak)
-
-        equity += r
-        peak = max(peak, equity)
-        res.max_dd_r = max(res.max_dd_r, peak - equity)
+        _record_trade(is_buy, entry, sl_dist, s, j0, exit_bar, exit_price, reason,
+                      banked=banked, weight=weight, mfe_px=mfe_px)
 
         # Live ``_cooldown_for`` pauses new entries for up to 2 bars (scalp) or
         # 1 bar (M15+ swing) of the strategy TF after a *fill*. Mirror that so
@@ -1197,6 +1136,8 @@ def _merge(results: list[Result]) -> Result:
         total.cost_r += r.cost_r
         total.trade_rs.extend(r.trade_rs)
         total.trade_cost_rs.extend(r.trade_cost_rs)
+        total.trade_mfes.extend(r.trade_mfes)
+        total.trade_events.extend(r.trade_events)
         for k, v in r.exits.items():
             total.exits[k] = total.exits.get(k, 0) + v
     bars = sum(r.avg_bars * r.trades for r in results)

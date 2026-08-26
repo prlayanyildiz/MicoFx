@@ -1,12 +1,13 @@
-"""Kivanc combo pieces that are not already a live family.
+"""Kivanc combo piece that earned a first holdout: ichimoku.
 
-AlphaTrend (RSI mode) is a trailing ATR line gated by RSI>=50, not SuperTrend.
-MavilimW is nested WMAs; the slope flip is the signal.
-Ichimoku is the TK cross against the cloud that was computed 26 bars ago
-(no forward displacement).
+AlphaTrend and MavilimW retired 26.08: alpha_trend could not clear
+MIN_TEST_TRADES (7 vs 12, structural lag-2 cross); mavilim had enough
+trades and lost (GER -20.2 R / PF 0.92). Their helpers must stay gone
+(see test_retired_indicators_stay_gone).
 
-BBW is not a family: ``atr_pct_min`` is the existing horizontal/dead-regime
-gate. TD Sequential is a fade counter and does not fit the trail-only exit.
+Ichimoku is the TK cross against the cloud from 26 bars ago (no forward
+displacement). BBW is not a family: atr_pct_min already gates dead
+regimes. TD Sequential is a fade counter against an ATR-trail book.
 """
 from __future__ import annotations
 
@@ -14,7 +15,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -29,30 +29,6 @@ def _series(n=400):
     high = close + 0.4
     low = close - 0.4
     return high, low, close
-
-
-def test_alpha_trend_prefix_matches_the_full_series():
-    high, low, close = _series()
-    full = ind.alpha_trend_rsi(high, low, close, period=14, coeff=1.0)
-    head = ind.alpha_trend_rsi(high[:-8], low[:-8], close[:-8], period=14, coeff=1.0)
-    assert np.allclose(full[:-8], head)
-
-
-def test_alpha_trend_does_not_drop_while_rsi_is_high():
-    n = 80
-    close = np.linspace(100.0, 120.0, n)
-    high = close + 0.3
-    low = close - 0.3
-    line = ind.alpha_trend_rsi(high, low, close, period=14, coeff=1.0)
-    # After warmup a rising tape should not let the RSI-bullish branch fall.
-    assert np.all(np.diff(line[30:]) >= -1e-12)
-
-
-def test_mavilim_is_causal():
-    high, low, close = _series()
-    full = ind.mavilim_w(close, 3, 5)
-    head = ind.mavilim_w(close[:-8], 3, 5)
-    assert np.allclose(full[:-8], head)
 
 
 def test_ichimoku_cloud_does_not_read_future_bars():
@@ -72,25 +48,15 @@ def _cache_from(high, low, close):
                           tf_seconds=300, open_=open_, volume=np.ones(close.size))
 
 
-@pytest.mark.parametrize("name", ("alpha_trend", "mavilim", "ichimoku"))
-def test_family_is_dispatched_and_never_both_sides(name):
+def test_ichimoku_is_dispatched_and_never_both_sides():
     high, low, close = _series(600)
-    sig = compute(_cache_from(high, low, close), Params(strategy=name))
-    assert name in STRATEGIES and name in _FAMILIES
+    sig = compute(_cache_from(high, low, close), Params(strategy="ichimoku"))
+    assert "ichimoku" in STRATEGIES and "ichimoku" in _FAMILIES
     assert not np.any(sig.buy & sig.sell)
     assert sig.buy.size == close.size
 
 
-def test_alpha_trend_reads_rsi_length_only_among_poison():
-    read = opt_fields_read("alpha_trend")
-    assert "rsi_length" in read
-    for field in ("htf_factor", "adx_min", "min_body_ratio", "atr_pct_min",
-                  "st_mult", "t3_length"):
+def test_ichimoku_is_unread_flip_shaped():
+    read = opt_fields_read("ichimoku")
+    for field in ("htf_factor", "adx_min", "min_body_ratio", "atr_pct_min"):
         assert field not in read
-
-
-def test_mavilim_and_ichimoku_are_unread_flip_shaped():
-    for name in ("mavilim", "ichimoku"):
-        read = opt_fields_read(name)
-        for field in ("htf_factor", "adx_min", "min_body_ratio", "atr_pct_min"):
-            assert field not in read

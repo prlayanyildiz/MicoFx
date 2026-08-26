@@ -85,7 +85,7 @@ class _Engine:
     def panic(self):
         return {"ok": True}
 
-    def close_all(self, symbol=None):
+    def close_all(self, symbol=None, reason=""):
         return 0, 0
 
     def shutdown(self):
@@ -94,6 +94,12 @@ class _Engine:
 
 class _Optimizer:
     MAX_COST_PER_TRADE_R = 0.25
+
+    def start(self, *a, **k):
+        return {"ok": True}
+
+    def cancel(self):
+        return {"ok": True}
 
 
 # shutdown/restart are on the same gate but must not be POSTed with a
@@ -106,6 +112,8 @@ CRITICAL = (
     ("/api/app/restart", {}),
     ("/api/positions-close-all", {}),
     ("/api/holdout/capture", {}),
+    ("/api/opt/run", {}),
+    ("/api/opt/cancel", {}),
 )
 LIVE_CRITICAL = (
     ("/api/bot/panic", {}),
@@ -113,6 +121,8 @@ LIVE_CRITICAL = (
     ("/api/bot/stop", {}),
     ("/api/positions-close-all", {}),
     ("/api/holdout/capture", {}),
+    ("/api/opt/run", {}),
+    ("/api/opt/cancel", {}),
 )
 
 
@@ -132,6 +142,8 @@ def test_shutdown_and_restart_are_on_the_origin_list():
     assert "/api/app/shutdown" in web_app._CRITICAL_MUTATIONS
     assert "/api/app/restart" in web_app._CRITICAL_MUTATIONS
     assert "/api/holdout/capture" in web_app._CRITICAL_MUTATIONS
+    assert "/api/opt/run" in web_app._CRITICAL_MUTATIONS
+    assert "/api/opt/cancel" in web_app._CRITICAL_MUTATIONS
 
 
 @pytest.mark.parametrize("path,body", LIVE_CRITICAL)
@@ -171,6 +183,14 @@ def test_index_sets_httponly_cookie_and_does_not_embed_the_secret():
     raw = res.headers.get("set-cookie", "")
     assert "httponly" in raw.lower()
     assert "samesite=strict" in raw.lower()
+
+
+def test_a_mutating_post_without_origin_is_403():
+    """Every POST/PATCH/DELETE needs Origin, not only the old critical set."""
+    tc = TestClient(_app(), unauth=True)
+    res = tc.post("/api/system", json={},
+                  headers={"X-Mico-Token": "secret123"})
+    assert res.status_code == 403, res.text
 
 
 def test_same_origin_panic_with_cookie_is_allowed():

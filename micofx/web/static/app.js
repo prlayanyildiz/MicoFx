@@ -39,7 +39,7 @@ function fillGroupSelects() {
   });
 }
 const DAY_LABEL = ["Pzt", "Sal", "Car", "Per", "Cum", "Cmt", "Paz"];
-const LOG_LEVELS = ["TRADE", "SIGNAL", "OPT", "AI", "CFG", "INFO", "WARN", "ERROR"];
+const LOG_LEVELS = ["TRADE", "SIGNAL", "OPT", "AI", "CFG", "INFO", "WARN", "ERROR", "DEBUG"];
 const AI_STATE = {
   ok: ["on", "Saglikli"], watch: ["warn", "Izlemede"],
   quarantine: ["bad", "Karantina"], idle: ["off", "Veri yok"],
@@ -53,13 +53,24 @@ let optSelection = new Set();
 let optTfSelection = new Set();
 const OPT_TF_OPTIONS = ["M5", "M15", "M30"];
 let logAfter = 0;
+let logEpoch = 0;
 let logFilter = new Set(LOG_LEVELS);
+let logSymbolFilter = new Set(); // empty = all symbols
+let logSeenSymbols = new Set();
+let logSearch = "";
+let logSearchTimer = null;
+let logPaused = false;
+let logPending = [];
+let logUnseen = 0;
+let logCompact = false;
 let cardsBuilt = false;
 let pollTimer = null;
 let optPickerSig = "";
 let portfolioSig = "";
 let aiTableSig = "";
 let refreshBusy = false;
+let lastViewPulse = "";
+let lastViewTab = "";
 
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
@@ -76,11 +87,9 @@ async function api(path, options = {}) {
 }
 
 // Symbol names (broker_symbol is user/API-settable), broker/account strings
-// and log/error text all land in innerHTML template literals verbatim
-// elsewhere in this file - a symbol saved with a name like
-// "<img src=x onerror=...>" would otherwise execute. Escaping matters even
-// more now that the API token sits in a <meta> tag on this same page: an
-// XSS here could read and exfiltrate it, defeating the token entirely.
+// and log/error text land in innerHTML only after esc(). Session is an
+// HttpOnly cookie, not a meta token; still escape, because a future sink
+// would run in the same origin as every mutation.
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
   { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
 ));
@@ -151,7 +160,6 @@ function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k === "class") node.className = v;
-    else if (k === "html") node.innerHTML = v;
     else if (k === "text") node.textContent = v;
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
     else if (v !== null && v !== undefined) node.setAttribute(k, v);
@@ -177,6 +185,8 @@ function rowsInto(table, rows, emptyText, colspan) {
 
 function selectTab(name) {
   activeTab = name;
+  lastViewPulse = "";
+  lastViewTab = "";
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === `page-${name}`));
   if (name === "opt") {
@@ -185,6 +195,10 @@ function selectTab(name) {
   }
   if (name === "tani") {
     loadGates(); loadBlocks(); loadSpreadRatio(); loadAutopsies();
+    renderExecution(); renderLive();
+  }
+  if (name === "panel" && STATE && STATE.bot) {
+    renderTop(); renderCards(); renderCapacity(); renderPositions(); renderDayTable();
     renderExecution(); renderLive();
   }
   if (name === "log") pollLogs();
@@ -301,6 +315,7 @@ async function loadSpreadRatio() {
 }
 
 let SCHEMA = {};
+let symbolsSig = "";
 
 async function loadSchema() {
   // Which OPT axes each family reads. Static for the life of the process, so
@@ -312,6 +327,15 @@ async function loadSchema() {
   } catch (err) {
     SCHEMA = {};
   }
+}
+
+async function loadSymbols() {
+  try {
+    const res = await api("/api/symbols");
+    if (res && res.symbols) {
+      SYMBOLS = res.symbols;
+    }
+  } catch (_) { /* transient; next poll retries */ }
 }
 
 async function loadAutopsies() {
@@ -337,8 +361,8 @@ async function loadAutopsies() {
       <td class="num dim">${r.held_min != null ? num(r.held_min, 1) : "-"}</td>
       <td class="num ${cls(r.r_realised)}">${r.r_realised != null ? signed(r.r_realised, 3) : "-"}</td>
       <td class="num dim">${r.mfe_r != null ? num(r.mfe_r, 3) : "-"}</td>
-      <td class="num ${Number(r.left_on_table_r) >= 1 ? "neg" : "dim"}">${
-        r.left_on_table_r != null ? num(r.left_on_table_r, 3) : "-"}</td>
+      <td class="num ${Number(r.r_realised) > 0 && Number(r.left_on_table_r) >= 1 ? "neg" : "dim"}">${
+        Number(r.r_realised) > 0 && r.left_on_table_r != null ? num(r.left_on_table_r, 3) : "-"}</td>
       <td class="dim">${after
         ? `${r.after_1h_through_entry ? '<span class="pill off">girise dondu</span>' : ""}`
           + `${r.after_1h_extra_r != null ? ` devam ${num(r.after_1h_extra_r, 2)}R` : ""}`
@@ -373,12 +397,18 @@ async function loadBlocks() {
     const tr = el("tr");
     tr.innerHTML = `
       <td class="sym">${esc(r.symbol)} <span class="dim">${esc(r.leg || "")}</span></td>
-      <td class="num">${r.signals}<span class="dim"> / ${r.attempts} deneme</span></td>
+      <td class="num">${r.signals}</td>
       <td class="num ${r.opened ? "pos" : "dim"}">${r.opened}</td>
       <td class="num ${r.fill_rate != null && r.fill_rate < 0.25 ? "neg" : "dim"}">${
         r.fill_rate != null ? num(r.fill_rate, 2) : "-"}</td>
       <td>${blocks.length
-        ? blocks.map(([k, v]) => `<span class="pill off">${esc(k)} ${v}</span>`).join(" ")
+        ? blocks.map(([k, v]) => {
+            const poll = (r.retries || {})[k];
+            const tip = poll != null
+              ? `${esc(k)}: ${v} sinyal, ${poll} poll`
+              : esc(k);
+            return `<span class="pill off" title="${tip}">${esc(k)} ${v}</span>`;
+          }).join(" ")
         : '<span class="dim">-</span>'}</td>`;
     return tr;
   });
@@ -818,8 +848,6 @@ const STRATEGY_LABEL = {
   stoch_flip: "Stochastic Yon Donusu",
   parabolic_flip: "Parabolic SAR Yon Donusu",
   aroon_flip: "Aroon Yon Donusu",
-  alpha_trend: "AlphaTrend RSI (Kivanc, trail cizgi)",
-  mavilim: "MavilimW Yon Donusu",
   ichimoku: "Ichimoku TK + bulut (gecikmeli, ileri bakissiz)",
 };
 
@@ -2238,68 +2266,255 @@ async function saveSystem(patch, flashNode) {
 
 /* ------------------------------------------------------------------- log */
 
-function renderLogLevels() {
-  const box = $("#log-levels");
+function logMatches(level, symbol, hay) {
+  if (!logFilter.has(level)) return false;
+  // Symbol-less rows stay visible under a symbol filter (system context).
+  if (logSymbolFilter.size && symbol && !logSymbolFilter.has(symbol)) return false;
+  if (logSearch && !(hay || "").includes(logSearch)) return false;
+  return true;
+}
+
+function logEntryMatches(e) {
+  const sym = e.symbol || "";
+  const hay = `${e.time} ${e.level} ${sym} ${e.message}`.toLowerCase();
+  return logMatches(e.level, sym, hay);
+}
+
+function logLineMatches(line) {
+  return logMatches(
+    line.dataset.level || "",
+    line.dataset.symbol || "",
+    line.dataset.hay || "",
+  );
+}
+
+function applyLogFilters() {
+  const view = $("#logview");
+  if (!view) return;
+  $$(".logline", view).forEach((line) => {
+    line.classList.toggle("hidden", !logLineMatches(line));
+  });
+}
+
+function bumpLogSymbols(sym) {
+  if (!sym || logSeenSymbols.has(sym)) return;
+  logSeenSymbols.add(sym);
+  renderLogSymbols();
+}
+
+function renderLogSymbols() {
+  const wrap = $("#log-symbols-wrap");
+  const box = $("#log-symbols");
+  if (!wrap || !box) return;
+  const names = Array.from(logSeenSymbols).sort();
+  wrap.hidden = names.length === 0;
+  const sep = $("#log-symbols-sep");
+  if (sep) sep.hidden = wrap.hidden;
   box.innerHTML = "";
-  LOG_LEVELS.forEach((level) => {
+  names.forEach((sym) => {
+    const on = !logSymbolFilter.size || logSymbolFilter.has(sym);
+    let clickTimer = null;
     box.appendChild(el("div", {
-      class: "chip" + (logFilter.has(level) ? " sel" : ""), text: level,
+      class: "chip" + (on ? " sel" : ""),
+      text: sym,
       onclick: () => {
-        logFilter.has(level) ? logFilter.delete(level) : logFilter.add(level);
-        renderLogLevels();
-        $("#logview").innerHTML = "";
-        logAfter = 0;
-        pollLogs();
+        clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => {
+          if (!logSymbolFilter.size) {
+            logSymbolFilter = new Set([sym]);
+          } else if (logSymbolFilter.has(sym)) {
+            logSymbolFilter.delete(sym);
+          } else {
+            logSymbolFilter.add(sym);
+          }
+          renderLogSymbols();
+          applyLogFilters();
+        }, 220);
+      },
+      ondblclick: (ev) => {
+        ev.preventDefault();
+        clearTimeout(clickTimer);
+        logSymbolFilter = new Set([sym]);
+        renderLogSymbols();
+        applyLogFilters();
       },
     }));
   });
 }
 
+function renderLogLevels() {
+  const box = $("#log-levels");
+  if (!box) return;
+  box.innerHTML = "";
+  LOG_LEVELS.forEach((level) => {
+    let clickTimer = null;
+    box.appendChild(el("div", {
+      class: "chip" + (logFilter.has(level) ? " sel" : ""), text: level,
+      onclick: () => {
+        clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => {
+          if (logFilter.has(level)) {
+            if (logFilter.size === 1) return;
+            logFilter.delete(level);
+          } else {
+            logFilter.add(level);
+          }
+          renderLogLevels();
+          applyLogFilters();
+        }, 220);
+      },
+      ondblclick: (ev) => {
+        ev.preventDefault();
+        clearTimeout(clickTimer);
+        logFilter = new Set([level]);
+        renderLogLevels();
+        applyLogFilters();
+      },
+    }));
+  });
+}
+
+function ticketHtml(msg) {
+  // Split the RAW message, escape each piece, then join. The tempting
+  // shortcut - esc() first, then regex /#(\d+)/ over the result - is wrong:
+  // esc("'") yields "&#39;", so that regex would match "#39" inside the
+  // entity and cut it in half. Splitting before escaping cannot see an
+  // entity, because none exists yet.
+  const parts = String(msg ?? "").split(/(#\d{4,})/g);
+  return parts.map(
+    (part, i) => (i % 2 ? `<span class="tk">${esc(part)}</span>` : esc(part))
+  ).join("");
+}
+
+function makeLogLine(e) {
+  const sym = e.symbol || "";
+  const line = el("div", { class: `logline lv-${e.level}` });
+  line.dataset.level = e.level;
+  line.dataset.symbol = sym;
+  line.dataset.hay = `${e.time} ${e.level} ${sym} ${e.message}`.toLowerCase();
+  line.innerHTML = `<span class="t">${esc(e.time)}</span><span class="l">${esc(e.level)}</span>` +
+    `<span class="s">${esc(sym)}</span><span class="m">${ticketHtml(e.message)}</span>`;
+  if (!logLineMatches(line)) line.classList.add("hidden");
+  bumpLogSymbols(sym);
+  return line;
+}
+
+function pruneLogView(view) {
+  let removedH = 0;
+  while (view.childElementCount > 1200) {
+    const first = view.firstChild;
+    removedH += first.getBoundingClientRect().height || 0;
+    view.removeChild(first);
+  }
+  if (removedH > 0 && view.scrollTop > 0) {
+    view.scrollTop = Math.max(0, view.scrollTop - removedH);
+  }
+}
+
+function updateLogJump() {
+  const btn = $("#btn-log-jump");
+  if (!btn) return;
+  if (logUnseen > 0) {
+    btn.hidden = false;
+    btn.textContent = `${logUnseen} yeni satir \u2193`;
+  } else {
+    btn.hidden = true;
+  }
+}
+
+function appendLogEntries(entries) {
+  if (!entries.length) return;
+  const view = $("#logview");
+  const follow = $("#log-follow") && $("#log-follow").checked;
+  const atBottom = view.scrollTop + view.clientHeight >= view.scrollHeight - 40;
+  const visibleNew = entries.reduce((n, e) => n + (logEntryMatches(e) ? 1 : 0), 0);
+  entries.forEach((e) => {
+    logAfter = Math.max(logAfter, e.id);
+    view.appendChild(makeLogLine(e));
+  });
+  pruneLogView(view);
+  if (follow && atBottom) {
+    view.scrollTop = view.scrollHeight;
+    logUnseen = 0;
+  } else {
+    logUnseen += visibleNew;
+  }
+  updateLogJump();
+}
+
 async function pollLogs() {
+  const epoch = logEpoch;
   try {
-    const levels = Array.from(logFilter).join(",");
+    // Fetch every level; chips/search/symbol filter client-side so toggles
+    // never wipe the DOM or race an in-flight response.
+    const levels = LOG_LEVELS.join(",");
     const res = await api(`/api/logs?after=${logAfter}&limit=400&levels=${levels}`);
+    if (epoch !== logEpoch) return;
     if (!res.entries.length) return;
-    const view = $("#logview");
-    const atBottom = view.scrollTop + view.clientHeight >= view.scrollHeight - 40;
-    res.entries.forEach((e) => {
-      logAfter = Math.max(logAfter, e.id);
-      const line = el("div", { class: `logline lv-${e.level}` });
-      line.innerHTML = `<span class="t">${esc(e.time)}</span><span class="l">${esc(e.level)}</span>` +
-        `<span class="s">${esc(e.symbol || "")}</span><span>${esc(e.message)}</span>`;
-      view.appendChild(line);
-    });
-    while (view.childElementCount > 1200) view.removeChild(view.firstChild);
-    if ($("#log-follow").checked && atBottom) view.scrollTop = view.scrollHeight;
+    if (logPaused) {
+      res.entries.forEach((e) => {
+        logAfter = Math.max(logAfter, e.id);
+        logPending.push(e);
+      });
+      logUnseen += res.entries.reduce((n, e) => n + (logEntryMatches(e) ? 1 : 0), 0);
+      updateLogJump();
+      return;
+    }
+    appendLogEntries(res.entries);
   } catch (_) { /* transient */ }
 }
 
 /* ----------------------------------------------------------------- poll */
+
+function viewPulse(s) {
+  const pos = (s.positions || []).map(
+    (p) => `${p.ticket}:${p.sl}:${p.profit}:${p.volume}`).join("|");
+  const st = s.states || {};
+  const notes = Object.keys(st).sort().map(
+    (k) => `${k}:${st[k].signal || ""}:${st[k].note || ""}:${st[k].k}:${st[k].atr}`
+  ).join("|");
+  const day = s.day || {};
+  const acc = s.account || {};
+  const bot = s.bot || {};
+  const mt5 = s.mt5 || {};
+  return [bot.last_cycle_at, bot.running, mt5.connected, acc.equity, acc.profit,
+          day.realised, day.halted, pos, notes, s.ai && s.ai.last_review].join("\0");
+}
 
 async function refresh() {
   if (refreshBusy) return;
   refreshBusy = true;
   try {
     STATE = await api("/api/state");
-    SYMBOLS = STATE.symbols || [];
+    const sig = STATE.symbols_sig || "";
+    if (sig !== symbolsSig || !SYMBOLS.length) {
+      symbolsSig = sig;
+      await loadSymbols();
+    }
     const pulse = $("#pulse");
     if (pulse) {
       pulse.className = "pulse on";
       setTimeout(() => { pulse.className = "pulse"; }, 250);
     }
 
-    renderTop();
-    if (activeTab === "panel") {
-      renderCards(); renderCapacity(); renderPositions(); renderDayTable();
+    const vp = viewPulse(STATE);
+    const same = vp === lastViewPulse && activeTab === lastViewTab;
+    lastViewPulse = vp;
+    lastViewTab = activeTab;
+    if (!same) {
+      renderTop();
+      if (activeTab === "panel") {
+        renderCards(); renderCapacity(); renderPositions(); renderDayTable();
+      }
+      if (activeTab === "panel" || activeTab === "tani") {
+        renderExecution(); renderLive();
+      }
+      if (!cardsBuilt && SYMBOLS.length) buildSymbolCards();
+      if (activeTab === "semboller") updateSymbolCards();
+      if (activeTab === "opt") { renderOptJob(); syncOptPicker(); }
+      if (activeTab === "ai") renderAI();
+      if (activeTab === "sistem") renderSystem();
     }
-    if (activeTab === "panel" || activeTab === "tani") {
-      renderExecution(); renderLive();
-    }
-    if (!cardsBuilt && SYMBOLS.length) buildSymbolCards();
-    if (activeTab === "semboller") updateSymbolCards();
-    if (activeTab === "opt") { renderOptJob(); syncOptPicker(); }
-    if (activeTab === "ai") renderAI();
-    if (activeTab === "sistem") renderSystem();
     if (activeTab === "log") pollLogs();
   } catch (e) {
     const pulse = $("#pulse");
@@ -2611,11 +2826,79 @@ function wire() {
     toast("AI kararlari sifirlandi", "ok");
     refresh();
   });
-  $("#btn-log-clear").onclick = async () => {
-    await api("/api/logs/clear", { method: "POST" });
+  $("#btn-log-clear").onclick = () => {
+    // View-only: do not call /api/logs/clear (that wipes the shared ring).
+    logEpoch += 1;
     $("#logview").innerHTML = "";
-    logAfter = 0;
+    logPending = [];
+    logUnseen = 0;
+    logSeenSymbols = new Set();
+    logSymbolFilter = new Set();
+    renderLogSymbols();
+    updateLogJump();
   };
+  const search = $("#log-search");
+  if (search) {
+    search.addEventListener("input", () => {
+      clearTimeout(logSearchTimer);
+      logSearchTimer = setTimeout(() => {
+        logSearch = (search.value || "").trim().toLowerCase();
+        applyLogFilters();
+      }, 150);
+    });
+  }
+  const pauseBtn = $("#btn-log-pause");
+  if (pauseBtn) {
+    pauseBtn.onclick = () => {
+      logPaused = !logPaused;
+      pauseBtn.textContent = logPaused ? "Devam" : "Duraklat";
+      pauseBtn.classList.toggle("btn-stop", logPaused);
+      if (!logPaused && logPending.length) {
+        const batch = logPending;
+        logPending = [];
+        appendLogEntries(batch);
+      }
+    };
+  }
+  const densBtn = $("#btn-log-density");
+  if (densBtn) {
+    densBtn.onclick = () => {
+      logCompact = !logCompact;
+      $("#logview").classList.toggle("compact", logCompact);
+      densBtn.textContent = logCompact ? "Ferah" : "Sik";
+    };
+  }
+  const jumpBtn = $("#btn-log-jump");
+  if (jumpBtn) {
+    jumpBtn.onclick = () => {
+      if (logPaused && logPending.length) {
+        const batch = logPending;
+        logPending = [];
+        appendLogEntries(batch);
+      }
+      const view = $("#logview");
+      view.scrollTop = view.scrollHeight;
+      logUnseen = 0;
+      updateLogJump();
+      if ($("#log-follow")) $("#log-follow").checked = true;
+    };
+  }
+  const lvlAll = $("#btn-log-levels-all");
+  if (lvlAll) {
+    lvlAll.onclick = () => {
+      logFilter = new Set(LOG_LEVELS);
+      renderLogLevels();
+      applyLogFilters();
+    };
+  }
+  const symAll = $("#btn-log-symbols-all");
+  if (symAll) {
+    symAll.onclick = () => {
+      logSymbolFilter = new Set();
+      renderLogSymbols();
+      applyLogFilters();
+    };
+  }
   // Same-origin <a href> sends the HttpOnly session cookie; the secret
   // must not go in the URL (history, Referer, access logs).
 
@@ -2627,4 +2910,4 @@ fillGroupSelects();
 // Schema first: buildSymbolCards() hides OPT axes a family never reads, and
 // with an empty SCHEMA every axis shows. Fetch before the first refresh so the
 // symbol form does not flash the full field list.
-loadSchema().then(refresh);
+loadSchema().then(loadSymbols).then(refresh);

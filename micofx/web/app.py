@@ -14,7 +14,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from .. import APP_NAME, __version__
 from ..engine import Engine
@@ -91,7 +91,12 @@ class OptRun(_ForbidModel):
     symbols: list[str] | None = None
     apply_best: bool = True
     bars: int | None = None
-    timeframes: list[str] | None = None
+    timeframes: list[str] | None = Field(default=None, max_length=32)
+    # One-off family subset for this run. Does not persist; scheduled
+    # reopt still reads the saved opt_params list (which re-appends every
+    # shipped family). None/empty = inherit. Bound so a session cookie
+    # cannot POST a 10k-name list into the parser / keep-log.
+    strategies: list[str] | None = Field(default=None, max_length=32)
     # Waives the settling-time hold: a config normally has to run for
     # reopt_min_age_hours before a scan may replace it.
     force: bool = False
@@ -568,6 +573,7 @@ _CRITICAL_MUTATIONS = frozenset({
     "/api/positions-close-all",
     "/api/account-lock",
     "/api/holdout/capture",
+    "/api/opt/run", "/api/opt/cancel",
 })
 _holdout_capture_lock = threading.Lock()
 
@@ -579,7 +585,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     A missing token used to skip the middleware entirely, so a page on
     another origin could POST /api/bot/panic at the local panel (AS1).
     The secret lives in an HttpOnly SameSite=Strict cookie set on GET /,
-    not in the URL and not in the HTML.
+    not in the URL and not in the HTML. Every POST/PUT/PATCH/DELETE also
+    needs Origin matching this Host (defense in depth on top of SameSite).
     """
     if not api_token:
         api_token = secrets.token_urlsafe(24)
@@ -597,7 +604,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         offered = request.headers.get("x-mico-token") or request.cookies.get(SESSION_COOKIE)
         if not offered or not secrets.compare_digest(str(offered), api_token):
             return JSONResponse({"detail": "gecersiz veya eksik oturum"}, status_code=401)
-        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path in _CRITICAL_MUTATIONS:
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             origin = request.headers.get("origin")
             site = (request.headers.get("sec-fetch-site") or "").lower()
             host = request.headers.get("host") or ""
@@ -655,7 +662,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         """Which OPT axes each family actually reads. Static per process.
 
         These three blocks used to ride on every /api/state, which the panel
-        polls every ~3s (1.5s while a search runs). They are built from module
+        polls every ~3s. They are built from module
         constants - OPT_FIELDS and _FAMILIES cannot change while the process is
         up - so 2155 bytes and twelve sorted() calls were repeating for a
         payload that never differed. The panel fetches this once on load, the
@@ -677,7 +684,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             "ts": time.time(),
             "version": __version__,
             **engine.snapshot(),
-            "symbols": symbol_payload(),
+            "symbols_sig": ",".join(sorted(store.symbols)),
             "system": store.system.to_dict(),
             "opt": optimizer.status(),
         }
@@ -1543,20 +1550,18 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         two causes that look identical from outside - a gate refusing the
         trade, versus the signal never firing in the first place.
 
-        ``attempts`` is signals that reached _try_entry, not bars. Compare it
-        against the holdout's implied trade count: if attempts match and
-        ``opened`` does not, a gate is eating them and ``blocks`` names it. If
-        attempts themselves are short, the entry gates are innocent and the
-        shortfall is upstream, in signal generation.
+        ``signals`` is distinct episodes (the number that compares to a
+        holdout trade count). ``attempts`` is poll persistence on the same
+        episode and must not be the note's denominator.
         """
         data = engine.entry_blocks()
-        total = data["attempts"]
+        total = data["signals"]
         top = next(iter(data["totals"].items()), None)
         data["note"] = (
             "Henuz giris denemesi kaydedilmedi - sayac bu surumle basladi, "
             "bir sinyal gelene kadar bos kalir."
             if not total else
-            f"{data['opened']}/{total} deneme islemle sonuclandi"
+            f"{data['opened']}/{total} sinyal islemle sonuclandi"
             + (f"; en cok engelleyen: {top[0]} ({top[1]})" if top else "")
         )
         return {"ok": True, **data}
@@ -1736,7 +1741,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/symbols/{symbol}/close")
     def close_symbol(symbol: str) -> dict[str, Any]:
-        closed, remaining = engine.close_all(symbol=symbol)
+        closed, remaining = engine.close_all(
+            symbol=symbol, reason="panel sembol kapat")
         return {"ok": remaining == 0, "closed": closed, "remaining": remaining}
 
     @app.post("/api/symbols-bulk")
@@ -2081,7 +2087,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/positions-close-all")
     def close_everything() -> dict[str, Any]:
-        closed, remaining = engine.close_all()
+        closed, remaining = engine.close_all(reason="panel tumunu kapat")
         return {"ok": remaining == 0, "closed": closed, "remaining": remaining}
 
     # ----------------------------------------------------------- optimizer
@@ -2142,7 +2148,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/opt/run")
     def opt_run(body: OptRun) -> dict[str, Any]:
         result = optimizer.start(body.symbols, body.apply_best, body.bars,
-                                 timeframes=body.timeframes, force=body.force)
+                                 timeframes=body.timeframes, force=body.force,
+                                 strategies=body.strategies)
         if not result.get("ok"):
             raise HTTPException(409, result.get("error", "optimizasyon baslatilamadi"))
         return result

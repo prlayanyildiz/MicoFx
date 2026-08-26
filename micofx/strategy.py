@@ -1165,64 +1165,6 @@ def _cross_over(fast: np.ndarray, slow: np.ndarray) -> np.ndarray:
     return out
 
 
-def _alpha_trend(cache: IndicatorCache, p: Params) -> Signals:
-    """Kivanc AlphaTrend, RSI mode, traded as a lag-2 cross of its own line.
-
-    SuperTrend already lives as ``st_trend``. This is the other Kivanc trailing
-    line: SMA of true range, RSI>=50 ratchet, buy/sell = crossover versus the
-    line two bars ago. Coefficient stays at the published 1.0; the only search
-    axis is ``rsi_length`` (shared as Pine's Common Period). The plotshape
-    O1>K2 alternate filter is display-only and is not applied here.
-    """
-    close = cache.close
-    size = close.size
-    line = ind.alpha_trend_rsi(cache.high, cache.low, close, p.rsi_length, 1.0)
-    lagged = np.empty_like(line)
-    lagged[:2] = line[:2]
-    if size > 2:
-        lagged[2:] = line[:-2]
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-
-    buy = _cross_over(line, lagged)
-    sell = _cross_over(lagged, line)
-    warmup = min(size, max(p.rsi_length * 5, p.atr_period * 3, 2))
-    buy[:warmup] = False
-    sell[:warmup] = False
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=line, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
-
-
-def _mavilim(cache: IndicatorCache, p: Params) -> Signals:
-    """Kivanc MavilimW slope flip: nested WMA 3-5-8-13-21-34.
-
-    Lengths are the published defaults, not a search axis - nesting already
-    spends the lookback. Buy is the bar the outer line turns up, sell the bar
-    it turns down. Same shape as ``t3_flip`` on a different curve.
-    """
-    close = cache.close
-    size = close.size
-    line = ind.mavilim_w(close, 3, 5)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-    prev = np.roll(line, 1)
-    prev[0] = line[0]
-    rising = line > prev
-    was_rising = np.roll(rising, 1)
-    was_rising[0] = False
-    buy = rising & ~was_rising
-    sell = ~rising & was_rising
-    warmup = min(size, max(84, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=line, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
-
-
 def _ichimoku(cache: IndicatorCache, p: Params) -> Signals:
     """Classic TK cross against the cloud that already exists.
 
@@ -1263,8 +1205,6 @@ _FAMILIES = {
     "stoch_flip": _stoch_flip,
     "parabolic_flip": _parabolic_flip,
     "aroon_flip": _aroon_flip,
-    "alpha_trend": _alpha_trend,
-    "mavilim": _mavilim,
     "ichimoku": _ichimoku,
 }
 

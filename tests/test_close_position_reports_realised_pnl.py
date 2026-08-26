@@ -108,6 +108,25 @@ def test_realised_pnl_comes_from_the_closing_deal(monkeypatch):
     assert "-12.90" not in line
 
 
+def test_close_position_puts_realised_pnl_on_the_fill(monkeypatch):
+    """Autopsy flatten cash comes from this dict, not a second deal walk."""
+    monkeypatch.setattr("micofx.mt5client.mt5", _mt5((_deal(),)))
+    monkeypatch.setattr("micofx.mt5client._FILL_RETCODES", frozenset({10009, 10010}))
+    fill: dict = {}
+    ok = MT5Client.close_position(_client(), TICKET, fill=fill)
+    assert ok is True
+    assert fill["profit"] == -14.00
+
+
+def test_fill_profit_uses_the_floating_fallback_when_history_is_empty(monkeypatch):
+    monkeypatch.setattr("micofx.mt5client.mt5", _mt5(()))
+    monkeypatch.setattr("micofx.mt5client._FILL_RETCODES", frozenset({10009, 10010}))
+    fill: dict = {}
+    ok = MT5Client.close_position(_client(), TICKET, fill=fill)
+    assert ok is True
+    assert fill["profit"] == -13.30
+
+
 def test_partial_fills_of_one_close_are_summed(monkeypatch):
     deals = (_deal(profit=-9.0, commission=-0.3, swap=-0.2),
              _deal(profit=-4.0, commission=-0.2, swap=-0.2))

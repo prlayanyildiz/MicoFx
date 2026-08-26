@@ -102,9 +102,11 @@ def test_the_registry_is_the_whole_book():
     # against a field whose next-worst is 23.2. This number is a tripwire for
     # an ACCIDENTAL change, so it moves only with a reason written beside it.
     # 12 -> 15 on 25.08: alpha_trend, mavilim, ichimoku (Kivanc combo).
+    # 15 -> 13 on 26.08: alpha_trend unmeasurable (7 trades < 12), mavilim
+    # lost on GER holdout (-20.2 R / PF 0.92). ichimoku passed the same gates.
     # BBW and TD Sequential were measured out of the set: atr_pct_min already
     # gates dead regimes, and TD is a fade counter against an ATR-trail book.
-    assert len(FAMILIES) == 15, f"aile sayisi degisti: {FAMILIES}"
+    assert len(FAMILIES) == 13, f"aile sayisi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

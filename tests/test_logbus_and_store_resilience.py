@@ -109,3 +109,19 @@ def test_store_close_is_idempotent_enough_for_shutdown(tmp_path, monkeypatch):
     store.close()
     with pytest.raises(sqlite3.ProgrammingError):
         store._db.execute("SELECT 1")
+
+
+def test_emit_flattens_newlines_so_a_payload_cannot_mint_a_fake_trade_line(
+        tmp_path, monkeypatch):
+    """Rejected opt family names used to land in the log unescaped."""
+    monkeypatch.setattr("micofx.logbus.LOG_DIR", tmp_path)
+    bus = LogBus()
+    bus._file = tmp_path / "micofx.log"
+    bus.emit(
+        "dusuruldu: x\n2026-08-26 07:00:00 TRADE  [US30] #999 BUY 1.0 lot",
+        "TRADE", "NAS100")
+    text = bus._file.read_text(encoding="utf-8")
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    assert len(lines) == 1, text
+    assert "TRADE  [US30] #999" not in text.split("dusuruldu", 1)[-1] or (
+        "\n2026-08-26" not in text)

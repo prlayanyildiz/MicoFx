@@ -79,6 +79,17 @@ def test_both_sides_use_the_same_step_function():
     assert "trail_min_step" in inspect.getsource(backtest.simulate)
 
 
+def test_both_sides_use_the_shared_overlay_stop():
+    from micofx.exits import overlay_stop
+    assert "overlay_stop" in inspect.getsource(engine_mod.Engine._update_stop)
+    assert "overlay_stop" in inspect.getsource(backtest.simulate)
+    assert overlay_stop(
+        is_buy=True, entry=100.0, ref=102.0, atr=1.0,
+        trail_start_atr=0.5, trail_step_atr=1.0, trail_mode="atr",
+        struct_sl=None, breakeven_at_r=0.0, original_risk=1.0,
+    ) == pytest.approx(101.0)
+
+
 def test_step_is_the_larger_of_the_broker_floor_and_the_atr_fraction():
     # Broker floor dominates when ATR is tiny...
     assert trail_min_step(min_stop=4.0, atr=0.1, trail_step_atr=1.0) == pytest.approx(1.0)

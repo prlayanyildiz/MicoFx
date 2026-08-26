@@ -93,7 +93,7 @@ class SymbolConfig:
     broker_symbol: str = ""          # override when the broker renames an instrument
     # t3_stoch | mtf_pullback | micro_rev | burst | dual_t3
     # | st_trend | t3_flip | macd_flip | wavetrend_flip | stoch_flip
-    # | parabolic_flip | aroon_flip | alpha_trend | mavilim | ichimoku
+    # | parabolic_flip | aroon_flip | ichimoku
     # (see models.STRATEGIES)
     strategy: str = "t3_stoch"
 
@@ -541,11 +541,15 @@ OPT_FIELDS = [
 # candidates neither was ever applied to a symbol, neither is live, and their
 # best holdout score ever was 2.7 and 5.0 against a field whose next-worst is
 # 23.2 - not a marginal call. Dropping them is 2/14 of every sweep's work.
+# alpha_trend and mavilim retired 26.08 on the first holdout: alpha_trend
+# produced 7 trades against MIN_TEST_TRADES=12 (structural, lag-2 cross),
+# mavilim had enough trades and lost (GER -20.2 R / PF 0.92). ichimoku stayed
+# - it passed the same gates (GER 208 trades, +27.9 R, PF 1.21).
 STRATEGIES = ["t3_stoch", "mtf_pullback",
               "micro_rev", "burst", "dual_t3", "st_trend",
               "t3_flip", "macd_flip", "wavetrend_flip", "stoch_flip",
               "parabolic_flip", "aroon_flip",
-              "alpha_trend", "mavilim", "ichimoku"]
+              "ichimoku"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
 # Longer TFs turn them into slow mean-reversion with the wrong cost geometry.

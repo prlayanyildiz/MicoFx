@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
+import tempfile
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor
 from concurrent.futures import wait as futures_wait
 from concurrent.futures.process import BrokenProcessPool
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -47,6 +50,18 @@ def _stamp_values_match(live: Any, stamped: Any) -> bool:
     if fa != fa or fb != fb:
         return False
     return abs(fa - fb) <= 1e-9
+
+
+def tf_lock_status(tf_allow: Any) -> str:
+    """OPT start-line fragment: whether the family→TF map actually restricts.
+
+    ``STRATEGY_TIMEFRAMES`` empty means every family may search every TF
+    (scalps on M15+ included). A hardcoded "scalp TF kilidi acik" lied after
+    that map was cleared — XAUUSD is live burst/M15.
+    """
+    if isinstance(tf_allow, dict) and tf_allow:
+        return "aile TF kilidi acik"
+    return "aile TF kilidi kapali"
 
 
 def family_max_combos(opt_blob: dict[str, Any] | None, family: str,
@@ -97,6 +112,33 @@ def _grid_axis_equal(left: Any, right: Any) -> bool:
     return True
 
 
+_SWEEP_BAR_FIELDS = ("time", "open", "high", "low", "close", "spread", "volume")
+
+
+def write_sweep_bars(dest: Path, bars: Any) -> Path:
+    """Dump one TF window as mmap-able ``.npy`` files.
+
+    Thirteen families on the same TF used to pickle the same arrays into
+    thirteen ProcessPool jobs. One folder, workers mmap it read-only.
+    """
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    if (dest / "close.npy").exists():
+        return dest
+    for name in _SWEEP_BAR_FIELDS:
+        np.save(dest / f"{name}.npy", np.asarray(getattr(bars, name)),
+                allow_pickle=False)
+    return dest
+
+
+def load_sweep_bars(dest: Path | str) -> dict[str, Any]:
+    dest = Path(dest)
+    return {
+        name: np.load(dest / f"{name}.npy", mmap_mode="r")
+        for name in _SWEEP_BAR_FIELDS
+    }
+
+
 def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
     """Run one timeframe x strategy walk-forward in a separate process.
 
@@ -105,9 +147,10 @@ def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
     arrays and dicts cross the process boundary; MT5 is never touched here (the
     bars were already fetched by the parent under the client lock).
     """
+    arrays = load_sweep_bars(payload["bars_path"])
     bars = Bars.__new__(Bars)
-    for name in ("time", "open", "high", "low", "close", "spread", "volume"):
-        setattr(bars, name, payload["bars"][name])
+    for name in _SWEEP_BAR_FIELDS:
+        setattr(bars, name, arrays[name])
     bars.forming_time = 0
 
     cfg = SymbolConfig.from_dict(payload["cfg"])
@@ -232,11 +275,25 @@ class Optimizer:
         self.entry_lock: threading.Lock | None = None
         # Bars fetched at plan time, reused for incumbent replay (AS3).
         self._bar_snap: dict[tuple[str, str], Any] = {}
+        self._sweep_bars_dir: Path | None = None
         # First store/import failure of _spread_scale gets one WARN; a later
         # success re-arms it. Same latch the engine uses for diagnostic flushes:
         # returning 1.0 on a frozen read is the old behaviour (search still
         # runs) but quoting that 1.0 as "no measurement" is a ~10% cheap cost.
         self._spread_scale_warned = False
+
+    def _ensure_sweep_bars_dir(self) -> Path:
+        d = getattr(self, "_sweep_bars_dir", None)
+        if d is None:
+            d = Path(tempfile.mkdtemp(prefix="micofx_opt_bars_"))
+            self._sweep_bars_dir = d
+        return Path(d)
+
+    def _clear_sweep_bars(self) -> None:
+        d = getattr(self, "_sweep_bars_dir", None)
+        self._sweep_bars_dir = None
+        if d is not None:
+            shutil.rmtree(d, ignore_errors=True)
 
     @property
     def busy(self) -> bool:
@@ -253,7 +310,8 @@ class Optimizer:
     def start(self, symbols: list[str] | None = None, apply_best: bool = True,
               bars: int | None = None, source: str = "manual",
               timeframes: list[str] | None = None,
-              force: bool = False) -> dict[str, Any]:
+              force: bool = False,
+              strategies: list[str] | None = None) -> dict[str, Any]:
         with self._lock:
             if self.busy:
                 return {"ok": False, "error": "Optimizasyon zaten calisiyor."}
@@ -310,26 +368,51 @@ class Optimizer:
                 tf_override = kept
             else:
                 tf_override = None
+            # Same one-off door as timeframes. store.opt_params() re-appends
+            # every shipped family, so a saved subset cannot actually restrict
+            # a sweep - and writing one would leave scheduled reopt stuck.
+            requested_fam = [str(s) for s in (strategies or [])]
+            if requested_fam:
+                dropped_fam = [s for s in requested_fam if s not in STRATEGIES]
+                kept_fam = [s for s in requested_fam if s in STRATEGIES]
+                if dropped_fam:
+                    LOG.emit(
+                        f"Aranamayan strateji istekten dusuruldu: "
+                        f"{', '.join(dropped_fam[:8])} (aranan: {', '.join(STRATEGIES)})",
+                        "OPT")
+                if not kept_fam:
+                    return {"ok": False, "error": (
+                        f"Aranabilir strateji yok (istenilen: "
+                        f"{', '.join(requested_fam)}; aranan: "
+                        f"{', '.join(STRATEGIES)})")}
+                fam_override = kept_fam
+            else:
+                fam_override = None
             self._cancel.clear()
+            self._incumbent_holdout_cache = {}
             self.job = {
                 "state": "running", "started_at": time.time(), "finished_at": 0.0,
                 "symbols": targets, "apply_best": bool(apply_best),
                 "source": str(source or "manual"), "timeframes": tf_override or [],
+                "strategies": fam_override or [],
                 "force": bool(force),
                 "done": 0, "total": len(targets), "current": "",
                 "combo_done": 0, "combo_total": 0, "best_score": None,
                 "results": [], "error": "",
             }
             self._thread = threading.Thread(
-                target=self._run, args=(targets, bool(apply_best), bars, tf_override),
+                target=self._run,
+                args=(targets, bool(apply_best), bars, tf_override, fam_override),
                 name="micofx-optimizer", daemon=True,
             )
             self._thread.start()
             src = str(self.job.get("source") or "manual")
+            fam_note = (
+                f" stratejiler={'/'.join(fam_override)}" if fam_override else "")
             LOG.emit(
                 f"Optimizasyon istendi | kaynak={src} "
                 f"apply_best={str(bool(apply_best)).lower()} "
-                f"force={str(bool(force)).lower()} | "
+                f"force={str(bool(force)).lower()}{fam_note} | "
                 f"{len(targets)} sembol ({', '.join(targets)})",
                 "OPT")
             setter = getattr(self.store, "set_setting", None)
@@ -339,6 +422,7 @@ class Optimizer:
                     "apply_best": bool(apply_best),
                     "force": bool(force),
                     "symbols": list(targets),
+                    "strategies": list(fam_override or []),
                     "started_at": self.job.get("started_at"),
                     "state": "running",
                 })
@@ -351,7 +435,8 @@ class Optimizer:
             self.job.update(patch)
 
     def _run(self, targets: list[str], apply_best: bool, bars_override: int | None,
-             tf_override: list[str] | None = None) -> None:
+             tf_override: list[str] | None = None,
+             fam_override: list[str] | None = None) -> None:
         # Thread target - nothing downstream of start() is allowed to leave
         # self.job stuck in "running" forever. A bad opt_params value (e.g. a
         # None a client bug slipped through, or hand-edited settings) used to
@@ -359,14 +444,16 @@ class Optimizer:
         # it: the Start button (job.state == "running") stayed disabled
         # indefinitely with no error ever surfaced anywhere.
         try:
-            self._run_unsafe(targets, apply_best, bars_override, tf_override)
+            self._run_unsafe(targets, apply_best, bars_override, tf_override,
+                             fam_override)
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             self._set(state="done", finished_at=time.time(), current="", error=err)
             LOG.emit(f"Optimizasyon beklenmedik hatayla durdu: {err}", "OPT")
 
     def _run_unsafe(self, targets: list[str], apply_best: bool, bars_override: int | None,
-                    tf_override: list[str] | None = None) -> None:
+                    tf_override: list[str] | None = None,
+                    fam_override: list[str] | None = None) -> None:
         self.client.set_terminal_path(self.store.system.mt5_terminal_path)
         self.client.set_overrides(
             {c.symbol: c.broker_symbol for c in list(self.store.symbols.values())})
@@ -388,7 +475,8 @@ class Optimizer:
             or ["M5"]
         refine_rounds = int(params.get("refine_rounds", 2))
         shared = {k: v for k, v in (params.get("grid") or {}).items() if isinstance(v, list) and v}
-        families = [s for s in (params.get("strategies") or ["t3_stoch"]) if s in STRATEGIES] \
+        families = [s for s in (fam_override or params.get("strategies") or ["t3_stoch"])
+                    if s in STRATEGIES] \
             or ["t3_stoch"]
         family_grids = params.get("strategy_grids") or {}
         # One sweep per family: its own parameters on top of the shared risk
@@ -421,7 +509,7 @@ class Optimizer:
                  f"{segments} segment (son segment dogrulama) | "
                  f"zaman dilimleri {'/'.join(timeframes)} | stratejiler {'/'.join(families)} | "
                  f"cikis: sert ATR stop + ATR takip ({len(variants)} tarama/zaman dilimi) | "
-                 f"scalp TF kilidi acik | "
+                 f"{tf_lock_status(tf_allow)} | "
                  f"max {max_combos} kombinasyon | "
                  f"{_worker_count(self.store.system.opt_max_workers)} paralel surec", "OPT")
 
@@ -737,13 +825,15 @@ class Optimizer:
                 grid = self._exit_grid_for(
                     variant["grid"], variant["own"], family, tf,
                     shared=variant.get("shared"), factory=factory)
+                bars_dir = self._ensure_sweep_bars_dir()
+                safe = "".join(
+                    ch if ch.isalnum() else "_" for ch in f"{cfg.symbol}_{tf}")
+                bars_path = write_sweep_bars(bars_dir / safe, bars)
                 plan["jobs"].append({
                     "symbol": cfg.symbol, "timeframe": tf, "strategy": family,
                     "order": len(plan["jobs"]) + len(plan["attempts"]),
                     "cfg": {**cfg.to_dict(), "timeframe": tf, "strategy": family},
-                    "bars": {name: np.asarray(getattr(bars, name))
-                             for name in ("time", "open", "high", "low", "close",
-                                          "spread", "volume")},
+                    "bars_path": str(bars_path),
                     "point": float(info["point"]), "tf_seconds": timeframe_seconds(tf),
                     "spread_scale": spread_scale,
                     "charge_costs": charge_costs,
@@ -784,6 +874,7 @@ class Optimizer:
         serial prologue in front of it.
         """
         self._bar_snap = {}
+        self._ensure_sweep_bars_dir()
         plans: dict[str, dict[str, Any]] = {}
         allow = tf_allow if isinstance(tf_allow, dict) else STRATEGY_TIMEFRAMES
         # Count only legal family×TF pairs so the progress bar is honest.
@@ -839,37 +930,40 @@ class Optimizer:
 
         _limit_blas_threads()
         workers = _worker_count(self.store.system.opt_max_workers)
-        if workers > 1:
-            try:
-                self._search_parallel(targets, plan_next, note, workers)
-                return
-            except BrokenProcessPool:
-                # Usually memory pressure. Finishing slowly beats not finishing.
-                LOG.emit("Paralel arama basarisiz, tek surece dusuldu.", "OPT")
+        try:
+            if workers > 1:
+                try:
+                    self._search_parallel(targets, plan_next, note, workers)
+                    return
+                except BrokenProcessPool:
+                    # Usually memory pressure. Finishing slowly beats not finishing.
+                    LOG.emit("Paralel arama basarisiz, tek surece dusuldu.", "OPT")
 
-        # Single-process fallback: same work, same results, one core. A symbol
-        # already planned may still owe sweeps the broken pool never returned,
-        # so those are re-run here rather than skipped along with the symbol.
-        for symbol in targets:
-            if self._cancel.is_set():
-                return
-            plan = plans.get(symbol)
-            if plan is None:
-                self._set(current=symbol)
-                jobs = plan_next(symbol)
-                plan = plans.get(symbol)
-            elif plan["outstanding"] > 0:
-                self._set(current=symbol)
-                measured = {(a.get("timeframe"), a.get("strategy"))
-                            for a in plan["attempts"]}
-                jobs = [j for j in plan["jobs"]
-                        if (j["timeframe"], j["strategy"]) not in measured]
-            else:
-                continue
-            for job in jobs:
+            # Single-process fallback: same work, same results, one core. A symbol
+            # already planned may still owe sweeps the broken pool never returned,
+            # so those are re-run here rather than skipped along with the symbol.
+            for symbol in targets:
                 if self._cancel.is_set():
                     return
-                note(job, _sweep_worker(job))
+                plan = plans.get(symbol)
+                if plan is None:
+                    self._set(current=symbol)
+                    jobs = plan_next(symbol)
+                    plan = plans.get(symbol)
+                elif plan["outstanding"] > 0:
+                    self._set(current=symbol)
+                    measured = {(a.get("timeframe"), a.get("strategy"))
+                                for a in plan["attempts"]}
+                    jobs = [j for j in plan["jobs"]
+                            if (j["timeframe"], j["strategy"]) not in measured]
+                else:
+                    continue
+                for job in jobs:
+                    if self._cancel.is_set():
+                        return
+                    note(job, _sweep_worker(job))
+        finally:
+            self._clear_sweep_bars()
 
     def _search_parallel(self, targets: list[str], plan_next, note, workers: int) -> None:
         """Feed every symbol's sweeps into one pool, fetching bars as it goes."""
@@ -984,9 +1078,7 @@ class Optimizer:
                 "previous": None,
             }, False)
             tail = f" -> uygulanmadi ({reason})"
-            if report.get("incumbent"):
-                tail += (f", mevcut ayar korundu "
-                         f"(test net {float(report['incumbent'].get('net_r') or 0.0):+.1f}R)")
+            tail += self._incumbent_kept_tail(cfg)
             LOG.emit(f"{cfg.symbol}: {reason}{tail}", "OPT", cfg.symbol)
             return report
 
@@ -1109,9 +1201,7 @@ class Optimizer:
             # "dogrulanmadi" for something that actually validated fine and
             # was rejected for an unrelated, more specific cause.
             tail = f" -> uygulanmadi ({report.get('keep_reason') or reason or 'dogrulanmadi'})"
-            if report.get("incumbent"):
-                tail += (f", mevcut ayar korundu "
-                         f"(test net {float(report['incumbent'].get('net_r') or 0.0):+.1f}R)")
+            tail += self._incumbent_kept_tail(cfg)
         LOG.emit(
             f"{cfg.symbol}: {report['strategy']}/{report['timeframe']}"
             f" skor {score:.2f} | "
@@ -1363,6 +1453,31 @@ class Optimizer:
             return "holdout kenari zayifladi (retention)"
         return ""
 
+    def _incumbent_kept_tail(self, cfg) -> str:
+        """Log suffix when the live config is kept. Quote a fresh replay.
+
+        The apply stamp in opt_summary.holdout is the number from the day
+        the config was written. 26.08 US30 logged +224.2 R from 24.08 20:52
+        while the same setup on tonight's pins is -89.1 R. The gate already
+        replays; this line is what operators and the other agent actually
+        read, so it has to say taze vs damga.
+        """
+        stamp = ((getattr(cfg, "opt_summary", None) or {}).get("holdout") or {})
+        fresh = self._fresh_incumbent_holdout(cfg) or {}
+        if fresh.get("net_r") is not None:
+            return (
+                f", mevcut ayar korundu "
+                f"(taze test {float(fresh['net_r']):+.1f}R)")
+        if stamp.get("net_r") is not None:
+            when = ""
+            ts = float(getattr(cfg, "opt_updated_at", 0.0) or 0.0)
+            if ts > 0:
+                when = time.strftime(", %d.%m", time.gmtime(ts))
+            return (
+                f", mevcut ayar korundu "
+                f"(damga {float(stamp['net_r']):+.1f}R{when})")
+        return ""
+
     def _fresh_incumbent_holdout(self, cfg) -> dict[str, Any] | None:
         """Same-window holdout of the *live* config. None = use the stamp.
 
@@ -1371,11 +1486,22 @@ class Optimizer:
         """
         try:
             params = {k: getattr(cfg, k) for k in OPT_FIELDS if hasattr(cfg, k)}
+            key = (str(cfg.symbol), str(cfg.timeframe), str(cfg.strategy),
+                   tuple(sorted(params.items())))
+            cache = getattr(self, "_incumbent_holdout_cache", None)
+            if cache is None:
+                self._incumbent_holdout_cache = {}
+                cache = self._incumbent_holdout_cache
+            if key in cache:
+                return cache[key]
             out = self._holdout_costed(
-                cfg.symbol, cfg.timeframe, cfg.strategy, params)
+                cfg.symbol, cfg.timeframe, cfg.strategy, params,
+                allow_fetch=False)
+            result = out if isinstance(out, dict) else None
+            cache[key] = result
+            return result
         except Exception:
             return None
-        return out if isinstance(out, dict) else None
 
     def _beats_incumbent(self, cfg, hold: dict[str, Any]) -> bool:
         """Is this holdout at least as good as the live config's own holdout?
@@ -1527,16 +1653,20 @@ class Optimizer:
             LOG.emit(f"{symbol}: makas kalibrasyonu okunamadi ({exc}) - "
                      f"mevcut tavan korundu.", "OPT", symbol)
 
-    def _bars_for_holdout(self, symbol: str, timeframe: str):
+    def _bars_for_holdout(self, symbol: str, timeframe: str,
+                          allow_fetch: bool = True):
         """Holdout bars from the run snapshot, else a live fetch.
 
         A second client.bars() mid-run can close a new bar and shift the
-        window the candidate was scored on (AS3).
+        window the candidate was scored on (AS3). Incumbent keep/gate
+        replay must pass allow_fetch=False and fall back to the stamp.
         """
         snap = getattr(self, "_bar_snap", None) or {}
         got = snap.get((symbol, timeframe))
         if got is not None:
             return got
+        if not allow_fetch:
+            return None
         opt: dict[str, Any] = {}
         store = getattr(self, "store", None)
         if store is not None:
@@ -1548,7 +1678,8 @@ class Optimizer:
         return self.client.bars(symbol, timeframe, want)
 
     def _holdout_costed(self, symbol: str, timeframe: str, strategy: str,
-                        params: dict[str, Any]) -> dict[str, Any] | None:
+                        params: dict[str, Any], *,
+                        allow_fetch: bool = True) -> dict[str, Any] | None:
         """One charged replay of the winner on the holdout slice. Not a search.
 
         Search may still run with ``charge_costs=False`` (#50). Live still
@@ -1568,7 +1699,7 @@ class Optimizer:
         # five ways is not the last fifth of 99000.
         opt = self.store.opt_params() or {}
         segments = int(opt.get("segments") or 0) or 5
-        bars = self._bars_for_holdout(symbol, timeframe)
+        bars = self._bars_for_holdout(symbol, timeframe, allow_fetch=allow_fetch)
         if bars is None or len(bars) < 800:
             return None
         n = len(bars)

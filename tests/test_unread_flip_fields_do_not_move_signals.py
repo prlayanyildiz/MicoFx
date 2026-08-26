@@ -26,7 +26,6 @@ FLIP = (
     "stoch_flip",
     "parabolic_flip",
     "aroon_flip",
-    "mavilim",
     "ichimoku",
 )
 

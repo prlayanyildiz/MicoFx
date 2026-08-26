@@ -81,6 +81,21 @@ h3 { font-size: 12px; margin: 18px 0 10px; color: var(--muted); text-transform: 
 main { padding: 16px; max-width: 1720px; margin: 0 auto; }
 .page { display: none; }
 .page.active { display: block; }
+/* Log tab only: fill the viewport under sticky topbar+tabs without a magic
+   vh offset. Other pages keep normal block flow. */
+#page-log.active {
+  display: flex; flex-direction: column;
+  height: calc(100vh - 120px); min-height: 360px;
+}
+#page-log.active > .panel {
+  flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0;
+  margin-bottom: 0;
+}
+#page-log .log-sticky { flex: 0 0 auto; }
+#page-log .logview-wrap {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+}
+#page-log .logview { flex: 1 1 auto; height: auto; min-height: 260px; }
 
 /* ---------------------------------------------------------------- panels */
 
@@ -341,15 +356,46 @@ select#group-filter { width: 150px; }
 
 /* ------------------------------------------------------------------ log */
 
-.logview {
-  height: 62vh; overflow-y: auto; background: #080c11;
-  border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px;
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.65;
+.log-search { flex: 1 1 260px; min-width: 200px; max-width: 460px; }
+
+/* One sticky strip instead of three stacked rows. The old head + level row
+   + symbol row ate ~150px before the first log line on 1080p; the body was
+   a fixed 62vh regardless, so the page scrolled and the controls left with
+   it. Now the strip pins and the body takes what is left. */
+.log-toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 6px;
 }
-.logline { display: flex; gap: 9px; white-space: pre-wrap; word-break: break-word; }
-.logline .t { color: var(--dim); flex: none; }
-.logline .l { flex: none; width: 52px; font-weight: 600; }
-.logline .s { flex: none; width: 74px; color: var(--violet); }
+.log-toolbar.log-chips { gap: 6px; }
+.log-sticky {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--panel); padding: 8px 0 2px;
+  border-bottom: 1px solid var(--line); margin-bottom: 8px;
+}
+.log-sticky .panel-head { margin: 0 0 6px; }
+.log-sep { flex: none; width: 1px; align-self: stretch; background: var(--line); }
+.logview-wrap { position: relative; }
+.logview {
+  overflow-y: auto; background: #080c11;
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px 34px;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.6;
+}
+.logview.compact { font-size: 11px; line-height: 1.3; padding: 6px 9px 30px; }
+
+/* Grid, not flex: a wrapped message used to fold back under the timestamp,
+   so long OPT lines lost the column rhythm exactly where it mattered most.
+   minmax(0,1fr) lets the message shrink instead of pushing the grid wide. */
+.logline {
+  display: grid; grid-template-columns: max-content 50px 74px minmax(0, 1fr);
+  gap: 0 9px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.logline.hidden { display: none; }
+.logline .t { color: var(--dim); }
+.logline .l { font-weight: 600; letter-spacing: .2px; }
+.logline .s { color: var(--violet); }
+/* Ticket numbers are what an operator actually hunts for. */
+.logline .tk { color: var(--text); background: rgba(122, 162, 255, .13);
+  border-radius: 3px; padding: 0 2px; }
 .lv-INFO .l { color: var(--blue); }
 .lv-WARN .l { color: var(--amber); }
 .lv-ERROR .l { color: var(--red); }
@@ -361,6 +407,18 @@ select#group-filter { width: 150px; }
 .lv-AI .l { color: #ff9ede; }
 .lv-AI { background: rgba(255, 158, 222, .05); }
 .lv-DEBUG .l { color: var(--dim); }
+.lv-CFG .l { color: var(--muted); }
+.log-jump {
+  /* Sits in the padding-bottom the body reserves, so it never covers the
+     newest lines - which are the ones the pill is telling you about. */
+  position: absolute; right: 16px; bottom: 10px; z-index: 2;
+  padding: 6px 12px; border-radius: 16px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--text); font-size: 11.5px; font-family: inherit;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+}
+.log-jump:hover { border-color: var(--green); color: var(--green); }
+.log-jump[hidden] { display: none; }
 
 /* ---------------------------------------------------------------- toast */
 

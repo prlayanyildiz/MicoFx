@@ -178,12 +178,15 @@ Yazışma dosyaları:
 |---|---|
 | Claude → Cursor | `claude/FOR_CURSOR.md` |
 | Cursor → Claude | `cursor/FOR_CLAUDE.md` |
-| Claude → Antigravity | `claude/FOR_ANTIGRAVITY.md` |
-| Antigravity → Claude | `antigravity/FOR_CLAUDE.md` |
+| Cursor → Antigravity | `cursor/FOR_ANTIGRAVITY.md` (**köprü kesik 26.08**) |
+| Antigravity → Cursor | `antigravity/FOR_CURSOR.md` (**izlenmiyor**) |
+| Claude → Antigravity (eski) | `claude/FOR_ANTIGRAVITY.md` |
+| Antigravity → Claude (eski) | `antigravity/FOR_CLAUDE.md` |
 
-Antigravity salt-okuma denetçisiydi; token'ı bitti. Geri gelirse yetkisi
-**kod okumak ve bulgu yazmak** ile sınırlı — kod değiştirmez, commit atmaz,
-kendi görevini seçmez, okuduğu commit hash'ini raporun başına yazar.
+Cursor oturumu `cursor/watch_bridges.ps1` ile yalnız Claude **gelen**
+kutusunu 15 sn izler. Claude oturumu `claude/WATCH.ps1` ile
+`cursor/FOR_CLAUDE.md` izler. Antigravity otomatik köprü **kesik**
+(26.08). Kendi yazdığın dosyayı izleme — döngü.
 
 **Sihirli sözcükler:** `MICO MOLA` tüm ajanları duraklatır,
 `MICO DEVAM` kaldığı yerden sürdürür.

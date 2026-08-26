@@ -32,7 +32,9 @@ def _eng() -> Engine:
         system=SimpleNamespace(poll_interval_sec=2.0),
     )
     eng._positions = []
-    eng.last_cycle_at = 0.0
+    eng.    last_cycle_at = 0.0
+    eng._account = {}
+    eng._account_at = 0.0
     return eng
 
 
@@ -73,6 +75,40 @@ def test_a_stale_cycle_book_is_fetched_again():
     assert out[0]["ticket"] == 9
 
 
+def test_a_fresh_cycle_reuses_the_cached_account():
+    """Panel poll must not take account_info when the cycle just did."""
+    eng = _eng()
+    eng._account = {"equity": 100.0, "balance": 100.0}
+    eng._account_at = 0.0
+    eng.last_cycle_at = time.time()
+    eng.client.account = lambda: (_ for _ in ()).throw(
+        AssertionError("account_info on a fresh cycle"))
+
+    out = Engine._panel_account(eng)
+
+    assert out["equity"] == 100.0
+
+
+def test_a_stale_cycle_still_refreshes_the_account():
+    eng = _eng()
+    eng._account = {"equity": 1.0}
+    eng._account_at = 0.0
+    eng.last_cycle_at = time.time() - 30.0
+    eng.client.account_calls = 0
+
+    def _account():
+        eng.client.account_calls += 1
+        return {"equity": 9.0, "balance": 9.0}
+
+    eng.client.account = _account
+    eng._enforce_account_lock = lambda account: None
+
+    out = Engine._panel_account(eng)
+
+    assert eng.client.account_calls == 1
+    assert out["equity"] == 9.0
+
+
 def test_a_fresh_open_is_decorated_without_another_broker_read():
     eng = _eng()
     eng.client._next = [{"ticket": 99, "magic": 1, "symbol": "GER40"}]
@@ -86,3 +122,10 @@ def test_a_fresh_open_is_decorated_without_another_broker_read():
     assert out[0]["managed"] is True
     assert out[0]["group"] == "idx"
     assert eng._positions[0] == {"ticket": 7, "magic": 1, "symbol": "GER40"}
+
+
+def test_snapshot_uses_the_panel_account_helper():
+    import inspect
+    src = inspect.getsource(Engine.snapshot)
+    assert "self._panel_account()" in src
+    assert "self.refresh_account()" not in src

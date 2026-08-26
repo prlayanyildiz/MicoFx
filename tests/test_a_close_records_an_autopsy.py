@@ -35,6 +35,53 @@ def test_the_engine_close_path_records_an_autopsy():
     )
 
 
+def test_a_flatten_autopsy_records_the_fill_cash():
+    """26.08: 27 flatten rows had r_realised and empty profit.
+
+    ``_close_tracked`` wrote the row with ``profit=None`` even though
+    ``close_position`` already had the closing-deal cash on the fill. R is
+    not the ledger; summing autopsy ``kar`` then understated flatten by
+    the whole session-close cash pile.
+    """
+    eng = _engine()
+    eng.store.system = type("Sys", (), {"slippage_points": 20})()
+    eng._broker_now_int = lambda: 1000  # type: ignore[method-assign]
+
+    class _Client:
+        def close_position(self, ticket, slippage, comment, volume=None, fill=None):
+            if fill is not None:
+                fill.update({
+                    "symbol": "GER40", "side": "buy", "requested": 100.0,
+                    "price": 101.2, "volume": 0.1, "profit": 12.50,
+                })
+            return True
+
+        def info(self, _symbol):
+            return {"point": 0.1}
+
+        def money_per_price_unit(self, _symbol, volume):
+            return float(volume)
+
+    eng.client = _Client()
+    eng.execution = type("Ex", (), {
+        "record": staticmethod(lambda *a, **k: None),
+        "snapshot": staticmethod(lambda _ticket: {
+            "symbol": "GER40", "side": "buy", "entry": 100.0,
+            "original_sl": 99.0, "risk_dist": 1.0, "mfe": 2.0, "mae": 0.1,
+            "sl": 99.0,
+        }),
+    })()
+    pos = {"ticket": 7, "symbol": "GER40", "side": "buy", "volume": 0.1,
+           "price_open": 100.0}
+    fill: dict = {}
+    assert eng._close_tracked(pos, "MicoFX zorunlu flatten", "exit", fill=fill)
+    row = eng._trade_autopsies[-1]
+    assert row["exit_reason"] == "flatten"
+    assert row["profit"] == 12.50, (
+        f"flatten otopsi nakit bos: profit={row.get('profit')!r}"
+    )
+
+
 def test_a_broken_autopsy_cannot_break_the_close():
     """The property that matters more than the row itself.
 
@@ -377,6 +424,27 @@ def test_fill_after_stop_does_not_raise_on_broken_bars():
     state = SymbolState("GER40")
     state.bars = object()  # type: ignore[assignment]
     eng._fill_after_stop("GER40", state)
+
+
+def test_autopsy_report_left_on_table_sums_winners_only():
+    """Loser left = mfe - (-1R) is the loss, not giveback. Headline must not add it.
+
+    26.08 panel: 97/138 rows red, 70 of those losers. Stored left_on_table_r
+    stays on the row; the report total is winners only.
+    """
+    eng = _engine()
+    eng._trade_autopsies = [
+        {"symbol": "XAUUSD", "exit_reason": "sl", "held_min": 10.0,
+         "r_realised": -0.999, "left_on_table_r": 2.679},
+        {"symbol": "NAS100", "exit_reason": "sl", "held_min": 10.0,
+         "r_realised": 1.0, "left_on_table_r": 2.876},
+    ]
+    report = eng.trade_autopsy_report()
+    assert report["left_on_table_r"] == 2.876
+    xau = next(c for c in report["summary"] if c["symbol"] == "XAUUSD")
+    nas = next(c for c in report["summary"] if c["symbol"] == "NAS100")
+    assert xau["left_on_table_r"] is None
+    assert nas["left_on_table_r"] == 2.876
 
 
 def test_the_autopsy_report_counts_after_stop_shakeouts():

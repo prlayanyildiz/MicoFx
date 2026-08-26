@@ -8,6 +8,8 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .bars import Bars
 from .logbus import LOG
 
@@ -95,6 +97,8 @@ def _sltp_modify_succeeded(result: Any) -> bool:
 
 _INFO_TTL = 120.0
 _TICK_TTL = 0.5
+_BAR_FETCH_CHUNK = 2500
+_MARGIN_TTL = 5.0
 
 # How far ahead of this machine's clock a tick timestamp may sit before it is
 # treated as corrupt. A tick's ``time`` is the broker's wall clock encoded as
@@ -194,6 +198,7 @@ class MT5Client:
         self._last_attempt = 0.0
         self._info_cache: dict[str, tuple[float, Any]] = {}
         self._tick_cache: dict[str, tuple[float, dict[str, float]]] = {}
+        self._margin_cache: dict[tuple, tuple[float, float]] = {}
         # Newest tick timestamp seen across every symbol, in the broker's own
         # naive clock. market_open() measures staleness against this rather
         # than the wall clock, so the broker's UTC offset cancels instead of
@@ -301,6 +306,7 @@ class MT5Client:
         self._name_map.clear()
         self._info_cache.clear()
         self._tick_cache.clear()
+        self._margin_cache.clear()
         self._symbol_names_cache = []
         self._symbol_names_at = 0.0
 
@@ -468,6 +474,7 @@ class MT5Client:
         self.last_error = ""
         self._info_cache.clear()
         self._tick_cache.clear()
+        self._margin_cache.clear()
         self._name_map.clear()
         self._symbol_names_cache = []
         self._symbol_names_at = 0.0
@@ -909,8 +916,24 @@ class MT5Client:
         if real is None:
             return None
         tf = timeframe_const(timeframe)
-        with self._lock:
-            rates = mt5.copy_rates_from_pos(real, tf, 0, int(count) + 1)
+        need = int(count) + 1
+        chunk = _BAR_FETCH_CHUNK
+        parts: list[Any] = []
+        offset = 0
+        while offset < need:
+            take = min(chunk, need - offset)
+            with self._lock:
+                part = mt5.copy_rates_from_pos(real, tf, offset, take)
+            if part is None or len(part) == 0:
+                if not parts:
+                    return None
+                break
+            parts.append(part)
+            got = len(part)
+            if got < take:
+                break
+            offset += got
+        rates = parts[0] if len(parts) == 1 else np.concatenate(parts[::-1])
         if rates is None or len(rates) < 2:
             return None
         return Bars(rates[:-1], int(rates[-1]["time"]))
@@ -952,10 +975,17 @@ class MT5Client:
         if real is None or tick is None:
             return 0.0
         price = tick["ask"] if side == "buy" else tick["bid"]
+        key = (real, round(float(volume), 4), side)
+        now = time.time()
+        hit = self._margin_cache.get(key)
+        if hit and now - hit[0] < _MARGIN_TTL:
+            return hit[1]
         order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
         with self._lock:
             m = mt5.order_calc_margin(order_type, real, float(volume), price)
-        return float(m or 0.0)
+        value = float(m or 0.0)
+        self._margin_cache[key] = (now, value)
+        return value
 
     def money_per_price_unit(self, symbol: str, volume: float) -> float:
         """Account-currency P/L for a one-price-unit move at ``volume`` lots."""
@@ -1145,7 +1175,8 @@ class MT5Client:
     # ----------------------------------------------------------- order entry
 
     def open_market(self, symbol: str, side: str, volume: float, sl: float, tp: float,
-                    magic: int, slippage: int = 20, comment: str = "MicoFX") -> dict[str, Any]:
+                    magic: int, slippage: int = 20, comment: str = "MicoFX",
+                    defer_verify: bool = False) -> dict[str, Any]:
         real = self.select(symbol)
         if real is None:
             return {"ok": False, "error": f"{symbol}: sembol bulunamadi"}
@@ -1223,7 +1254,7 @@ class MT5Client:
                 symbol, real, magic, before_tickets, float(price),
                 f"{symbol}: order_send bos dondu ({code}: {text})",
                 side=side, req_sl=request["sl"], req_tp=request["tp"],
-                retcode=code)
+                retcode=code, defer=defer_verify)
 
         if result.retcode == mt5.TRADE_RETCODE_INVALID_STOPS:
             # The broker rejected the level, not the trade's risk. Widen only
@@ -1291,7 +1322,7 @@ class MT5Client:
                     # INVALID_STOPS ladder above may have widened them, and
                     # the widened pair is what the broker actually holds.
                     side=side, req_sl=request["sl"], req_tp=request["tp"],
-                    retcode=code)
+                    retcode=code, defer=defer_verify)
             return {"ok": False, "retcode": code, "error": f"{symbol}: emir reddedildi ({code} {text})",
                     "invalid_stops_retry_failed": bool(
                         stops_widened and code == getattr(mt5, "TRADE_RETCODE_INVALID_STOPS", -1))}
@@ -1446,7 +1477,8 @@ class MT5Client:
                                before_tickets: set[int], requested: float,
                                reason: str, side: str = "", req_sl: float = 0.0,
                                req_tp: float = 0.0,
-                               retcode: int | None = None) -> dict[str, Any]:
+                               retcode: int | None = None,
+                               defer: bool = False) -> dict[str, Any]:
         """Decide what actually happened after an unconfirmed ``order_send``.
 
         Timeouts and IPC failures are not rejections: the request may already
@@ -1481,13 +1513,17 @@ class MT5Client:
 
         Broker replication can lag the fill by a beat, so the book is
         re-checked a few times over ~2s before "no new ticket" is believed.
+        If the ticket is already there, that wait is skipped. Engine may pass
+        ``defer=True`` to return immediately and finish the wait off-thread.
         """
-        adopted = None
-        for attempt in range(4):
-            # Sleep first: a fill that has not propagated into positions_get
-            # yet is exactly the case this is here to catch, and the very
-            # first read is the least likely to see it.
-            time.sleep(0.3 if attempt == 0 else 0.6)
+        verify_kwargs = {
+            "symbol": symbol, "real": real, "magic": magic,
+            "before_tickets": before_tickets, "requested": requested,
+            "reason": reason, "side": side, "req_sl": req_sl, "req_tp": req_tp,
+            "retcode": retcode,
+        }
+
+        def _look():
             with self._lock:
                 after = mt5.positions_get(symbol=real)
             if after is None:
@@ -1506,17 +1542,28 @@ class MT5Client:
                 return {"ok": False, "ambiguous": True, "retcode": retcode,
                         "error": f"{reason} - birden fazla yeni pozisyon, cozulemedi"}
             if len(new) == 1:
-                adopted = new[0]
-                break
+                return new[0]
+            return None
 
+        found = _look()
+        if isinstance(found, dict) and "ok" in found:
+            return found
+        adopted = found
+        if adopted is None and defer:
+            return {"ok": False, "pending_verify": True,
+                    "verify_kwargs": verify_kwargs}
         if adopted is None:
-            # verified_unfilled: the book was readable and nothing landed. Safe
-            # to retry later - but Engine must see this flag (not only retcode)
-            # so IPC/None sends (retcode -10001 etc., outside AMBIGUOUS_RETCODES)
-            # still get LINK_BACKOFF_SEC instead of re-paying the 2.1s sleep
-            # every poll.
-            return {"ok": False, "retcode": retcode, "verified_unfilled": True,
-                    "error": f"{reason} - dogrulandi: yeni pozisyon olusmamis, emir gecmemis"}
+            for attempt in range(4):
+                time.sleep(0.3 if attempt == 0 else 0.6)
+                found = _look()
+                if isinstance(found, dict) and "ok" in found:
+                    return found
+                if found is not None:
+                    adopted = found
+                    break
+            if adopted is None:
+                return {"ok": False, "retcode": retcode, "verified_unfilled": True,
+                        "error": f"{reason} - dogrulandi: yeni pozisyon olusmamis, emir gecmemis"}
 
         LOG.emit(f"{reason} - ancak pozisyon #{int(adopted.ticket)} gercekten acilmis; "
                  f"tekrar emir gonderilmedi, pozisyon sahiplenildi.", "WARN", symbol)
@@ -1703,13 +1750,19 @@ class MT5Client:
         # line above already told the truth and a second "kapatildi" lied.
         if volume is None and not partial:
             realised = self._closing_deal_pnl(result, int(ticket))
+            # Autopsy flatten cash reads fill["profit"]. Same figure as the
+            # TRADE line so summing the book does not drop session closes.
+            fallback = float(p.profit) + float(p.swap)
+            cash = fallback if realised is None else float(realised)
+            if fill is not None:
+                fill["profit"] = cash
             if realised is None:
                 # History has not caught up (or the call failed). Fall back to
                 # the position's own floating figure, swap folded in, and say
                 # which one this is rather than quietly printing a different
                 # quantity under the same label.
                 LOG.emit(f"Pozisyon kapatildi #{ticket} "
-                         f"kar~{float(p.profit) + float(p.swap):.2f} (anlik)",
+                         f"kar~{fallback:.2f} (anlik)",
                          "TRADE", p.symbol)
             else:
                 LOG.emit(f"Pozisyon kapatildi #{ticket} kar={realised:.2f}",

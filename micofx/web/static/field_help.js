@@ -186,7 +186,7 @@ const FIELD_HELP = {
   "th.autopsy.Sure": "Acik kaldigi dakika.",
   "th.autopsy.R": "Gerceklesen sonuc, baslangic riskinin kati. -1 = tam stop.",
   "th.autopsy.MFE": "Islem sirasinda gorulen en iyi seviye, R cinsinden. 0 = hic lehe gitmedi.",
-  "th.autopsy.Masada": "MFE ile gerceklesen arasindaki fark - geri verilen kisim.",
+  "th.autopsy.Masada": "Yalniz kazanan: MFE eksi gerceklesen. MFE bar ici tepe, hasat edilebilir degil. Kaybedende tire.",
   "th.autopsy.Sonra": "Cikistan bir saat sonrasi: fiyat girise dondu mu, ayni yonde devam etti mi, toparladi mi. Kapanistan 1 saat sonra dolar.",
   "th.exec.Sembol": "Olculen emirlerin sembolu.",
   "th.exec.Ornek": "Istenen vs dolan fiyat karsilastirilan emir sayisi.",
@@ -222,9 +222,9 @@ const FIELD_HELP = {
   "th.gate.Siklik": "Gerceklesen / holdout'un vaat ettigi islem.",
   "th.gate.Katman": "Haftalik review katmani - otomatik kapatma yok, sadece siniflandirma.",
 
-  "th.block.Sinyal": "Ayri sinyal (bar) sayisi / toplam poll denemesi.",
+  "th.block.Sinyal": "Ayri sinyal bolumu (bar). Poll tekrar sayisi kapi rozetinin title'inda.",
   "th.block.Acilan": "Islemle sonuclanan.",
-  "th.block.Oran": "Acilan / deneme.",
+  "th.block.Oran": "Acilan / sinyal. Poll tekrar bu oranin paydasi degil.",
 
   "th.ratio.Ornek": "Toplanan olcum sayisi.",
   "th.ratio.Medyan": "Canli tick spread / bar spread, medyan.",

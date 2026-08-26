@@ -172,6 +172,9 @@ class ExecutionMonitor:
         # ticket -> what the engine last knew about an open position, so a
         # server-side stop/target fill can be scored after the position is gone
         self._open: dict[int, dict[str, Any]] = {}
+        # ticket -> fill-time original_sl / risk_dist. Survives restart;
+        # track() first-sight of the live (trailed) stop must not replace it.
+        self._originals: dict[int, dict[str, float]] = {}
         self._warned_at: dict[str, float] = {}
         self._dirty = 0
         self._restore()
@@ -205,6 +208,24 @@ class ExecutionMonitor:
                     kept = [r for r in rows[-MAX_SAMPLES:] if _usable_sample(r)]
                     if kept:
                         self._samples[str(symbol)] = kept
+        saved = {}
+        getter = getattr(self.store, "get_setting", None)
+        if callable(getter):
+            saved = getter("open_original_sl") or {}
+        if isinstance(saved, dict):
+            for key, row in saved.items():
+                try:
+                    ticket = int(key)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(row, dict):
+                    sl = float(row.get("original_sl") or 0.0)
+                    rd = float(row.get("risk_dist") or 0.0)
+                elif isinstance(row, (int, float)) and not isinstance(row, bool):
+                    sl, rd = float(row), 0.0
+                else:
+                    continue
+                self._originals[ticket] = {"original_sl": sl, "risk_dist": rd}
 
     def _persist(self, force: bool = False) -> None:
         # Writing every sample would put an SQLite round trip on the fill path;
@@ -213,8 +234,23 @@ class ExecutionMonitor:
         if not force and self._dirty < 20:
             return
         self._dirty = 0
-        self.store.set_setting("execution_samples",
-                               {s: rows[-MAX_SAMPLES:] for s, rows in self._samples.items()})
+        setter = getattr(self.store, "set_setting", None)
+        if not callable(setter):
+            return
+        setter("execution_samples",
+               {s: rows[-MAX_SAMPLES:] for s, rows in self._samples.items()})
+
+    def _persist_originals(self, live: set[int] | None = None) -> None:
+        setter = getattr(self.store, "set_setting", None)
+        if not callable(setter):
+            return
+        if live is not None:
+            self._originals = {t: v for t, v in self._originals.items() if t in live}
+        setter("open_original_sl", {
+            str(t): {"original_sl": float(v.get("original_sl") or 0.0),
+                     "risk_dist": float(v.get("risk_dist") or 0.0)}
+            for t, v in self._originals.items()
+        })
 
     # --------------------------------------------------------------- recording
 
@@ -270,6 +306,13 @@ class ExecutionMonitor:
             ticket = int(pos["ticket"])
             seen.add(ticket)
             book = self._open.setdefault(ticket, {})
+            originals = getattr(self, "_originals", None) or {}
+            saved = originals.get(ticket)
+            if saved:
+                # Fill-time values win over the live (possibly trailed) stop.
+                book.setdefault("original_sl", float(saved.get("original_sl") or 0.0))
+                if float(saved.get("risk_dist") or 0.0) > 0:
+                    book.setdefault("risk_dist", float(saved["risk_dist"]))
             book.update({
                 "symbol": pos["symbol"], "side": pos["side"], "sl": float(pos["sl"]),
                 "tp": float(pos["tp"]), "entry": float(pos["price_open"]),
@@ -280,6 +323,8 @@ class ExecutionMonitor:
             # First-sight stop, frozen the same way as risk_dist: a later trail
             # must not rewrite "did this close at the original SL or a moved
             # one". 0 means the broker had no stop on first sight.
+            # Not persisted: a restart of a pre-patch ticket would otherwise
+            # freeze the current trail as original.
             book.setdefault("original_sl", float(pos["sl"]) if pos["sl"] else 0.0)
             book.setdefault("opened_at", int(pos.get("time") or 0))
             # Peak excursion from entry, in price. Divided by this trade's own
@@ -290,6 +335,9 @@ class ExecutionMonitor:
                 fav = (cur - entry) if pos["side"] == "buy" else (entry - cur)
                 book["mfe"] = max(float(book.get("mfe") or 0.0), max(0.0, fav))
                 book["mae"] = max(float(book.get("mae") or 0.0), max(0.0, -fav))
+        originals = getattr(self, "_originals", None)
+        if isinstance(originals, dict) and originals.keys() - seen:
+            self._persist_originals(live=seen)
         return set(self._open) - seen
 
     def note_fill(self, ticket: int, **meta: Any) -> None:
@@ -304,6 +352,19 @@ class ExecutionMonitor:
             if value is None:
                 continue
             book.setdefault(key, value)
+        sl = book.get("original_sl")
+        rd = book.get("risk_dist")
+        if sl is not None:
+            originals = getattr(self, "_originals", None)
+            if originals is None:
+                self._originals = {}
+            self._originals[int(ticket)] = {
+                "original_sl": float(sl or 0.0),
+                "risk_dist": float(rd or 0.0),
+            }
+            persist = getattr(self, "_persist_originals", None)
+            if callable(persist):
+                persist()
 
     def snapshot(self, ticket: int) -> dict[str, Any] | None:
         """Copy of the open book for one ticket, or None. Does not pop."""
