@@ -415,6 +415,7 @@ exit-model / Origin / single sqlite / no restart-with-opens):
 
 | Item | Evidence now |
 |---|---|
+| Dead `risk_sembol_limiti` 209 still incrementing | **Frozen.** Claude 22:22 live GET: totals 209, sqlite since ≈16.08, producer gone from `can_open`. Live incrementing: spread 241, ters 148, bar_bosluk 45, emir 12, bar_doldu 8, lot 4. Dormant: `risk_toplam_limit` 0, `risk_kova_limiti` 0. Do not reset unasked. |
 | GET `/openapi.json` ungated | **Live 404.** Disk `FastAPI(openapi_url=None)`. `/docs` `/redoc` 404. Pin `test_openapi_schema_is_not_public`. Claude 20:50 was PID 17:40. |
 | Opt cancel stuck at 160k | **Disk landed.** `harvest` timeout 0.5s + `_abandon_search_pool` terminate. Pin `test_opt_cancel_is_noticed_mid_sweep`. Live job was killed by restart before this PID could prove it. |
 | Hands-off POST 400 | **Live 400** this PID: risk_percent, max_positions, sl/family, daily_loss_pct, size_by_edge, concurrent, total, opt strategies, reset. `max_margin_usage_pct` remains writable. |
