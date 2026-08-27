@@ -48,6 +48,16 @@ class _LotClient:
     def margin_for(self, symbol, lot, side):
         return 1.0
 
+    def tick(self, symbol):
+        return None
+
+
+class _LinearMarginClient(_LotClient):
+    """$100 margin per 1.0 lot, linear. leftover max_lot must not win."""
+
+    def margin_for(self, symbol, lot, side):
+        return 100.0 * float(lot)
+
 
 class _LotStore:
     def __init__(self, cfg: SymbolConfig) -> None:
@@ -134,6 +144,53 @@ def test_lot_for_ignores_leftover_max_lot():
         symbol="XAUUSD", magic=1, lot_mode="risk", risk_percent=1.0, max_lot=0.2,
     )
     lot, _ = _risk(cfg).lot_for(cfg, sl_distance=1.0, balance=10_000.0)
+    assert lot > 0.2
+
+
+def test_lot_for_caps_to_remaining_margin_like_positions():
+    """Operator: lot ceiling auto, same remaining-margin budget as free_slots.
+
+    leftover max_lot=0.2 must not bind. Risk% wants 10 lots; 90% of $1000
+    at $100/lot leaves 9.0.
+    """
+    cfg = SymbolConfig(
+        symbol="XAUUSD", magic=1, lot_mode="risk", risk_percent=1.0, max_lot=0.2,
+    )
+    store = _LotStore(cfg)
+    store.system.max_margin_usage_pct = 90.0
+    store.system.min_free_margin = 0.0
+    risk = RiskManager.__new__(RiskManager)
+    risk.store = store
+    risk.client = _LinearMarginClient()
+    account = {"equity": 1000.0, "margin": 0.0, "margin_free": 1000.0}
+    lot, note = risk.lot_for(
+        cfg, sl_distance=1.0, balance=10_000.0, account=account)
+    assert lot == pytest.approx(9.0)
+    assert lot > 0.2
+    assert "marj" in note
+
+
+def test_lot_for_skips_when_margin_ceiling_is_below_broker_min():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=1.0, max_lot=5.0)
+    store = _LotStore(cfg)
+    store.system.max_margin_usage_pct = 90.0
+    store.system.min_free_margin = 0.0
+    risk = RiskManager.__new__(RiskManager)
+    risk.store = store
+    risk.client = _LinearMarginClient()
+    # 90% of $8 = $7.20; 0.1 min lot costs $10 → skip, do not send min lot
+    account = {"equity": 8.0, "margin": 0.0, "margin_free": 8.0}
+    lot, note = risk.lot_for(
+        cfg, sl_distance=1.0, balance=10_000.0, account=account)
+    assert lot == 0.0
+    assert "atlandi" in note
+
+
+def test_lot_for_does_not_zero_size_when_account_picture_is_missing():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=1.0, max_lot=0.2)
+    lot, _ = _risk(cfg).lot_for(
+        cfg, sl_distance=1.0, balance=10_000.0,
+        account={"equity": 0.0, "margin": 0.0, "margin_free": 0.0})
     assert lot > 0.2
 
 

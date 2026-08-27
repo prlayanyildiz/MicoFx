@@ -2565,7 +2565,9 @@ class Engine:
         # Optional live cost gate — off by default; optimizer already models cost.
         sys = self.store.system
         if sys.block_high_cost and sys.max_cost_pct_of_risk > 0:
-            lot_probe, _ = self.risk.lot_for(cfg, sl_dist, account.get("balance", 0.0))
+            lot_probe, _ = self.risk.lot_for(
+                cfg, sl_dist, account.get("balance", 0.0),
+                account=account, side=side)
             if lot_probe > 0:
                 r_value = sl_dist * self.client.money_per_price_unit(cfg.symbol, lot_probe)
                 cost = cfg.commission_per_lot * lot_probe
@@ -2576,7 +2578,9 @@ class Engine:
                     state.entry_block = "maliyet"
                     return
 
-        lot, note = self.risk.lot_for(cfg, sl_dist, account.get("balance", 0.0), ai_scale=scale)
+        lot, note = self.risk.lot_for(
+            cfg, sl_dist, account.get("balance", 0.0), ai_scale=scale,
+            account=account, side=side)
         if sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
             logged = getattr(self, "_sl_floor_logged", None)
             if logged is None:

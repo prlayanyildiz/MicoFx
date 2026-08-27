@@ -160,8 +160,9 @@ class SymbolConfig:
     # ---- Aroon oscillator zero-cross ----
     aroon_length: int = 14
 
-    # Leftover DB keys. lot_for always uses risk_percent against balance;
-    # can_open stacks until concurrent 1R / total / margin. HTTP 400.
+    # Leftover DB keys. lot_for uses risk_percent against balance, then the
+    # remaining-margin ceiling (same budget as free_slots). can_open stacks
+    # until margin / reverse / STOPSUZ. HTTP 400.
     lot_mode: str = "risk"
     fixed_lot: float = 0.01
     risk_percent: float = 0.5        # % of balance at 1R (the live size knob)

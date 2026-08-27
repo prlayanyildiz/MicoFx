@@ -349,8 +349,46 @@ class RiskManager:
             return 1.0
         return max(self.EDGE_MIN, min(self.EDGE_MAX, (mine / reference) ** 0.5))
 
+    def _margin_lot_ceiling(self, cfg: SymbolConfig, account: dict[str, Any] | None,
+                            side: str, floor: float,
+                            broker_ceiling: float) -> float | None:
+        """Lots that still fit remaining margin. None = no extra cap.
+
+        Same budget ``capacity`` uses for free_slots: leftover ``max_lot`` is
+        unread, so the kasa (equity × max_margin_usage_pct, minus used,
+        minus min_free_margin) is the live ceiling - the way position count
+        already stacks until margin / reverse / STOPSUZ. A missing or
+        all-zero account picture must not size to zero (MT5 blip).
+        """
+        if not account:
+            return None
+        try:
+            equity = float(account.get("equity", 0.0) or 0.0)
+            free = float(account.get("margin_free", 0.0) or 0.0)
+            used = float(account.get("margin", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if equity <= 0 and free <= 0:
+            return None
+        sys_cfg = self.store.system
+        pct = float(sys_cfg.max_margin_usage_pct or 0.0)
+        if equity > 0 and pct > 0:
+            margin_budget = max(0.0, equity * pct / 100.0 - used)
+        else:
+            margin_budget = free
+        budget = max(0.0, min(margin_budget, free - float(sys_cfg.min_free_margin or 0.0)))
+        unit = floor if floor > 0 else 0.01
+        try:
+            need = float(self.client.margin_for(cfg.symbol, unit, side) or 0.0)
+        except (TypeError, ValueError, AttributeError):
+            return None
+        if need <= 0:
+            return None
+        return min(broker_ceiling, unit * (budget / need))
+
     def lot_for(self, cfg: SymbolConfig, sl_distance: float, balance: float,
-               ai_scale: float = 1.0) -> tuple[float, str]:
+               ai_scale: float = 1.0, account: dict[str, Any] | None = None,
+               side: str = "buy") -> tuple[float, str]:
         """Resolve the order volume, returning (lot, explanation).
 
         ``ai_scale`` (the supervisor's watch/hour/drawdown throttle) has to be
@@ -417,6 +455,14 @@ class RiskManager:
             note += f" | avantaj x{edge:.2f}"
         if ai_scale != 1.0:
             note += f" | AI x{ai_scale:.2f}"
+        auto = self._margin_lot_ceiling(cfg, account, side, floor, ceiling)
+        if auto is not None:
+            if auto + 1e-12 < floor:
+                return 0.0, (f"lot sifir ({note}, marj tavani {auto:g} "
+                             f"< min {floor:g}), islem atlandi")
+            if lot > auto:
+                lot = auto
+                note += f" | marj tavan {auto:.3f}"
         lot = min(lot, ceiling)
         return self.client.normalize_volume(cfg.symbol, lot), note
 
@@ -704,7 +750,7 @@ class RiskManager:
                 cfg.sl_atr_mult, cfg.symbol, autopsies)
             sl_dist = max(atr * sl_mult, self.client.min_stop_distance(cfg.symbol)) \
                 if atr > 0 else 0.0
-            lot, lot_note = self.lot_for(cfg, sl_dist, balance)
+            lot, lot_note = self.lot_for(cfg, sl_dist, balance, account=account)
             if sl_dist <= 0:
                 lot_note = "risk (ATR bekleniyor)"
             elif sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
