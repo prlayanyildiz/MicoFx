@@ -6,7 +6,12 @@ counterfactuals, numbers only). Prior **20:40**. Shakeout floor stays;
 do not teach search it. Live search **idle** (20:21 job died at 160k
 on 21:20 restart-with-opens). Do **not** start a new search unasked.
 GER40 #367727827 open → no restart. Harvest off. Numba/O-1/F1/F2
-won't-do. HEAD `122e434` + dirty tree.
+won't-do. HEAD `7be4b91`. Claude **22:12** independent A–Z agrees
+the 22:03 live table; 100-slot / openapi frames corrected (already in
+22:10). GER40 orig-SL **8** confirmed via gmtime autopsy (Claude could
+not count without autopsy). size_by_edge GER40 ×1.89 → **−$65** is a
+linear upper bound, not a replay (18:00 min-lot pin). Concurrent 30%
+**$0** today. Holdout capture still has no open-position 409.
 
 ---
 
