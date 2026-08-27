@@ -1,21 +1,35 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**27.08 22:10** operator hardest A–Z (API/web/dead leftovers/8 families/
-counterfactuals, numbers only). Prior **20:40**. Shakeout floor stays;
-do not teach search it. Live search **idle** (20:21 job died at 160k
-on 21:20 restart-with-opens). Do **not** start a new search unasked.
-GER40 #367727827 open → no restart. Harvest off. Numba/O-1/F1/F2
-won't-do. HEAD `7be4b91`. Claude **22:12** independent A–Z agrees
-the 22:03 live table; 100-slot / openapi frames corrected (already in
-22:10). GER40 orig-SL **8** confirmed via gmtime autopsy (Claude could
-not count without autopsy). size_by_edge GER40 ×1.89 → **−$65** is a
-linear upper bound, not a replay (18:00 min-lot pin). Concurrent 30%
-**$0** today. Holdout capture still has no open-position 409.
+**27.08 22:36** operator income-max + **00:06 opt** (armed, not started).
+Prior **22:10** A–Z. Shakeout floor stays; do not teach search it.
+GER40 #367727827 still open **plus** JPN/XAU/NAS fills → no restart.
+Public WFO/TP/pyramid GitHub does not change the exit model. Yellow
+levers (`size_by_edge`, `daily_loss_pct=0`) stay HTTP 400. HEAD
+`681022d`. 00:06 POST is `apply_best=true` `force=true` six symbols
+(NAS first), saved 8 families: GER/NAS/XAU ages 6–18 h < 48 h gate;
+`stoch_flip` 28800 is ~2.07 M of the 3.08 M wall. 20:21 died on
+restart-with-tickets, not duration.
 
 ---
 
-## 27.08 22:10 — Operator hardest A–Z (measured; no patch)
+## 27.08 22:36 — Income-max + 00:06 search (armed)
+
+Operator: maximize income, fix gaps, GitHub+web, run opt at 00:06.
+No engine PATCH. Live 22:36: 4 tickets (GER40 overnight 2.0 ATR + JPN/XAU/NAS),
+day still **−$186.61 / 38** closes, halt false, opt idle.
+
+* Public WFO/WFE 0.5, ATR-stop blogs (1.0× noise on M30, 2.0× common),
+  StockSharp stoch+step trail, ByTamerFX DD-scalp+TP, QTradeX `tp_multiplier`
+  — none of that enters this tree. Exit model stays hard ATR + ATR trail.
+* `size_by_edge` / `daily_loss_pct=0` remain yellow (HTTP 400). Shakeout
+  floor already live; do not teach the search it; do not PATCH open SL.
+* 00:06 `POST /api/opt/run` `apply_best=true` `force=true` (GER 8.1 h /
+  NAS 6.6 h / XAU 17.6 h < 48 h). Saved 8 families: dropping the five idle
+  ones only saves ~1.01 M; `stoch_flip` 28800 is ~2.07 M. 20:21 died on
+  restart-with-tickets. This PID does not restart.
+
+---
 
 Independent Cursor pass after operator: API/web/engine/families/symbols,
 stripped-feature leftovers, missed fills, reverse+forward, counterfactuals
