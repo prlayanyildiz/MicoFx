@@ -6,7 +6,9 @@ process already holds initialize(); this script must not open a second one.
 """
 from __future__ import annotations
 
+import io
 import sys
+import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -101,8 +103,8 @@ def test_a_failed_capture_does_not_fail_the_restart(monkeypatch):
 def test_a_running_search_is_logged_before_the_tree_dies(tmp_path, monkeypatch):
     """26.08 12:32 search ran 11h then gece killed it with no OPT/gece line.
 
-    The restart is still unconditional (midnight is empty). The miss was
-    silence: operators could not tell a 5M-combo job had been cut.
+    Flat-book midnight still kills. The miss was silence: operators could
+    not tell a 5M-combo job had been cut.
     """
     monkeypatch.setattr(gece_restart, "LOG", tmp_path / "gece_restart.log")
     hits = []
@@ -147,6 +149,7 @@ def test_orphans_are_swept_after_the_tree_is_killed(monkeypatch):
     """
     order = []
     monkeypatch.setattr(gece_restart, "port_owner", lambda: 10888)
+    monkeypatch.setattr(gece_restart, "live_ticket_count", lambda *a: 0)
     monkeypatch.setattr(gece_restart, "note_in_flight_search", lambda *a: None)
     monkeypatch.setattr(
         gece_restart, "stop_tree",
@@ -166,3 +169,92 @@ def test_orphans_are_swept_after_the_tree_is_killed(monkeypatch):
     kinds = [step[0] for step in order]
     assert kinds[:2] == ["stop", "sweep"], kinds
     assert order[0] == ("stop", 10888)
+
+
+def test_open_tickets_skip_the_midnight_kill(tmp_path, monkeypatch):
+    """00:00 used to taskkill with GER40 still on the book (HTTP 409 exists
+    for panel restart; the scheduled script bypassed it). First-sight trail.
+    """
+    monkeypatch.setattr(gece_restart, "LOG", tmp_path / "gece_restart.log")
+    killed = []
+    monkeypatch.setattr(gece_restart, "port_owner", lambda: 10888)
+    monkeypatch.setattr(gece_restart, "live_ticket_count", lambda *a: 3)
+    monkeypatch.setattr(gece_restart, "stop_tree", lambda pid: killed.append(pid))
+    monkeypatch.setattr(gece_restart, "start", lambda: killed.append("start"))
+    monkeypatch.setattr(gece_restart, "cleanup_orphan_workers", lambda *a, **k: None)
+    monkeypatch.setattr(gece_restart, "request_holdout_capture", lambda *a: killed.append("cap"))
+    monkeypatch.setattr(gece_restart.time, "sleep", lambda s: None)
+    assert gece_restart.main() == 0
+    assert killed == []
+    logged = (tmp_path / "gece_restart.log").read_text(encoding="utf-8")
+    assert "acik pozisyon" in logged
+    assert "10888" in logged
+
+
+def test_unread_book_still_kills(monkeypatch):
+    """22.08 wedged bind: port up, HTTP dead. Kill is the recovery."""
+    order = []
+    monkeypatch.setattr(gece_restart, "port_owner", lambda: 10888)
+    monkeypatch.setattr(gece_restart, "live_ticket_count", lambda *a: None)
+    monkeypatch.setattr(gece_restart, "note_in_flight_search", lambda *a: None)
+    monkeypatch.setattr(
+        gece_restart, "stop_tree",
+        lambda pid: order.append(("stop", pid)))
+    monkeypatch.setattr(
+        gece_restart, "cleanup_orphan_workers",
+        lambda executable=None: order.append(("sweep", executable)))
+    monkeypatch.setattr(gece_restart, "start", lambda: None)
+    monkeypatch.setattr(gece_restart, "port_open", lambda: True)
+    monkeypatch.setattr(gece_restart, "panel_session", lambda base: "op")
+    monkeypatch.setattr(
+        gece_restart, "wait_mt5_connected", lambda op, base, seconds=60: True)
+    monkeypatch.setattr(gece_restart, "request_holdout_capture", lambda *a: None)
+    monkeypatch.setattr(gece_restart, "say", lambda t: None)
+    monkeypatch.setattr(gece_restart.time, "sleep", lambda s: None)
+    assert gece_restart.main() == 0
+    assert order[0] == ("stop", 10888)
+
+
+def test_a_409_capture_is_logged_as_skip(tmp_path, monkeypatch):
+    """New PID inherits tickets → POST capture 409. Not an HTTPError dump."""
+    monkeypatch.setattr(gece_restart, "LOG", tmp_path / "gece_restart.log")
+
+    class _Op:
+        def open(self, req, timeout=0):
+            raise urllib.error.HTTPError(
+                "http://127.0.0.1:8900/api/holdout/capture",
+                409, "Conflict", None,
+                io.BytesIO(b'{"detail":"acik pozisyon var (3) - holdout capture yok"}'),
+            )
+
+    gece_restart.request_holdout_capture(_Op(), "http://127.0.0.1:8900")
+    logged = (tmp_path / "gece_restart.log").read_text(encoding="utf-8")
+    assert "409" in logged
+    assert "acik pozisyon" in logged
+    assert "HTTPError" not in logged
+
+
+def test_live_ticket_count_reads_state_positions():
+    hits = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def read(self):
+            return self._payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Op:
+        def open(self, req, timeout=0):
+            url = req if isinstance(req, str) else getattr(req, "full_url", req)
+            hits.append(str(url))
+            return _Resp(b'{"ok":true,"positions":[{"ticket":1},{"ticket":2}]}')
+
+    assert gece_restart.live_ticket_count(_Op(), "http://127.0.0.1:8900") == 2
+    assert any(u.endswith("/api/state") for u in hits)

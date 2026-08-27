@@ -56,7 +56,8 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - **No restart while positions are open.** `POST /api/app/restart` and
   `/api/app/shutdown` are **409** while this process's magics still have
   tickets (MT5 down still allowed so a wedged bind can recover).
-  `gece_restart` still taskkills at midnight. `track()` first-sights
+  `gece_restart` skips the midnight taskkill when `/api/state` shows
+  tickets; unread/wedged still kills (22.08 recovery). `track()` first-sights
   missing `open_original_sl` to the *current trail*.
 
 ## Validation before finishing

@@ -12,11 +12,10 @@ symbol in the book is outside its session (the earliest window opens at
 01:00) and the day-end flatten has already run. A restart there cannot
 interrupt a position it would otherwise be managing.
 
-Deliberately unconditional. A health check would have to decide what "healthy"
-means, and the incident this exists for looked healthy from outside: process
-up, port bound, database being written. Restarting something that was fine
-costs a few seconds at an hour with no trading in it. Not restarting
-something that is quietly blind costs a session.
+The 22.08 incident looked healthy from outside (process up, port bound), so
+an unread book still kills: that is the recovery. An *open* book does not.
+Panel restart is already 409 with tickets; this script used to bypass that
+and first-sight the trail. ``/api/state`` positions > 0 → log and return 0.
 
 Verifies afterwards and says so either way, in its own log, because a
 recovery step whose failure is silent is the thing it was written to prevent.
@@ -25,7 +24,8 @@ After the port is up, asks the live process (GET / cookie, then POST
 /api/holdout/capture) to pin holdout bars through its own MT5 client. This
 script never calls initialize() - a second bind would drop the trading
 process. Capture failure is visible here and does not fail the restart: the
-bot is already up.
+bot is already up. 409 (tickets still on the new PID) is a skip, not an
+HTTPError dump.
 """
 from __future__ import annotations
 
@@ -128,6 +128,25 @@ def cleanup_orphan_workers(executable: str | None = None) -> None:
                 pass
     except Exception:
         pass
+
+
+def live_ticket_count(opener, base: str) -> int | None:
+    """How many rows ``/api/state`` is carrying, or None if the book is unread.
+
+    None is the 22.08 case (port up, HTTP dead) and must not block the kill.
+    A positive count is a live trade - do not taskkill it.
+    """
+    try:
+        with opener.open(base + "/api/state", timeout=10) as resp:
+            data = json.loads(resp.read())
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    pos = data.get("positions")
+    if not isinstance(pos, list):
+        return None
+    return len(pos)
 
 
 def note_in_flight_search(opener, base: str) -> None:
@@ -252,8 +271,22 @@ def request_holdout_capture(opener, base: str) -> None:
         base + "/api/holdout/capture", data=b"{}", method="POST",
         headers={"Content-Type": "application/json", "Origin": origin},
     )
-    with opener.open(req, timeout=CAPTURE_TIMEOUT_SEC) as resp:
-        body = json.loads(resp.read())
+    try:
+        with opener.open(req, timeout=CAPTURE_TIMEOUT_SEC) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        raw = (exc.read() or b"").decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(raw)
+            detail = parsed.get("detail") if isinstance(parsed, dict) else raw
+        except json.JSONDecodeError:
+            detail = raw
+        detail = str(detail or raw or exc)[:240]
+        if exc.code == 409:
+            say(f"holdout capture atlandi (409): {detail}")
+            return
+        say(f"HATA holdout capture HTTP {exc.code}: {detail}")
+        return
     results = body.get("results") or []
     fails = [row for row in results if not row.get("ok")]
     say(f"holdout capture: {int(body.get('captured') or 0)} yazildi"
@@ -278,6 +311,15 @@ def main() -> int:
     say("--- gece restart basliyor ---")
     pid = port_owner()
     if pid:
+        n = None
+        try:
+            n = live_ticket_count(panel_session(PANEL), PANEL)
+        except Exception as exc:
+            say(f"pozisyon okunamadi ({type(exc).__name__}: {exc})")
+        if n:
+            say(f"acik pozisyon ({n}) pid {pid} - gece restart yok")
+            say("--- atlandi ---")
+            return 0
         _note_search_if_up(PANEL)
         say(f"calisan bot bulundu (port {PORT} pid {pid}) - agac durduruluyor")
         stop_tree(pid)
