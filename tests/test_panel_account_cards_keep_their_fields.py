@@ -1,22 +1,22 @@
 """AI1: account-strip cards keep their fields after the density pass."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 JS = (ROOT / "micofx" / "web" / "static" / "app.js").read_text(encoding="utf-8")
 CSS = (ROOT / "micofx" / "web" / "static" / "style.css").read_text(encoding="utf-8")
+HTML = (ROOT / "micofx" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
 
 
-def _cards_fn() -> str:
-    start = JS.index("function renderCards()")
-    end = JS.index("function costCell(", start)
-    return JS[start:end]
+def test_the_v1_fields_survived_the_move_to_the_top_bar():
+    """Operator 26.08: the strip is gone; its four gauges are top-bar chips.
 
-
-def test_render_cards_still_writes_the_v1_fields():
-    # Whole file: the projection's regime, costed slice and badge moved out of
-    # the card and into the capacity line, which is a different function.
+    ``Acilabilir Islem`` is not in the list any more - it folded into the
+    ``Pozisyon`` chip, which carries free slots and per-symbol cap in its
+    label. Every other number the cards owned still has to exist somewhere.
+    """
     body = JS
     for needle in (
         "Beklenen Aylik",
@@ -27,13 +27,13 @@ def test_render_cards_still_writes_the_v1_fields():
         "kagit/maliyetli fark",
         "maliyetli dilim",
         "maliyetli dilimde negatif",
-        "Acilabilir Islem",
-        "sembol basi",
-        "max_positions_per_symbol",
         "ai.risk_scale",
         "lot x",
+        "Marj Kullanimi",
     ):
         assert needle in body, needle
+    assert "renderCards" not in JS, "card strip is gone; nothing may still call it"
+    assert 'id="account-cards"' not in HTML
 
 
 def test_stock_group_has_the_same_kind_of_pill_as_the_others():
@@ -65,45 +65,38 @@ def test_the_cards_in_a_row_share_one_height():
 
 
 def test_the_column_count_divides_the_cards():
-    """Six cards, and every column count divides six.
+    """AI strip is five readouts on one row.
 
-    auto-fill chose the count from the width, so the last row held whatever did
-    not divide - at 1590px the strip came out four, four and a single card
-    stranded on a third row. A fixed count that divides the strip leaves no
-    remainder at any breakpoint, and the widest case puts them all on one row,
-    which is what the strip is for.
-
-    Was eight against 8/4/2 until the operator asked (26.08) for the numbers
-    already in the top bar to stop being printed twice. Balance, equity and the
-    day's cash went first; free margin and free slots followed when the split
-    settled into "top bar carries scalars, the strip carries gauges". Four
-    gauges left, so the count that has to divide is four.
+    Was four account gauges until those moved to the top bar. The remaining
+    ``.cards`` node is ``#ai-cards``. Five columns, one row; they shrink
+    instead of wrapping a leftover sixth (Global Lot Carpani) onto a
+    second line.
     """
-    assert "grid-template-columns: repeat(4, 1fr);" in CSS
-    assert "grid-template-columns: repeat(2, 1fr);" in CSS
-    # The word appears in the comment explaining why it went; check the rule.
+    assert "grid-template-columns: repeat(5, minmax(0, 1fr));" in CSS
     rules = [ln for ln in CSS.splitlines()
              if "grid-template-columns" in ln and not ln.lstrip().startswith(("/*", "*"))]
     assert not [r for r in rules if "auto-fill" in r and ".cards" in r]
 
 
-def test_every_card_is_the_same_shape():
-    """One label, one number, one line of foot - for all ten.
+def test_every_gauge_chip_is_the_same_shape():
+    """One label, one number, an optional bar - for all thirteen chips.
 
-    The projection used to carry a sentence and a badge, which made it taller
-    than the rest whatever the grid did. Both moved to the capacity line below,
-    where prose belongs.
+    A gauge's detail is a sentence, and a sentence in the chip label is what
+    pushed the bar to three rows. The chip keeps the deciding number; the
+    sentence lives in the hover title. Same trade the capacity line makes.
     """
-    # The literal appears in prose further down the file; check the card
-    # definitions and the markup that renders them.
-    defs = JS[JS.index("const cards = ["):JS.index("$(\"#account-cards\")")]
-    assert "signed(cap.projected_costed_monthly" in defs, (
+    defs = JS[JS.index("const items = ["):JS.index('$("#topstats").innerHTML')]
+    assert "signed(costed)" in defs, (
         "headline must be the charged figure, not the paper one")
-    assert "maliyet odenmeden" in defs
-    assert "wide" not in defs, "no card may claim extra width any more"
+    assert "Number(cap.projected_costed_monthly) || paper" in JS
+    assert "overlayMonthlyProjection" in JS
+    assert 'sub: "kagit"' in defs, (
+        "the % sits next to live P/L otherwise; paper must be on the chip")
+    assert "sub: `%${num(projPct" not in defs
+    assert "tip:" in defs, "gauge detail belongs in the hover title"
     assert "foot-line" not in defs
-    markup = JS[JS.index("$(\"#account-cards\")"):]
-    assert 'c.wide' not in markup[:400]
+    markup = JS[JS.index('$("#topstats").innerHTML'):]
+    assert 'class="bar"' in markup[:700], "a chip must be able to carry a bar"
 
 
 def test_the_projection_detail_survived_the_move():
@@ -135,3 +128,36 @@ def test_the_costed_badge_does_not_contradict_the_sum():
     """
     assert "bazi semboller maliyetli dilimde negatif" in JS
     assert "MALIYETLI DILIM NEGATIF" not in JS
+
+
+def test_there_is_one_density_and_no_toggle():
+    """Operator 27.08: roomy is the panel, not a preference.
+
+    Two spacing sets meant the screenshot in a bug report and the screen in
+    front of the operator could disagree, and the choice lived in localStorage
+    where neither of us could see it. The knobs stayed - they are how a size
+    change is one edit - but there is a single column of them now.
+
+    ``btn-log-density`` is a different control on the Log tab (line height for
+    a wall of text) and is deliberately not covered here.
+    """
+    assert ':root[data-density=' not in CSS, "one set of knobs, no second column"
+    assert 'id="btn-density"' not in HTML
+    assert "micofx-density" not in JS, "no stored preference to diverge from"
+    assert "dataset.density" not in JS
+    assert "--d-tstat-y" in CSS, "the knobs themselves stay"
+
+
+def test_the_sticky_offsets_match_the_bar_they_were_measured_against():
+    """The tab strip sticks at --d-topbar-h; a stale literal overlaps the bar.
+
+    Measured 27.08 at 1440-1920px with the chips on one row: topbar 73.1px,
+    tabs 39.5px, main padding 2x16px, status strip 40px. The two numbers are
+    rounded up so the strip never lands on top of the bar and the log page
+    never grows past the viewport.
+    """
+    knobs = CSS[CSS.index("--d-main:"):CSS.index("* { box-sizing")]
+    topbar = int(re.search(r"--d-topbar-h:\s*(\d+)px", knobs).group(1))
+    chrome = int(re.search(r"--d-chrome:\s*(\d+)px", knobs).group(1))
+    assert topbar >= 74, "the roomy bar is 73.1px tall"
+    assert chrome >= topbar + 39 + 32 + 40

@@ -103,45 +103,39 @@ def test_atr_period_is_covered_by_the_mid_trade_guard():
     assert "atr_period" in EXIT_RISK_FIELDS
 
 
-def test_atr_period_is_refused_while_a_position_is_open():
+def test_atr_period_is_not_http_writable():
+    # Left the card 27.08. Mid-trade 409 stays in patch_symbol as defense
+    # if the allowlist ever grows; HTTP cannot reach it today.
     tc, store = _client([_position()])
     before = store.symbols["XAUUSD"].atr_period
 
     res = tc.post("/api/symbols/XAUUSD", json={"atr_period": 30})
 
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert "atr_period" in res.json()["detail"]
     assert store.symbols["XAUUSD"].atr_period == before
 
 
-def test_atr_period_is_allowed_when_flat():
+def test_atr_period_stays_closed_when_flat():
     tc, store = _client()
+    before = store.symbols["XAUUSD"].atr_period
     res = tc.post("/api/symbols/XAUUSD", json={"atr_period": 30})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].atr_period == 30
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].atr_period == before
 
 
 def test_an_unrelated_field_still_lands_while_a_position_is_open():
-    # The guard must stay narrow: entry-signal fields only shape the NEXT
-    # entry and were never the hazard.
+    # The guard must stay narrow: session hours still write; search guts
+    # are a different door (hands-off 400).
     tc, store = _client([_position()])
-    res = tc.post("/api/symbols/XAUUSD", json={"adx_min": 12})
+    res = tc.post("/api/symbols/XAUUSD", json={"enabled": False})
     assert res.status_code == 200
-    assert store.symbols["XAUUSD"].adx_min == 12
+    assert store.symbols["XAUUSD"].enabled is False
 
 
-def test_writing_the_same_atr_period_back_is_not_a_change():
-    # Guarding on "key present" rather than "value differs" would block a UI
-    # that posts the whole form back unchanged.
+def test_writing_the_same_atr_period_back_is_still_refused():
     tc, store = _client([_position()])
     same = store.symbols["XAUUSD"].atr_period
     res = tc.post("/api/symbols/XAUUSD", json={"atr_period": same})
-    assert res.status_code == 200
-
-
-def test_a_position_under_another_magic_does_not_block_the_edit():
-    other = dict(_position(), magic=MAGIC + 999)
-    tc, store = _client([other])
-    res = tc.post("/api/symbols/XAUUSD", json={"atr_period": 30})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].atr_period == 30
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].atr_period == same

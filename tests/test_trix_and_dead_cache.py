@@ -41,8 +41,9 @@ def test_an_old_row_with_trix_length_still_loads():
 def test_required_bars_does_not_depend_on_trix_length():
     assert "trix_length" not in inspect.getsource(required_bars)
     # Retired term was trix_length*15 = 210 at the shipped default (14).
-    # t3_stoch default is 720, so 210 never bound.
-    assert required_bars(Params(strategy="t3_stoch")) == 720
+    # mtf_pullback forces htf to 6, so t3_length*20*6 = 720 and 210 never
+    # bound. (t3_stoch was the subject here until it retired 27.08.)
+    assert required_bars(Params(strategy="mtf_pullback")) == 720
 
 
 def test_the_panel_does_not_edit_trix_length():
@@ -63,8 +64,8 @@ def test_every_living_family_still_computes_without_those_helpers():
     times = np.arange(n, dtype=np.int64) * 300
     cache = IndicatorCache(high, low, close, times, 300, open_, np.ones(n), np.zeros(n))
     assert sorted(STRATEGIES) == sorted(
-        ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3",
-         "t3_flip", "wavetrend_flip", "stoch_flip",
+        ["mtf_pullback", "burst", "dual_t3",
+         "t3_flip", "stoch_flip",
          "parabolic_flip", "aroon_flip",
          "ichimoku"])
     for family in STRATEGIES:

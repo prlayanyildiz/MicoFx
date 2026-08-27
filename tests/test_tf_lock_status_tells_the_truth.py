@@ -22,12 +22,12 @@ def test_the_shipped_map_is_unlocked():
 
 
 def test_a_named_restriction_is_locked():
-    assert tf_lock_status({"micro_rev": ["M5"]}) == "aile TF kilidi acik"
+    assert tf_lock_status({"burst": ["M5"]}) == "aile TF kilidi acik"
 
 
 def test_an_empty_family_list_still_counts_as_a_lock():
     # models: explicit empty list means "nothing", not "everything".
-    assert tf_lock_status({"micro_rev": []}) == "aile TF kilidi acik"
+    assert tf_lock_status({"burst": []}) == "aile TF kilidi acik"
 
 
 def test_the_start_banner_uses_the_helper_not_a_hardcoded_on():

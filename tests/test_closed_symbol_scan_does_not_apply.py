@@ -81,7 +81,7 @@ def _finish_plan(enabled: bool):
         "holdout": {"net_r": 3.0, "score": 4.0, "trades": 40},
         "params": {"sl_atr_mult": 0.9},
     }
-    cfg = SymbolConfig(symbol="JPN225", magic=1, strategy="t3_stoch",
+    cfg = SymbolConfig(symbol="JPN225", magic=1, strategy="stoch_flip",
                        timeframe="M5", sl_atr_mult=0.9, enabled=enabled)
     cfg.opt_updated_at = 1.0
     cfg.opt_summary = dict(stamped)

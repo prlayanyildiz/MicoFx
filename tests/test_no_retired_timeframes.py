@@ -47,7 +47,7 @@ RETIRED = ("M1", "M3", "H1", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
 @pytest.mark.parametrize("name", RETIRED)
 def test_a_retired_timeframe_is_not_translated_to_seconds(name):
     """models.uses_swing_exits' own table used to carry M10 and H4."""
-    assert uses_swing_exits("t3_stoch", name) is False
+    assert uses_swing_exits("stoch_flip", name) is False
 
 
 @pytest.mark.parametrize("name", RETIRED)
@@ -61,7 +61,7 @@ def test_the_offered_timeframes_still_translate():
     # The wider exit envelope is decided by the bar, not the family: only the
     # scalp length (M5) keeps the tight grid, M15+ get swing.
     for tf in TIMEFRAMES:
-        assert uses_swing_exits("t3_stoch", tf) is (tf != "M5")
+        assert uses_swing_exits("stoch_flip", tf) is (tf != "M5")
 
 
 # ------------------------------------- the tables themselves carry no leftovers

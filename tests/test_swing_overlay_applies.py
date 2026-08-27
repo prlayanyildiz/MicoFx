@@ -99,5 +99,5 @@ def test_the_family_parameters_survive_either_way():
 
 
 def test_an_axis_only_the_overlay_knows_is_still_added():
-    grid = _merge({"sl_atr_mult": [0.5]}, {}, "t3_stoch", "M30")
+    grid = _merge({"sl_atr_mult": [0.5]}, {}, "stoch_flip", "M30")
     assert grid["trail_step_atr"] == SWING_GRID_OVERLAY["trail_step_atr"]

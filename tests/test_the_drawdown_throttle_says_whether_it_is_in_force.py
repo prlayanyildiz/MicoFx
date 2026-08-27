@@ -64,7 +64,6 @@ def _sup(enabled: bool, risk_scale: float = 0.4) -> Supervisor:
     sup.risk_scale = risk_scale
     sup.verdicts = {}
     sup.notes = []
-    sup.reopt_queue = []
     sup.last_review = 0.0
     sup.optimizer = None
     return sup
@@ -108,3 +107,11 @@ def test_an_untroubled_day_reports_enforced_too():
     sup = _sup(enabled=True, risk_scale=1.0)
     assert sup.status()["risk_scale_enforced"] is True
     assert sup.status()["risk_scale"] == 1.0
+
+
+def test_the_panel_asks_whether_the_throttle_is_in_force():
+    """The API flag was the first half. The header still printed 'kisildi'."""
+    js = (Path(__file__).resolve().parents[1]
+          / "micofx" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "risk_scale_enforced" in js
+    assert "carpan uygulanmiyor" in js

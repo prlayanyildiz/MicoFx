@@ -81,6 +81,26 @@ def test_a_missing_or_non_positive_drawdown_is_neutral_not_the_floor():
     assert rm.edge_scale(peers[0]) != 1.0 or rm.edge_scale(peers[2]) != 1.0
 
 
+def test_an_unvalidated_stamp_does_not_count_as_edge():
+    """GAP-5 NAS100: validated=false, paper +93 R / 47 DD. size_by_edge
+    still treated that as a real edge and sized the live loser up."""
+    peers = [
+        _cfg("A", net_r=40.0, max_dd_r=20.0),
+        _cfg("B", net_r=80.0, max_dd_r=20.0),
+        _cfg("C", net_r=120.0, max_dd_r=20.0),
+    ]
+    fake = _cfg("NAS100", net_r=93.6, max_dd_r=47.2)
+    fake.validated = False
+    fake.opt_summary["validated"] = False
+    assert RiskManager._edge_metric(fake) == 0.0
+    rm = _rm(*peers, fake)
+    # Neutral scale, not EDGE_MAX off a stamp the walk-forward rejected.
+    assert rm.edge_scale(fake) == 1.0
+    # And it must not inflate the peer median either.
+    without = _rm(*peers)
+    assert rm.edge_scale(peers[0]) == without.edge_scale(peers[0])
+
+
 def test_fewer_than_three_positive_metrics_stay_neutral():
     a = _cfg("A", net_r=40.0, max_dd_r=10.0)
     b = _cfg("B", net_r=400.0, max_dd_r=10.0)

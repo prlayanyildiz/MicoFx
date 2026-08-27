@@ -28,7 +28,7 @@ from micofx.web.app import create_app
 
 def _cfg(symbol="XAUUSD", magic=990021):
     c = SymbolConfig(symbol=symbol, magic=magic)
-    c.strategy = "t3_stoch"
+    c.strategy = "stoch_flip"
     c.timeframe = "M5"
     return c
 
@@ -116,7 +116,7 @@ def _history_row(run_id=7, validated=True):
     return {
         "id": run_id, "symbol": "XAUUSD", "score": 12.5,
         "params": {"sl_atr_mult": 1.5, "trail_step_atr": 0.8, "trail_mode": "atr"},
-        "timeframe": "M15", "strategy": "wavetrend_flip",
+        "timeframe": "M15", "strategy": "parabolic_flip",
         "validated": validated, "holdout": {"net_r": 4.0},
         "applied": False,
     }
@@ -142,7 +142,7 @@ def test_run_id_apply_stamps_the_existing_row_not_a_new_one():
     assert stamp["run_id"] == 7
     assert stamp["force"] is True
     assert stamp["applied_at"] >= before
-    assert stamp["previous"] == {"strategy": "t3_stoch", "timeframe": "M5"}
+    assert stamp["previous"] == {"strategy": "stoch_flip", "timeframe": "M5"}
 
 
 def test_param_match_apply_stamps_the_matched_row():
@@ -151,14 +151,14 @@ def test_param_match_apply_stamps_the_matched_row():
     res = tc.post("/api/opt/apply", json={
         "symbol": "XAUUSD",
         "params": {"sl_atr_mult": 1.5, "trail_step_atr": 0.8, "trail_mode": "atr"},
-        "timeframe": "M15", "strategy": "wavetrend_flip",
+        "timeframe": "M15", "strategy": "parabolic_flip",
         "score": 12.5,
     })
     assert res.status_code == 200, res.text
     assert store.inserts == []
     assert store.stamps[0]["run_id"] == 11
     assert store.stamps[0]["force"] is False
-    assert store.stamps[0]["previous"]["strategy"] == "t3_stoch"
+    assert store.stamps[0]["previous"]["strategy"] == "stoch_flip"
 
 
 def test_hand_typed_params_with_no_row_insert_a_stamped_run():
@@ -166,7 +166,7 @@ def test_hand_typed_params_with_no_row_insert_a_stamped_run():
     res = tc.post("/api/opt/apply", json={
         "symbol": "XAUUSD",
         "params": {"sl_atr_mult": 1.5, "trail_step_atr": 0.8, "trail_mode": "atr"},
-        "timeframe": "M15", "strategy": "t3_stoch",
+        "timeframe": "M15", "strategy": "stoch_flip",
         "score": 1.0, "force": False,
     })
     assert res.status_code == 200, res.text
@@ -176,7 +176,7 @@ def test_hand_typed_params_with_no_row_insert_a_stamped_run():
     assert "force" in payload
     assert payload["force"] is False
     assert payload["applied_at"] is not None
-    assert payload["previous"] == {"strategy": "t3_stoch", "timeframe": "M5"}
+    assert payload["previous"] == {"strategy": "stoch_flip", "timeframe": "M5"}
     assert store.inserts[0]["applied"] is True
 
 
@@ -189,12 +189,12 @@ def test_stamp_merges_into_payload_without_dropping_holdout(tmp_path, monkeypatc
     st = store_module.Store()
     run_id = st.record_opt_run(
         "XAUUSD", 12.5,
-        {"holdout": {"net_r": 4.0}, "strategy": "wavetrend_flip", "timeframe": "M15"},
+        {"holdout": {"net_r": 4.0}, "strategy": "parabolic_flip", "timeframe": "M15"},
         applied=False,
     )
     ok = st.stamp_opt_run_apply(
         run_id, force=True,
-        previous={"strategy": "t3_stoch", "timeframe": "M5"},
+        previous={"strategy": "stoch_flip", "timeframe": "M5"},
         applied_at=1_700_000_000.0,
     )
     assert ok is True
@@ -204,7 +204,7 @@ def test_stamp_merges_into_payload_without_dropping_holdout(tmp_path, monkeypatc
     assert row["holdout"] == {"net_r": 4.0}
     assert row["force"] is True
     assert row["applied_at"] == 1_700_000_000.0
-    assert row["previous"] == {"strategy": "t3_stoch", "timeframe": "M5"}
+    assert row["previous"] == {"strategy": "stoch_flip", "timeframe": "M5"}
 
 
 def test_stamp_of_a_missing_id_returns_false_and_leaves_history_alone(tmp_path, monkeypatch):
@@ -213,7 +213,7 @@ def test_stamp_of_a_missing_id_returns_false_and_leaves_history_alone(tmp_path, 
     monkeypatch.setattr(store_module, "DB_PATH", tmp_path / "opt.db")
     monkeypatch.setattr(store_module, "ensure_dirs", lambda: None)
     st = store_module.Store()
-    st.record_opt_run("XAUUSD", 1.0, {"strategy": "t3_stoch"}, applied=False)
+    st.record_opt_run("XAUUSD", 1.0, {"strategy": "stoch_flip"}, applied=False)
     assert st.stamp_opt_run_apply(999, False, None, 1.0) is False
     row = st.opt_history("XAUUSD")[0]
     assert row["applied"] is False

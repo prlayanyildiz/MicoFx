@@ -1,13 +1,408 @@
 # OPTIMIZATIONS.md
 
-Read-only notes. **Not executed by the engine.** Latest pass:
-**26.08 08:40** Cursor clean scan (below). Prior: **08:00** landing,
-**08:05** Claude measurement pass, **07:50** reverse-engineering scan.
+Read-only notes. **Not executed by the engine.** Latest:
+**27.08 22:10** operator hardest A–Z (API/web/dead leftovers/8 families/
+counterfactuals, numbers only). Prior **20:40**. Shakeout floor stays;
+do not teach search it. Live search **idle** (20:21 job died at 160k
+on 21:20 restart-with-opens). Do **not** start a new search unasked.
+GER40 #367727827 open → no restart. Harvest off. Numba/O-1/F1/F2
+won't-do. HEAD `122e434` + dirty tree.
 
-**HEAD** `0c33d72` + this working tree. Latest pass: **26.08 12:50**
-Cursor SCAN-2 (profit/model + remaining opt/security). Prior: **08:40**
-clean scan. Live PID **12:32:15** (disk loaded; book was flat at scan).
-Do not restart while opens exist just to load `open_original_sl`.
+---
+
+## 27.08 22:10 — Operator hardest A–Z (measured; no patch)
+
+Independent Cursor pass after operator: API/web/engine/families/symbols,
+stripped-feature leftovers, missed fills, reverse+forward, counterfactuals
+**with numbers**. Did **not** PATCH, start a search, flatten, capture,
+restart, or commit. 1 GER40 ticket open. Claude given a heavier independent
+brief (22:08) — this file is Cursor's numbers, not Claude's.
+
+Live GET `/` cookie then `/api/state` `/api/symbols` `/api/system`
+`/api/analysis/*` `/openapi.json`. Log `logs/micofx.log` 27.08 only.
+Autopsies dated with `gmtime` (naive broker epoch). 82 tests green:
+csrf, openapi, cancel-abandon, hands-off HTTP, unused names, shakeout,
+panel DOM.
+
+**Live 22:05–22:10:** demo 61562752. Balance **$1957.88** / equity **~$1958**
+/ floating **−$0.1**. Day **38** closes WR **26.3%** realised **−$186.61**
+`pnl_pct` **−8.69%** halt **false**. `opt.state=idle`. `last_cycle_ms` **3–7**.
+`last_error` empty. 1 open: GER40 #367727827 BUY 0.1 SL **26303.1** (entry
+26379.1 ≈ **2.0 ATR**, ATR 38.0). AI `risk_scale` **0.60** enforced
+(`Gunluk zarar %8.69`). JPN `ok`; other five `watch`.
+
+### 1) Optimization Summary
+
+* **Health:** No new engine leak vs 20:40. Today's **−$186.61 / −13.22 R**
+  is GER40 `stoch_flip` 1.0 orig-SL (**8/11**, **−$138.52 / −8.89 R**) plus
+  JPN225 (**−$73.79 / −7.16 R**) with **no daily halt** (`daily_loss_pct=0`)
+  and **no ticket cap** (`max_total_positions` **unread**). Idle cycle is
+  paid (**3–7 ms**). Search is **not** running. Claude 20:50 openapi+cancel
+  holes are **closed on this PID** (404 + disk abandon).
+* **Top 3 highest-impact (none is a silent CPU patch):**
+  1. Keep the open GER40. Restart first-sights stops; 21:20 and 21:43 already
+     restarted **with tickets** (5 then 3).
+  2. After **flat only**: `daily_loss_pct=0` vs a 3% brake. Start equity
+     inferred **$2144** from `pnl_pct`. 3% ≈ **$64**. Realised **$186**.
+     Gap **~$122** is the measured extra bleed **if** the 3% halt would have
+     fired and flattened; it would also have flattened later US30/XAU winners
+     (US30 today **+$21.78 / +2.19 R**, XAU **+$8.97 / +1.37 R**). Yellow/red.
+  3. GER40 searched stop **1.0** vs shakeout next-entry **2.0** (this PID,
+     22:01 `lot serbest, risk ayni`). Floor is live on **all 6** names
+     (last-10 `exit_reason=sl` losers ≥3; all of those were `sl==original_sl`).
+     Search still prefers 1.0. Do not PATCH SL. Do not disable the floor.
+* **Biggest risk if no changes:** Operational, not ms. Next `apply_best`
+  of a 1-slot walk-forward onto a book that stacks until **margin 90% /
+  reverse / STOPSUZ** is an untested regime. Panel still ranks dead
+  `risk_sembol_limiti` **209** as lifetime #2 (producer gone). Day can
+  keep bleeding with no halt.
+
+### 2) Findings (Prioritized)
+
+* **Title** `max_total_positions=100` is unread — 100-slot / 80% 1R does **not** bind
+* **Category** Algorithm / Reliability
+* **Severity** High (operator model; corrects 20:40)
+* **Impact** Live stacking cap is **margin 90%**, reverse, STOPSUZ, scalp/swing
+  only if those leftovers **>0** (live **0/0 = off**). Capacity
+  `global_free_slots=237`, `margin_usage_pct=0.39`, `open_risk_pct=0.45`.
+* **Evidence** `can_open` `risk.py:570-604` has no total-count check.
+  `max_positions` **zero reads** in `risk.py`. Capacity still **dumps**
+  `max_total_positions: 100` and leftover `max_concurrent_risk_pct: 30`.
+  field_help already says unread.
+* **Why it’s inefficient** 20:40 / Claude 20:35 treated 100×0.8%=80% 1R as
+  a live ceiling. It is a stored number. Concurrent 1R also unread
+  (`risk.py:601-602`).
+* **Recommended fix** After quiet: slim snapshot to panel keys. Do **not**
+  restore a ticket cap unasked (US30 slot-2 overlap +4.62 R, closed won't-do).
+* **Tradeoffs / Risks** Readers using GET as the contract.
+* **Expected impact estimate** Clarity. Zero latency.
+* **Removal Safety** Likely Safe (payload slim) / Needs Verification (restore cap)
+* **Reuse Scope** `risk.py` capacity dict + `app.py` system GET
+
+* **Title** Today's cash is GER40 1.0 orig-SL + no halt, not a fill leak
+* **Category** Cost / Algorithm
+* **Severity** High (today's $)
+* **Impact** Day **−$186.61 / −13.22 R / 38 closes**. GER40 11 **−$138.52 /
+  −8.89 R / 8 orig-SL / 2 trail / 1 manuel / 1 win**. JPN225 13 **−$73.79 /
+  −7.16 R / 6 orig-SL**. US30 7 **+$21.78 / +2.19 R**. XAU 2 **+$8.97**.
+  NAS 4 **−$1.14**. Brent 1 **−$3.87**. `mfe_r≥1.5` then SL **today: 0**.
+* **Evidence** Autopsy `gmtime` 27.08 n=38 matches `/api/state` day.
+  `fill_vs_signal_close_r` today n=25 mean **+0.088 R** (min −0.13, max +1.12)
+  — not an adverse-fill leak. Window n=237: SL 132, through_entry 87,
+  recovery ≥0.5 R 135.
+* **Why it’s inefficient** Search still offers `sl_atr_mult=1.0` and GER40
+  holds it. Shakeout only widens the **next** entry (22:01 GER40 2.0, lot free).
+* **Recommended fix** Let a future search finish on a **flat** book. Do not
+  PATCH SL on the open ticket. Do not cancel a search that is already idle.
+* **Tradeoffs / Risks** `apply_best` may write another 1.0 onto GER40.
+* **Expected impact estimate** Floor: losers stay −1 R in R-space; min-lot
+  names **grow dollar risk** (see shakeout finding).
+* **Removal Safety** Needs Verification
+* **Reuse Scope** `risk.shakeout_sl_atr_mult` + optimizer grid
+
+* **Title** `daily_loss_pct=0` — flatten-always is wired but unreachable
+* **Category** Reliability / Cost
+* **Severity** High (policy)
+* **Impact** Counterfactual 3% of ~$2144 ≈ **$64**. Realised **$186**.
+  Extra **~$122** if the old 3% halt would have flattened when it first
+  crossed. `daily_loss_flatten` **unread** (`models.py` + field_help only);
+  engine flattens whenever `loss_halted` (`engine.py:897-899`) **without**
+  reading the flag. Halt never trips because `DailyGuard.check` needs
+  `daily_loss_pct > 0` (`risk.py:263`).
+* **Evidence** Live `system.daily_loss_pct=0`, `halted=false`. CFG 19:28
+  `daily_loss_pct 20.0 -> 0.0`. HTTP 400 on POST `daily_loss_pct`.
+* **Why it’s inefficient** N/A — intentional cancel. Communication: capacity
+  / AI still react (`lot carpani 0.60` at −8.69%) **after** the cash is gone.
+* **Recommended fix** None unless the operator wants the brake back.
+  Restoring 3% is yellow/red. Do not silently write 3.
+* **Tradeoffs / Risks** A halt flattens winners too.
+* **Expected impact estimate** Likely capped today near −$64 vs −$186
+  **if** it had been on from the open. Not a replay.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** Store leftover + `DailyGuard`
+
+* **Title** Concurrent 30% leftover — the cap **was** binding before the strip
+* **Category** Algorithm
+* **Severity** High (stripped feature, not dead)
+* **Impact** Log 27.08 **8** `eszamanli` WARN lines, last `19:18:35 kitap
+  %54.56 eszamanli risk istiyor, tavan %30`. After ~20:05 unread, WARNs stop.
+  Live 20:39 had **7** opens. Now 1 open, `concurrent_risk_pct` dump **4.91**
+  (sum of configured 1R, not a gate).
+* **Evidence** Claude TUR 5 + log. `can_open` does not read
+  `max_concurrent_risk_pct`. HTTP 400.
+* **Why it’s inefficient** Calling it "dead code cleanup" is false — it was
+  refusing entries at 31–54% demand. Operator chose to drop it; record that.
+* **Recommended fix** Do not restore unasked. Do not teach search stacking
+  tonight.
+* **Tradeoffs / Risks** Restoring 30% re-opens a real gate (yellow).
+* **Expected impact estimate** Unknown without a stacking walk-forward.
+  Cannot attribute today's −$186 to the strip (no replay).
+* **Removal Safety** Needs Verification
+* **Reuse Scope** `risk.can_open`
+
+* **Title** Shakeout floor is on for the whole book; min-lot **grows** dollar risk
+* **Category** Cost
+* **Severity** High (live overlay vs paper)
+* **Impact** Last-10 `exit_reason=sl` losers: SpotBrent 3, JPN 5, GER40 7,
+  US30 3, NAS 5, XAU 7 — **all ≥3**, all were `sl==original_sl`. Floor **2.0**.
+  Log 6 fires: first five `lot tabanda, gercek risk buyuyor`; GER40 22:01
+  `lot serbest, risk ayni`. Capacity `lot_note` `SL x2 shakeout` on five
+  names; Brent still `avantaj x0.71` (sl already 2.5 ≥ floor).
+* **Evidence** `shakeout_sl_atr_mult` window=10 deaths=3 floor=2.0.
+  `shakeout_size_note` `risk.py:66-77`. This PID 18:00–22:01.
+* **Why it’s inefficient** Walk-forward never pays the floor. Winners' R
+  halves when 2.0 binds; min-lot losers **cost more $**.
+* **Recommended fix** Keep the floor. Do not add it to `OPT_FIELDS`.
+* **Tradeoffs / Risks** Paper vs live divergence on every 1.0-stop name.
+* **Expected impact estimate** Qualitative (19:10); live log now confirms
+  the min-lot branch.
+* **Removal Safety** Needs Verification (do not remove)
+* **Reuse Scope** `risk.py`
+
+* **Title** Dead `risk_sembol_limiti` still ranked #2 (209 / 956)
+* **Category** Frontend / Maintainability
+* **Severity** High (operator model)
+* **Impact** Lifetime entry-blocks: signals **956**, opened **289**
+  (fill **30.2%**). totals: spread **241**, **sembol limiti 209**, ters **148**,
+  bar_bosluk 45, emir_hatasi 12, bar_doldu 8, lot 4. Retries US30 spread
+  17715 / GER40 sembol 40590. Producer string gone from `can_open`.
+* **Evidence** `engine.py:151-159` `_RISK_BLOCK_KEYS`. Live GET
+  `/api/analysis/entry-blocks`. HTTP 400 `max_positions`.
+* **Why it’s inefficient** Historical counters look like a live gate.
+* **Recommended fix** After quiet: drop needles **or** note suffix
+  `(kalkti)` **or** reset (wipes spread/ters too). Do not reset during a
+  search (none running, still don't — operator-visible).
+* **Tradeoffs / Risks** Reset is one-shot irreversible on that blob.
+* **Expected impact estimate** Zero latency. Stops a false #2.
+* **Removal Safety** Likely Safe (mapping) / Needs Verification (reset)
+* **Reuse Scope** engine.py + panel analysis
+
+* **Title** 20:21 `apply_best` 3.08M died at 160k; restart-with-opens cancelled it
+* **Category** Concurrency / Reliability
+* **Severity** High (operational, now idle)
+* **Impact** Log: 20:21 start 144 sweeps / 6 symbols / 8 families / 3 TF
+  (`6×8×3=144`). Cancel lines 20:27–21:20 stuck **160000/3081600**.
+  **21:20:58 restart** (5 tickets) + **21:43:25 restart** (3 tickets).
+  No apply line. Last successful apply **15:56** GER40+NAS100.
+  Disk now abandons the pool; this PID did not run that job.
+* **Evidence** `logs/micofx.log` OPT/WARN. Live `opt.idle`. Tests 4/4
+  `test_opt_cancel_is_noticed_mid_sweep`.
+* **Why it’s inefficient** Iptal set the event; old harvest waited on
+  workers. Restarts with tickets first-sight stops **and** kill the job.
+* **Recommended fix** Do not start a new 3.08M unasked. Next search: either
+  drop unused families from **that job's** `strategies` (one-off, not persist)
+  or leave 8 — apply **can** swap (NAS100 `mtf_pullback`→`stoch_flip` 15:56).
+* **Tradeoffs / Risks** A 3-family one-off cannot discover ichimoku/aroon.
+* **Expected impact estimate** 5 unused families = **90/144** sweeps (62.5%)
+  if this job had finished. Combo wall dominated by `stoch_flip` cap 28800.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** optimizer start `strategies=`
+
+* **Title** Restart/shutdown 409 still missing — proven twice tonight
+* **Category** Reliability
+* **Severity** Medium (constitution vs operator)
+* **Impact** Two live restarts with open tickets. 21:50 four **Elle
+  (terminal)** closes (US30 +9.40, JPN −3.10, GER40 +3.86, US30 +13.56 =
+  **+$23.72** operator, not engine) then IPC **−10001** ×2.
+* **Evidence** `app.py:1987-2016` no position check, no `_restarting` lock.
+  Log 21:20 / 21:43 `Yeniden baslatma istegi alindi` + `magic ile N acik ticket`.
+* **Why it’s inefficient** AGENTS.md forbids restart-with-opens; HTTP allows it.
+  Double-submit can spawn two `restart.bat`.
+* **Recommended fix** Notes only tonight — operator used restart with tickets
+  and granted restart authority. A 409 would block that. Do not add unasked.
+* **Tradeoffs / Risks** 409 vs operator override.
+* **Expected impact estimate** Safety, not ms.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** `app.py` restart/shutdown
+
+* **Title** `size_by_edge` hidden-but-on; AI 0.60 after the loss
+* **Category** Maintainability
+* **Severity** Medium
+* **Impact** Live True. GER40 capacity `avantaj x1.89`. HTTP 400. AI scale
+  0.60 from **today's** −8.69% — haircuts **next** lots, does not unwind
+  today's −$186. GER40 TRADE 22:01 `AI x0.36` with shakeout 2.0 and lot free 0.12.
+* **Evidence** `GET /api/system` `size_by_edge=true`. TRADE 22:01:12.
+* **Why it’s inefficient** Operator cannot dial it. AI throttle is lagging.
+* **Recommended fix** After quiet: read-only chip **or** force False (yellow,
+  changes lots). Do not HTTP-open it.
+* **Tradeoffs / Risks** Turning it off shrinks names the stamp likes (GER40 1.89).
+* **Expected impact estimate** Live lots move; idle ms unchanged.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** Store leftover
+
+* **Title** SIGNAL 90 vs fills 43 is **not** 47 lost +R trades
+* **Category** Reliability (measurement honesty)
+* **Severity** Medium
+* **Impact** Log 27.08: SIGNAL **90**, TRADE opens **43**, closes **38**.
+  Naive ±120s unmatched **55** — includes reverse, spread, session, restart
+  re-SIGNAL (10:03:46 GER40/XAU/NAS same second; 21:20/21:43 `last_bar`
+  replay). Lifetime fill 289/956=30.2% mixes the dead 209-slot era.
+* **Evidence** Log parser. `filled_bars` / restart SIGNAL design (24.08 15:31).
+* **Why it’s inefficient** Counting SIGNAL−TRADE as missed edge overstates.
+  Need `entry_block_events` **today** (API totals are lifetime).
+* **Recommended fix** Do not open spread / reverse gates unasked (MISS-1 GER40
+  reverse holdout −1001 R still stands).
+* **Tradeoffs / Risks** False "we left money on the table".
+* **Expected impact estimate** Unmeasured without today's event rows.
+* **Removal Safety** n/a
+* **Reuse Scope** analysis + log
+
+* **Title** 8 families reverse: 4 live `stoch_flip` + burst + parabolic; 5 empty are search candidates
+* **Category** Algorithm
+* **Severity** Medium (search cost vs option value)
+* **Impact** Live book: GER40/JPN/NAS/US30 `stoch_flip` (HTF **flat**),
+  XAU `burst` M15 (HTF used, misses showed HTF=−1), Brent `parabolic_flip`
+  M15 (PSAR flip, HTF flat, sl 2.5). Empty: `mtf_pullback` `dual_t3`
+  `t3_flip` `aroon_flip` `ichimoku`. Grids already drop unread axes
+  (`test_no_family_grid_axis_is_unread`). Overlays **not** OPT_FIELDS:
+  BE 1.5, partial 1.5 on five names, harvest **0**.
+* **Evidence** `GET /api/symbols`. `strategy.py` builders + `searchable_axes`.
+  20:21 log `144 tarama`.
+* **Why it’s inefficient** 90/144 sweeps search families the book does not
+  currently trade; `apply_best` **may** swap them in (NAS100 15:56).
+* **Recommended fix** F1/F2 stay **won't-do**. One-off `strategies=` on a
+  future manual run is allowed and does not persist.
+* **Tradeoffs / Risks** Dropping 5 families forever closes NAS100-style swaps.
+* **Expected impact estimate** Sweep count −62.5% on a 144-job; combo wall
+  still `stoch_flip` 28800-capped.
+* **Removal Safety** Needs Verification (yellow if persistent)
+* **Reuse Scope** `POST /api/opt/run` strategies
+
+* **Title** GET leftover asdict + `autostart_mt5=true` vs MASTER_PROMPT §19
+* **Category** Frontend / Maintainability
+* **Severity** Low
+* **Impact** `/api/system` still returns unread caps and `daily_loss_flatten`.
+  Panel connection card still has `autostart_mt5` (HTTP allowlist).
+  MASTER_PROMPT §19 says do not port `autostart_mt5`; this tree already has it
+  and AGENTS.md lists it as System POST. Not a new port.
+* **Evidence** Live GET. `app.py` `_OPERATOR_SYSTEM_FIELDS`.
+* **Why it’s inefficient** Agents/panel can *see* dead knobs.
+* **Recommended fix** Slim GET after next boot. Do not remove autostart unasked.
+* **Tradeoffs / Risks** GET-as-contract readers.
+* **Expected impact estimate** Less than 1% payload.
+* **Removal Safety** Likely Safe (slim) / Needs Verification (autostart)
+* **Reuse Scope** app.py
+
+* **Title** Security live: session/CSRF/openapi/hands-off hold; restart 409 is the hole
+* **Category** Reliability / Security
+* **Severity** Low–Medium
+* **Impact** See SECURITY AUDIT below. No new injection in the probes.
+* **Evidence** Live curl + 82 tests.
+* **Why it’s inefficient** `/openapi.json` was the 20:50 hole; **this PID 404**.
+* **Recommended fix** Notes. Do not add restart 409 tonight.
+* **Tradeoffs / Risks** —
+* **Expected impact estimate** —
+* **Removal Safety** —
+* **Reuse Scope** web middleware
+
+### 3) Quick Wins (Do First)
+
+* Do nothing to the open GER40. No restart, no SL PATCH, no search.
+* After flat: decide daily halt (yellow/red) — measured gap ~$122 vs 3%.
+* After quiet: label or drop dead `risk_sembol_limiti` / `risk_eszamanli`
+  needles so Eleme Kapilari stops ranking a deleted gate #2.
+* Slim capacity/system GET so unread `max_total_positions=100` /
+  `max_concurrent_risk_pct=30` stop looking like live caps.
+* Next manual search: optional one-off `strategies` = live three
+  (`stoch_flip`,`burst`,`parabolic_flip`) **without** persisting the subset.
+
+### 4) Deeper Optimizations (Do Next)
+
+* Yellow: stacking walk-forward (`max_open` from live) vs paper 1. Do not
+  teach it tonight.
+* Yellow: persist vs one-off family subset. Option value of 15:56 NAS100 swap.
+* Shakeout vs search 1.0: three-arm diagnostic (gates / floor / both) stays
+  designed, not a patch. Floor is **not** an OPT axis.
+* Restart 409 + single-flight `_restarting` — only if operator wants the
+  constitution enforced against the panel button.
+* Numba simulate / O-1 sqlite split: still won't-do (2.57ms / 6.53ms; 2000-row
+  cap unmeasured). Idle cycle already 3–7 ms.
+
+### 5) Validation Plan
+
+* Already green this pass: `tests/test_session_csrf_gate.py` (incl. openapi
+  404), `test_opt_cancel_is_noticed_mid_sweep.py`,
+  `test_hands_off_fields_are_not_api_writable.py`,
+  `test_unused_production_names.py`, `test_shakeout_widens_the_next_stop.py`,
+  `test_panel_first_screen_shows_positions.py` — **82 passed**.
+* Before/after any payload slim: `GET /api/state` capacity keys the panel
+  actually reads (`test_panel_account_cards_keep_their_fields`,
+  `test_unread_payload_keys_are_gone`).
+* Before restoring a halt: measure start_balance × pct vs today's deal times
+  (replay, not a guess).
+* Before a stacking search: holdout with `max_open>1` on GER40/NAS/US30 only.
+* Metrics: `last_cycle_ms`, day realised, orig-SL count, entry-blocks
+  **increments** (dead keys must stay flat).
+
+### 6) Optimized Code / Patch
+
+**None shipped.** Disk already contains the 20:50 fixes
+(`openapi_url=None`, `_abandon_search_pool`). Live PID (21:43 restart)
+serves them: `/openapi.json` **404**, hands-off **400**. Remaining items
+are yellow/red or operator-model. AGENTS.md **not** rewritten (see notes).
+
+#### SECURITY AUDIT: dirty tree + live surface 22:10
+
+**Risk Assessment:** Low on the live PID. Medium on restart-with-opens
+(availability / stop first-sight), not a remote RCE.
+
+#### **Findings:**
+
+* **Unauthenticated `/openapi.json`** (Severity: closed on this PID)
+  * **Location:** `micofx/web/app.py:587-588` `openapi_url=None`
+  * **The Exploit:** Claude 20:50: cookie-less GET 200 / 42 routes / 11
+    destructive names. Middleware skips non-`/api/` paths.
+  * **The Fix:** Already `FastAPI(..., openapi_url=None)`. **Live 404.**
+    `/docs` `/redoc` 404. Pin `test_openapi_schema_is_not_public`.
+
+* **Origin CSRF** (Severity: held)
+  * **Location:** `app.py:602-608`
+  * **The Exploit:** POST `/api/system` no Origin → **403**. POST panic
+    `Origin: http://evil.example` → **403**. Cookie-less `/api/state` → **401**.
+  * **The Fix:** None. SameSite=Strict + Origin=Host still on.
+
+* **Hands-off allowlist** (Severity: held on this PID; G6 closed)
+  * **Location:** `app.py:418-429` `_OPERATOR_*`
+  * **The Exploit:** Live POST GER40 `risk_percent` / `sl_atr_mult` / `strategy`
+    / `max_positions` → **400**. System `daily_loss_pct` / `size_by_edge` /
+    concurrent / total → **400**. `.../reset` 400. `/api/ai` GET **404**.
+    `/api/logs/clear` **404**.
+  * **The Fix:** None. Claude 20:50 G6 (old PID accepted `risk_percent`)
+    does **not** reproduce here.
+
+* **Restart with open tickets** (Severity: Medium, operator-visible)
+  * **Location:** `app.py:1987-2016`
+  * **The Exploit:** Panel restart does not 409. 21:20 (5 tickets) and
+    21:43 (3 tickets) landed. First-sights `open_original_sl` to current
+    trail. Killed the 160k search.
+  * **The Fix:** 409 if `engine.positions` non-empty **plus** a
+    `_restarting` latch. **Not applied** — operator used this door tonight.
+
+* **Secrets / pickle / second initialize:** Claude 20:50 dirty-tree grep
+  `eval` / `exec` / `pickle` / `shell=True` **0**. Subprocess restart.bat is
+  a fixed template. Not re-diffed line-by-line this pass.
+
+#### **Observations:**
+
+* Static `/` 200 without cookie (must — sets the cookie). HTML 23122 bytes.
+* Panel DOM: day before positions before capacity, no `panel-narrow`, no
+  `tabs-spacer`.
+* `autostart_mt5` True is an allowlisted connection-card dial, not a new Ai port.
+
+#### AGENTS.md rewrite — **not shipped**
+
+Constitution stays. Proposed **additions** only (do not delete 8-family /
+exit-model / Origin / single sqlite / no restart-with-opens):
+
+* `FastAPI(openapi_url=None)` is required; `/openapi.json` must 404.
+* `Optimizer.cancel` must mark `cancelled` and abandon the pool
+  (`terminate` + `shutdown(wait=False)`). Event-only cancel is a panel lie.
+* `max_total_positions` / `max_positions` / `max_concurrent_risk_pct` are
+  **unread**. Live stacks until margin / reverse / STOPSUZ. Do not quote
+  leftover 100 as a gate.
+* `daily_loss_flatten` unread; flatten runs whenever `loss_halted`. `0`
+  `daily_loss_pct` disables the halt entirely.
+* Next process loads HTTP-off exits; this PID still 400s them (verified).
 
 ---
 
@@ -15,6 +410,9 @@ Do not restart while opens exist just to load `open_original_sl`.
 
 | Item | Evidence now |
 |---|---|
+| GET `/openapi.json` ungated | **Live 404.** Disk `FastAPI(openapi_url=None)`. `/docs` `/redoc` 404. Pin `test_openapi_schema_is_not_public`. Claude 20:50 was PID 17:40. |
+| Opt cancel stuck at 160k | **Disk landed.** `harvest` timeout 0.5s + `_abandon_search_pool` terminate. Pin `test_opt_cancel_is_noticed_mid_sweep`. Live job was killed by restart before this PID could prove it. |
+| Hands-off POST 400 | **Live 400** this PID: risk_percent, max_positions, sl/family, daily_loss_pct, size_by_edge, concurrent, total, opt strategies, reset. `max_margin_usage_pct` remains writable. |
 | F1 `trigger_pad` hoist | `walk_forward` passes `trigger_pad=` into `simulate`. |
 | `/api/schema` catalogs | `GET /api/schema`. `/api/state` has no `opt_fields`. |
 | Panel 1.5s during search | `app.js` `hidden ? 6000 : 3000`. |
@@ -23,45 +421,1487 @@ Do not restart while opens exist just to load `open_original_sl`.
 | `entry_blocks` every-poll commit | 45s debounce. |
 | `_sig_cache` full clear | LRU cap 4. |
 | Tick/info TTL | 120s / 0.5s. |
-| alpha_trend / mavilim | Retired 26.08 holdout. 13 families. |
+| alpha_trend / mavilim / st_trend / macd_flip / t3_stoch / wavetrend_flip / micro_rev | Retired. **8 families.** |
 | `original_sl` RAM-only | **Landed.** `note_fill` writes `open_original_sl`; `track()` restores before first-sight. Pre-patch tickets still first-sight. Do not persist the fallback. |
-| Fill-verify blocks `_cycle` | **Landed.** Immediate peek (no sleep if the ticket is there). Engine `defer_verify=True`: pending + inflight + side thread; drain books the fill. Fail-closed: no second send while inflight. Sleeps still exist — on the verifier thread, not `micofx-engine`. |
-| Supervisor 14d inside `_cycle` | **Landed.** `_kick_supervisor_review` daemon thread; gate prevents stacking. |
-| `/api/state` full `symbol_payload` | **Landed.** State carries `symbols_sig`; panel refetches `/api/symbols` when the set changes. |
-| Scale-out remain / second `info` | **Landed.** Clamp `filled` ≤ position; cash from the existing `info` dict. |
-| Duplicated trail/BE math | **Landed.** `micofx/exits.py` `overlay_stop`; live clamp stays in `_update_stop`; paper `_trail_one` is the single simulate path. |
-| Opt `copy_rates` holds the lock | **Landed (chunked).** `_BAR_FETCH_CHUNK=2500`; lock released between chunks. Still the live client — no second `initialize()`. |
-| Stale 1.5s / Windows-day comments | **Landed.** |
-| Short MFE ask pad (08:05 C-2) | **Landed.** `_mfe_tick` shorts use `entry - (bar_low + pad)`. |
-| `_merge` drops `trade_mfes` (08:05 C-3) | **Landed.** `total.trade_mfes.extend(r.trade_mfes)`. |
-| LOG.emit CR/LF minting extra TRADE rows | **Landed.** `logbus.emit` flattens `\r`/`\n` to space. |
-| Incumbent holdout replayed twice | **Landed.** `_fresh_incumbent_holdout` memo; `allow_fetch=False`. |
-| `/api/opt/run` Origin-unchecked | **Landed 08:45.** `_CRITICAL_MUTATIONS` includes `/api/opt/run` and `/api/opt/cancel`. `strategies`/`timeframes` `max_length=32`. |
-| Snapshot `account_info` every 3s | **Landed 08:45.** `_panel_account` reuses cycle book; `_ACCOUNT_TTL` 2s. |
-| `day_stats` 5s on every snapshot | **Landed 08:45 (TTL only).** snapshot `max_age=15`; halt path stays 5s. Not a separate `/api/day`. |
-| Panel `attempts` mixed units | **Landed 08:45.** Signals column is the count; poll retries on pill `title`. Window not reset. |
-| `el({html})` XSS sink | **Landed 08:45.** Branch removed. |
-| snapshot `day_stats` fetch on web thread | **Landed 09:15.** `fetch=False`; cycle warms after reap; halt stays 5s. |
-| `capacity()` N× `order_calc_margin` every `/api/state` | **Landed 09:15.** `_panel_capacity` 3s TTL, invalidate on ticket/volume; `margin_for` 5s TTL. |
-| Panel innerHTML every 3s | **Landed 09:15.** `viewPulse` skip when unchanged; tab switch forces render. |
-| Origin only on a named critical set | **Landed 09:15.** Every POST/PUT/PATCH/DELETE needs Origin. Authenticated TestClient sends it. |
-| Incremental `IndicatorCache` | **Closed 09:15 (measured won't-do).** Fresh cache+`compute` 1680 bars **2.57ms**; 6×M5 close ≈15ms. Identity risk > ROI. |
-| Numba `simulate` | **Closed 09:15 (measured won't-do until grid 3×).** `simulate` 1680 bars **6.53ms**. Live irrelevant; search unpaid. |
-| TRADE log on SL modify | **Closed 09:15 (won't-change).** `_stop_bar` already one modify/log per ticket per bar. Autopsy pairs on TRADE. |
-| Flatten autopsy `profit` empty | **Landed 09:32.** `_close_tracked` used `profit=None`; `close_position` now puts deal PnL (or `kar~` fallback) on `fill["profit"]`. Do not rewrite the 27 historical rows. R/capture were already complete. |
-| Autopsy `left_on_table_r` paints losers | **Landed 09:43.** Panel + report total **winners only** (`r_realised > 0`). Stored row formula unchanged. MFE is bar-extreme, not harvestable. |
-| Halt-flatten tests AttributeError `_day_cache` | **Landed 09:43.** Fixture `__new__` miss after cycle-warm `day_stats()`. Live brake unchanged. |
-| AGENTS.md density | **Landed 10:12** from Claude 10:05 proposal + Cursor keeps (bridges, overlays, 900s, verifier). |
-| Lying `scalp TF kilidi acik` | **Landed 12:50.** `tf_lock_status(tf_allow)` — empty `STRATEGY_TIMEFRAMES` logs `aile TF kilidi kapali`. XAUUSD is live burst/M15. |
-| Silent panel flatten-all | **Landed 12:50.** `Engine.close_all(reason=)` — panel doors pass `panel tumunu kapat` / `panel sembol kapat`. Panic/session/daily-loss stay on their own lines. Do not rewrite the 12:22 rows. |
-| Opt pickles bars 13× per TF | **Landed 13:05.** One npy folder per `(symbol, TF)`; workers `mmap_mode='r'`. Same arrays. Temp dir cleared when the run ends. |
+| Fill-verify blocks `_cycle` | **Landed.** Immediate peek. `defer_verify=True` side thread. Do not delete the sleeps. |
+| Supervisor 14d inside `_cycle` | **Landed.** `_kick_supervisor_review` daemon; gate prevents stacking. |
+| `/api/state` full `symbol_payload` | **Landed.** `symbols_sig`; panel refetches `/api/symbols`. |
+| Scale-out remain / second `info` | **Landed.** Clamp `filled` ≤ position. |
+| Duplicated trail/BE math | **Landed.** `exits.overlay_stop`. |
+| Opt `copy_rates` holds the lock | **Landed (chunked).** `_BAR_FETCH_CHUNK=2500`. No second `initialize()`. |
+| Short MFE ask pad / `_merge` `trade_mfes` / LOG CR/LF | **Landed.** |
+| Incumbent holdout replayed twice | **Landed.** `_fresh_incumbent_holdout` memo. |
+| Origin-less POST | **Landed.** Every mutation needs Origin. |
+| Snapshot account / day_stats / capacity TTL | **Landed.** |
+| `el({html})` XSS | **Landed.** Branch removed. |
+| Incremental IndicatorCache / Numba simulate | **Closed (measured won't-do).** 2.57ms / 6.53ms. |
+| Flatten autopsy profit / left_on winners-only | **Landed.** |
+| `tf_lock_status` / panel flatten `reason=` / opt npy share | **Landed 12:50–13:05.** |
+| Calendar reopt / GET `/api/ai` / `POST /api/logs/clear` | **Landed 26.08 strip.** Panel `STATE.ai`; Temizle DOM-only. |
+| `backtest.run` / `mae_close` / `_stamp_values_match` / `_tf_seconds` | **Landed.** Pin `tests/test_unused_production_names.py`. |
+| Unread payload (`pending_exit_fields`, `tried[]` net_r, walk_forward `raw_score`/`holdout_bars`, info `contract_size`, supervisor `saved_at`, `partial_close_lots`, `primary_max_spread_atr`) | **Landed.** Claude 18:05/18:45: production callers **0**. |
+| Harvest-on / trail-to-entry clamp / BE 0.5 | **Won't-do.** Paper off beats harvest shapes; GER40 BE@0.5R = −32 R. |
+| `max_positions` 3→1 from one red ticket | **Won't-do.** US30 slot-2 overlap +4.62 R (n=12). Yellow. |
+| Adverse-fill entry gate (`fill_vs_signal_close_r`) | **Won't-do.** WF fill-next-open; Claude 18:45 threshold scan is a curve-fit. |
+| One-day `blocked_entry_hours` | **Won't-do.** UTC+3 invented a 00:00 SL bucket; gmtime has no 00 hour. |
+| `/api/state` during a 14-worker search (148s) | **Landed.** Snapshot serves last cycle book while `optimizer.busy`. Halt/flatten still wait in `_cycle`. No second `initialize()`. |
+| F-1 `entry_block_events` skipped 45s debounce | **Landed.** `_flush_entry_blocks` window covers both blobs. `force=True` on reset/delete. |
+| MISS-1 `shutdown()` skipped the ring | **Landed.** `shutdown()` force-flushes the ring after join. |
+| MISS-2 force-flush before `thread.join` | **Landed.** Ring flush runs after join. |
+| MISS-3 `execution.flush()` before `thread.join` | **Landed.** Same place as the ring: after join. Autopsies stay cycle-local (no shutdown flush). |
+| 900s integrity full `required_bars` with no new bar | **Landed.** `bar_window_pins` (oldest + last closed). Full copy on mismatch / missing cache. Middle-bar hole with both ends unchanged is the remaining miss. |
+| O-1/O-2/O-3 settings blob rewrite | **Won't-do until 2000-row cap is measured.** F-1 closed the hot caller. Live sqlite owner; schema split is a restart-sized migration. |
+| Numba `simulate` | **Won't-do until `OPT_FIELDS` grid 3×.** 6.53ms measured. |
+| Empty `compute()` series | **Landed.** Fail-closed `_no_signal` before the family builder. Live `bars()` never hands n<2. |
+| `_is_improvement` / `_maybe_reoptimize` names | **Landed.** Apply gates are `_slice_ok`, `reject_reason`, `_beats_incumbent`. Calendar auto-queue is gone. Quarantine still uses `_queue_reoptimization`. |
+| Family-count docs (11) | **Landed.** `tests/test_docs_match_the_code.py` scans TR `N aile` and EN `N families`. Skip only `(arsiv)`. |
+| Deferred fill books live `last_bar` | **Landed.** Pending carries send-time source+bar. Drain marks those; clears live signal only if `last_bar` is still that bar. Pin `tests/test_deferred_fill_keeps_a_newer_bar_signal.py`. |
+| Quarantine `last_reopt_attempt` before `start()` | **Landed.** Stamp only when `start()` returns ok (or a non-dict test double). Failed start no longer burns `reopt_retry_cooldown_hours`. |
+| Saved `opt_params` kept retired families | **Landed.** `Store.opt_params()` and `save_opt_params()` drop names/grids/caps not in `STRATEGIES`. Live blob POSTed 27.08 00:50 to every family then in `STRATEGIES` (search already skipped them). Pin `tests/test_opt_params_drops_retired_families.py`. |
+| Combo bar used global `max_combos` | **Landed.** `run_combo_budget` sums `family_max_combos` × refine. Live `stoch_flip` 28800 made the bar 2.38M against ~5.27M real. Next process; do not PATCH caps mid-run. |
+| Hands-off panel / cost toggles off UI | **Landed (UI).** Values stay on Store. MT5 path + backup dir/secondary/keep restored. Exits readout. |
+| Shakeout SL floor | **Landed (disk).** Next entry floors SL to 2.0 after 3/10 original-SL deaths. Trail not scaled (option 3, docstring). This PID still old emit. |
+| Opt prefetch bars / poll drops `top`/`baseline` | **Landed (disk).** This PID still fat blob + no prefetch log. |
+| Dead `SECTIONS` / `optFieldVisible` / `loadSchema` / ghost `ADVANCED_SECTIONS` | **Landed (panel JS).** `GET /api/schema` kept. Pin `test_dead_symbol_guts_ui_is_gone`. Dead AI settings form builder gone; `AI_SETTING_FIELDS` stays for FIELD_HELP. |
+| Ad-hoc scripts appending `logs/micofx.log` | **Landed (disk).** `LogBus._disk` off until `run.py` `LOG.enable_disk()`. Pin `test_disk_is_off_until_the_live_launcher_enables_it`. This PID still old always-on write. |
+| Unread snapshot crumbs (`day.cash_flow` / `floating` / `bot.poll_interval_sec`) | **Landed (disk).** Panel already used `day.realised` / `account.profit` / Store poll. Pin `test_unread_payload_keys_are_gone`. |
+| `STOCH_MID` unused constant | **Landed.** Pin `test_dead_repair_helpers_are_gone`. |
+| Hands-off fields still Origin-POST writable | **Landed (disk).** HTTP allowlist = panel dials only (sizing/sessions/enabled; opt lookback/refine/max_combos). Family/TF/exits/magic/grid/reset → 400. Pin `test_hands_off_fields_are_not_api_writable`. Apply() unchanged. |
+| Dead opt-grid / `SWING_OVERLAY` / empty `SYS_DANGER_NOTES` | **Landed (disk).** Client + `GET /api/opt/params` `swing_overlay` dropped together. `SYS_FIELDS_ADVANCED = []` stays (FIELD_HELP pin). `saveOptParams` still refuses empty `body.grid = {}`. Pin `test_search_gate_internals_are_not_on_the_panel`. |
+| `_FALLBACK_PATHS` empty constant | **Landed.** Gone from `mt5client.py`. Pin `test_unread_payload_keys_are_gone`. |
+| `cash_flow_since` every cycle | **Landed (disk).** 30s TTL while balance unchanged; `None` does not stamp TTL; deposit-shaped jump fetches immediately; rollover resets. Pin `test_cash_flow_is_not_fetched_every_cycle`. Two-call merge still won't-do. |
+| Unread payload crumbs (`session_clock_skew_hours`, `execution.tracked`, snapshot `day.wins`) | **Landed (disk).** Panel keys only on snapshot `day`. `t3_kind` stays on `as_dict` (status contract). |
+| `backup_dir_allow_unc` HTTP-writable | **Landed (disk).** Dropped from `_OPERATOR_SYSTEM_FIELDS`. Same-request latch → 400. Store flag still opens UNC. Pin `test_unc_latch_is_not_http_writable`. Runtime gate in `backup.py` unchanged. |
+| F5 unread `opt.results[].tried` | **Landed (disk).** `status()` pops `tried` with `top`/`baseline`. Live job / opt_runs keep it. Pin `test_opt_poll_drops_unread_rankings`. |
+| F3 GER40 900-bar / 2023 holdout pin | **Landed (disk).** `capture()` refuses n<5000 or last bar >14d; old file stays. Do **not** recapture while tickets are open. Next gece writes a fat window. |
+| F10 Windows spawn orphans | **Landed (disk).** Sweep now matches `spawn_main` as well as `--multiprocessing-fork`. Do **not** kill the live 14 workers while the book is open; next boot/resweep. Pin `test_orphan_sweep_stays_in_its_own_venv`. |
+| F14 sweep PowerShell never parsed | **Landed (disk).** Where-Object closer is an f-string; `{`/`}` balanced. rc≠0 → `gece_restart.say`. Do **not** invoke by hand while tickets are open; next gece/restart actually Stop-Process. |
+| F13 topstats `lbl`/`val` unescaped | **Landed.** Both go through `esc()`. |
+| F12 `cash_flow` every cycle | **Landed (disk).** 30s TTL. |
+| Unread `states.*` crumbs on `/api/state` | **Landed (disk).** `_states_view` is panel keys only. `t3_kind` stays on `as_dict` (status contract). |
+| `/api/state` `terminal_info` every poll | **Landed (disk).** 5s TTL, search still serves cache. |
+| F11 `AI_SETTING_FIELDS` / `SYS_FIELDS_ADVANCED` | **Closed (catalog).** 0 panel builders by design; FIELD_HELP pin still keys them. Not deleted. |
+| F1 search coverage / F2 family churn | **Won't-do unasked.** Yellow: shrink axes / min-trades apply gate. Quarantine stays the broken-family valve. |
+| F4 this PID vs disk | **Operational.** Restart after flat. |
+| F6 entry-gate cache | **Won't-do until F1/F2.** Idle 5.4 ms. |
+| F7 spread 237 refuses | **Won't-do.** No counterfactual. Do not loosen. |
+| F8 `watch_pf=1.0` / AI allowlist | **Won't-do.** Design (protection while book is red). Allowlist stays `{enabled}`. |
+| F9 grid HTTP lock | **Closed (intentional).** HTTP=panel. F1 if ever taken is code-side. |
+| Unreachable HTTP 409 after allowlist | **Keep.** Defense. |
+| Capacity N× margin / `_harvest_view` autopsy | **Won't-do until measured.** TTL 3s already; n=23 vs cap 2000. |
+| Daily-loss UI + `daily_loss_flatten` unread | **Landed (disk).** Flatten always when stored halt fires. `daily_loss_pct=0` is operator cancel (no halt). Pin `test_daily_loss_halt_actually_flattens`. |
+| Concurrent 1R unread + chip gone; margin on Sistem | **Landed (disk).** `can_open` does not read `max_concurrent_risk_pct`. HTTP: `max_margin_usage_pct` writable. `_note_risk_capacity` no-op. |
+| Symbol card hours-only; `risk_percent` HTTP 400 | **Landed (disk).** `POSITION_SECTION` gone. Stored % still sizes lots. Pin `test_account_sizes_the_book` / `test_position_sizing_is_not_writable`. |
+| AI Global Lot Carpani card | **Landed (panel).** Five AI cards one row. Throttle still on Gün `lot x` + table. Not system `lot_multiplier`. |
+| `_symbol_daily_halt` getattr | **Landed.** `:4168` `getattr(..., 0.0)`. `:4198` still naked (field always on `SymbolConfig`). |
 
-### Still open (identity tests / profile first — do not treat as this-scan bugs)
+### Still open
 
-* 900s integrity still fetches full `required_bars` (chunked; no compute). Stamp-only fetch needs verification.
-* Search wall: Numba still unpaid if `OPT_FIELDS` grows 3× — re-profile a GER40 worker then, not now.
-* `/api/state` during a 14-worker search: measured **148s** this page (shared MT5 `RLock`). Serve-stale / skip-lock needs identity tests. Not a second `initialize()`.
-* O-1/O-2/O-3 settings blob rewrite: still measure-first (SCAN-1). **O-4 landed 26.08:** Origin-less POST 403 is the gate; the unused `_CRITICAL_MUTATIONS` frozenset is gone.
+Unpaid measured won't-dos: Numba if `OPT_FIELDS` 3×; O-1 if 2000-row autopsy
+cap is hot. Harvest-on / BE 0.5 / `max_positions`→1 stay **won't-do**
+(evidence, not a lock). F1+F2 together if the operator wants a search
+redesign (yellow).
+
+Operational **20:40:** a **manual** search is **running** (`apply_best`,
+all 6 symbols, 160k/3.08M, current GER40/JPN225/NAS100). Do **not**
+restart while 7 tickets are open. Do **not** cancel that job unasked.
+GER40 pending 1.0/0.3/1.2 **already on the live row** (`pend {}`);
+shakeout still overlays next-entry SL to 2.0. This PID still PATCHes
+exits; **next boot is 400**. Do not PATCH `max_margin_usage_pct`
+unasked. Do not add `/exit-override`. Do not kill orphan pythonw
+workers while the book is open.
+
+Panel-lie leftovers (no code tonight): `risk_sembol_limiti` 209 events
+/ 73k retries are **historical** (producer gone); `field_help.js`
+`lot_mode`/`fixed_lot` still describe a switch; capacity still ships
+unread `max_concurrent_risk_pct=30`; `size_by_edge` still **on** with
+no dial. Search `max_open=1` vs live stacking to `max_total_positions=100`.
+
+
+**Live (16:40, then Claude 16:46):** day **−$169.19 / 25 / WR 20%**.
+GER40 **8/0 −$122.66**. Idle `last_cycle_ms` **5.4**. No 27.08 ERROR.
+
+Claude 16:4x: claim 3 JS "Safe delete" list is **wrong** (would
+`ReferenceError` / miss Python). `SWING_OVERLAY` is assigned but
+unread (`#opt-grid` gone). Cash_flow waste is **every-cycle
+frequency**, not the two-call shape. GER40 exits are **6 sl + trail
++ flatten**, not 6/6 orig-SL.
+
+---
+
+## 27.08 20:40 — Evening-strip A–Z (Claude 20:35 + live book + dirty tree)
+
+Independent Cursor pass. Did **not** patch, restart, cancel the search, or
+commit. GET `/` then `/api/state` `/api/symbols` `/api/analysis/*`.
+Claude 20:35 arithmetic (100 slots / ~80% theoretical 1R) **accepted**.
+`last_cycle_ms` **7–9** (search busy; snapshot last-cycle book).
+`last_error` empty. **No `ERROR` line on 27.08** in `logs/micofx.log`.
+
+**Live (20:39 broker):** demo 61562752. Balance **$1944** / equity **$1966**
+/ floating **+$21**. Day realised **−$200.15** / 30 closes / WR **20%** /
+`pnl_pct` **−8.26%**. Halt **false** (`daily_loss_pct=0`). AI enabled,
+`risk_scale` **0.60** enforced. 7 open: NAS100×2 buy, US30×2 sell,
+GER40 buy, JPN225 buy, SpotBrent sell. All have broker SL. Reverse
+signals on GER40/JPN/NAS blocked (`ters yonde acik pozisyon var`).
+**`opt.state=running`** source=manual `apply_best` 160000/3081600.
+
+Book families: 4× `stoch_flip`, XAU `burst` M15, Brent `parabolic_flip`
+M15. Unused live: `mtf_pullback` `dual_t3` `t3_flip` `aroon_flip`
+`ichimoku`. All `risk_percent=0.8`, `symbol_daily_loss_pct=0`.
+GER40 exits **1.0 / 0.3 / 1.2** (pending applied). Harvest off.
+Partial on five names. `size_by_edge=True` still read. `lot_multiplier=1.0`.
+
+Today cash: GER40 10/0 **−$142.38** (8 orig-SL + 2 trail, **−9.24 R**);
+JPN225 11 **−$64.92** (−6.68 R, 6 orig-SL); US30 −$1.18; NAS −$0.60;
+XAU **+$8.97**. Autopsy window n=229: SL 131 / trail 63 / flatten 35.
+After-1h on SL: 75/131 through entry, 87 recovery ≥0.5 R (shakeout
+thesis still live; not a silent patch).
+
+### 1) Optimization Summary
+
+* **Health:** Idle cycle is paid (~8 ms) even under a 14-worker search
+  because `/api/state` serves the last cycle book. Today's −$200 is
+  **book + operator cancel of the daily halt**, not a new engine leak.
+  GER40 `stoch_flip` 1.00 ATR stop is eating the day (8 orig-SL). Dead
+  `risk_sembol_limiti` is a **panel lie**, not a live gate.
+* **Top 3 highest-impact (none is a silent CPU patch):**
+  1. Keep the open book. Restart first-sights stops **and** would collide
+     with a running `apply_best` search.
+  2. After **flat only**: decide whether `daily_loss_pct=0` stays (day
+     already −8.26% with no flatten). Restoring 3% is yellow/red.
+  3. After quiet: drop or relabel historical `risk_sembol_limiti` /
+     `risk_eszamanli` so Eleme Kapilari stops ranking a deleted gate #2
+     (209 events / 73k retries). Reset vs mapping delete vs "kalktı".
+* **Biggest risk if no changes:** Operational. Search `max_open=1`
+  `apply_best` can land new params onto a book that now **stacks** to
+  100. Panel still teaches leftover slot limits. Day can keep bleeding
+  with no halt.
+
+### 2) Findings (Prioritized)
+
+* **Title** Live search running (`apply_best`, 3.08M combos)
+* **Category** Concurrency / Reliability
+* **Severity** High (operational)
+* **Impact** MT5 lock chunks; apply waits on open tickets; next-boot
+  HTTP 400 vs this PID still PATCHing exits
+* **Evidence** `GET /api/state` `opt.state=running` source=`manual`
+  `done=0/6` `combo_done=160000` `combo_total=3081600` current
+  GER40,JPN225,NAS100. Cursor did **not** start it.
+* **Why it’s inefficient** Search scores `max_open_from_cfg` = **1**
+  (`backtest.py:428-436`). Live `can_open` stacks same-side until
+  total/margin/reverse/STOPSUZ. Holdout cannot see tonight's 7-ticket
+  book.
+* **Recommended fix** Do not cancel unasked. After this job: either
+  keep paper honest (max_open=1) and accept live stacking as unmeasured,
+  or yellow-open a stacking search. Do not apply a 1-slot score onto
+  a 100-slot book without saying so.
+* **Tradeoffs / Risks** Cancelling wastes 160k already scored. Letting
+  `apply_best` land on first flat changes GER40/NAS/JPN under a red day.
+* **Expected impact estimate** Correctness, not ms.
+* **Removal Safety** Needs Verification (job is live)
+* **Reuse Scope** optimizer + risk
+
+* **Title** `daily_loss_pct=0` — day −8.26% with no halt
+* **Category** Reliability / Cost (capital)
+* **Severity** High (policy, not a bug)
+* **Impact** Counterfactual: leftover default 3% of ~$2423 start ≈ **$73**.
+  Realised already **−$200**. Flatten-always is wired but never trips.
+* **Evidence** `system.daily_loss_pct=0`, `day.halted=false`,
+  `DailyGuard.check` `risk.py:263` requires `> 0`. Operator cancelled
+  the panel dial 27.08 evening.
+* **Why it’s inefficient** N/A — intentional. The inefficiency is
+  **communication**: capacity/brain still mention a limit that cannot fire.
+* **Recommended fix** None unless the operator wants the brake back.
+  Do not silently restore 3%.
+* **Tradeoffs / Risks** A 3% halt would have flattened winners too
+  (US30/NAS/XAU still trading).
+* **Expected impact estimate** Would have capped today near −$73 vs −$200
+  (**likely**, start_balance inferred from pnl_pct).
+* **Removal Safety** Needs Verification
+* **Reuse Scope** system leftover
+
+* **Title** Dead `risk_sembol_limiti` / `risk_eszamanli` still ranked
+* **Category** Frontend / Maintainability
+* **Severity** High (operator model)
+* **Impact** Eleme Kapilari: spread 241, **sembol limiti 209**, ters 148.
+  Retries **73k / 32k**. Producer strings gone from `can_open`.
+* **Evidence** `engine.py:152` mapping; `can_open` `risk.py:549-603` has
+  no `"sembol pozisyon limiti"` / `"eszamanli risk limiti"`. Claude 20:35.
+  Live stacking: NAS100×2 US30×2 with leftover `max_positions` 5/5 unread.
+* **Why it’s inefficient** Historical counters look like a live gate.
+  Same class as `daily_loss_flatten` visible-but-unread /
+  `size_by_edge` hidden-but-on.
+* **Recommended fix** Pick one after quiet: drop needles from
+  `_RISK_BLOCK_KEYS`; or one-shot `POST /api/analysis/entry-blocks/reset`;
+  or panel suffix "(kalktı)". Do not reset during a search.
+* **Tradeoffs / Risks** Reset wipes spread/ters history too.
+* **Expected impact estimate** Zero latency. Stops a false #2 cause.
+* **Removal Safety** Likely Safe (mapping) / Needs Verification (reset)
+* **Reuse Scope** engine.py + panel analysis
+
+* **Title** Search vs live stacking (paper 1, live 100)
+* **Category** Algorithm
+* **Severity** High (edge measurement)
+* **Impact** Holdout/net R do not include overlapping same-side tickets.
+  Live theoretical 100 × 0.8% = **80% 1R** before AI 0.60 → ~48%;
+  `size_by_edge` (on, ×2.2 cap) can pull up. Margin 90% binds ~175
+  lots at $10/pos — **100 binds first**. Claude 20:35.
+* **Evidence** `max_open_from_cfg` returns 1. `max_total_positions=100`.
+  `max_positions` leftover unread. Open 7 / concurrent risk **1.59%**.
+* **Why it’s inefficient** Two different products. Apply() of a 1-slot
+  winner onto a stacking book is an untested regime.
+* **Recommended fix** Yellow, operator. Do not teach search stacking
+  tonight. Do not restore leftover `max_positions` as a silent gate.
+* **Tradeoffs / Risks** Restoring slots re-opens the 209-block lie as a
+  real gate (US30 slot-2 overlap was +4.62 R, closed won't-do).
+* **Expected impact estimate** Unknown without a stacking walk-forward.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** backtest + risk
+
+* **Title** GER40 `stoch_flip` 1.0 ATR orig-SL cluster
+* **Category** Algorithm / Cost
+* **Severity** High (today's cash)
+* **Impact** Today −$142 / −9.24 R; window −$161 / −8.52 R (n=37).
+  Shakeout 3/10 orig-SL → next entry SL **2.0** (this PID has the helper).
+  Floor wears winners (Cursor 19:10); does not save 8 already dead.
+* **Evidence** Autopsy today GER40 8 `exit_reason=sl` with `sl==original_sl`.
+  Live row `sl_atr_mult=1.0` trail 0.3/1.2 BE 1.5 partial 1.5. Open GER40
+  SL **above** entry (trail in profit) — floor is next-entry only.
+* **Why it’s inefficient** Search prefers 1.0. Shakeout is a live overlay
+  the grid never paid for. Trail 0.3 starts inside a 1.0 stop.
+* **Recommended fix** Let the running search finish. Do not PATCH SL.
+  Do not disable the floor. Three-arm diagnostic (gates/floor/both)
+  stays designed, not a patch.
+* **Tradeoffs / Risks** `apply_best` may write another 1.0 onto GER40
+  on first flat.
+* **Expected impact estimate** Floor: losers stay −1 R; winners haircut
+  when 2.0 binds (qualitative, 19:10).
+* **Removal Safety** Needs Verification
+* **Reuse Scope** risk.shakeout_sl_atr_mult
+
+* **Title** `size_by_edge` on, dial gone
+* **Category** Maintainability
+* **Severity** Medium
+* **Impact** Lots still × holdout net R / maxDD (`risk.py:335`).
+  Panel has no switch. HTTP 400. Capacity footnote still prints it.
+* **Evidence** `GET /api/state` `system.size_by_edge=true`. Claude 20:05
+  asked if hiding it is a lie — **yes, still-read**.
+* **Why it’s inefficient** Operator cannot see the multiplier except
+  in a capacity sentence.
+* **Recommended fix** After quiet: either force `False` in Store
+  (yellow — changes lots) or a read-only chip. Do not HTTP-open it.
+* **Tradeoffs / Risks** Turning it off shrinks names the stamp likes.
+* **Expected impact estimate** Live lots move; idle ms unchanged.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** Store leftover
+
+* **Title** GET still dumps leftover asdict
+* **Category** Network / Frontend
+* **Severity** Low (n=6 symbols)
+* **Impact** `/api/symbols` `/api/system` `/api/state.system` still
+  carry `lot_mode` `fixed_lot` `max_lot` `max_positions`
+  `max_concurrent_risk_pct` `daily_loss_flatten`. Capacity still
+  ships unread `max_concurrent_risk_pct=30`.
+* **Evidence** `app.py` `to_dict()` / `risk.py:837`.
+* **Why it’s inefficient** Agents/panel can still *see* dead knobs
+  and assume they bind. Tiny JSON.
+* **Recommended fix** After next boot: slim snapshot to panel keys
+  (same pattern as `_states_view`). Keep GET schema for apply/readout.
+* **Tradeoffs / Risks** A reader using full GET as the contract.
+* **Expected impact estimate** <1% payload. Clarity, not latency.
+* **Removal Safety** Likely Safe if tests pin the slim set
+* **Reuse Scope** web/app.py + risk.capacity
+
+* **Title** `field_help.js` lot_mode / fixed_lot lie
+* **Category** Maintainability
+* **Severity** Low
+* **Impact** Hover catalog describes a mode switch that HTTP 400s.
+* **Evidence** `field_help.js:4-5` vs `lot_for` always risk%.
+* **Recommended fix** Rewrite help to "Kartta yok / okunmaz" like
+  `max_lot`. Pin `test_sys_hint`.
+* **Tradeoffs / Risks** None.
+* **Expected impact estimate** Zero runtime.
+* **Removal Safety** Safe
+* **Reuse Scope** field_help.js
+* **Reuse Opportunity** same sentence as `risk_percent` help
+
+* **Title** `_symbol_daily_halt` `:4198` naked attr
+* **Category** Reliability
+* **Severity** Low
+* **Impact** Stubs without the field: `:4168` returns early; if that
+  `<= 0` guard ever changes, `:4198` AttributeError. Production
+  `SymbolConfig` always has the field (all 0.0 live).
+* **Evidence** `engine.py:4168` vs `:4198`. Claude 20:35.
+* **Recommended fix** One `getattr` at `:4198` when touching the
+  function. Not tonight.
+* **Removal Safety** Safe
+* **Reuse Scope** engine.py local
+
+* **Title** `AI_SETTING_FIELDS` / `GET /api/symbols/lot-mode-check`
+* **Category** Dead Code
+* **Severity** Low
+* **Impact** Catalog with zero panel builders (FIELD_HELP pin).
+  lot-mode-check name leftover; logic is min-lot overshoot.
+* **Evidence** Closed ledger F11. Do not delete the const.
+* **Recommended fix** Rename the path later. Keep the catalog.
+* **Removal Safety** Needs Verification (help pin)
+* **Reuse Scope** app.js / app.py
+
+* **Title** Unused live families
+* **Category** Algorithm
+* **Severity** Medium (search cost, not idle CPU)
+* **Impact** 8 families in `STRATEGIES`. Live book uses 3
+  (`stoch_flip` `burst` `parabolic_flip`). Search still pays the
+  other 5 × TF × refine. Running job `strategies=[]` inherits the
+  saved list — likely all 8.
+* **Evidence** `models.py:538-541`. Combo bar 3.08M.
+* **Why it’s inefficient** Grid cost on families with no live
+  symbol. ichimoku stayed for GER holdout evidence (closed ledger).
+* **Recommended fix** `POST /api/opt/run` `strategies` one-off
+  (already). Do not persist a subset into `opt_params` unasked.
+  F1/F2 yellow if shrinking axes.
+* **Tradeoffs / Risks** Dropping ichimoku without a new holdout.
+* **Expected impact estimate** Combo wall-clock, not cycle ms.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** opt_params
+
+* **Title** After-1h SL recoveries (missed MFE, not harvestable)
+* **Category** Algorithm
+* **Severity** Medium (already measured)
+* **Impact** 131 SL; 75 through entry in 1h; 87 recovery ≥0.5 R.
+  `left_on_table_r` window **95 R** includes losers; panel masada
+  is winners-only. Do not sum autopsy `kar` across flatten-empty
+  profit rows.
+* **Evidence** `/api/analysis/trade-autopsies` 20:39. Constitution.
+* **Recommended fix** Shakeout floor is the live answer. Do not
+  add an adverse-fill entry gate. Do not harvest-on (won't-do).
+* **Tradeoffs / Risks** Wider SL haircuts wins (19:10).
+* **Expected impact estimate** Already on the closed ledger.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** autopsy + shakeout
+
+* **Title** `models.py` comment still says concurrent 1R
+* **Category** Maintainability
+* **Severity** Low
+* **Evidence** `models.py:163-164` "stacks until concurrent 1R /
+  total / margin". `can_open` does not read 1R.
+* **Recommended fix** Comment-only when next touching the block.
+* **Removal Safety** Safe
+* **Reuse Scope** models.py
+
+### 3) Quick Wins (Do First)
+
+* After this search + flat: rewrite `lot_mode`/`fixed_lot` help
+  (Safe). `getattr` on `:4198` (Safe). Comment fix on `models.py`.
+* After quiet: label or drop dead `_RISK_BLOCK_KEYS` needles
+  (Likely Safe). Do **not** reset counters during the running job.
+* Do not restore daily-loss or per-symbol slots unasked.
+
+### 4) Deeper Optimizations (Do Next)
+
+* Yellow: stacking walk-forward vs keep paper `max_open=1`.
+* Yellow: `size_by_edge` on/off as an explicit operator decision.
+* Slim GET leftover keys (same pattern as `_states_view`).
+* Restart/shutdown **409** if bot-owned tickets exist (security #1).
+* Pin Origin to loopback URLs (security #2) — not tonight.
+* F1/F2 search-axis shrink only if the operator wants a redesign.
+
+### 5) Validation Plan
+
+* Idle: `last_cycle_ms` before/after any snapshot slim (now 7–9
+  under search; 5.4 was idle 16:40).
+* Book: day realised vs autopsy today cash (GER −142.38 matches).
+* Gates: POST `risk_percent` / `max_positions` / `daily_loss_pct`
+  → 400 (this PID may still 200 until restart).
+* Shakeout: next GER40 WARN `stop 1->2 ATR` in `micofx.log`.
+* Search: when `opt.state` leaves `running`, confirm `apply()`
+  waited on the 7 opens.
+* Tests already green for the evening strip (account_sizes,
+  hands_off, fixed_mode, atr mid-trade, panel names). Full pack
+  last Claude **2580 passed**.
+
+### 6) Optimized Code / Patch
+
+**None applied.** Notes only.
+
+### SECURITY AUDIT: dirty tree (`122e434` + 146 files)
+
+**Risk Assessment:** Medium-Low for the localhost operator model.
+No SQLi, no secrets, Origin+allowlist+`esc()` landed. Residual is
+trading-integrity races and Host-mirrored Origin.
+
+#### Findings
+
+* **Restart/shutdown ignore open positions** (Severity: High integrity)
+* **Location:** `micofx/web/app.py` `app_restart` / `app_shutdown`;
+  panel `confirm()` only
+* **The Exploit:** Authenticated `POST /api/app/restart` while 7
+  tickets are open → `stop(close_positions=False)` → trail/BE dies;
+  broker SL remains. Violates AGENTS.
+* **The Fix:** 409 if bot-owned positions exist. Do not ship tonight
+  (a search is also running).
+
+* **Origin allowlist mirrors Host** (Severity: Medium)
+* **Location:** `app.py` ~601-607
+* **The Exploit:** DNS-rebinding CSRF class against panic/close/restart.
+  SameSite helps ordinary cross-site; not rebinding on the rebound name.
+* **The Fix:** Pin `http://127.0.0.1:8900` + `http://localhost:8900`.
+
+* **Orphan sweeper PowerShell `-Command` paths** (Severity: Low)
+* **Location:** `gece_restart.py` ~102-113
+* **The Exploit:** Quote-break if `sys.executable` contains `'`.
+* **The Fix:** `-File` + parameters; reject quote/backtick/newline.
+
+* **Unauthenticated `/openapi.json`** (Severity: Low)
+* **Location:** `docs_url=None` but `openapi_url` still default
+* **The Fix:** `openapi_url=None`.
+
+* **`mt5_terminal_path` any existing `.exe`** (Severity: Low, conditional)
+* **Location:** system allowlist + `ensure_terminal_process`
+* **The Fix:** Require `terminal64.exe` basename. `autostart_mt5` is
+  hands-off but still stored.
+
+#### Observations
+
+* Localhost trust is by design (any local process `GET /` then Origin).
+* `aiHoursCell` hour strings unescaped — numeric hours only.
+* `X-Mico-Token` still Origin-gated on mutations.
+* No second sqlite writer in the dirty tree.
+
+### AGENTS.md rewrite (do **not** apply tonight)
+
+Optimization prompt forbids shipping AGENTS.md. Signal-density
+fixes if the operator asks later:
+
+* HTTP writes: add backup dir/secondary/keep + `mt5_terminal_path`
+  (code already allows them; current bullet understates).
+* Symbol POST already lists sessions/`enabled`/`group`/`broker_symbol`;
+  add `use_sessions` / `trade_days` / `flat_before_close_min` or say
+  "hours block".
+* Drop leftover "concurrent 1R" mental model; `can_open` is reverse /
+  total / scalp-swing-if-nonzero / margin / STOPSUZ.
+* `risk_percent` already 400 — keep.
+* Known gotcha: this PID vs next-boot 400; running search + stacking.
+* Do not paste the optimization/security prompts into AGENTS.md.
+
+---
+
+## 27.08 16:40 — A–Z hard test (book, dead surface, lock, HTTP, security)
+
+
+Independent Cursor pass after HTTP=panel land. Did not re-open the closed
+ledger. Live GET `/` then `/api/state` (session). `last_cycle_ms` **5.4**.
+`last_error` empty. **No `ERROR` line on 27.08** in `logs/micofx.log`.
+AI `risk_scale` **0.60** (daily-loss floor). Opt not busy.
+
+**Live (16:40):** demo book. Day realised **−$157.75** / 23 closes / WR
+21.7% / DD **−7.36%**. Floating ~flat. 4 open: GER40 buys #367303567
+#367334015 #367492600 (live SL 2.0 / 0.5/2.2, pending 1.0/0.3/1.2) and
+JPN225 sell #367498872 (+). Shakeout / prefetch / slim poll / HTTP 400
+**not in this PID**.
+
+### 1) Optimization Summary
+
+* **Health:** Idle hot path is paid (5.4 ms). Today's losses are **book**,
+  not a new engine leak: GER40 6/6 original-SL (−$111.22) and JPN225
+  (−$63.15). XAU +$18.40 is the only real offset. Dual `history_deals_get`
+  and unread `/api/state` crumbs are real code, **not** today's 5.4 ms.
+* **Top 3 highest-impact (none is a silent CPU patch):**
+  1. Keep the open book. Restart would first-sight stops **and** close the
+     HTTP exit door on the same boot.
+  2. After **flat + restart only**: confirm shakeout WARN, prefetch log,
+     slim payload, HTTP 400 on family/exit, `raw/floor` vs `volume_min`.
+  3. Dead opt-grid / `SWING_OVERLAY` / `SYS_DANGER_NOTES` JS — Safe delete
+     when quiet. Maintainability, not latency.
+* **Biggest risk if no changes:** Operational, not CPU. GER40 pending
+  1.0/0.3/1.2 lands on flat via `apply()`. Shakeout lifts next-entry SL
+  to 2.0; trail 0.3/1.2 has no floor and no HTTP PATCH after next process.
+  Harvest-on / BE 0.5 / `max_positions`→1 stay won't-do.
+
+### 2) Findings (Prioritized)
+
+* **Title** GER40 original-SL cluster is the day
+* **Category** Reliability (book, not code)
+* **Severity** High (cash) / Low (code)
+* **Impact** Closed −$111.22 of −$157.75. 6/6 unmoved ~1.0 ATR stops
+  before the 11:29 panel bump to SL 2.0.
+* **Evidence** Autopsy 23 rows = `day.closed_trades`. GER40 n=6 WR 0/6
+  orig-SL 6/6. Live tickets still on 2.0/0.5/2.2. Pending queued 14:28.
+* **Why it’s inefficient** Not CPU. Six signals died on first-sight SL
+  before the floor existed in this PID.
+* **Recommended fix** None now. Shakeout floor is on disk for the **next**
+  entry. Do not PATCH trail unasked. Do not flatten the 3 open buys.
+* **Tradeoffs / Risks** Pending 1.0/0.3/1.2 still apply()s on flat.
+* **Expected impact estimate** Cash already spent. Floor is next-entry only.
+* **Removal Safety** n/a
+* **Reuse Scope** n/a
+
+* **Title** Dual `history_deals_get` per cycle + every 5s
+* **Category** I/O / Concurrency
+* **Severity** Medium (likely under search; idle cycle is 5.4 ms)
+* **Impact** MT5 lock hold vs trail/modify / `/api/state`
+* **Evidence** `_refresh_cash_flow` every `_cycle` → `cash_flow_since`
+  `engine.py:843` / `mt5client.py:1149`. `day_stats()` 5s cache miss →
+  `deals_since` `engine.py:854` / `mt5client.py:1089`. Same day window,
+  two filters (external types vs entry types). Older pass already named
+  `day_stats` in snapshot; **cash_flow has no TTL**.
+* **Why it’s inefficient** Two IPC history pulls overlap. Correctness needs
+  both numbers (breaker vs day table).
+* **Recommended fix** One `history_deals_get`, split in-process. Or TTL
+  cash_flow to the same 5s as day_stats. Measure lock hold first.
+* **Tradeoffs / Risks** Deposit-as-profit breaker (13.08 +499.96) must not
+  see a stale 0. Fail-closed `None` on history miss stays.
+* **Expected impact estimate** Likely ms on idle (already 5.4). High if
+  history stalls during a 14-worker search.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** `mt5client` + `engine._cycle`
+
+* **Title** `/api/state` always calls `terminal_info`
+* **Category** Concurrency
+* **Severity** Medium (likely)
+* **Impact** Snapshot vs `_cycle` lock
+* **Evidence** `_panel_terminal_flags` `engine.py:4061-4070` — busy-search
+  reuses cache; idle poll always `terminal_flags()` → `mt5.terminal_info()`
+  `mt5client.py:571-575`. Positions/account already reuse the cycle book.
+* **Why it’s inefficient** Flags change rarely; poll is 3s.
+* **Recommended fix** TTL (seconds) like capacity. Measure `/api/state`
+  wall vs cycle lock wait.
+* **Tradeoffs / Risks** Stale `trade_allowed` for one poll.
+* **Expected impact estimate** Likely small idle; lock wait under search.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** snapshot path
+
+* **Title** Dead opt-grid / reset / `SWING_OVERLAY` JS
+* **Category** Frontend / Dead Code
+* **Severity** Medium (maintainability)
+* **Impact** Bundle noise; false "grid still writable" reading
+* **Evidence** HTML has no `#opt-grid` / `#opt-settings-advanced` /
+  `#btn-opt-reset` (pin `test_hands_off_controls_are_not_on_the_panel`).
+  JS still: `OPT_SETTING_FIELDS_ADVANCED=[]` `app.js:1308`; `SWING_OVERLAY`
+  `1310-1361`; `[data-grid-key]` collect `1442`; gated reset POST `2823`.
+  API reset already 400 `app.py:1797`.
+* **Why it’s inefficient** Dead branches after HTTP=panel.
+* **Recommended fix** Delete the empty advanced loop, overlay flag, grid
+  collect, reset click. Keep GET `swing_overlay` until JS gone, or drop
+  both together.
+* **Tradeoffs / Risks** None if HTML stays grid-free (pinned).
+* **Expected impact estimate** Zero runtime.
+* **Removal Safety** Safe
+* **Reuse Scope** `app.js` + `GET /api/opt/params` flag
+
+* **Title** Unread `/api/state` crumbs after the 15:16 strip
+* **Category** Network / Frontend
+* **Severity** Low–Medium
+* **Impact** Payload size (this PID still fat; disk already dropped
+  `cash_flow`/`floating`/`poll_interval_sec`)
+* **Evidence** Panel never reads: `mt5.session_clock_skew_hours` (only
+  `session_clock_warning`); `day.wins`/`losses`/`day_key`/`start_balance`;
+  `states.*.last_bar`/`t3`/`t3_kind`/`signal_source`/`primary_signal`/
+  `spread`/`last_signal_at`; `execution.tracked`. Live table uses
+  `atr/adx/t3_rising/htf/k/d/signal/bars_ready/note/session/spread_atr`.
+* **Why it’s inefficient** JSON work every 3s for unused keys.
+* **Recommended fix** Strip from `as_dict` / payload only. Keep engine attrs.
+* **Tradeoffs / Risks** External GET `/api/state` readers (Claude panel
+  probe). Pin like `test_unread_payload_keys_are_gone`.
+* **Expected impact estimate** Qualifies the 99 KB → ~35 KB claim; leftover
+  crumbs are the rest.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** snapshot
+
+* **Title** `_FALLBACK_PATHS` empty constant + `SYS_DANGER_NOTES={}`
+* **Category** Dead Code
+* **Severity** Low
+* **Impact** None
+* **Evidence** `mt5client.py:21` never read. `app.js:1868-1878` `syncSysDangerNotes`
+  no-op (empty map).
+* **Why it’s inefficient** Leftover scaffolding.
+* **Recommended fix** Delete with a pin, or leave as documented empty.
+* **Tradeoffs / Risks** None.
+* **Expected impact estimate** Zero.
+* **Removal Safety** Safe
+* **Reuse Scope** local file
+
+* **Title** `backup_dir_allow_unc` still HTTP-writable, not on panel
+* **Category** Security / Cost
+* **Severity** Medium
+* **Impact** Origin-bearing agent can latch UNC backup without a control
+* **Evidence** `_OPERATOR_SYSTEM_FIELDS` `app.py:425`. `BACKUP_FIELDS` only
+  dir/secondary/keep `app.js:1862-1866`. Gate reads it `app.py:1614`.
+* **Why it’s inefficient** Visibility ≠ lock leftover after HTTP=panel.
+* **Recommended fix** Drop from allowlist (400) unless operator needs UNC.
+  UNC dest tests stay on Store / allow-flag in DB.
+* **Tradeoffs / Risks** Legitimate UNC backup then needs a Store write or
+  a new panel toggle (yellow).
+* **Expected impact estimate** Attack surface, not latency.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** `POST /api/system`
+
+* **Title** Unreachable HTTP 409/grid validators after allowlist
+* **Category** Dead Code
+* **Severity** Low
+* **Impact** None while allowlist holds
+* **Evidence** Hands-off fires first (`app.py:894`, `1765`). Magic/strategy/
+  `EXIT_RISK` 409 and opt `_exit_axes` never see a panel body.
+* **Why it’s inefficient** Dead defense, not a leak.
+* **Recommended fix** Keep. Apply() and allowlist regression still need them.
+* **Tradeoffs / Risks** Deleting them re-opens the hole if allowlist slips.
+* **Expected impact estimate** Zero.
+* **Removal Safety** Needs Verification (do not delete)
+* **Reuse Scope** `web/app.py`
+
+* **Title** Capacity N× `order_calc_margin` / tick under lock
+* **Category** Concurrency
+* **Severity** Medium (likely) — already TTL 3s
+* **Impact** Lock vs `_cycle` when ticket/volume sig changes
+* **Evidence** `engine.py:4072-4096`, `_CAPACITY_TTL=3s`. Not new; still
+  the rebuild path when not `optimizer.busy`.
+* **Why it’s inefficient** 6 symbols × margin+tick on sig change.
+* **Recommended fix** Measure first. Do not add a second `initialize()`.
+* **Tradeoffs / Risks** Stale lot gauges.
+* **Expected impact estimate** Likely small on this 6-name book.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** snapshot / `risk.py`
+
+* **Title** `_harvest_view` full autopsy every poll
+* **Category** CPU / Alloc
+* **Severity** Low today (n=23; cap 2000)
+* **Impact** `/api/state` CPU
+* **Evidence** `engine.py:3975-4008` → `trade_autopsy_report()` then drops
+  rows, keeps aggregates. Called from snapshot ~3s.
+* **Why it’s inefficient** Builds `rows` then throws them away.
+* **Recommended fix** Aggregate-only helper. Measure when n approaches 2000.
+* **Tradeoffs / Risks** O-1 still won't-do until cap is hot.
+* **Expected impact estimate** Qual; idle 5.4 ms says not today.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** snapshot
+
+### 3) Quick Wins (Do First)
+
+* Delete dead opt-grid / `SWING_OVERLAY` / empty `SYS_DANGER_NOTES` JS
+  (Safe, pinned HTML absence).
+* Drop `_FALLBACK_PATHS` or leave documented empty.
+* Do **not** restart, flatten, harvest-on, BE 0.5, cut `max_positions`.
+* Operator still owns: GER40 trail recovery door vs this-PID PATCH window.
+
+### 4) Deeper Optimizations (Do Next)
+
+* Share one `history_deals_get` between cash_flow and day_stats (identity
+  tests on the 13.08 deposit case).
+* TTL `terminal_flags` on `/api/state`.
+* Strip remaining unread snapshot keys after the next process confirms
+  the first crumb strip.
+* Incremental `IndicatorCache` / Numba — still won't-do at 2.57 / 6.53 ms
+  until grid 3×.
+
+### 5) Validation Plan
+
+* Idle: `bot.last_cycle_ms` (now 5.4) and `/api/state` wall. No `ERROR`
+  on the day file.
+* After restart (flat only): shakeout WARN on next GER40 entry; prefetch
+  log line; opt poll without `top`/`baseline`; HTTP 400 on `sl_atr_mult`
+  / `grid` / reset; payload KB; log disk still writes from `run.py`.
+* Dual history: count `history_deals_get` per `_cycle` vs per snapshot.
+* Correctness: deposit cash_flow ≠ 0 still disarms DailyGuard the same way;
+  day `closed_trades` still matches autopsy n; fill-next-open WF unchanged.
+* Panel: 13 chips / 7 tabs still render after JS delete.
+
+### 6) Optimized Code / Patch
+
+Not applied (operator: notes only). Candidates if asked:
+
+* `saveOptParams` drop `[data-grid-key]` block; drop `SWING_OVERLAY` assign.
+* `_OPERATOR_SYSTEM_FIELDS` minus `backup_dir_allow_unc`.
+* `cash_flow_since` + `deals_since` share one raw history list.
+
+### Strategy reverse (27.08 closed book)
+
+Masada = winners only. R = `|entry − original_sl|`. `mfe_r` not harvestable.
+Keep-lines are `taze test`, not a live replay.
+
+| Symbol | Family/TF | n | Cash | Orig-SL | Reverse |
+|---|---|---|---:|---:|---|
+| GER40 | stoch_flip M30 | 6 | −111.22 | 6/6 | Skip-all = +111 arithmetic, not WF. Pending 1.0/0.3/1.2 **unverifiable** (six already dead; 3 opens still on 2.0). |
+| JPN225 | stoch_flip M15 | 9 | −63.15 | 5 | Search weaker, **not applied**. |
+| US30 | stoch_flip M30 | 5 | −1.18 | 3 | Afternoon M30. Slot-2 cut stays won't-do. |
+| NAS100 | stoch_flip M30 *now* | 2 | −0.60 | 1 | Both closes were **mtf_pullback**. New family: 0 closes. |
+| XAUUSD | burst M15 | 1 | +18.40 | 0 | Kept (age 48h). |
+| SpotBrent | parabolic_flip M15 | 0 | 0 | — | 4 SIGNAL, **no** today block log. Do not invent misses. |
+
+Opt apply: GER40 exits pending; NAS100 family live 15:56; other four incumbent.
+
+### SECURITY AUDIT: HTTP=panel + leftover JS + disk-off log
+
+**Risk Assessment:** Low (write surface shrank). Residual Medium: UNC latch.
+
+#### **Findings:**
+
+* **Hidden UNC latch still Origin-POST writable** (Severity: Medium)
+* **Location:** `micofx/web/app.py` `_OPERATOR_SYSTEM_FIELDS` / `patch_system`
+* **The Exploit:** Same-origin agent POSTs `backup_dir_allow_unc:true` then a
+  UNC `backup_dir`. Panel has no control. Backup job then writes off-box.
+* **The Fix:** Drop the key from the allowlist (400) unless operator wants
+  a visible toggle.
+
+* **Restart closes exit PATCH** (Severity: Low / operational)
+* **Location:** allowlist minus `EXIT_RISK_FIELDS`; this PID still old
+* **The Exploit:** n/a. Side-effect: GER40 trail 0.3/1.2 cannot be typed
+  back after next boot.
+* **The Fix:** Operator door (apply / this-PID PATCH / explicit override).
+  Do not reopen the allowlist unasked.
+
+#### **Observations:**
+
+* Origin on every mutation intact. Session cookie HttpOnly + SameSite=Strict.
+* SQL still parameterized. `el({html})` still gone.
+* No secrets in the working-tree web diff.
+* Unreachable 409 paths are defense-in-depth, not a bypass.
+* `OptRun.force` / `bars` still accepted; panel does not send them. Keep
+  for one-off search, do not dump into `_INTERNAL_ONLY_FIELDS`.
+
+### Checked, not a finding
+
+Closed ledger still holds. No 27.08 ERROR. Incremental indicators / Numba
+won't-do. Harvest / BE 0.5 / max_positions→1 won't-do. Adverse-fill gate
+won't-do. Calendar reopt gone. `GET /api/schema` kept on purpose.
+`AI_SETTING_FIELDS` kept for FIELD_HELP. 409 exit guards kept. Apply()
+still writes `OPT_FIELDS`. Fill-verify sleeps stay. No second
+`initialize()`.
+
+---
+
+## 27.08 15:16 — A–Z hard test (dead UI, PnL reverse, API, security)
+
+Independent Cursor pass. Did not trust 26.08 21:57: grepped retired
+families, unused JS, Origin, live GET `/` then `/api/state`, cycle ms,
+today's ERROR lines, dirty-tree mutation surface. Claude 15:03 already
+cleared readout+queue and Drive backup; this pass adds leftover UI and
+per-symbol reverse.
+
+**Live (15:16):** demo `61562752` @ Pepperstone-Demo. Bot running, MT5
+connected, `last_cycle_ms` **4.4**, cycle 9508, `last_error` empty.
+4 open, floating **+$22**. Day realised **−151.15** / 17 closes / WR
+17.6% / DD **−6%**. AI enabled, `risk_scale` **0.71**. `max_margin_usage_pct`
+**90**. Harvest off. **No `ERROR` line on 27.08** in `logs/micofx.log`.
+
+### 1) Optimization Summary
+
+* **Health:** Idle hot path is still paid (4.4 ms). Retired families
+  fail-closed. Search/snapshot lock reuse already landed. Today's
+  losses are **book**, not a new engine leak: GER40 6/6 original SL
+  (−111$), JPN225 −51$, US30 −12$; XAU +18, NAS +5. Shakeout floor
+  exists on disk for the next GER40 entry; this PID does not load it.
+* **Top 3 highest-impact (none is a silent CPU patch):**
+  1. Keep the running search and the open book. Restart/cancel would
+     drop hours of combo work and first-sight stops.
+  2. After **flat + restart only**: confirm shakeout WARN, prefetch
+     log, slim opt poll, `raw/floor` vs `volume_min`.
+  3. Delete dead panel blobs (`SECTIONS`, `optFieldVisible`) when the
+     book is quiet — maintainability, not latency.
+* **Biggest risk if no changes:** None on the idle path. Operational:
+  GER40 pending 1.0/0.3/1.2 lands when two tickets close; floor still
+  overlays SL. That mix is **accepted** (option 3). Harvest-on / BE 0.5
+  / `max_positions`→1 stay won't-do.
+
+### 2) Findings (Prioritized)
+
+* **Title:** Dead symbol-guts UI (`SECTIONS` / `optFieldVisible`)
+* **Category:** Frontend / Maintainability
+* **Severity:** Medium (agent trap), Low (runtime)
+* **Impact:** Smaller `app.js`, fewer false "restore Ileri duzey" PRs
+* **Evidence:** `SECTIONS` `1020:1128:micofx/web/static/app.js` —
+  definition only. `optFieldVisible` `1130:1137` never called.
+  `buildSymbolCard` maps POSITION + EXIT readout + sessions only.
+* **Why it’s inefficient:** ~50 field defs + schema fetch exist only
+  so a removed advanced card can hide axes.
+* **Recommended fix:** Delete `SECTIONS`, `optFieldVisible`, and the
+  one-shot `loadSchema` if nothing else reads `SCHEMA`. Keep
+  `GET /api/schema` for tests.
+* **Tradeoffs / Risks:** Help/schema tests scan `SECTIONS` keys —
+  update `test_field_help_covers_every_setting.py`.
+* **Expected impact estimate:** Bundle/parse only; cycle ms unchanged.
+* **Removal Safety:** Likely Safe after test retarget.
+* **Reuse Scope:** local file (`app.js`)
+
+* **Title:** Ghost `ADVANCED_SECTIONS` comment
+* **Category:** Maintainability
+* **Severity:** Medium (agent)
+* **Impact:** Stops a resurrect of collapsed guts
+* **Evidence:** `app.js:989-992` claims guts live in
+  `ADVANCED_SECTIONS`; the name **does not exist**.
+* **Why it’s inefficient:** Next agent "completes" the floor/panel.
+* **Recommended fix:** Rewrite the comment to match POSITION + EXIT
+  readout.
+* **Tradeoffs / Risks:** None.
+* **Expected impact estimate:** Zero runtime.
+* **Removal Safety:** Safe
+* **Reuse Scope:** local file
+
+* **Title:** Hands-off fields still Origin-POST writable
+* **Category:** Reliability / Security-impacting (operator footgun)
+* **Severity:** Low (by design)
+* **Impact:** A crafted POST can still flip `lot_multiplier`,
+  `trade_all_hours`, `charge_costs`, harvest overlays mid-trade
+  (`breakeven_at_r` not in `EXIT_RISK_FIELDS`).
+* **Evidence:** `POST /api/system` = full `SystemConfig`;
+  `POST /api/symbols/{id}` = full `SymbolConfig`; AI settings
+  `DEFAULTS`; opt params full blob. Panel only sends a subset.
+* **Why it’s inefficient:** Not CPU. Confusion: UI hide ≠ API lock.
+* **Recommended fix:** Do **not** add them to
+  `_INTERNAL_ONLY_FIELDS` (that tuple is pending-exit staging).
+  Operator asked visibility. Yellow/red stay operator.
+* **Tradeoffs / Risks:** Locking overlays mid-trade would 409 BE/partial
+  which AGENTS deliberately allows.
+* **Expected impact estimate:** n/a
+* **Removal Safety:** Needs Verification if anyone later "locks" them
+* **Reuse Scope:** service-wide
+
+* **Title:** GER40 shakeout vs pending apply (book, not a bug)
+* **Category:** Algorithm / Reliability
+* **Severity:** n/a (accepted mix)
+* **Impact:** Next GER40 entry: SL floored 2.0, trail 0.3/1.2 until
+  window cools then stored 1.0/0.3/1.2
+* **Evidence:** Card readout `2 (kuyruk 1)` / `0.5 (kuyruk 0.3)` /
+  `2.2 (kuyruk 1.2)`. Today −111$ / 6 original SL. Docstring option 3.
+* **Why it’s inefficient:** Not inefficient — temporary overlay.
+* **Recommended fix:** None. Do not scale trail. Do not drop pending.
+* **Tradeoffs / Risks:** Already written on `shakeout_sl_atr_mult`.
+* **Expected impact estimate:** n/a
+* **Removal Safety:** n/a
+* **Reuse Scope:** `micofx/risk.py`
+
+* **Title:** Spread/slot misses (SpotBrent, US30, JPN/XAU)
+* **Category:** Algorithm (live gates)
+* **Severity:** n/a (working as designed)
+* **Impact:** Fill rates 13% Brent / 21% US30 vs 71% NAS100
+* **Evidence:** `max_spread_atr` blocks (US30 144, Brent 65 of 909
+  earlier today). Cost 18% gate refused **0**. `max_positions` slots
+  JPN225/XAUUSD. AI watch scale 0.425 on 5/6 names.
+* **Why it’s inefficient:** Tight spread is the real filter; do not
+  loosen from one red day.
+* **Recommended fix:** Let current search finish. Do not harvest-on.
+  Do not cut `max_positions` to 1 (US30 slot-2 +4.62 R).
+* **Tradeoffs / Risks:** Loosening spread is a curve-fit.
+* **Expected impact estimate:** n/a
+* **Removal Safety:** n/a
+* **Reuse Scope:** live `SymbolConfig`
+
+* **Title:** Unread snapshot crumbs
+* **Category:** Network
+* **Severity:** Low
+* **Impact:** Bytes on `/api/state`
+* **Evidence:** `day.cash_flow`, `day.floating`, `bot.poll_interval_sec`
+  written, zero `app.js` reads (day.realised / positions already shown).
+* **Why it’s inefficient:** Tiny ints every 3s.
+* **Recommended fix:** Optional omit after panel confirm. Not hot.
+* **Tradeoffs / Risks:** A future chip might want `floating`.
+* **Expected impact estimate:** <<1 KB
+* **Removal Safety:** Needs Verification
+* **Reuse Scope:** `engine.py` snapshot
+
+* **Title:** `GET /api/schema` consumer is dead
+* **Category:** Network / Frontend
+* **Severity:** Low
+* **Impact:** One fetch on load
+* **Evidence:** `loadSchema()` then unused except dead `optFieldVisible`.
+  Tests still hit the route.
+* **Recommended fix:** Keep endpoint; drop the panel fetch with SECTIONS.
+* **Tradeoffs / Risks:** None if tests stay.
+* **Expected impact estimate:** one GET
+* **Removal Safety:** Likely Safe
+* **Reuse Scope:** `app.js`
+
+### 3) Quick Wins (Do First)
+
+* Comment fix: `ADVANCED_SECTIONS` → actual card shape (one line).
+* After **flat restart**: measure shakeout WARN on disk, prefetch
+  `Barlar indirildi`, opt poll payload drop, `raw/floor`.
+* Do not PATCH margin 90, harvest, BE, flatten, cancel.
+
+### 4) Deeper Optimizations (Do Next)
+
+* Delete `SECTIONS` + `optFieldVisible` + unused schema load (panel
+  quiet). Update field-help test.
+* Numba / O-1 still gated on measured 3× grid / 2000-row autopsy heat.
+* Do not invent families (`dual_t3` / `t3_flip` / `aroon_flip` /
+  `ichimoku` unused live is not a cue to force-assign).
+
+### 5) Validation Plan
+
+* Cycle: `bot.last_cycle_ms` (now 4.4) before/after any JS delete
+  (must not move).
+* `/api/state` size while opt busy (slim rankings wait on restart).
+* `pytest tests/test_hands_off_controls_are_not_on_the_panel.py`
+  `tests/test_shakeout_widens_the_next_stop.py`
+  `tests/test_opt_poll_drops_unread_rankings.py`
+* Log: no new `ERROR` on 27.08; shakeout line is `WARN` after restart.
+* PnL: do not sum autopsy `kar` across flatten rows; panel day cash
+  is the truth (−151.15).
+
+### 6) Optimized Code / Patch
+
+None this pass. Operator: **do not implement** until Cursor OK after
+Claude's independent scan.
+
+### Per-symbol reverse (evidence only)
+
+| Sym | Family/TF | Today $ | Structural note |
+|---|---|---|---|
+| GER40 | stoch_flip M30 | −111.22 (6 SL) | Floor ON; pending 1.0/0.3/1.2 |
+| JPN225 | stoch_flip M15 | −51.20 (7) | Slots 3/3; AI ok |
+| US30 | stoch_flip M30 | −12.14 (2) | Spread+slot; overlap slot stays |
+| NAS100 | mtf_pullback M30 | +5.01 | Unvalidated stamp; watch PF 0.58 |
+| XAUUSD | burst M15 | +18.4 | max_pos 1; partial 0 |
+| SpotBrent | parabolic_flip M15 | 0 closed | Fill 13%; spread@cap |
+
+Unused live families: `dual_t3`, `t3_flip`, `aroon_flip`, `ichimoku`.
+Won't-do: harvest-on, BE 0.5 (−32 R GER40), max_positions 1, adverse-fill
+gate, cost-toggle off engine (0/909 maliyet blocks).
+
+### SECURITY AUDIT: dirty tree vs HEAD `122e434`
+
+**Risk Assessment:** Low
+
+#### **Findings:**
+* None Critical/High. `mt5_terminal_path` → `Popen([exe])` list-form,
+  missing file `None` (Claude 14:5x). Origin CSRF unchanged. No
+  secrets in backup Drive path. Hands-off keys remain POST-able —
+  operator asked hide not lock.
+
+#### **Observations:**
+* Overlay PATCH mid-trade still allowed (not in `EXIT_RISK_FIELDS`).
+* `backup_dir_secondary` Google Drive path contains `Drive'ım` —
+  UTF-8 round-trips.
+* AGENTS.md rewrite from the pasted template would **drop** today's
+  gotchas (shakeout, prefetch, hands-off). Not rewritten this pass.
+
+---
+
+
+Independent Cursor pass. Claude 23:00 already reported 0 new findings
+and 2579 passed / 1 xfailed. This pass did not trust that: grepped
+retired families, unused routes, SQLi, Origin, live `/api/state`,
+cycle ms, payload sizes, comment traps.
+
+**Live (21:57, GET `/` then `/api/state`):** demo `61562752` @
+Pepperstone-Demo. Bot running, MT5 connected, opt idle, harvest_on
+`[]`. 5 open (XAUUSD / GER40 / NAS100 / JPN225 / SpotBrent). Day
+realised **−213.22$** (59 closes, WR 30.5%). `ai.risk_scale` 0.6
+(daily DD ~8.66%). `bot.last_cycle_ms` **5.2**. `/api/state` **16.7 KB**
+(ai 5.1, capacity 4.0, states 2.6, positions 2.0).
+
+### 1) Optimization Summary
+
+* **Health / saglik:** Idle hot path is already paid. Cycle 5.2 ms with
+  5 tickets, 6 symbols, 900s pin skip on. Schema no longer rides on
+  every poll. Snapshot reuses the cycle book while `optimizer.busy`.
+  Retired families (`alpha_trend`, `mavilim`, `st_trend`, `macd_flip`)
+  are absent from `_FAMILIES` / `STRATEGIES` / `OPT_FIELDS`. Leftover
+  DB names fail closed. Production callers for the unused-name pin
+  list are still 0.
+* **Top 3 highest-impact (none unpaid in code):**
+  1. Keep the 00:05 search from overlapping an open book (ops, not a
+     patch). Search lock is already snapshot-reused; `EXIT_RISK_FIELDS`
+     mid-trade stay 409 / `pending_exit_patch`.
+  2. Do **not** land Numba or O-1/O-2/O-3 until the measured gates
+     trip (`OPT_FIELDS` 3×; 2000-row autopsy cap actually hot).
+  3. Do **not** restart while these 5 tickets are open — disk already
+     has the 900s / join-order landings; live PID does not.
+* **Biggest risk if no changes:** None on the idle path. The overnight
+  search starting while tickets remain would stall `_cycle` on the MT5
+  lock for ~minutes (panel already degrades to last cycle book; halt /
+  flatten still wait inside `_cycle`). That is an ops gate, already
+  written into `gece_opt.py`.
+
+### 2) Findings (Prioritized)
+
+* **Title:** Stale `_maybe_reoptimize` comments (agent trap) /
+  silinmis takvim fonksiyonuna isaret eden yorumlar
+* **Category:** Dead Code
+* **Severity:** Low (docs / agent, not runtime)
+* **Impact:** Maintenance — agents planning work off comments would
+  resurrect calendar auto-queue.
+* **Evidence:** `optimizer.py` apply-age comment and
+  `tests/test_apply_age_guard.py` / `tests/test_scan_skips_disabled.py`
+  module docs named `supervisor._maybe_reoptimize`. Function does not
+  exist. Live path is `reject_reason` + `reopt_min_age_hours` on apply;
+  quarantine queues via `_queue_reoptimization`.
+* **Why it’s inefficient:** Copy-paste drift after calendar reopt was
+  stripped. Same class as `_is_improvement` (MISS-4).
+* **Recommended fix:** Point comments at `reject_reason`. **Done this
+  pass.** AGENTS gotcha added.
+* **Tradeoffs / Risks:** None — comment-only.
+* **Expected impact estimate:** Zero runtime. Prevents a wrong reopt
+  rewrite.
+* **Removal Safety:** Safe (comments). Production `_queue_reoptimization`
+  must stay.
+* **Reuse Scope:** module (optimizer + two tests + AGENTS)
+
+---
+
+* **Title:** Overnight 6-symbol search vs first fills /
+  gece aramasi ilk fill penceresine biner
+* **Category:** Concurrency
+* **Severity:** Medium (ops). Code path already mitigated.
+* **Impact:** Latency of `_cycle` / flatten during search; apply of
+  family/TF refused if that symbol is open.
+* **Evidence:** Armed task `MicoFX Gece Opt 0005` →
+  `cursor/gece_opt.py` (gitignored). Waits for 0 positions, aborts if
+  still open after 20 min **or** local hour ≥ 01:00. Six names.
+  Session flatten historically ~23:54; first fills ~01:05. JPN225
+  48h gate will refuse apply (`force=false`).
+* **Why it’s inefficient:** 14 workers hold the MT5 `RLock` for
+  `copy_rates` chunks. Panel `/api/state` already serves last cycle
+  book while `optimizer.busy`. Halt/flatten still serialize on `_cycle`.
+* **Recommended fix:** Do not start the search from this chat while
+  n_pos > 0. Leave the armed task. Do not `force=true` on JPN225.
+* **Tradeoffs / Risks:** Skipping the night search leaves old configs
+  (NAS100/GER holdout age already called out). Starting it with opens
+  blocks management.
+* **Expected impact estimate:** 148s lock hold measured 26.08 on a
+  prior search — panel hung before snapshot reuse; now it does not.
+* **Removal Safety:** N/A (ops).
+* **Reuse Scope:** service-wide (optimizer + engine snapshot)
+
+---
+
+* **Title:** 900s pin middle-bar hole /
+  pin iki ucu ayni kalirsa ortadaki delik gorulmez
+* **Category:** Reliability / I/O
+* **Severity:** Low (accepted remaining miss)
+* **Impact:** A corrupted middle of the window with unchanged oldest +
+  last-closed stamps skips the full `copy_rates`.
+* **Evidence:** `engine.py` integrity branch compares
+  `bar_window_pins` to `(state.bars.time[0], state.last_bar)`. Pins
+  are **not** `forming_time`. Tests:
+  `tests/test_bar_fetch_releases_the_lock.py`.
+* **Why it’s inefficient:** Full `required_bars` every 900s with no
+  new bar used to hold the lock. Two small `copy_rates` are the
+  cheaper honesty. A third pin (checksum / bar count in the middle)
+  would close the hole and cost another MT5 call every 900s.
+* **Recommended fix:** Leave it. Do not re-add `_STALE_BAR_REFRESH`.
+* **Tradeoffs / Risks:** Rare broker-history hole vs lock time.
+* **Expected impact estimate:** Already paid (lock hold gone on the
+  common path).
+* **Removal Safety:** Needs Verification to add a third pin.
+* **Reuse Scope:** `engine.py` + `mt5client.py`
+
+---
+
+* **Title:** `TIMEFRAMES` == `READABLE_TIMEFRAMES` /
+  iki liste artik ayni
+* **Category:** Algorithm (Reuse Opportunity)
+* **Severity:** Low
+* **Impact:** Maintenance only. No runtime.
+* **Evidence:** `models.py` both `["M5", "M15", "M30"]`. Comment says
+  they only needed to differ while a live row still named H1.
+  Tests encode the split (`test_h1_left_the_search.py`).
+* **Why it’s inefficient:** Two names for one set. Merging would
+  touch tests that exist specifically to keep the split reopenable.
+* **Recommended fix:** **Do not merge.** One-line reopen if an hourly
+  bar earns a R/day number.
+* **Tradeoffs / Risks:** Merging loses the documented reopen hatch.
+* **Expected impact estimate:** Zero.
+* **Removal Safety:** Needs Verification.
+* **Reuse Scope:** models + tests
+
+---
+
+* **Title:** `/api/state` 16.7 KB / 3s, `ai` 5.1 KB /
+  panel polling payload
+* **Category:** Network / Frontend
+* **Severity:** Low
+* **Impact:** Bandwidth / JSON parse on the panel. Idle ~5.6 KB/s.
+* **Evidence:** Measured 21:57. Schema already extracted to
+  `GET /api/schema` (was 2.1 KB × 12 `sorted()` on every poll).
+  Symbol rows live on `/api/symbols` + `symbols_sig`. Hidden-tab
+  poll is 6s (`app.js`).
+* **Why it’s inefficient:** `supervisor.status()` rebuilds 6 rows
+  with `_gate_locked` on every snapshot. Cheap vs MT5 lock.
+* **Recommended fix:** Do not split `ai` off `/api/state`. 5 KB is
+  not the bottleneck; `last_cycle_ms` 5.2 is.
+* **Tradeoffs / Risks:** Extra round-trip would desync the AI tab
+  from the header scale.
+* **Expected impact estimate:** <1% CPU. Premature.
+* **Removal Safety:** Needs Verification.
+* **Reuse Scope:** `engine.snapshot` / `supervisor._status_locked`
+
+---
+
+* **Title:** Keep-list is not dead /
+  tutulan isimler kullaniliyor
+* **Category:** Dead Code (negative finding — do not strip)
+* **Severity:** n/a
+* **Impact:** Stripping these would break tests and CSRF/session
+  probes, or hide operator columns.
+* **Evidence:**
+  * `GET /api/system`, `GET /api/positions`, `GET /api/logs` +
+    download — tests + panel POST/download. Panel reads
+    `STATE.positions`; GET stays for empty-book honesty.
+  * `sessions.broker_epoch` — inverse of `server_datetime`; 0
+    production call sites, 4 tests. Clock helper, not dead.
+  * Payload keys `captured`, `raw_lot`, `trail_improves_at_r`,
+    `expected_trades`, `actual_trades`, `config_age_days` — tests
+    and/or panel.
+  * `_SYMBOL_RISK_BOUNDS` dict stays; only `partial_close_lots`
+    **entry** is gone.
+  * Overlay fields `breakeven_at_r` / `partial_at_r` /
+    `harvest_at_r` (0 = off) stay. Not `OPT_FIELDS`.
+* **Why it’s inefficient:** It isn’t. Earlier unused-name strip
+  already took the real dead set (`backtest.run`, `mae_close`,
+  `edge_decomposition`, analysis routes, `GET /api/ai`,
+  `POST /api/logs/clear`).
+* **Recommended fix:** Leave the keep-list. Pin remains
+  `tests/test_unused_production_names.py`.
+* **Tradeoffs / Risks:** Stripping `broker_epoch` re-introduces
+  the localtime 00:00 SL bucket the next time someone formats a
+  day cut.
+* **Expected impact estimate:** n/a
+* **Removal Safety:** Unsafe
+* **Reuse Scope:** service-wide
+
+### 3) Quick Wins (Do First)
+
+* Comment trap `_maybe_reoptimize` → `reject_reason`. **Done.**
+* AGENTS: pin identity + calendar-name gotcha. **Done.**
+* Do **not**: merge TIMEFRAMES, split `/api/state`, strip
+  `broker_epoch`, restart with 5 opens, start the 00:05 search from
+  this chat, re-add Numba / O-1 / harvest-on / max_positions 3→1.
+
+### 4) Deeper Optimizations (Do Next)
+
+* **Numba `simulate`:** won't-do until `OPT_FIELDS` grid 3×. Measured
+  6.53 ms. Incremental IndicatorCache 2.57 ms. Closed ledger.
+* **O-1/O-2/O-3 own tables:** won't-do until 2000-row autopsy cap is
+  hot. Live sqlite owner; schema split is a restart-sized migration.
+* **00:05 all-six search:** next measured event. Apply gates unchanged.
+  JPN225 likely 48h-refused. Do not `force=true`.
+* **Third pin / bar checksum:** only if a real middle-hole is observed
+  in `bar damgasi` WARN lines.
+
+### 5) Validation Plan
+
+* Benchmarks already on the ledger: simulate 6.53 ms, IndicatorCache
+  2.57 ms, search lock 148s (panel reuse landed). Idle cycle **5.2 ms**
+  tonight — compare `bot.last_cycle_ms` after the next restart (disk
+  landings load). During a search, confirm `/api/state` still returns
+  while `opt.busy` and `last_cycle_ms` does not jump to seconds.
+* Profiling: do not attach a sampler to the live PID. Repro in tests:
+  `tests/test_snapshot_reuses_the_cycle_book.py`,
+  `tests/test_bar_fetch_releases_the_lock.py`,
+  `tests/test_unused_production_names.py`,
+  `tests/test_retired_indicators_stay_gone.py`,
+  `tests/test_docs_match_the_code.py`,
+  `tests/test_apply_age_guard.py`.
+* Metrics before/after (only if a real patch lands): `last_cycle_ms`,
+  `/api/state` byte size, search wall time, sqlite `opt_runs` trim.
+* Correctness: 8 families × TIMEFRAMES still fail-closed on unknown
+  names. `compute()` empty series does not signal. Origin-less POST
+  still 403.
+
+### 6) Optimized Code / Patch
+
+Comment-only (no behaviour). `optimizer.py` apply-age block and the
+two test module docs now name `reject_reason` / quarantine
+`_queue_reoptimization`. AGENTS pins `bar_window_pins` to
+`(oldest, last_closed)`.
+
+No Numba, no table split, no overlay change, no live PATCH.
+
+### SECURITY AUDIT: dirty tree vs HEAD `122e434` (deletions dominate)
+
+**Risk Assessment:** Secure / Low
+
+Working tree vs HEAD is net **−1213** on `micofx/`+`tests/` (54 files,
+994 / 2207). Surface area shrank: analysis routes, `GET /api/ai`,
+`POST /api/logs/clear`, `edge_decomposition`, `backtest.run`,
+`mae_close` kwargs.
+
+#### Findings:
+
+* **None Critical / High.** Session cookie + Origin gate unchanged
+  (`create_app` middleware: missing session 401, missing/cross-site
+  Origin 403). `docs_url=None`. Bind stays 127.0.0.1. Mutations still
+  need `Origin: http://127.0.0.1:8900`.
+* **Restart spawn** (Severity: Low, accepted)
+  * **Location:** `micofx/web/app.py` `POST /api/app/restart` ~
+    `subprocess.Popen(["cmd", "/c", restart.bat"], ...)`
+  * **The Exploit:** argv is a fixed list, not request body. No
+    injection. Restart still forbidden while positions are open
+    (operator / AGENTS).
+  * **The Fix:** none. Do not take user path into Popen.
+* **Dynamic SQL placeholders** (Severity: Low, Secure)
+  * **Location:** `store.purge_orphan_history` —
+    `DELETE ... NOT IN ({placeholders})` with `keep` bound as params.
+  * **The Exploit:** values are `?`-bound; only the count of `?` is
+    interpolated. Not SQLi.
+  * **The Fix:** none.
+* **Secrets:** no new credentials in the diff. Session token is
+  `secrets.token_urlsafe(24)`, HttpOnly, SameSite=Strict, not in HTML.
+
+#### Observations:
+
+* `GET /api/system` remains — CSRF tests hit it. Account-lock fields
+  still refused on `POST /api/system` (door is `/api/account-lock`).
+* Web handlers still do not import `MetaTrader5`.
+* Pydantic bodies `forbid` extra fields (existing tests).
+* Do not restore `GET /api/ai` or ring-wipe `POST /api/logs/clear`.
+
+### AGENTS.md
+
+Not rewritten. Signal density already at the quality bar. Two
+gotchas added this pass (pin identity; `_maybe_reoptimize` gone).
+Did not duplicate MASTER_PROMPT §19, README, or the closed ledger.
+
+---
+
+## 26.08 19:12 — live after restart + opt/sec (no further patches)
+
+Operator asked restart then re-test, then this audit into this file.
+Restart **19:10:49** → MT5 **19:10:58**. Log: `Restart: magic ile 8 acik
+ticket devam ediyor` — same eight tickets as pre-restart snapshot.
+All `managed=True`. SL identity: SpotBrent 88.794, JPN 66126.3 / 66039.0,
+US30 53532.9 / 53507.1 / 53506.0, XAU 4613.32, NAS 29118.1. Unchanged.
+`GET /api/ai` **404**, `POST /api/logs/clear` **404**. `last_cycle_ms`
+3.7 then 10.6 (idle). Opt idle. Harvest on: none.
+
+Pytest re-run after live was up: **91 passed**
+(`test_snapshot_reuses_the_cycle_book`, `test_snapshot_capacity_is_cached`,
+`test_entry_block_events`, `test_entry_block_tally`,
+`test_entry_blocks_concurrency`, `test_a_deleted_symbol_leaves_nothing_behind`,
+`test_original_sl_survives_restart`, `test_unused_production_names`,
+`test_restart_waits_for_the_port`, `test_panel_does_not_fast_poll_during_opt`).
+
+### 1) Optimization Summary
+
+Health: **good, and now loaded**. F-1 debounce and search-stale snapshot
+are in the live process (`last_cycle_ms` ~4–11, not 148). Dead-route
+strip is live (404s). Remaining unpaid items are the same three
+measure-first leftovers: 900s full integrity fetch, Numba if grid 3×,
+settings-blob rewrite (O-1/2/3).
+
+Top 3 unpaid:
+
+1. 900s no-new-bar still full `copy_rates` (I/O) — stamp-only unverified.
+2. `Store.set_setting` full JSON blob rewrite (DB) — F-1 closed the hot
+   caller; leftover is autopsies/execution_samples, not entry events.
+3. Visible-tab innerHTML rebuild (Frontend) — `viewPulse` skip exists.
+
+Biggest risk if unchanged: a 900s integrity pass on M5 US30 still holds
+the MT5 lock for a chunked full window. Idle `last_cycle_ms` stays low.
+
+### 2) Findings (Prioritized)
+
+* **Title:** 900s integrity still copies full `required_bars`
+* **Category:** I/O
+* **Severity:** Low (idle) / Medium (6 symbols × M5)
+* **Impact:** Lock hold, MT5 IPC
+* **Evidence:** `_BAR_INTEGRITY_REFRESH = 900`; `due or integrity` then
+  `client.bars(..., need)`. Chunked. Live last_cycle_ms 3.7–10.6 so this
+  is not the current cycle cost.
+* **Why:** Stamp/length check would refuse a silent hole; full copy is
+  the hammer.
+* **Recommended fix:** Stamp-only integrity; full fetch on mismatch.
+  Needs a truncated-history test. **Not this pass.**
+* **Tradeoffs:** Wrong stamp API → missed holes.
+* **Expected impact:** Rare 900s spike gone.
+* **Removal Safety:** Needs Verification · **Reuse Scope:** `engine.py`
+
+* **Title:** Settings KV still rewrites whole blobs (O-1 leftover)
+* **Category:** DB / I/O
+* **Severity:** Low after F-1
+* **Impact:** Cycle I/O on autopsy/execution flush, not every poll
+* **Evidence:** Claude 19:05 F-2: 51 `set_setting` sites; three blobs
+  ~94% of settings bytes. F-1 closed `entry_block_events` every-poll.
+  `execution_samples` already batches 20. `_flush_trade_autopsies` is
+  close-driven.
+* **Recommended fix:** None until measured after F-1 in a blocked-entry
+  session (`bot.last_cycle_ms` p90).
+* **Removal Safety:** n/a · **Reuse Scope:** `store.py`
+
+* **Title:** Search-stale snapshot (landed, now live)
+* **Category:** Concurrency / Caching
+* **Severity:** n/a (closed)
+* **Evidence:** 8 tickets survived restart; idle state 10.6 ms. Not
+  re-measured under a 14-worker search this pass (book open — do not
+  start a search).
+* **Removal Safety:** Safe (tests pin) · **Reuse Scope:** `engine.snapshot`
+
+### 3) Quick Wins (Do First)
+
+None unpaid that is Safe without identity tests. Do not restore
+`POST /api/logs/clear` or `GET /api/ai`.
+
+### 4) Deeper Optimizations (Do Next)
+
+Stamp-only 900s integrity. Own table for entry-block events only if
+F-1 p90 still hurts in a blocked session. Numba if `OPT_FIELDS` 3×.
+
+### 5) Validation Plan
+
+* Idle: `bot.last_cycle_ms` already 3.7–10.6 post-restart.
+* Search stall: flat book, 14-worker job, `GET /api/state` p95. Not
+  tonight (8 opens).
+* F-1: blocked-entry session ≥200 cycles; `entry_block_events` writes
+  ≤1 per 45s.
+* Restart identity: ticket set + SL map (done 19:10).
+
+### 6) Optimized Code / Patch
+
+**Not applied this pass.** F-1 and search-stale already on disk and
+now in the live PID.
+
+### SECURITY AUDIT: live reload of dead-route strip + F-1 + stale snapshot
+
+**Risk Assessment:** Low (surface reduced). Restart did not add doors.
+
+#### Findings
+
+* **Stale panel during search** (Severity: Low / accepted)
+  * Location: `engine.py` `_panel_reuse_cycle_book` / `_search_is_busy`
+  * The Exploit: localhost operator sees frozen P/L while opt.busy.
+    Not an unauthenticated read; Origin still on mutations. Halt path
+    still waits on the lock inside `_cycle`.
+  * The Fix: none. Documented. Do not add a second `initialize()`.
+
+* **force=True flush** (Severity: none)
+  * Location: `forget_entry_blocks` / `reset_entry_blocks`
+  * The Exploit: none extra. Those are already Origin-gated POSTs.
+    Debounce bypass is for correctness (deleted symbol must leave disk).
+  * The Fix: none.
+
+* **Removed GET `/api/ai` and POST `/api/logs/clear`** (improvement)
+  * Live 404 confirmed 19:12.
+
+* **Secrets:** none in the diff.
+
+#### Observations
+
+* Origin middleware still wraps every POST/PUT/PATCH/DELETE.
+* 8/8 tickets `managed=True` after restart — first-sight did not steal
+  trail as original_sl (persisted blob).
+* `search_busy` callable is in-process only; not an HTTP knob.
+
+---
+
+## 26.08 18:50 — Cursor opt + security (dirty tree, no patches)
+
+Prompt: full optimization + staged-diff security. **No code fixes this
+pass** (standing: write here, do not implement unasked). Live book
+open (7 tickets). Harvest `0/0` all six. Opt idle.
+
+### 1) Optimization Summary
+
+Health: **good for a 3s-poll localhost bot**. Hot-path TTLs, lock
+chunking, symbol_sig, npy mmap, dead-route strip already landed.
+Remaining cost is **shared MT5 `RLock` during search** (measured), not
+Python loops on `_cycle` (last_cycle_ms 7–72 this evening).
+
+Top 3 unpaid (all previously open; no new Critical):
+
+1. `/api/state` stalls 148s under a 14-worker search (Concurrency / I/O).
+2. 900s integrity full `copy_rates` even with no new bar (I/O) — stamp-only unverified.
+3. Panel still rebuilds innerHTML on pulse when the tab is visible (Frontend) — `viewPulse` skip exists; remaining cost is the visible tab.
+
+Biggest risk if unchanged: operator panel **looks dead** during a
+manual search; they restart mid-book. Not a silent money bug.
+
+### 2) Findings (Prioritized)
+
+* **Title:** `/api/state` shares the MT5 lock with opt workers
+* **Category:** Concurrency / I/O
+* **Severity:** High (during search only; idle last_cycle_ms ~7)
+* **Impact:** Panel latency; operator may restart
+* **Evidence:** AGENTS gotcha; SCAN-2 148s; `snapshot()` → `_panel_positions` → `client.positions()` under `RLock`. Workers `copy_rates` in chunks but still the same lock.
+* **Why it’s inefficient:** One lock, two audiences (3s UI vs 14 fetchers).
+* **Recommended fix:** Serve-stale snapshot / skip-lock when `opt.state==running`. Identity tests first. **Not** a second `mt5.initialize()`.
+* **Tradeoffs:** Stale positions for minutes; halt path must stay fresh.
+* **Expected impact:** Panel p95 during search: 148s → ~TTL (2–3s). Idle: 0.
+* **Removal Safety:** Needs Verification
+* **Reuse Scope:** `engine.snapshot` / `MT5Client`
+
+* **Title:** 900s no-new-bar still full `required_bars` fetch
+* **Category:** I/O
+* **Severity:** Low (idle) / Medium (6 symbols × M5)
+* **Impact:** Lock hold, MT5 IPC
+* **Evidence:** `_BAR_INTEGRITY_REFRESH = 900`; `integrity = now - state.last_fetch > 900` then full bars. Chunked. No compute.
+* **Why:** Stamp/length check would refuse a silent hole; full copy is the hammer.
+* **Recommended fix:** Stamp-only integrity; full fetch on mismatch. Needs a test that a truncated terminal history is detected.
+* **Tradeoffs:** Wrong stamp API → missed holes.
+* **Expected impact:** Rare 900s spike gone; correctness-sensitive.
+* **Removal Safety:** Needs Verification
+* **Reuse Scope:** `engine.py` bar fetch
+
+* **Title:** Dead-code strip this tree (already on disk, not a new patch)
+* **Category:** Maintainability / Dead Code
+* **Severity:** n/a (landed)
+* **Impact:** −2k lines; fewer lying payloads
+* **Evidence:** `git diff --stat` 39 files. Claude 18:05/18:45 callers **0**.
+* **Reuse Scope:** repo-wide
+* **Removal Safety:** Safe (pinned)
+
+* **Title:** Adverse-fill / expensive-spread entry gates
+* **Category:** Algorithm (yield, not runtime)
+* **Severity:** Low as a *perf* item; High as a *wrong-fix* risk
+* **Evidence:** Claude 18:45. Q4 `fill_vs_signal_close_r>=0.05` n=35 net −25 R vs Q1–Q3 +1.45 — but t=0 drops 62% of trades for +2.87 R; t>0.05 remaining set goes negative. `spread_atr` Q2 +9.42, Q1 −2.46 (non-monotonic). `block_high_cost` already at 18%.
+* **Recommended fix:** Do nothing. Holdout cannot see fill_vs.
+* **Removal Safety:** n/a
+* **Reuse Scope:** do not add
+
+### 3) Quick Wins (Do First)
+
+* None unpaid that is Safe without identity tests. Strip already landed.
+* Do not restore `POST /api/logs/clear` or `GET /api/ai`.
+
+### 4) Deeper Optimizations (Do Next)
+
+* Serve-stale `/api/state` during search (finding 1).
+* Stamp-only 900s integrity (finding 2).
+* Numba only if `OPT_FIELDS` grid 3× (closed until then).
+
+### 5) Validation Plan
+
+* Search stall: start a 14-worker job on a **flat** book; time `GET /api/state` p50/p95 vs idle 7–72ms.
+* Integrity: fixture with a hole in `copy_rates` mid-window; stamp-only must refuse.
+* Dead-code: `pytest tests/test_unused_production_names.py`.
+* Yield gates: any new entry filter needs holdout **and** live fill_vs distribution; paper cannot bless fill_vs.
+
+### 6) Optimized Code / Patch
+
+**Not applied.** Standing order: this file is notes.
+
+### SECURITY AUDIT: dead-route strip + overlay-off (working tree vs `0c33d72`)
+
+**Risk Assessment:** Low (surface reduced). No new mutation doors.
+
+#### Findings
+
+* **Removed ring-wipe POST** (Severity: none / improvement)
+  * Location: was `web/app.py` `POST /api/logs/clear`
+  * The Exploit: authenticated same-origin could empty the in-memory ring for every viewer. Panel never called it (DOM Temizle).
+  * The Fix: already deleted. `LogBus.clear()` remains in-process only.
+
+* **Removed duplicate GET `/api/ai`** (Severity: none / improvement)
+  * Location: was `web/app.py`
+  * The Exploit: extra authenticated read of supervisor status (same data as `/api/state`).
+  * The Fix: already deleted. POST settings/review/clear stay; Origin still required.
+
+* **innerHTML on poll** (Severity: Low, previously landed)
+  * Location: `app.js` table builders
+  * The Exploit: XSS if a field skips `esc()`. `el({html})` sink already removed 08:45. Log lines use `esc(e.time/level)`.
+  * The Fix: none this pass. New innerHTML must keep `esc()`.
+
+* **Query-token on download** (Severity: Low, pre-existing)
+  * Location: `GET /api/logs/download` — cookie/header session, not `?token=`
+  * Tests pin query token is **not** accepted on panic. Download is GET + cookie. Same-origin cookie is the session. Fine for bind 127.0.0.1.
+
+* **Secrets:** none in the diff. No new tokens, no `docs_url`.
+
+#### Observations
+
+* Origin middleware still wraps every POST/PUT/PATCH/DELETE (`web/app.py` ~597–603). Strip did not punch a hole.
+* `compare_digest` on the session cookie stays.
+* `from_dict` ignoring unknown keys (`partial_close_lots` leftover DB) is fail-open for *config*, not auth.
+* Restart/shutdown still exist; they are red operator doors, Origin-gated.
 
 ---
 
@@ -75,7 +1915,7 @@ flight). Operator raised US30/JPN225/GER40/NAS100/SpotBrent
 silent flatten of the previous 6 then IPC −10001.
 
 Constitution (§0 / §19) **not** reopened: session/day-end flatten,
-no TP ladders, `trail_start <= trail_step` legal, 13 families,
+no TP ladders, `trail_start <= trail_step` legal, 8 families,
 `_slice_ok` / incumbent gate stays the apply door. Capture is not a
 score input.
 
@@ -170,7 +2010,7 @@ See `tf_lock_status` in `optimizer.py` and `Engine.close_all(reason=)`.
 | `breakeven_at_r` | All six at **1.5**. Not 0.5. Not an OPT axis. |
 | `partial_at_r` | GER40 **1.5** only; others 0. One-shot third. Do not bring ladders back. |
 | `trail_mode` | All `atr`. Structure/hybrid remain searchable. |
-| 13 families | Live: parabolic_flip, burst, stoch_flip×3, mtf_pullback. No alpha_trend/mavilim. |
+| 8 families | Live: parabolic_flip, burst, stoch_flip×3, mtf_pullback. No alpha_trend/mavilim/st_trend/macd_flip/t3_stoch/wavetrend_flip/micro_rev. `ichimoku` stays. |
 | TFs | SpotBrent M15, XAUUSD M15, GER40 M30, JPN225 M15, NAS100 M30, US30 **M5**. Empty `STRATEGY_TIMEFRAMES` is deliberate; scalp-on-M15 is allowed. |
 | Session/day-end flatten | Settled 09.08. Overnight gap risk. Do not file as a bug. |
 | Apply / churn | MATCH-1 still stands: strategies directionally correct; churn was the leak. 48h age + `_beats_incumbent` + `_slice_ok` stay. Capture is **not** a gate. `apply_best` default true — questioned, not silently changed. |
@@ -678,7 +2518,7 @@ key = (cfg.symbol, cfg.timeframe, cfg.strategy,
 * No hardcoded credentials, keys or tokens in the diff. Confirms 07:50.
 * `OptRun` is `_ForbidModel`; extra fields rejected. `_FAMILIES.get` (`strategy.py:406`, `:1243`) warns once on an unknown name rather than raising — a leftover `alpha_trend` / `mavilim` in the DB fails closed. Confirms 07:50.
 * `strategies` has no length bound, so a 10k-element list becomes one log line. Not a DoS; an unbounded line.
-* `capture` remains read-only on holdout dicts; `_slice_ok` / `_is_improvement` untouched.
+* `capture` remains read-only on holdout dicts; `_slice_ok` / `reject_reason` / `_beats_incumbent` untouched.
 
 ---
 
@@ -689,7 +2529,7 @@ Not code claims. Read from the running system.
 * **Process:** PID 10424, started **26.08 01:38:46**, `127.0.0.1:8900` LISTENING. HEAD `0c33d72` was committed after that start, so the live process is **pre-HEAD** and certainly does not carry the uncommitted diff. Any "live behaves like this" claim about the diff is currently **unverifiable**.
 * **The keep-line has never fired.** Searching `logs/micofx.log` for `taze test` / `damga` returns three lines — all three are `"broker saati ... broker damgasinda, Windows DST sapmasi"` (lines 920, 922, 923). `_incumbent_kept_tail` has not emitted once in this log. The 25.08 keep-line fix is **unproven in production**; first thing to check on the next search.
 * **Counter window:** `entry_blocks_since` = 1786905256.33 → **16.08 21:34:16**, 226.2 h. All C-1 ratios come from that window.
-* **13 families:** the panel reports 13 and post-diff `STRATEGIES` is 13, so the live DB `opt_params.strategies` already dropped `alpha_trend` / `mavilim`. The code constant follows the DB rather than leading it.
+* **13 families (arsiv):** the panel reports 13 and post-diff `STRATEGIES` is 13, so the live DB `opt_params.strategies` already dropped `alpha_trend` / `mavilim`. The code constant follows the DB rather than leading it.
 * **Book at 07:48:** JPN225 #366201717 still open (04:15 entry, SL fixed at 66139.73815 since 06:00, logged peak 4.92×ATR); SpotBrent #366298271 BUY 0.12 at 07:15; GER40 #366302421 SELL 0.8 at 07:30. Overnight closes: GER40 −27.53, NAS100 +11.04, NAS100 −15.36.
 
 ---
@@ -707,7 +2547,7 @@ AGENTS/MASTER/OPTIMIZATIONS (~32 files, +1382/−591). Suite claimed green on
 the other page (147 targeted / 2492 full); this pass did not re-run pytest.
 
 AGENTS.md: already dense enough (venv, live-owns-DB, no sidecar MT5, yellow/red
-gates, overlay_stop, 13 families, gotchas). Do **not** rewrite it here. Only
+gates, overlay_stop, 8 families, gotchas). Do **not** rewrite it here. Only
 gap worth a later one-liner: `exits.py` is untracked so a clone-from-HEAD
 misses the shared stop helper until commit.
 
@@ -1478,13 +3318,14 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   the identity test.**
 - A forming candle never signals. Buy ∧ sell on one bar → neither.
 - Opt apply writes `OPT_FIELDS` only. Never silently enable
-  `ensemble_enabled`. `_slice_ok` / `_is_improvement` is the only gate;
-  scheduled reopt uses the same path.
+  `ensemble_enabled`. Apply gates are `_slice_ok`, `reject_reason` and
+  `_beats_incumbent`. Calendar reopt is gone.
 - `EXIT_RISK_FIELDS` mid-trade → **409**. `breakeven_at_r` and
   `partial_at_r` are deliberately **not** in that set: they apply to
   already-open tickets.
-- **13 live families.** `alpha_trend` and `mavilim` retired 26.08 on
-  holdout; `test_retired_indicators_stay_gone` blocks their return.
+- **11 live families.** `alpha_trend` / `mavilim` / `st_trend` /
+  `macd_flip` retired 26.08; `test_retired_indicators_stay_gone`
+  blocks their return. `ichimoku` stays.
 - **No restart while positions are open** — `track()` first-sight
   `setdefault`s `original_sl` to the *current trail*, poisoning every R
   derived from it until those tickets die.
@@ -1645,7 +3486,7 @@ Live bot at `C:\Users\Administrator\MicoFx`. Constraints:
 - No LLM in engine. Exit model: hard ATR stop + ATR trail (no partial tp ladders).
 - `overlay_stop` identity shared live/backtest. Forming candle never signals.
 - `OPT_FIELDS` apply only; `EXIT_RISK_FIELDS` mid-trade yields 409.
-- 13 families; no restart with opens.
+- 8 families; no restart with opens.
 - Fail-first with pytest/ruff. Persist via Store only.
 - Yellow/red gates stay operator-only. Holdout capture is not a score input.
 - Autopsy gotchas: `open_original_sl` must be tracked, profit-empty rows exist, `gmtime` broker calendar used.

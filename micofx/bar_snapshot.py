@@ -60,9 +60,11 @@ def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
         raise ValueError(
             f"spread_scale_n {n} < {SPREAD_RATIO_MIN_SAMPLES} - refusing a "
             "thin histogram that _spread_scale would silently call 1.0")
-    if not charge_costs:
-        raise ValueError("charge_costs must be True - a cost-free file cannot "
-                         "count the 18% refusals")
+    # charge_costs=False is a live operator choice (this book: commission 0,
+    # trail holds through the spread). Refusing the file used to skip all six
+    # names at gece capture (27.08 00:00, 0 yazildi). Stamp the real flag so
+    # the file records the regime it was captured under. Nothing reads it
+    # back today — this is archive metadata, not a gate.
     segs = int(segments)
     if segs < 2:
         raise ValueError(f"segments must be >= 2, got {segments!r}")
@@ -94,7 +96,7 @@ def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
         segments=np.int32(segs),
         trade_all_hours=np.bool_(bool(trade_all_hours)),
         day_end_flatten_min=np.int32(int(day_end_flatten_min)),
-        charge_costs=np.bool_(True),
+        charge_costs=np.bool_(bool(charge_costs)),
         max_cost_pct_of_risk=np.float64(threshold),
         config_json=np.asarray(json.dumps(config, default=str)),
     )
@@ -134,9 +136,9 @@ def read(path: Path) -> dict[str, Any]:
             "spread_scale": float(blob["spread_scale"]),
             "spread_scale_n": int(blob["spread_scale_n"]),
             "segments": int(blob["segments"]),
-            "trade_all_hours": bool(blob["trade_all_hours"]),
+            "trade_all_hours": bool(np.asarray(blob["trade_all_hours"]).item()),
             "day_end_flatten_min": int(blob["day_end_flatten_min"]),
-            "charge_costs": bool(blob["charge_costs"]),
+            "charge_costs": bool(np.asarray(blob["charge_costs"]).item()),
             "max_cost_pct_of_risk": float(blob["max_cost_pct_of_risk"]),
             "config": config,
         }

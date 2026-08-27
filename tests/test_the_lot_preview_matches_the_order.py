@@ -182,7 +182,7 @@ def test_a_symbol_with_no_tick_value_is_skipped_rather_than_divided_by():
     assert rm.lot_mode_diagnostics(BALANCE) == []
 
 
-def test_a_fixed_lot_symbol_is_not_in_the_table():
+def test_a_leftover_fixed_lot_symbol_is_still_in_the_table():
     cfg = _cfg()
     cfg.lot_mode = "fixed"
-    assert _rm(0.0, [cfg]).lot_mode_diagnostics(BALANCE) == []
+    assert _rm(0.0, [cfg]).lot_mode_diagnostics(BALANCE)

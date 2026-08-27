@@ -50,7 +50,6 @@ def _sup():
     s.store = _Store()
     s.verdicts = {}
     s.notes = []
-    s.reopt_queue = []
     s.risk_scale = 1.0
     s.optimizer = None
     return s

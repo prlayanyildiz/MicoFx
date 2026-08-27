@@ -73,7 +73,7 @@ def _engine_with_tally(tally: dict) -> Engine:
     eng = Engine.__new__(Engine)
     eng._entry_blocks = tally
     eng._entry_blocks_dirty = False
-    eng._flush_entry_blocks = lambda: None       # type: ignore[assignment]
+    eng._flush_entry_blocks = lambda *a, **k: None       # type: ignore[assignment]
     return eng
 
 

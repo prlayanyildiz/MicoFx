@@ -50,7 +50,7 @@ class _Client:
 
 
 def _cfg():
-    return SymbolConfig(symbol="XAUUSD", magic=1, strategy="t3_stoch",
+    return SymbolConfig(symbol="XAUUSD", magic=1, strategy="stoch_flip",
                         timeframe="M5", sl_atr_mult=1.0, trail_step_atr=0.6)
 
 
@@ -79,7 +79,7 @@ def test_explicit_charged_stamp_with_zero_cost_is_refused():
     cfg = _cfg()
     result = _opt(cfg).apply(
         "XAUUSD", {"sl_atr_mult": 1.2}, score=9.9,
-        detail=_detail(charge_costs=True), timeframe="M5", strategy="t3_stoch")
+        detail=_detail(charge_costs=True), timeframe="M5", strategy="stoch_flip")
     assert not result["ok"]
     assert "maliyet" in (result.get("error") or "").lower()
     assert cfg.opt_score != 9.9
@@ -89,7 +89,7 @@ def test_omitted_stamp_with_zero_cost_does_not_claim_charged():
     cfg = _cfg()
     result = _opt(cfg).apply(
         "XAUUSD", {"sl_atr_mult": 1.2}, score=9.9,
-        detail=_detail(), timeframe="M5", strategy="t3_stoch")
+        detail=_detail(), timeframe="M5", strategy="stoch_flip")
     assert result["ok"], result
     assert cfg.opt_summary["charge_costs"] is False
     assert cfg.opt_summary["holdout"]["cost_per_trade_r"] == 0.0
@@ -101,6 +101,6 @@ def test_charged_stamp_with_real_cost_still_writes():
     detail["holdout"] = {**detail["holdout"], "cost_per_trade_r": 0.027}
     result = _opt(cfg).apply(
         "XAUUSD", {"sl_atr_mult": 1.2}, score=9.9,
-        detail=detail, timeframe="M5", strategy="t3_stoch")
+        detail=detail, timeframe="M5", strategy="stoch_flip")
     assert result["ok"], result
     assert cfg.opt_summary["charge_costs"] is True

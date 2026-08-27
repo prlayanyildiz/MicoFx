@@ -35,6 +35,7 @@ def bus(tmp_path, monkeypatch):
     monkeypatch.setattr(logbus, "LOG_DIR", tmp_path)
     b = LogBus()
     b._file = tmp_path / "micofx.log"
+    b.enable_disk()
     return b
 
 

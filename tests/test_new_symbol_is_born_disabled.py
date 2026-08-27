@@ -1,6 +1,6 @@
 """add_symbol wrote enabled=True, so an unsearched default went live.
 Found 15.08: nine operator-added symbols (FX/stock/crypto) traded on
-factory t3_stoch because the enable-before-opt guard only covers PATCH,
+factory stoch_flip because the enable-before-opt guard only covers PATCH,
 not birth. seed_symbols already forces False; add_symbol and reset did not.
 """
 from __future__ import annotations
@@ -25,6 +25,16 @@ def test_add_symbol_is_born_disabled_even_when_asked_to_enable(tmp_path, monkeyp
     cfg = s.add_symbol("NEWPAIR", group="forex", enabled=True)
     assert cfg.enabled is False
     assert s.symbols["NEWPAIR"].enabled is False
+
+
+def test_add_symbol_does_not_grow_leftover_total_cap(tmp_path, monkeypatch):
+    """Leftover max_total_positions is unread; adding a name must not bump it."""
+    monkeypatch.setattr(store_module, "DB_PATH", tmp_path / "lot.db")
+    s = Store()
+    s.update_system({"max_total_positions": len(s.symbols)})
+    before = s.system.max_total_positions
+    s.add_symbol("NEWPAIR", group="forex")
+    assert s.system.max_total_positions == before
 
 
 def test_reset_to_preset_leaves_the_symbol_disabled(tmp_path, monkeypatch):

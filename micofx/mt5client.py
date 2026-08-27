@@ -18,8 +18,6 @@ try:
 except ImportError:  # pragma: no cover - the package is Windows only
     mt5 = None
 
-_FALLBACK_PATHS: list[str] = []  # never auto-pick; path must be set in Sistem
-
 # Rejects that will not clear up by polling the same bar again - a config or
 # account-state problem, not a momentary quote/margin blip. Retrying these
 # every ~1s poll until the bar closes is pure order_send spam; the caller
@@ -195,6 +193,7 @@ class MT5Client:
         self.terminal_path = (terminal_path or "").strip()
         self.connected = False
         self.last_error = ""
+        self.autostart = False
         self._last_attempt = 0.0
         self._info_cache: dict[str, tuple[float, Any]] = {}
         self._tick_cache: dict[str, tuple[float, dict[str, float]]] = {}
@@ -517,6 +516,11 @@ class MT5Client:
             if time.time() - self._last_attempt < _RECONNECT_COOLDOWN:
                 return False
             self._last_attempt = time.time()
+            # Boot Popen lives in run.py. Mid-cycle a dead terminal used to
+            # leave initialize() failing forever (22.08). Launch the
+            # configured exe, then attach; do not sleep the lock here.
+            if self.autostart:
+                self.ensure_terminal_process()
             return self.connect()
 
     def reconnect(self) -> bool:
@@ -657,9 +661,8 @@ class MT5Client:
             "name": real, "description": i.description, "digits": i.digits, "point": i.point,
             "volume_min": i.volume_min, "volume_max": i.volume_max, "volume_step": i.volume_step,
             "tick_value": i.trade_tick_value, "tick_size": i.trade_tick_size,
-            "contract_size": i.trade_contract_size, "stops_level": i.trade_stops_level,
+            "stops_level": i.trade_stops_level,
             "freeze_level": i.trade_freeze_level, "filling_mode": i.filling_mode,
-            "trade_mode": i.trade_mode, "currency_profit": i.currency_profit,
         }
         self._info_cache[symbol] = (now, data)
         return data
@@ -937,6 +940,32 @@ class MT5Client:
         if rates is None or len(rates) < 2:
             return None
         return Bars(rates[:-1], int(rates[-1]["time"]))
+
+    def bar_window_pins(self, symbol: str, timeframe: str,
+                        closed_count: int) -> tuple[int, int] | None:
+        """Oldest and last-closed stamps of a closed-bar window.
+
+        Two small ``copy_rates_from_pos`` calls instead of the full
+        ``required_bars`` copy. None means the window cannot be pinned
+        (empty history, short series) — callers must full-fetch.
+        """
+        real = self.select(symbol)
+        if real is None:
+            return None
+        tf = timeframe_const(timeframe)
+        n = int(closed_count)
+        if n < 2:
+            return None
+        with self._lock:
+            newest = mt5.copy_rates_from_pos(real, tf, 0, 2)
+        if newest is None or len(newest) < 2:
+            return None
+        last_closed = int(newest[0]["time"])
+        with self._lock:
+            oldest_raw = mt5.copy_rates_from_pos(real, tf, n, 1)
+        if oldest_raw is None or len(oldest_raw) < 1:
+            return None
+        return (int(oldest_raw[0]["time"]), last_closed)
 
     # ------------------------------------------------------------- normalise
 

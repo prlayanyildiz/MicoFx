@@ -12,7 +12,7 @@ things:
 
 ``Signals.last()`` then applied one rule to all three: ``t3[i] > t3[i-1]``. On
 an all-zero series that is ``0 > 0``, permanently False - so NAS100, running
-``wavetrend_flip``, reported a BUY signal beside "t3 falling" while computing no
+``stoch_flip``, reported a BUY signal beside "t3 falling" while computing no
 T3 whatsoever. Read literally that says the bot is buying against its own trend
 filter. It was read that way, which is how this was found. The same held for
 ``adx``/``k``/``d``: 0.0 for "this family does not measure it", identical to a
@@ -63,7 +63,7 @@ def _sig(t3, *, adx=None, k=None, d=None, kind="level"):
 # ------------------------------------------------------------- the defect
 
 def test_a_family_that_computes_no_t3_does_not_report_it_falling():
-    """NAS100's shape: wavetrend_flip, t3 never populated."""
+    """NAS100's shape: stoch_flip, t3 never populated."""
     snap = _sig(np.zeros(N)).last()
     assert snap["t3"] is None
     assert snap["t3_rising"] is None, "hesaplanmayan t3 'dusuyor' diye okunuyor"

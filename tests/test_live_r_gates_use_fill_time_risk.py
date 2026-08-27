@@ -107,7 +107,7 @@ def test_mfe_peak_survives_a_restart():
     assert restarted._open[7]["original_sl"] == pytest.approx(99.0)
 
 
-def test_first_manage_cycle_logs_tickets_resumed_by_magic(monkeypatch):
+def _resume_engine():
     cfg = SimpleNamespace(symbol="NAS100", magic=14, group="index")
     eng = Engine.__new__(Engine)
     eng.client = SimpleNamespace(connected=True)
@@ -119,9 +119,7 @@ def test_first_manage_cycle_logs_tickets_resumed_by_magic(monkeypatch):
         get_setting=lambda *a, **k: None,
     )
     eng.entry_lock = threading.Lock()
-    eng._positions = [{"ticket": 42, "magic": 14, "symbol": "NAS100",
-                       "side": "buy", "volume": 0.3, "time": 1, "sl": 100.0,
-                       "profit": 0, "swap": 0}]
+    eng._positions = []
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
     eng._sec_tickets = set()
@@ -131,12 +129,41 @@ def test_first_manage_cycle_logs_tickets_resumed_by_magic(monkeypatch):
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     eng.states = {}
+    return eng
+
+
+def test_first_manage_cycle_logs_tickets_resumed_by_magic(monkeypatch):
+    eng = _resume_engine()
+    eng._positions = [{"ticket": 42, "magic": 14, "symbol": "NAS100",
+                       "side": "buy", "volume": 0.3, "time": 1, "sl": 100.0,
+                       "profit": 0, "swap": 0}]
     lines: list[tuple[str, str]] = []
     monkeypatch.setattr(
         "micofx.engine.LOG.emit",
         lambda msg, level="INFO", *a, **k: lines.append((msg, level)))
     eng.manage_positions(server_now=None)
     eng.manage_positions(server_now=None)
-    resumed = [m for m, lvl in lines if "magic ile" in m and "devam ediyor" in m]
+    resumed = [(m, lvl) for m, lvl in lines
+               if "magic ile" in m and "devam ediyor" in m]
     assert len(resumed) == 1
-    assert "#42" in resumed[0] and "NAS100" in resumed[0]
+    assert resumed[0][1] == "WARN"
+    assert "#42" in resumed[0][0] and "NAS100" in resumed[0][0]
+
+
+def test_trusted_empty_book_does_not_label_later_fills_as_restart(monkeypatch):
+    """manage_positions runs only after a connected positions() read
+    (_cycle bails if that read flipped connected). Empty here is flat, not
+    'list failed'. Latch on that read; a ticket that opens hours later is
+    a new fill, not a resumed restart book."""
+    eng = _resume_engine()
+    lines: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "micofx.engine.LOG.emit",
+        lambda msg, level="INFO", *a, **k: lines.append((msg, level)))
+    eng.manage_positions(server_now=None)
+    eng._positions = [{"ticket": 42, "magic": 14, "symbol": "NAS100",
+                       "side": "buy", "volume": 0.3, "time": 1, "sl": 100.0,
+                       "profit": 0, "swap": 0}]
+    eng.manage_positions(server_now=None)
+    resumed = [m for m, lvl in lines if "magic ile" in m and "devam ediyor" in m]
+    assert resumed == []

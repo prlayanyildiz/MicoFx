@@ -1,10 +1,10 @@
 """A config gets the settling time the system already says it should get.
 
 ``reopt_min_age_hours`` (48 by default) states a policy: a configuration is not
-reconsidered until it has had that long to run. ``supervisor._maybe_reoptimize``
-enforces it - a symbol younger than that is never queued, including on the
-decay path. ``Optimizer.start`` never checked it at all, so the full-scan route
-replaced configurations the auto route would have left alone.
+reconsidered until it has had that long to run. ``Optimizer.reject_reason``
+enforces it on apply. Calendar auto-queue is gone (quarantine search only).
+``Optimizer.start`` used to skip the age gate, so the full-scan route
+replaced configurations a queued reopt would have left alone.
 
 The churn that produces is measurable in the log's 495 applies. Symbols that
 made money have settled on one configuration - SpotBrent's last three applies
@@ -60,7 +60,7 @@ def _opt(force: bool = False, settings=None) -> Optimizer:
 
 
 def _cfg(age_hours: float) -> SymbolConfig:
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15")
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, strategy="stoch_flip", timeframe="M15")
     cfg.opt_updated_at = time.time() - age_hours * 3600.0
     cfg.opt_summary = {}          # no incumbent score to compare against
     return cfg
@@ -132,6 +132,10 @@ def test_cfg_none_is_not_blocked_by_settling_time():
 def test_the_improvement_wrapper_is_gone():
     """It was `return not self.reject_reason(cfg, best)` with no production caller."""
     assert not hasattr(Optimizer, "_is_improvement")
+    root = Path(__file__).resolve().parents[1]
+    for name in ("AGENTS.md", "MASTER_PROMPT.md"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "_is_improvement" not in text, name
 
 
 def test_a_genuinely_bad_candidate_is_still_refused_on_its_own_merits():

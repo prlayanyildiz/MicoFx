@@ -10,7 +10,6 @@ import threading
 import time
 from typing import Any
 
-import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,9 +24,7 @@ from ..models import (
     EXIT_RISK_FIELDS,
     GROUPS,
     OPT_FIELDS,
-    READABLE_TIMEFRAMES,
     STRATEGIES,
-    SWING_GRID_OVERLAY,
     TIMEFRAMES,
     SymbolConfig,
     SystemConfig,
@@ -37,7 +34,7 @@ from ..models import (
 from ..mt5client import MT5Client
 from ..optimizer import Optimizer
 from ..paths import ROOT, WEB_DIR
-from ..sessions import describe, server_datetime, session_clock_warning
+from ..sessions import describe, server_datetime
 from ..store import Store
 from ..strategy import _FAMILIES, ENGINE_OPT_FIELDS, opt_fields_read
 from ..supervisor import DEFAULTS as AI_SETTINGS_DEFAULTS
@@ -92,9 +89,8 @@ class OptRun(_ForbidModel):
     apply_best: bool = True
     bars: int | None = None
     timeframes: list[str] | None = Field(default=None, max_length=32)
-    # One-off family subset for this run. Does not persist; scheduled
-    # reopt still reads the saved opt_params list (which re-appends every
-    # shipped family). None/empty = inherit. Bound so a session cookie
+    # One-off family subset for this run. Does not persist into opt_params.
+    # None/empty = inherit the saved list. Bound so a session cookie
     # cannot POST a 10k-name list into the parser / keep-log.
     strategies: list[str] | None = Field(default=None, max_length=32)
     # Waives the settling-time hold: a config normally has to run for
@@ -127,9 +123,6 @@ class AccountLockBody(_ForbidModel):
 # numeric bounds below still catch e.g. risk_percent=500 on a known field.
 _SYMBOL_RISK_BOUNDS = {
     "risk_percent": (0.0, 20.0, False),   # (min, max, min_inclusive) - % of balance per trade
-    "max_lot": (0.0, 20.0, False),
-    "fixed_lot": (0.0, 20.0, False),
-    "max_positions": (1, 10, True),
     # The whole exit model is these three numbers, so all three are
     # strictly-positive. ``trail_start_atr`` is the one that actually needed
     # a gate: engine._update_stop and backtest both arm the trail behind
@@ -144,7 +137,6 @@ _SYMBOL_RISK_BOUNDS = {
     # Zero disables the lock (trail is the only way the stop crosses entry).
     # 1.5 is the BE-1 holdout threshold; 5 R is past any trail the book runs.
     "breakeven_at_r": (0.0, 5.0, True),
-    "partial_close_lots": (0.0, 20.0, True),
     "partial_at_r": (0.0, 5.0, True),
     "partial_close_frac": (0.0, 0.9, True),
     "harvest_at_r": (0.0, 5.0, True),
@@ -189,7 +181,7 @@ _SYMBOL_RISK_BOUNDS = {
 # carry "0 disables" in models.py - and bounding those at 1 would refuse the
 # live US500 config. A length has no such reading: an average over no bars is
 # a mistake, not a disabled filter.
-_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "wt_channel_len", "wt_avg_len", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "aroon_length", "adx_length", "atr_length", "trail_lookback"), (1, 10000, True))
+_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "aroon_length", "adx_length", "atr_length", "trail_lookback"), (1, 10000, True))
 
 
 _SYSTEM_RISK_BOUNDS = {
@@ -285,7 +277,7 @@ def _require_optimised_before_enabling(patch: dict[str, Any], cfg) -> None:
 
     EURUSD reached ``enabled`` carrying nothing but the dataclass defaults -
     ``opt_updated_at`` 0.0, ``opt_score`` 0.0, an empty ``opt_summary`` and
-    ``t3_stoch/M5``. That is not a config the search picked; it is the factory
+    ``stoch_flip/M5``. That is not a config the search picked; it is the factory
     setting, and the search had in fact already refused this symbol outright
     (365 days, four timeframes, fourteen families, no candidate cleared the
     accept gate). On M5 an FX symbol pays 25-28% of risk in spread against an
@@ -419,6 +411,24 @@ def _exit_axes(body: dict[str, Any], names: Any = None):
 # field directly could stage ANY symbol field to land later.
 _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
 
+# Panel-visible writes. Search apply() / Store still own the rest; this is
+# not _INTERNAL_ONLY_FIELDS (that tuple is pending-exit staging). Family,
+# TF, magic, exits and overlays left the card as controls 27.08 - GET still
+# returns them for the readout / pending_exit_patch kuyruk.
+_OPERATOR_SYSTEM_FIELDS = frozenset({
+    "max_margin_usage_pct",
+    "backup_dir", "backup_dir_secondary", "backup_keep",
+    "mt5_terminal_path", "autostart_mt5",
+})
+_OPERATOR_SYMBOL_FIELDS = frozenset({
+    "use_sessions", "sessions", "trade_days", "flat_before_close_min",
+    "enabled", "group", "broker_symbol",
+})
+_OPERATOR_OPT_FIELDS = frozenset({
+    "lookback_days", "refine_rounds", "max_combos",
+})
+_OPERATOR_AI_FIELDS = frozenset({"enabled"})
+
 
 # strategy_allows_timeframe() falls back to "allow every timeframe" for a
 # strategy name it does not recognise (see its own docstring) - it was never
@@ -429,23 +439,7 @@ _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
 # just a data-integrity problem - it is another XSS entry point.
 _ENUM_FIELDS = {"group": (GROUPS, False), "strategy": (STRATEGIES, False),
                 "timeframe": (TIMEFRAMES, False),
-                "lot_mode": (("fixed", "risk"), False),
                 "trail_mode": (("atr", "structure", "hybrid"), False)}
-
-
-def _reject_risk_percent_when_fixed(patch: dict[str, Any], current: Any) -> None:
-    """``risk_percent`` is dead under fixed lots; do not accept it as a live write.
-
-    The book sat on ``lot_mode=fixed`` while the panel still offered
-    risk_percent. PATCH returned ok:true; ``lot_for`` never read the field.
-    """
-    if "risk_percent" not in patch:
-        return
-    mode = patch.get("lot_mode")
-    if mode is None:
-        mode = getattr(current, "lot_mode", None) or "risk"
-    if mode == "fixed":
-        raise HTTPException(400, "bu ayar fixed modda kullanilmiyor")
 
 
 _NON_FINITE_TOKENS = {"nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"}
@@ -538,6 +532,12 @@ def _reject_internal_fields(patch: dict[str, Any]) -> None:
         raise HTTPException(400, f"{', '.join(found)} disaridan yazilamaz (motor ici alan)")
 
 
+def _reject_hands_off_fields(patch: dict[str, Any], allowed: frozenset[str]) -> None:
+    found = sorted(k for k in patch if k not in allowed)
+    if found:
+        raise HTTPException(400, f"{', '.join(found)} panelden yazilamaz")
+
+
 def _coerce_symbol_patch(raw: dict[str, Any]) -> dict[str, Any]:
     """Accept the panel's flat body or the bulk door's ``{\"patch\": {...}}``.
 
@@ -584,7 +584,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     """
     if not api_token:
         api_token = secrets.token_urlsafe(24)
-    app = FastAPI(title=f"{APP_NAME} Terminal", version=__version__, docs_url=None, redoc_url=None)
+    app = FastAPI(title=f"{APP_NAME} Terminal", version=__version__,
+                  docs_url=None, redoc_url=None, openapi_url=None)
     app.state.api_token = api_token
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
@@ -694,83 +695,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.get("/api/symbols")
     def get_symbols() -> dict[str, Any]:
         return {"ok": True, "symbols": symbol_payload()}
-
-    @app.get("/api/symbols/broker-audit")
-    def broker_audit() -> dict[str, Any]:
-        """Compare stored min-lot / Friday-close config against live broker data.
-
-        ``friday_close`` is the broker's own last Friday session end (minutes
-        since midnight, broker clock); ``configured_close`` is this symbol's
-        widest configured session end on Friday (or None if it trades
-        ``trade_all_hours``/has no session windows at all).
-        """
-        rows: list[dict[str, Any]] = []
-        for cfg in list(store.symbols.values()):
-            if not cfg.enabled:
-                continue
-            info = client.info(cfg.symbol)
-            floor = float(info["volume_min"]) if info else None
-            broker_close = client.last_session_close_minute(cfg.symbol, 5)  # Friday
-            windows = cfg.session_windows() if cfg.use_sessions else []
-            configured_close = max((end for _, end in windows), default=None)
-            lot_mismatch = (
-                cfg.lot_mode == "fixed" and floor is not None
-                and float(cfg.fixed_lot) < floor
-            )
-            close_mismatch = (
-                broker_close is not None and configured_close is not None
-                and abs(broker_close - configured_close) > 30
-            )
-            # "Could not check" is its own answer. close_mismatch is False both
-            # when the times agree and when the broker's schedule could not be
-            # read at all - and the Python package exposes no schedule, so the
-            # second case is the only one that ever happens. Reporting that as
-            # a clean result made this audit certify all twenty symbols as
-            # aligned while looking at nothing.
-            if configured_close is None:
-                close_check = "session-yok"
-            elif broker_close is None:
-                close_check = "okunamadi"
-            elif close_mismatch:
-                close_check = "kayik"
-            else:
-                close_check = "uyumlu"
-            rows.append({
-                "symbol": cfg.symbol, "lot_mode": cfg.lot_mode,
-                "fixed_lot": cfg.fixed_lot, "broker_min_lot": floor,
-                "lot_mismatch": lot_mismatch,
-                "configured_friday_close_min": configured_close,
-                "broker_friday_close_min": broker_close,
-                "close_mismatch": close_mismatch,
-                "close_check": close_check,
-            })
-        # What is actually measurable about the broker's clock today. Session
-        # windows are configured against the Windows clock (Turkey, UTC+3 all
-        # year); the broker's server follows European DST and drops an hour at
-        # the end of October, which is when every window quietly stops matching
-        # the instrument's real session.
-        broker_utc = client.broker_utc_offset_hours(
-            [c.symbol for c in list(store.symbols.values()) if c.enabled])
-        # Turkey has no DST, so this is +3 year round; taken from the machine
-        # rather than hardcoded so a move or a changed Windows zone shows up.
-        local_utc = -(time.altzone if time.daylight and time.localtime().tm_isdst
-                      else time.timezone) // 3600
-        drift = None if broker_utc is None else broker_utc - local_utc
-        return {
-            "ok": True, "rows": rows,
-            "broker_utc_offset_hours": broker_utc,
-            "local_utc_offset_hours": local_utc,
-            "clock_drift_hours": drift,
-            "clock_note": (
-                "olculemedi - yeterli canli tick yok"
-                if drift is None else
-                f"broker GMT{broker_utc:+d}, yerel GMT{local_utc:+d} - ayni, "
-                f"seans pencereleri enstrumanin gercek seansiyla hizali"
-                if drift == 0 else
-                (session_clock_warning(drift)
-                 or f"broker GMT{broker_utc:+d}, yerel GMT{local_utc:+d}")
-            ),
-        }
 
     @app.get("/api/broker-symbols")
     def broker_symbols(q: str = "", limit: int = 50) -> dict[str, Any]:
@@ -945,13 +869,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         patch = _coerce_symbol_patch(
             body.model_dump(exclude_unset=True))  # type: ignore[attr-defined]
         _reject_internal_fields(patch)
+        _reject_hands_off_fields(patch, _OPERATOR_SYMBOL_FIELDS)
         _reject_non_finite_values(patch)
         _validate_enum_fields(patch)
         _validate_risk_bounds(patch)
         _validate_risk_bounds(patch, _INDICATOR_PERIOD_BOUNDS)
         _validate_sessions(patch)
         current = store.symbols.get(symbol)
-        _reject_risk_percent_when_fixed(patch, current)
         _require_optimised_before_enabling(patch, current)
         _require_current_cost_basis_before_enabling(patch, current, optimizer)
         # Same hazard as DELETE: the magic number is the only thing that maps
@@ -1120,68 +1044,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
         return {"ok": True, "symbols": symbol_payload(force=True), "system": store.system.to_dict()}
 
-    @app.get("/api/analysis/breakeven")
-    def breakeven_margin() -> dict[str, Any]:
-        """How far each symbol's validated win rate sits above its own breakeven.
-
-        The apply gates read profit factor, expectancy, retention and cost
-        separately; none of them answers "how much room is there before this
-        config stops paying". That distance is what a small execution
-        degradation eats, and it is not visible in any single number they do
-        check - US30 clears every gate on PF 1.12 while sitting 2.4 points
-        above the line.
-
-        Derived from the untouched holdout only, no assumptions bolted on.
-        The average win W matters here and is easy to get wrong: this exit
-        model has no take-profit, so winners run and W is nothing like 1R -
-        USDJPY's is 3.6R against a 26.5% win rate. Assuming 1R puts its
-        breakeven at 58% instead of 24% and inverts the verdict.
-
-            PF = (w * W) / ((1 - w) * L)          ->  W/L
-            E  = w * W - (1 - w) * L              ->  scale
-            breakeven win rate = L / (W + L)
-        """
-        rows: list[dict[str, Any]] = []
-        for cfg in list(store.symbols.values()):
-            if not cfg.enabled:
-                continue
-            hold = (cfg.opt_summary or {}).get("holdout") or {}
-            wr = float(hold.get("win_rate", 0.0) or 0.0)
-            pf = float(hold.get("profit_factor", 0.0) or 0.0)
-            exp = float(hold.get("expectancy", 0.0) or 0.0)
-            if wr <= 0 or wr >= 100 or pf <= 0:
-                continue
-            w = wr / 100.0
-            ratio = pf * (1 - w) / w                 # W / L
-            denom = w * ratio - (1 - w)
-            if denom == 0:
-                continue
-            loss = exp / denom                       # average loss, in R
-            win = ratio * loss
-            if win + loss <= 0:
-                continue
-            breakeven = loss / (win + loss) * 100.0
-            rows.append({
-                "symbol": cfg.symbol,
-                "win_rate": round(wr, 1),
-                "profit_factor": round(pf, 2),
-                "avg_win_r": round(win, 2),
-                "avg_loss_r": round(loss, 2),
-                "breakeven_win_rate": round(breakeven, 1),
-                "margin_pp": round(wr - breakeven, 1),
-                "trades": hold.get("trades"),
-            })
-        rows.sort(key=lambda r: r["margin_pp"])
-        thin = [r["symbol"] for r in rows if r["margin_pp"] < 4.0]
-        return {
-            "ok": True, "rows": rows, "thin": thin,
-            "note": (
-                f"{len(thin)} sembol 4 puandan az marjla calisiyor: "
-                f"{', '.join(thin)} - kucuk bir icra bozulmasi bunlari negatife cevirir"
-                if thin else "her sembol 4 puandan genis marjla calisiyor"
-            ),
-        }
-
     @app.get("/api/analysis/portfolio-gates")
     def portfolio_gates(min_sample: int = 100, min_fill_rate: float = 0.25) -> dict[str, Any]:
         """Which gate each live symbol fails, in one view. Read-only.
@@ -1204,12 +1066,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             small, precisely. Read the two together, never the flag alone.
 
         ``maliyet``      Does the config give its edge away? holdout
-            cost_per_trade_r against the optimizer's own accept ceiling. This
-            is deliberately NOT the cost-by-hour median: that view averages
-            every bar while the walk-forward only charges cost where a signal
-            fired, so it runs 5-14x higher on short timeframes. Comparing its
-            level to a gate has already produced wrong calls on which symbols
-            are worth trading.
+            cost_per_trade_r against the optimizer's own accept ceiling.
+            Walk-forward only charges cost where a signal fired, so a
+            bar-average cost series is the wrong comparison (it runs 5-14x
+            higher on short timeframes and has already produced wrong
+            prune calls).
 
         ``tavan``        Can the symbol pass its own spread ceiling? The live
             spread/ATR the engine is gating on right now against
@@ -1389,7 +1250,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 "session_open": session_open,
                 "max_spread_atr": ceiling or None,
                 "ceiling_leg": ceiling_leg,
-                "primary_max_spread_atr": float(cfg.max_spread_atr or 0.0) or None,
                 "expected_trades": round(expected, 1) if expected else None,
                 "actual_trades": actual,
                 "fill_rate": round(fill, 3) if fill is not None else None,
@@ -1420,107 +1280,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 f"Orneklemi {sample_floor} altinda kalan: "
                 f"{', '.join(thin_symbols) if thin_symbols else 'yok'} - "
                 f"bu sembollerde 'olculebilir' bayragi tek basina okunmamali."
-            ),
-        }
-
-    @app.get("/api/analysis/correlation")
-    def correlation(timeframe: str = "H1", bars: int = 1500,
-                    extra: str = "") -> dict[str, Any]:
-        """Return correlation between every pair of live symbols. Read-only.
-
-        The portfolio is 8 equity indices out of 13, and whether that is a
-        concentration problem or merely a long list has been argued both ways
-        without either side measuring it. Stops cap what any ONE trade loses;
-        they do nothing about several positions losing at the same time,
-        because each one stops out independently at full risk. So the question
-        that matters is not how many indices there are, it is how much they
-        move together - and that is a number, not an opinion.
-
-        Computed on log returns of the closing series, which is the right
-        input: raw prices trend and would report almost everything as
-        correlated. Pairs are matched on the bar CLOCK, not on position -
-        taking the last N bars of each symbol compares different calendar
-        windows the moment two instruments trade different hours per day, and
-        that is how US400 first read -0.066 against US500. ``bars`` is the
-        number of timestamps the pair actually shared.
-        """
-        _require_connected()
-        tf = timeframe if timeframe in READABLE_TIMEFRAMES else "H1"
-        count = max(200, min(int(bars), 20000))
-
-        # ``extra`` is a comma-separated list of broker symbols that are not in
-        # the book. Judging a candidate on the one thing that decides whether
-        # it adds information - how much it moves with what we already hold -
-        # otherwise required adding it to the config first, and adding then
-        # removing a symbol destroys its opt_runs history. A candidate should
-        # be measurable without paying that.
-        names_wanted = [c.symbol for c in list(store.symbols.values()) if c.enabled]
-        for name in (s.strip() for s in extra.split(",")):
-            if name and name not in names_wanted:
-                names_wanted.append(name)
-
-        series: dict[str, Any] = {}
-        skipped: dict[str, str] = {}
-        for symbol in names_wanted:
-            data = client.bars(symbol, tf, count)
-            if data is None or len(data) < 60:
-                skipped[symbol] = f"yeterli bar yok ({len(data) if data else 0})"
-                continue
-            close = np.asarray(data.close, dtype=np.float64)
-            times = np.asarray(data.time, dtype=np.int64)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                rets = np.diff(np.log(np.where(close > 0, close, np.nan)))
-            # Return at index i belongs to the bar that CLOSED at times[i+1].
-            stamps = times[1:]
-            good = np.isfinite(rets)
-            series[symbol] = (stamps[good], rets[good])
-
-        names = sorted(series)
-        pairs: list[dict[str, Any]] = []
-        for i, a in enumerate(names):
-            for b in names[i + 1:]:
-                ta, xa_all = series[a]
-                tb, yb_all = series[b]
-                # Match on the bar CLOCK, not on position. Aligning the last N
-                # bars of each symbol silently compares different calendar
-                # windows whenever the two trade different hours per day: a
-                # 7-hour session covers three times the days a 23-hour one
-                # does in the same 1500 bars. That is not a small error - it
-                # reported US400 against US500 at -0.066, two US equity
-                # indices that plainly move together, purely because their
-                # windows barely overlapped.
-                shared, ia, ib = np.intersect1d(ta, tb, return_indices=True)
-                if shared.size < 60:
-                    continue
-                xa, yb = xa_all[ia], yb_all[ib]
-                if xa.std() <= 0 or yb.std() <= 0:
-                    continue
-                r = float(np.corrcoef(xa, yb)[0, 1])
-                if not math.isfinite(r):
-                    continue
-                pairs.append({"a": a, "b": b, "r": round(r, 3),
-                              "bars": int(shared.size)})
-        pairs.sort(key=lambda p: -abs(p["r"]))
-
-        live = {c.symbol for c in list(store.symbols.values()) if c.enabled}
-        groups = {c.symbol: c.group for c in list(store.symbols.values())}
-        same: list[float] = []
-        cross: list[float] = []
-        for p in pairs:
-            (same if groups.get(p["a"]) == groups.get(p["b"]) else cross).append(p["r"])
-        high = [p for p in pairs if abs(p["r"]) >= 0.7]
-        return {
-            "ok": True, "timeframe": tf, "symbols": names, "pairs": pairs,
-            "skipped": skipped,
-            "candidates": [n for n in names if n not in live],
-            "median_same_group": round(float(np.median(same)), 3) if same else None,
-            "median_cross_group": round(float(np.median(cross)), 3) if cross else None,
-            "high_pairs": high,
-            "note": (
-                f"{len(high)} cift 0.70 ve uzeri birlikte hareket ediyor"
-                + (f" (grup ici medyan {round(float(np.median(same)), 2)}, "
-                   f"gruplar arasi {round(float(np.median(cross)), 2)})" if same and cross else "")
-                if pairs else "yeterli veri yok"
             ),
         }
 
@@ -1586,23 +1345,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         )
         return {"ok": True, **data}
 
-    @app.get("/api/analysis/stamp-drift")
-    def stamp_drift() -> dict[str, Any]:
-        """Live row vs stamp params, only fields the family or engine reads.
-
-        ``calibrated`` is max_spread_atr moved by apply-time calibration and
-        recorded on the stamp. ``unexpected`` is everything else — including
-        a spread change with no record.
-        """
-        data = optimizer.stamp_drift()
-        n = int(data.get("unexpected") or 0)
-        data["note"] = (
-            "Canli satir damgasiyla uyumlu."
-            if not n else
-            f"{n} beklenmeyen ayrisma — kalibrasyon kaydi olmayan fark kirmizi"
-        )
-        return {"ok": True, **data}
-
     @app.post("/api/analysis/entry-blocks/reset")
     def entry_blocks_reset() -> dict[str, Any]:
         engine.reset_entry_blocks()
@@ -1610,136 +1352,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/symbols/{symbol}/reset")
     def reset_symbol(symbol: str) -> dict[str, Any]:
-        cfg = store.symbols.get(symbol)
-        if cfg is None and not any(
-                e.get("symbol") == symbol for e in store.defaults.get("symbols", [])):
-            raise HTTPException(404, f"{symbol} icin varsayilan yok")
-        # Preset reset rewrites strategy/TF/exits (and clears secondary). Same
-        # orphan class as a family PATCH under an open ticket - refuse while
-        # anything is still live under this magic.
-        if cfg is not None:
-            _require_connected()
-            with engine.entry_lock:
-                open_here = _open_under_magic(cfg.magic)
-                if open_here:
-                    raise HTTPException(
-                        409, f"{symbol}: varsayilana donulemedi, {len(open_here)} acik pozisyon var "
-                             f"(once kapatin veya pozisyon kapanmasini bekleyin)")
-                if _pending_orphan_scan(cfg.magic, symbol):
-                    raise HTTPException(
-                        409, f"{symbol}: varsayilana donulemedi, tanimlanamayan bir "
-                             f"ticket taramasi devam ediyor - taramanin bitmesini bekleyin")
-                updated = store.reset_symbol_to_preset(symbol)
-        else:
-            # cfg is None: this symbol was deleted and is being recreated from
-            # its preset - a fresh magic is assigned (see Store.next_magic),
-            # so the same reuse risk as create_symbol() applies.
-            _reject_magic_assignment_if_disconnected_orphans()
-            updated = store.reset_symbol_to_preset(
-                symbol,
-                avoid_magics=_orphan_ticket_magics() | _recent_deal_magics())
-        if updated is None:
-            raise HTTPException(404, f"{symbol} icin varsayilan yok")
-        LOG.emit("Ayarlar varsayilana dondu.", "INFO", symbol)
-        return {"ok": True, "config": updated.to_dict()}
+        # Card button left 27.08. Preset rewrite of strategy/TF/exits stays
+        # on Store.reset_symbol_to_preset for seed/create; HTTP is shut.
+        raise HTTPException(400, f"{symbol}: varsayilana don panelden yazilamaz")
 
     @app.get("/api/symbols/lot-mode-check")
     def lot_mode_check() -> dict[str, Any]:
         account = engine.refresh_account(force=True)
-        rows = engine.risk.lot_mode_diagnostics(float(account.get("balance", 0.0)))
+        rows = engine.risk.lot_mode_diagnostics(
+            float(account.get("balance", 0.0)),
+            getattr(engine, "_trade_autopsies", None))
         return {"ok": True, "rows": rows}
-
-    @app.get("/api/analysis/cost-by-hour")
-    def cost_by_hour(symbol: str, timeframe: str = "", bars: int = 5000) -> dict[str, Any]:
-        """Cost as a fraction of the ATR stop distance, bucketed by hour of day.
-
-        Read-only. Answers one question the apply gates cannot: the cost share
-        that decides whether a config is worth trading is an average over the
-        whole day, and it hides the fact that spread and ATR do not move
-        together. If a window exists where ATR expands faster than spread, cost
-        per unit of risk collapses there - which is the only way a fast config
-        can stop giving most of its edge away.
-
-        Same arithmetic ``simulate`` charges: spread from the bar itself, plus
-        commission converted to price, over ``atr * sl_atr_mult``.
-
-        NOT comparable to ``opt_summary.holdout.cost_per_trade_r``, and the
-        difference is not a rounding one - on M5 configs this figure runs
-        5-14x the walk-forward's. Same arithmetic, different population: this
-        averages EVERY bar, while the walk-forward only ever charges cost on
-        bars where a signal actually fired. Signals fire on movement, so entry
-        bars carry a systematically higher ATR than the median bar, and a
-        higher ATR is a bigger denominator. On H1 the two land within 10% of
-        each other because a long bar's ATR is large either way; the shorter
-        the timeframe, the further they diverge.
-
-        So read this for the SHAPE across hours - where in the day cost per
-        unit of risk collapses or spikes, which is what no other view answers -
-        and read cost_per_trade_r for the LEVEL a config actually pays.
-        Comparing the two levels directly has produced wrong calls on which
-        symbols are worth trading; the hourly shape has not.
-        """
-        cfg = store.symbols.get(symbol)
-        if cfg is None:
-            raise HTTPException(404, f"{symbol} bulunamadi")
-        _require_connected()
-        tf = timeframe if timeframe in READABLE_TIMEFRAMES else cfg.timeframe
-        count = max(200, min(int(bars), 50000))
-        data = client.bars(cfg.symbol, tf, count)
-        if data is None or len(data) < cfg.atr_period + 10:
-            raise HTTPException(503, f"{symbol}/{tf}: yeterli bar alinamadi")
-        info = client.info(cfg.symbol) or {}
-        point = float(info.get("point", 0.0) or 0.0)
-        if point <= 0:
-            raise HTTPException(503, f"{symbol}: point degeri okunamadi")
-
-        from .. import backtest
-        from .. import indicators as ind
-        commission = backtest.commission_in_price(
-            cfg.commission_per_lot,
-            float(info.get("tick_value", 0.0) or 0.0),
-            float(info.get("tick_size", 0.0) or 0.0))
-        atr = ind.atr(data.high, data.low, data.close, cfg.atr_period)
-        buckets: dict[int, list[float]] = {}
-        atr_buckets: dict[int, list[float]] = {}
-        for i in range(cfg.atr_period + 1, len(data)):
-            a = float(atr[i])
-            if not (a > 0) or a != a:          # zero or NaN
-                continue
-            risk = a * max(cfg.sl_atr_mult, 0.01)
-            if risk <= 0:
-                continue
-            cost = float(data.spread[i]) * point + commission
-            # gmtime, not localtime: an MT5 bar timestamp is a naive epoch
-            # encoding the broker's own wall-clock reading, so gmtime recovers
-            # that reading while localtime would add this machine's UTC offset
-            # on top of it and report every bar three hours late. Same
-            # convention Supervisor._bad_hours/_hour_risk_scales use on deal
-            # timestamps, and the reason its gate compares against
-            # localtime(server_now) - broker and Windows clock read the same
-            # wall time here.
-            hour = time.gmtime(int(data.time[i])).tm_hour
-            buckets.setdefault(hour, []).append(cost / risk)
-            atr_buckets.setdefault(hour, []).append(a)
-
-        rows = []
-        for hour in sorted(buckets):
-            vals = sorted(buckets[hour])
-            atrs = sorted(atr_buckets[hour])
-            rows.append({
-                "hour": hour,
-                "samples": len(vals),
-                "cost_over_risk": round(vals[len(vals) // 2], 4),
-                "atr": round(atrs[len(atrs) // 2], 6),
-            })
-        overall = sorted(v for vs in buckets.values() for v in vs)
-        return {
-            "ok": True, "symbol": symbol, "timeframe": tf,
-            "sl_atr_mult": cfg.sl_atr_mult,
-            "commission_per_lot": cfg.commission_per_lot,
-            "median_cost_over_risk": round(overall[len(overall) // 2], 4) if overall else 0.0,
-            "rows": rows,
-        }
 
     @app.post("/api/symbols/{symbol}/close")
     def close_symbol(symbol: str) -> dict[str, Any]:
@@ -1751,6 +1374,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
         body.patch = _coerce_symbol_patch(body.patch)
         _reject_internal_fields(body.patch)
+        _reject_hands_off_fields(body.patch, _OPERATOR_SYMBOL_FIELDS)
         _reject_non_finite_values(body.patch)
         _validate_enum_fields(body.patch)
         _validate_risk_bounds(body.patch)
@@ -1796,7 +1420,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # per-symbol route does. Checked before the lock: nothing is written
         # yet, and refusing the whole batch is right when part of it is unsafe.
         for target in targets:
-            _reject_risk_percent_when_fixed(body.patch, store.symbols.get(target))
             _require_optimised_before_enabling(body.patch, store.symbols.get(target))
             _require_current_cost_basis_before_enabling(
                 body.patch, store.symbols.get(target), optimizer)
@@ -1932,6 +1555,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 f"{', '.join(lock_keys)} buradan yazilamaz - "
                 "bagli hesabi kilitlemek icin /api/account-lock kullanin",
             )
+        _reject_hands_off_fields(patch, _OPERATOR_SYSTEM_FIELDS)
         _reject_non_finite_values(patch)
         _validate_risk_bounds(patch, _SYSTEM_RISK_BOUNDS)
         # Both destinations go through the identical gate: the secondary one
@@ -1957,17 +1581,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             if is_unc:
                 # A UNC destination sends the whole project - code AND the
                 # settings DB - over the network to whatever share is named.
-                # Fine for an intentional NAS backup; not something a plain
-                # backup_dir PATCH should be able to flip on by itself, since
-                # that is the one field here that turns "misconfigured" into
-                # "exfiltration". allow_unc has to already be true (set in a
-                # separate, explicit step) or be flipped on in this same
-                # request alongside the UNC path.
-                allow_unc = patch.get("backup_dir_allow_unc", store.system.backup_dir_allow_unc)
-                if not allow_unc:
+                # Fine for an intentional NAS backup; the latch is Store-only
+                # (not an HTTP key) so a panel POST cannot flip it on.
+                if not store.system.backup_dir_allow_unc:
                     raise HTTPException(
-                        400, f"{field} UNC ({path!r}) - once backup_dir_allow_unc:true "
-                             f"gonderin (agdaki bir paylasima proje + veritabani kopyalanacak)")
+                        400, f"{field} UNC ({path!r}) - backup_dir_allow_unc kapali "
+                             f"(agdaki bir paylasima proje + veritabani kopyalanacak)")
         updated = store.update_system(patch, source="panel sistem")
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}
         if "mt5_terminal_path" in patch:
@@ -1978,6 +1597,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             result["mt5_error"] = client.last_error
             result["terminal"] = client.terminal_flags()
             result["configured_path"] = updated.mt5_terminal_path
+        if "autostart_mt5" in patch:
+            client.autostart = bool(updated.autostart_mt5)
         return result
 
     @app.post("/api/account-lock")
@@ -2096,22 +1717,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.get("/api/opt/params")
     def opt_params() -> dict[str, Any]:
-        params = store.opt_params()
-        defaults = getattr(store, "defaults", None) or {}
-        factory = (defaults.get("optimizer") or {}).get("grid") or {}
-        shared = params.get("grid") or {}
-        owned = (
-            Optimizer.overlay_axes_operator_owns(shared, factory)
-            if factory else set()
-        )
-        return {
-            "ok": True,
-            "params": params,
-            "swing_overlay": {k: (k not in owned) for k in SWING_GRID_OVERLAY},
-        }
+        return {"ok": True, "params": store.opt_params()}
 
     @app.post("/api/opt/params")
     def set_opt_params(body: dict[str, Any]) -> dict[str, Any]:
+        # Panel only offers lookback / refine / max_combos. Grid, min_trades
+        # and the rest stay in the saved blob; apply() still reads them.
+        _reject_hands_off_fields(body, _OPERATOR_OPT_FIELDS)
         # These parameters drive the walk-forward search that ultimately
         # writes live trading params via apply() - same NaN/Infinity class of
         # risk as the symbol-level fields. strategy_grids/grid nest their
@@ -2145,7 +1757,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/opt/params/reset")
     def reset_opt_params() -> dict[str, Any]:
-        return {"ok": True, "params": store.reset_opt_params()}
+        # HTML button is gone; JS is gated on #btn-opt-reset. Store.reset
+        # still exists for tests / a future operator restore.
+        raise HTTPException(400, "opt izgara varsayilani panelden yazilamaz")
 
     @app.post("/api/opt/run")
     def opt_run(body: OptRun) -> dict[str, Any]:
@@ -2155,10 +1769,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if not result.get("ok"):
             raise HTTPException(409, result.get("error", "optimizasyon baslatilamadi"))
         return result
-
-    @app.get("/api/opt/job")
-    def opt_job() -> dict[str, Any]:
-        return {"ok": True, "job": optimizer.status()}
 
     @app.post("/api/opt/cancel")
     def opt_cancel() -> dict[str, Any]:
@@ -2320,13 +1930,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         return result
 
     # ------------------------------------------------------------------ ai
-
-    @app.get("/api/ai")
-    def ai_status() -> dict[str, Any]:
-        return {"ok": True, "ai": engine.supervisor.status()}
+    # Panel reads STATE.ai from /api/state. No duplicate GET.
 
     @app.post("/api/ai/settings")
     def ai_settings(body: dict[str, Any]) -> dict[str, Any]:
+        _reject_hands_off_fields(body, _OPERATOR_AI_FIELDS)
         _reject_non_finite_values(body)
         _reject_wrong_type_against(body, AI_SETTINGS_DEFAULTS)
         settings = engine.supervisor.update_settings(body)
@@ -2354,11 +1962,6 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def logs(after: int = 0, limit: int = 400, levels: str = "") -> dict[str, Any]:
         wanted = [x for x in levels.split(",") if x] or None
         return {"ok": True, "entries": LOG.recent(after, limit, wanted)}
-
-    @app.post("/api/logs/clear")
-    def logs_clear() -> dict[str, Any]:
-        LOG.clear()
-        return {"ok": True}
 
     @app.get("/api/logs/download")
     def logs_download():

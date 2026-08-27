@@ -41,7 +41,7 @@ class _Client:
 
 
 def _cfg() -> SymbolConfig:
-    return SymbolConfig(symbol="FRA40", magic=1, strategy="t3_stoch",
+    return SymbolConfig(symbol="FRA40", magic=1, strategy="stoch_flip",
                         timeframe="M15", sl_atr_mult=1.0, trail_step_atr=0.6)
 
 
@@ -75,7 +75,7 @@ def _apply(costed, logs=None):
         LOG.emit = _cap
     try:
         result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-                           detail=_detail(), timeframe="M15", strategy="t3_stoch")
+                           detail=_detail(), timeframe="M15", strategy="stoch_flip")
     finally:
         if logs is not None:
             LOG.emit = orig
@@ -93,7 +93,7 @@ def test_negative_costed_holdout_is_not_applied():
     opt = Optimizer(store=store, client=_Client())
     opt._holdout_costed = lambda *a, **k: {"trades": 665, "expectancy": -0.056}
     result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-                       detail=_detail(), timeframe="M15", strategy="t3_stoch")
+                       detail=_detail(), timeframe="M15", strategy="stoch_flip")
     assert result["ok"] is False
     assert "maliyet" in result["error"]
     assert cfg.sl_atr_mult == 1.0
@@ -116,7 +116,7 @@ def test_force_still_applies_a_costed_negative_candidate():
     LOG.emit = _cap
     try:
         result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-                           detail=_detail(), timeframe="M15", strategy="t3_stoch")
+                           detail=_detail(), timeframe="M15", strategy="stoch_flip")
     finally:
         LOG.emit = orig
     assert result["ok"] is True, result
@@ -153,7 +153,7 @@ def test_a_broken_costed_eval_leaves_apply_intact():
 
     opt._holdout_costed = _boom
     result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-                       detail=_detail(), timeframe="M15", strategy="t3_stoch")
+                       detail=_detail(), timeframe="M15", strategy="stoch_flip")
     assert result["ok"] is True
     assert "holdout_costed" not in cfg.opt_summary
     assert "costed_negative" not in cfg.opt_summary
@@ -190,7 +190,7 @@ def test_spread_scale_on_the_row_is_the_sweeps_not_the_live_clock():
     result = opt.apply(
         "FRA40", {"sl_atr_mult": 2.4}, score=9.9,
         detail={**_detail(), "spread_scale": 0.41},
-        timeframe="M15", strategy="t3_stoch")
+        timeframe="M15", strategy="stoch_flip")
     assert result["ok"] is True, result
     assert cfg.opt_summary["spread_scale"] == 0.41
     assert cfg.opt_summary["charge_costs"] is False

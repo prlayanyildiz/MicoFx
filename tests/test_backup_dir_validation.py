@@ -2,8 +2,8 @@
 
 A UNC backup_dir sends the whole project (code + settings DB) over the
 network to whatever share is named - previously accepted unconditionally.
-Now requires an explicit backup_dir_allow_unc opt-in, either already set or
-flipped on in the same request. Local drive-letter paths are unaffected.
+Now requires Store `backup_dir_allow_unc` already true. Same-request HTTP
+latch is 400. Local drive-letter paths are unaffected.
 """
 from __future__ import annotations
 
@@ -66,20 +66,22 @@ def _client():
     return TestClient(app), store
 
 
-def test_backup_dir_unc_rejected_without_opt_in():
+def test_backup_dir_unc_rejected_without_store_opt_in():
     tc, store = _client()
     res = tc.post("/api/system", json={"backup_dir": r"\\nas\share\backups"})
     assert res.status_code == 400
     assert store.system.backup_dir != r"\\nas\share\backups"
 
 
-def test_backup_dir_unc_accepted_with_opt_in_same_request():
+def test_backup_dir_unc_opt_in_is_not_an_http_key():
+    """Same-request latch left with the panel. Store flag still opens UNC."""
     tc, store = _client()
     res = tc.post("/api/system", json={
         "backup_dir": r"\\nas\share\backups", "backup_dir_allow_unc": True,
     })
-    assert res.status_code == 200
-    assert store.system.backup_dir == r"\\nas\share\backups"
+    assert res.status_code == 400
+    assert store.system.backup_dir != r"\\nas\share\backups"
+    assert store.system.backup_dir_allow_unc is False
 
 
 def test_backup_dir_unc_accepted_when_already_opted_in():

@@ -33,23 +33,9 @@ from .models import (
 from .mt5client import Bars, MT5Client, timeframe_seconds
 from .spread_calibration import calibrate
 from .store import Store
-from .strategy import searchable_axes, stamp_fields
+from .strategy import searchable_axes
 
 APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
-
-
-def _stamp_values_match(live: Any, stamped: Any) -> bool:
-    """True when a live field and its stamp copy are the same number or value."""
-    if live is stamped:
-        return True
-    try:
-        fa = float(live)
-        fb = float(stamped)
-    except (TypeError, ValueError):
-        return live == stamped
-    if fa != fa or fb != fb:
-        return False
-    return abs(fa - fb) <= 1e-9
 
 
 def tf_lock_status(tf_allow: Any) -> str:
@@ -81,6 +67,36 @@ def family_max_combos(opt_blob: dict[str, Any] | None, family: str,
     except (TypeError, ValueError):
         return fallback
     return n if n > 0 else fallback
+
+
+def run_combo_budget(
+    opt_blob: dict[str, Any] | None,
+    families: list[str],
+    timeframes: list[str],
+    max_combos: int,
+    refine_rounds: int,
+    n_symbols: int,
+    allow: dict[str, list[str]] | None = None,
+) -> tuple[int, dict[str, int]]:
+    """Panel combo_total must match walk_forward spend, including family caps.
+
+    Progress used to count every sweep as ``sweep_budget(max_combos, …)``.
+    That was honest only while every family shared the global cap. A live
+    ``strategy_max_combos.stoch_flip = 28800`` against a 2000 global cap
+    spends 14× on that family; the bar still reported 2000. Percentage
+    stayed consistent; wall-clock and the absolute number did not.
+    """
+    table = allow if isinstance(allow, dict) else STRATEGY_TIMEFRAMES
+    per_sweep: dict[str, int] = {}
+    total = 0
+    for fam in families:
+        cost = backtest.sweep_budget(
+            family_max_combos(opt_blob, fam, max_combos), refine_rounds)
+        per_sweep[fam] = cost
+        n_tf = sum(1 for tf in timeframes
+                   if strategy_allows_timeframe(fam, tf, table))
+        total += int(n_symbols) * n_tf * cost
+    return total, per_sweep
 
 
 def _ranked_finalists(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -300,18 +316,49 @@ class Optimizer:
         return bool(self._thread and self._thread.is_alive())
 
     def status(self) -> dict[str, Any]:
+        """Panel poll copy. Drops unread ``top`` / ``baseline`` / ``tried``.
+
+        Those blobs are most of /api/state while a search is mid-book
+        (Claude 27.08). renderOptJob only reads best / incumbent / keep_reason
+        / validated / holdout_retention. The live ``self.job`` keeps the
+        full rows for opt_runs.
+        """
         with self._lock:
-            return dict(self.job, busy=self.busy)
+            snap = dict(self.job, busy=self.busy)
+        rows = snap.get("results")
+        if not isinstance(rows, list):
+            return snap
+        slim: list[Any] = []
+        for raw in rows:
+            if not isinstance(raw, dict):
+                slim.append(raw)
+                continue
+            row = dict(raw)
+            row.pop("top", None)
+            row.pop("baseline", None)
+            row.pop("tried", None)
+            slim.append(row)
+        snap["results"] = slim
+        return snap
 
     def cancel(self) -> dict[str, Any]:
         self._cancel.set()
         running = False
+        snap: dict[str, Any] = {}
         with self._lock:
             running = bool(self.busy) or str((self.job or {}).get("state") or "") == "running"
+            if running:
+                snap = dict(self.job or {})
         if running:
             # Restart used to SIGTERM before _run noticed the event, so
             # last_opt_job stayed "running" with no OPT cancel line. Write
             # now; _run's finish overwrites the same cancelled state.
+            current = snap.get("current") or "?"
+            done = snap.get("combo_done")
+            total = snap.get("combo_total")
+            LOG.emit(
+                f"Optimizasyon yari da kesiliyor: {current} {done}/{total}",
+                "OPT")
             setter = getattr(self.store, "set_setting", None)
             if callable(setter):
                 getter = getattr(self.store, "get_setting", None)
@@ -319,7 +366,14 @@ class Optimizer:
                 if not isinstance(prev, dict):
                     prev = {}
                 setter("last_opt_job", {**prev, "state": "cancelled",
-                                        "finished_at": time.time()})
+                                        "finished_at": time.time(),
+                                        "current": snap.get("current") or "",
+                                        "combo_done": done,
+                                        "combo_total": total})
+            # Panel polls status() (self.job), not last_opt_job. Leave
+            # finished_at to _run so busy workers are still visible as
+            # cancelled-in-progress rather than a frozen "Calisiyor".
+            self._set(state="cancelled")
         return {"ok": True, "message": "Iptal istegi gonderildi."}
 
     def start(self, symbols: list[str] | None = None, apply_best: bool = True,
@@ -339,7 +393,7 @@ class Optimizer:
             # (JPN225 / SpotBrent / UK100) could never be re-scored after the
             # grid moved - the operator had to type every name. Disabled
             # symbols stay in targets; _finish_symbol will not apply or enable
-            # them. Weekly auto-reopt still queues by enabled name only.
+            # them. Operator start() with no name list still includes disabled.
             if symbols:
                 targets = [s for s in symbols if s in self.store.symbols]
             else:
@@ -385,7 +439,7 @@ class Optimizer:
                 tf_override = None
             # Same one-off door as timeframes. store.opt_params() re-appends
             # every shipped family, so a saved subset cannot actually restrict
-            # a sweep - and writing one would leave scheduled reopt stuck.
+            # a sweep - so a one-off subset is not persisted into opt_params.
             requested_fam = [str(s) for s in (strategies or [])]
             if requested_fam:
                 dropped_fam = [s for s in requested_fam if s not in STRATEGIES]
@@ -490,9 +544,9 @@ class Optimizer:
             or ["M5"]
         refine_rounds = int(params.get("refine_rounds", 2))
         shared = {k: v for k, v in (params.get("grid") or {}).items() if isinstance(v, list) and v}
-        families = [s for s in (fam_override or params.get("strategies") or ["t3_stoch"])
+        families = [s for s in (fam_override or params.get("strategies") or ["stoch_flip"])
                     if s in STRATEGIES] \
-            or ["t3_stoch"]
+            or ["stoch_flip"]
         family_grids = params.get("strategy_grids") or {}
         # One sweep per family: its own parameters on top of the shared risk
         # grid. There used to be a second axis here - an ``exit_styles`` block
@@ -537,7 +591,7 @@ class Optimizer:
         with self._lock:
             results = list(self.job.get("results") or [])
             src = str(self.job.get("source") or "manual")
-            tag = "Zamanlanmis optimizasyon" if src == "scheduled" else "Optimizasyon"
+            tag = "Optimizasyon"
         setter = getattr(self.store, "set_setting", None)
         if callable(setter):
             getter = getattr(self.store, "get_setting", None)
@@ -761,9 +815,7 @@ class Optimizer:
             combo_seed = int(opt_blob.get("combo_seed", 7))
         except (TypeError, ValueError):
             combo_seed = 7
-        risk_dollar = 1.0
-        if str(getattr(cfg, "lot_mode", "") or "") == "risk":
-            risk_dollar = max(float(getattr(cfg, "risk_percent", 0) or 0), 0.01)
+        risk_dollar = max(float(getattr(cfg, "risk_percent", 0) or 0), 0.01)
 
         # Timeframe and strategy family are both search dimensions; each pairing is
         # judged on its own held-out slice so they compete on equal terms.
@@ -880,23 +932,30 @@ class Optimizer:
 
         Every (symbol, timeframe, family) sweep is independent, so they all go
         into a single queue rather than one pool per symbol. That matters for
-        wall clock in three ways: the pool is spawned once instead of once per
-        symbol; sweep durations differ by two orders of magnitude (an M5 pullback
+        wall clock: the pool is spawned once instead of once per symbol, and
+        sweep durations differ by two orders of magnitude (an M5 pullback
         search against an H1 one), so draining one symbol at a time left every
         worker idling on that symbol's slowest sweep while the next symbol's
-        short ones waited; and bar fetching - which must stay in this thread,
-        behind the MT5 lock - now overlaps the search instead of running as a
-        serial prologue in front of it.
+        short ones waited. Bar fetching stays in this thread behind the MT5
+        lock — all of it, before any sweep — so the live cycle is not sharing
+        copy_rates for the whole first-symbol duration.
         """
         self._bar_snap = {}
         self._ensure_sweep_bars_dir()
         plans: dict[str, dict[str, Any]] = {}
         allow = tf_allow if isinstance(tf_allow, dict) else STRATEGY_TIMEFRAMES
-        # Count only legal family×TF pairs so the progress bar is honest.
-        legal = sum(1 for v in variants for tf in timeframes
-                    if strategy_allows_timeframe(v["strategy"], tf, allow))
-        total_sweeps = len(targets) * max(1, legal)
-        done_sweeps = 0
+        opt_blob: dict[str, Any] = {}
+        if hasattr(self.store, "opt_params"):
+            try:
+                opt_blob = self.store.opt_params() or {}
+            except Exception:
+                opt_blob = {}
+        families = [v["strategy"] for v in variants]
+        combo_total, sweep_cost = run_combo_budget(
+            opt_blob, families, timeframes, max_combos, refine_rounds,
+            len(targets), allow)
+        self._set(combo_total=combo_total)
+        combo_done = 0
         finished = 0
 
         def close_out(plan: dict[str, Any]) -> None:
@@ -910,21 +969,17 @@ class Optimizer:
 
         def note(job: dict[str, Any], outcome: dict[str, Any]) -> None:
             """Record one finished sweep, closing the symbol out when it is the last."""
-            nonlocal done_sweeps
+            nonlocal combo_done
             plan = plans[job["symbol"]]
             plan["attempts"].append(outcome)
             plan["outstanding"] -= 1
-            done_sweeps += 1
+            fam = str(job.get("strategy") or "")
+            combo_done += sweep_cost.get(
+                fam, backtest.sweep_budget(max_combos, refine_rounds))
             best = max((a["best"]["score"] for p in plans.values()
                         for a in p["attempts"] if a.get("ok")), default=None)
             active = sorted(s for s, p in plans.items() if p["outstanding"] > 0)
-            # Per-sweep cost is the coarse pass PLUS each refine round, not
-            # max_combos alone - see backtest.sweep_budget(). Reporting the
-            # bare max_combos understated the panel's combo total fourfold at
-            # the shipped refine_rounds=3.
-            per_sweep = backtest.sweep_budget(max_combos, refine_rounds)
-            self._set(combo_done=done_sweeps * per_sweep,
-                      combo_total=max(total_sweeps, done_sweeps) * per_sweep,
+            self._set(combo_done=combo_done, combo_total=combo_total,
                       best_score=best, current=", ".join(active[:3]))
             if plan["outstanding"] <= 0:
                 close_out(plan)
@@ -957,42 +1012,92 @@ class Optimizer:
             # Single-process fallback: same work, same results, one core. A symbol
             # already planned may still owe sweeps the broken pool never returned,
             # so those are re-run here rather than skipped along with the symbol.
+            queued: list[dict[str, Any]] = []
             for symbol in targets:
                 if self._cancel.is_set():
                     return
                 plan = plans.get(symbol)
                 if plan is None:
-                    self._set(current=symbol)
-                    jobs = plan_next(symbol)
-                    plan = plans.get(symbol)
+                    self._set(current=f"veri: {symbol}")
+                    queued.extend(plan_next(symbol))
                 elif plan["outstanding"] > 0:
                     self._set(current=symbol)
                     measured = {(a.get("timeframe"), a.get("strategy"))
                                 for a in plan["attempts"]}
-                    jobs = [j for j in plan["jobs"]
-                            if (j["timeframe"], j["strategy"]) not in measured]
-                else:
-                    continue
-                for job in jobs:
-                    if self._cancel.is_set():
-                        return
-                    note(job, _sweep_worker(job))
+                    queued.extend(
+                        j for j in plan["jobs"]
+                        if (j["timeframe"], j["strategy"]) not in measured)
+            if queued:
+                LOG.emit(
+                    f"Barlar indirildi, tarama basliyor: {len(queued)} tarama",
+                    "OPT")
+            for job in queued:
+                if self._cancel.is_set():
+                    return
+                note(job, _sweep_worker(job))
         finally:
             self._clear_sweep_bars()
 
-    def _search_parallel(self, targets: list[str], plan_next, note, workers: int) -> None:
-        """Feed every symbol's sweeps into one pool, fetching bars as it goes."""
-        with ProcessPoolExecutor(max_workers=workers) as pool:
-            inflight: dict[Any, dict[str, Any]] = {}
+    def _abandon_search_pool(self, pool: Any, inflight: dict[Any, Any]) -> None:
+        """Drop in-flight sweeps. Child processes cannot see ``_cancel``.
 
-            def harvest(block: bool) -> bool:
+        ``future.cancel()`` only skips work that has not started.
+        ``ProcessPoolExecutor.__exit__`` waits for the rest, which is why
+        Iptal looked dead: the event was set and apply() of later symbols
+        was skipped, but ``job.state`` stayed running until every worker
+        finished its current walk-forward.
+        """
+        for future in list(inflight):
+            try:
+                future.cancel()
+            except Exception:
+                pass
+        inflight.clear()
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:
+            pool.shutdown(wait=False)
+        except Exception:
+            pass
+        procs = getattr(pool, "_processes", None) or {}
+        if isinstance(procs, dict):
+            procs = procs.values()
+        for proc in list(procs):
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+    def _search_parallel(self, targets: list[str], plan_next, note, workers: int) -> None:
+        """Fetch every symbol's bars, then run the sweeps CPU-only."""
+        queued: list[dict[str, Any]] = []
+        for symbol in targets:
+            if self._cancel.is_set():
+                return
+            # Bars stay in this thread so MT5 stays behind its single lock.
+            # The pool does not start until every window is on disk.
+            self._set(current=f"veri: {symbol}")
+            queued.extend(plan_next(symbol))
+        if self._cancel.is_set():
+            return
+        LOG.emit(
+            f"Barlar indirildi, tarama basliyor: {len(queued)} tarama, "
+            f"{len(targets)} sembol",
+            "OPT")
+        pool = ProcessPoolExecutor(max_workers=workers)
+        inflight: dict[Any, dict[str, Any]] = {}
+        abandoned = False
+        try:
+            def harvest() -> bool:
                 """Collect finished sweeps; False once a cancel has been seen."""
+                if self._cancel.is_set():
+                    return False
                 if not inflight:
+                    return True
+                done, _ = futures_wait(
+                    list(inflight), timeout=0.5, return_when=FIRST_COMPLETED)
+                if not done:
                     return not self._cancel.is_set()
-                if block:
-                    done, _ = futures_wait(list(inflight), return_when=FIRST_COMPLETED)
-                else:
-                    done = {f for f in inflight if f.done()}
                 for future in list(done):
                     job = inflight.pop(future)
                     try:
@@ -1003,26 +1108,22 @@ class Optimizer:
                         note(job, {"timeframe": job["timeframe"], "strategy": job["strategy"],
                                    "order": job["order"], "ok": False,
                                    "error": f"{type(exc).__name__}: {exc}"})
-                if self._cancel.is_set():
-                    for future in inflight:
-                        future.cancel()
-                    inflight.clear()
-                    return False
-                return True
+                return not self._cancel.is_set()
 
-            for symbol in targets:
+            for job in queued:
                 if self._cancel.is_set():
+                    self._abandon_search_pool(pool, inflight)
+                    abandoned = True
                     return
-                # Bars are fetched here, in this thread, so MT5 stays behind its
-                # single lock; the workers already running keep the cores busy.
-                for job in plan_next(symbol):
-                    inflight[pool.submit(_sweep_worker, job)] = job
-                if not harvest(block=False):
-                    return
-
+                inflight[pool.submit(_sweep_worker, job)] = job
             while inflight:
-                if not harvest(block=True):
+                if not harvest():
+                    self._abandon_search_pool(pool, inflight)
+                    abandoned = True
                     return
+        finally:
+            if not abandoned:
+                pool.shutdown(wait=True)
 
     def _finish_symbol(self, plan: dict[str, Any], apply_best: bool) -> dict[str, Any]:
         """Pick the winning sweep for one symbol, gate it, store it, log it."""
@@ -1039,8 +1140,6 @@ class Optimizer:
             {"timeframe": a["timeframe"], "strategy": a.get("strategy", "?"),
              "ok": bool(a.get("ok")), "validated": bool(a.get("validated")),
              "score": a["best"]["score"] if a.get("ok") else None,
-             "validation_net_r": a["best"]["validation"]["net_r"] if a.get("ok") else None,
-             "holdout_net_r": a["best"]["holdout"]["net_r"] if a.get("ok") else None,
              "error": a.get("error", "")}
             for a in attempts
         ]
@@ -1297,7 +1396,7 @@ class Optimizer:
         once claimed the search had picked a family the apply path would
         have refused. The product's stated priority is scalping, swing is
         the fallback when scalping genuinely does not validate for a
-        symbol - so a scalp family (micro_rev/burst) among the near-tied peers
+        symbol - so a scalp family (burst) among the near-tied peers
         wins over an equally-valid swing one; it never wins over a swing
         candidate that is not actually tied on validation.
         """
@@ -1387,9 +1486,9 @@ class Optimizer:
             return "secim segmentleri arasinda tutarsiz"
         # A configuration gets the settling time the system already says it
         # should get. ``reopt_min_age_hours`` states the policy and
-        # supervisor._maybe_reoptimize enforces it - a symbol younger than that
-        # is never queued, decay path included. This route never checked it, so
-        # a full scan replaced configurations the auto route would have left
+        # ``reject_reason`` enforces it on apply. Calendar auto-queue is gone
+        # (quarantine search only). This route never checked age, so a
+        # full scan replaced configurations the auto route would have left
         # alone, and that is where the churn came from: across 495 applies, the
         # symbols that made money had settled on one config (SpotBrent's last
         # three applies all mtf_pullback/H1, US30's all dual_t3/M15) while the
@@ -1528,6 +1627,27 @@ class Optimizer:
         if cfg is None:
             return True
         summary = getattr(cfg, "opt_summary", None) or {}
+        flag = getattr(cfg, "validated", None)
+        if flag is None:
+            raw = summary.get("validated")
+            flag = None if raw is None else bool(raw)
+        if flag is False:
+            # Unvalidated stamp is not a bar (NAS100 GAP-5 +38 vs live PF
+            # 0.50). Fresh same-window replay still counts if it pays
+            # (GER40, same campaign, actually profitable).
+            fresh = self._fresh_incumbent_holdout(cfg)
+            if fresh is None:
+                return True
+            old_score = float(fresh.get("score", 0.0) or 0.0)
+            if old_score <= 0.0:
+                return True
+            new_score = float(hold.get("score", 0.0) or 0.0)
+            if new_score >= old_score:
+                return True
+            LOG.emit(f"{cfg.symbol}: yeni aday mevcut ayardan zayif "
+                     f"(test skoru {new_score:.2f} < {old_score:.2f}), uygulanmadi.",
+                     "OPT", cfg.symbol)
+            return False
         previous = summary.get("holdout") or {}
         age_days = (time.time() - float(getattr(cfg, "opt_updated_at", 0.0) or 0.0)) / 86400.0
         if not previous or age_days > self.INCUMBENT_GUARD_DAYS:
@@ -1783,98 +1903,6 @@ class Optimizer:
             return "uygulama damgasi eksik: validated"
         return ""
 
-    def restamp_from_replay(self, symbol: str, detail: dict[str, Any] | None,
-                            source: str = "") -> dict[str, Any]:
-        """Refresh the stamp to the config the replay actually ran.
-
-        GAP-5 rewrote ``opt_summary.holdout`` from a live-row replay and left
-        ``params`` on the previous apply. The stamp then described a config
-        that had not been measured. ``detail['params']`` is that leftover —
-        the live row is what was simulated, so the stamp copies
-        ``stamp_fields`` off the live row, not out of detail. Unread OPT
-        axes stay off the stamp (STAMP-1b).
-
-        This is not ``apply``. Live exits stay put.
-        """
-        cfg = self.store.symbols.get(symbol)
-        if cfg is None:
-            return {"ok": False, "error": "sembol yok"}
-        # Narrowed here rather than with ``(detail or {})`` so the reader and
-        # the checker both see that everything below has a dict.
-        if detail is None:
-            return {"ok": False, "error": "holdout yok"}
-        hold = detail.get("holdout")
-        if not isinstance(hold, dict) or not hold:
-            return {"ok": False, "error": "holdout yok"}
-        live_params = {
-            k: getattr(cfg, k) for k in stamp_fields(cfg.strategy) if hasattr(cfg, k)
-        }
-        summary = dict(getattr(cfg, "opt_summary", None) or {})
-        summary["holdout"] = dict(hold)
-        if detail.get("holdout_days") is not None:
-            summary["holdout_days"] = float(detail["holdout_days"])
-        if "validated" in detail:
-            summary["validated"] = bool(detail["validated"])
-        summary["params"] = live_params
-        if source:
-            summary["stamp_source"] = source
-        patch: dict[str, Any] = {"opt_summary": summary}
-        if "validated" in detail:
-            patch["validated"] = bool(detail["validated"])
-        updated = self.store.update_symbol(
-            symbol, patch, source=source or "opt restamp")
-        return {"ok": updated is not None, "symbol": symbol}
-
-    def stamp_drift(self) -> dict[str, Any]:
-        """Live row vs stamp params, only on fields that can change behaviour.
-
-        ``max_spread_atr`` matching ``opt_summary.spread_recalibrated_to`` is
-        expected (apply then calibrates). The same gap with no record is
-        unexplained — GER40 session and book max_positions were caught by
-        hand; this is that check, standing.
-        """
-        rows: list[dict[str, Any]] = []
-        unexpected = 0
-        for cfg in list(self.store.symbols.values()):
-            allow = stamp_fields(cfg.strategy)
-            stamp = ((getattr(cfg, "opt_summary", None) or {}).get("params") or {})
-            if not isinstance(stamp, dict) or not stamp:
-                rows.append({
-                    "symbol": cfg.symbol,
-                    "family": cfg.strategy,
-                    "unexpected": [],
-                    "calibrated": [],
-                    "note": "damga params yok",
-                })
-                continue
-            summary = getattr(cfg, "opt_summary", None) or {}
-            calib = summary.get("spread_recalibrated_to")
-            diffs: list[dict[str, Any]] = []
-            calibrated: list[dict[str, Any]] = []
-            for key in sorted(allow):
-                if not hasattr(cfg, key):
-                    continue
-                live = getattr(cfg, key)
-                if key not in stamp:
-                    continue
-                stamped = stamp[key]
-                if _stamp_values_match(live, stamped):
-                    continue
-                item = {"field": key, "stamp": stamped, "live": live}
-                if (key == "max_spread_atr" and calib is not None
-                        and _stamp_values_match(live, calib)):
-                    calibrated.append(item)
-                else:
-                    diffs.append(item)
-            unexpected += len(diffs)
-            rows.append({
-                "symbol": cfg.symbol,
-                "family": cfg.strategy,
-                "unexpected": diffs,
-                "calibrated": calibrated,
-            })
-        return {"rows": rows, "unexpected": unexpected}
-
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,
               timeframe: str | None = None, strategy: str | None = None) -> dict[str, Any]:
@@ -2114,11 +2142,12 @@ class Optimizer:
                         # opt_summary.params otherwise claimed the held-back
                         # exit values were live immediately - drop them from
                         # the reported "applied" set and flag what's pending
-                        # so the UI can show it honestly.
+                        # so the UI can show it honestly. The log line below
+                        # names the held-back fields; a duplicate payload key
+                        # had no panel reader.
                         summary_params = {k: v for k, v in patch["opt_summary"].get("params", {}).items()
                                           if k not in EXIT_RISK_FIELDS}
-                        patch["opt_summary"] = {**patch["opt_summary"], "params": summary_params,
-                                                "pending_exit_fields": sorted(held_back)}
+                        patch["opt_summary"] = {**patch["opt_summary"], "params": summary_params}
                     LOG.emit(f"{symbol}: {len(open_here)} acik pozisyon var{scan_note}, "
                              f"cikis/risk parametreleri ({', '.join(sorted(held_back))}) "
                              f"pozisyon kapanana kadar bekletildi.", "OPT", symbol)

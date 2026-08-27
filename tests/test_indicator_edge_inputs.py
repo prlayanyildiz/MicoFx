@@ -113,8 +113,12 @@ def test_the_public_surface_is_what_this_file_thinks_it_is():
     Twenty-four since close_location_value went: nothing called it, and burst -
     the one family that wants a close-location reading - computes its own
     inline. Two copies of one formula, and the exported one was the dead half.
+
+    Twenty-three since ``wavetrend`` went with ``wavetrend_flip`` (27.08).
+    Checked before lowering the bound: no caller left in ``micofx/`` - the
+    only remaining mention is the retirement note in ``models.py``.
     """
-    assert len(PUBLIC) >= 24, PUBLIC
+    assert len(PUBLIC) >= 23, PUBLIC
     for expected in ("atr", "rsi", "adx", "wilder", "true_range", "supertrend"):
         assert expected in PUBLIC
 

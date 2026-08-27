@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import math
-import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
@@ -348,20 +347,6 @@ def flatten_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False,
     return mask
 
 
-def run(cache: IndicatorCache, open_: np.ndarray, spread_pts: np.ndarray, point: float,
-        p: Params, tradable: np.ndarray | None = None, commission_price: float = 0.0) -> Result:
-    """Bar-replay of the live rules, scored in R multiples.
-
-    Conventions that keep the result honest rather than flattering:
-      * a signal on a closed bar is filled at the *next* bar's open;
-      * the full spread and round-turn commission are charged every trade;
-      * when a bar's range contains both stop and target, the stop wins;
-      * the trailing stop only advances on bar closes, never intrabar.
-    """
-    return simulate(cache, compute(cache, p), open_, spread_pts, point, p, tradable,
-                    commission_price=commission_price)
-
-
 def stop_floor_const(min_stop: float | None, point: float) -> float:
     """Broker stop floor used when the caller has a single number, not a series.
 
@@ -441,19 +426,14 @@ def stop_fill_price(is_buy: bool, sl: float, bar_open: float,
 
 
 def max_open_from_cfg(cfg) -> int:
-    """Concurrent slots paper must score the same way live caps them.
+    """Search still scores one open ticket. Live stacking is the risk cap.
 
-    ``simulate`` defaults to 1. ``walk_forward`` and the charged holdout used
-    to omit the argument, so a config with ``max_positions=2`` was still
-    scored as 1 - the number that decided whether stacking was even worth
-    turning on. At ``max_positions=1`` this still returns 1, and every
-    existing search result stays bit-identical.
+    Operator 27.08 dropped per-symbol ``max_positions``. Leftover DB values
+    must not re-open a stacking search the holdout never validated. Live
+    ``can_open`` stacks same-side tickets until concurrent 1R / total /
+    margin bind; paper stays one-at-a-time so existing scores stay honest.
     """
-    try:
-        n = int(getattr(cfg, "max_positions", 1) or 1)
-    except (TypeError, ValueError):
-        n = 1
-    return max(1, n)
+    return 1
 
 
 def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarray,
@@ -467,8 +447,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
              block_reverse: bool = False,
              reverse_on_signal: bool = False,
              breakeven_at_r: float | None = None,
-             mae_close_bars: int = 0,
-             mae_close_r: float = 0.0,
              trigger_pad: list[float] | np.ndarray | None = None) -> Result:
     """Replay one bar window using an already-computed signal set.
 
@@ -495,11 +473,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     is for the measurement tests. Zero on the config is off: the trail is
     then the only way the stop crosses entry. Search does not sweep this
     (not an OPT_FIELD; BE-3 unpaid).
-
-    ``mae_close_bars`` / ``mae_close_r`` are LOSS-3. Zero bars is live: MAE
-    is not an exit. A positive bar count closes the trade at that bar's
-    close if MAE through those bars exceeds the R threshold. Search and
-    walk_forward never pass them.
 
     ``trigger_pad`` is the short-stop ASK pad in price units, already
     imputed × point. ``None`` (direct ``simulate`` / tests) builds it here
@@ -582,8 +555,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         breakeven_at_r = float(getattr(p, "breakeven_at_r", 0.0) or 0.0)
     else:
         breakeven_at_r = float(breakeven_at_r or 0.0)
-    mae_close_bars = max(0, int(mae_close_bars or 0))
-    mae_close_r = float(mae_close_r or 0.0)
 
     def _cooldown_bars() -> int:
         cooldown_bars = 0
@@ -696,25 +667,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             return close[j] + (0.0 if is_buy else s), "flatten"
         return None, None
 
-    def _mae_tick(is_buy, entry, sl_dist, j0, j, mae_px):
-        # LOSS-3: accumulate MAE; fire only on the Nth bar, after stop/flatten.
-        if mae_close_bars <= 0 or sl_dist <= 0:
-            return mae_px, False
-        bar_high, bar_low = high[j], low[j]
-        if is_buy:
-            adverse = entry - bar_low
-        else:
-            adverse = bar_high + float(trigger_pad[j]) - entry
-        if adverse > mae_px:
-            mae_px = adverse
-        held = j - j0 + 1
-        if held == mae_close_bars and (mae_px / sl_dist) > mae_close_r:
-            return mae_px, True
-        return mae_px, False
-
     def _mfe_tick(is_buy, entry, mfe_px, j):
-        # Same ASK convention as _mae_tick / stop_fill_price: a short covers
-        # on bar_low + pad. Using the print low inflated short MFE by one
+        # Same ASK convention as stop_fill_price: a short covers on
+        # bar_low + pad. Using the print low inflated short MFE by one
         # spread and made capture look worse on the sell side.
         bar_high, bar_low = high[j], low[j]
         if is_buy:
@@ -738,20 +693,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                                   banked=pos.get("banked", 0.0),
                                   weight=pos.get("weight", 1.0),
                                   mfe_px=pos.get("mfe_px", 0.0))
-                    continue
-                mae_px, mae_hit = _mae_tick(
-                    pos["is_buy"], pos["entry"], pos["sl_dist"],
-                    pos["j0"], j, pos.get("mae_px", 0.0))
-                pos["mae_px"] = mae_px
-                if mae_hit:
-                    _record_trade(
-                        pos["is_buy"], pos["entry"], pos["sl_dist"],
-                        pos["s"], pos["j0"], j,
-                        close[j] + (0.0 if pos["is_buy"] else pos["s"]),
-                        "mae",
-                        banked=pos.get("banked", 0.0),
-                        weight=pos.get("weight", 1.0),
-                        mfe_px=pos.get("mfe_px", 0.0))
                     continue
                 if j >= n - 1:
                     _record_trade(pos["is_buy"], pos["entry"], pos["sl_dist"],
@@ -850,7 +791,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 opens.append({
                     "is_buy": is_buy, "entry": entry, "sl": sl,
                     "sl_dist": sl_dist, "trailing": False, "j0": j0, "s": s,
-                    "mae_px": 0.0, "mfe_px": max(0.0, mfe0),
+                    "mfe_px": max(0.0, mfe0),
                     "scaled": False, "weight": 1.0, "banked": 0.0,
                 })
                 cd = _cooldown_bars()
@@ -907,7 +848,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # original risk being hit, a "trail" is giving back part of a move that
         # had already gone our way.
         trailing = False
-        mae_px = 0.0
         mfe_px = 0.0
         scaled = False
         weight = 1.0
@@ -940,13 +880,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 # same ordering here (checked immediately after the stop).
                 exit_price = close[j] + (0.0 if is_buy else s)
                 reason = "flatten"
-                exit_bar = j
-                break
-
-            mae_px, mae_hit = _mae_tick(is_buy, entry, sl_dist, j0, j, mae_px)
-            if mae_hit:
-                exit_price = close[j] + (0.0 if is_buy else s)
-                reason = "mae"
                 exit_bar = j
                 break
 
@@ -992,7 +925,6 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         j0 = j
                         exit_price = None
                         reason = "time"
-                        mae_px = 0.0
                         mfe_px = 0.0
                         scaled = False
                         weight = 1.0
@@ -1396,7 +1328,6 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
     rejected_inconsistent = 0
     rejected_costly = 0
     evaluated = 0
-    screened = 0
     cancelled = False
 
     def sweep(batch: list[tuple[int, ...]], offset: int, budget: int,
@@ -1408,7 +1339,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         what is measured or recorded - only how often the indicator stack is
         rebuilt.
         """
-        nonlocal rejected_inconsistent, rejected_costly, evaluated, screened
+        nonlocal rejected_inconsistent, rejected_costly, evaluated
         groups: dict[tuple, list[tuple[tuple[int, ...], dict[str, Any], Params]]] = {}
         for idx in batch:
             if idx in pool:
@@ -1433,7 +1364,6 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
                         # spot for the plateau blend and move on without the
                         # rest of the simulation.
                         pool[idx] = 0.0
-                        screened += 1
                         if on_progress and i % 40 == 0:
                             on_progress(offset + i, budget, max(raw.values(), default=None))
                         continue
@@ -1545,8 +1475,6 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         top.append({
             "params": detail[idx]["params"],
             "score": round(blended[idx], 3),
-            "raw_score": raw[idx],
-            "plateau_neighbours": neighbours.get(idx, 0),
             "positive_ratio": detail[idx]["positive_ratio"],
             "min_positive_ratio": float(min_positive_ratio),
             "selection": detail[idx]["pooled"],
@@ -1575,10 +1503,7 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         "baseline": baseline,
         "validated": validated,
         "combos": evaluated,
-        "simulated": len(pool),
-        "screened_out": screened,
         "candidates": len(raw),
-        "grounded": len(grounded),
         "rejected_inconsistent": rejected_inconsistent,
         "rejected_costly": rejected_costly,
         "bars": n,
@@ -1591,13 +1516,8 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         "min_positive_ratio": float(min_positive_ratio),
         "selection_metric": (
             selection_metric if selection_metric in SELECTION_METRICS else "score"),
-        "holdout_bars": holdout[1] - holdout[0],
         "holdout_days": round((int(bars.time[-1]) - int(bars.time[holdout[0]])) / 86400.0, 1),
         "validation_days": validation_days,
-        "span_days": round((int(bars.time[-1]) - int(bars.time[0])) / 86400.0, 1),
-        "from": int(bars.time[0]),
-        "to": int(bars.time[-1]),
-        "finished_at": time.time(),
         "grid_total": grid_total,
         "max_combos": int(max_combos),
         "coverage": coverage,

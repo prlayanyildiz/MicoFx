@@ -8,7 +8,10 @@ replace the counters, and it must not be read by the entry path.
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -121,8 +124,9 @@ def test_evaluate_needles_the_two_silent_halts():
 def test_a_retry_does_not_rewrite_the_events_blob():
     """The 222 KB ring must not hit disk on every 2s poll.
 
-    Counters used to (1.3 KB). They now wait 45s unless a new episode
-    marks the ring dirty, which is the write that must still be immediate.
+    Counters and new episodes both wait 45s. A burst of blocked bars
+    used to rewrite the whole blob every cycle because events_dirty
+    skipped the debounce.
     """
     store = _Store()
     writes: list[str] = []
@@ -148,6 +152,10 @@ def test_a_retry_does_not_rewrite_the_events_blob():
     writes.clear()
     eng._tally_entry("X", "spread", bar_key=(2, 0))
     eng._flush_entry_blocks()
+    assert "entry_block_events" not in writes, "new episode skipped the debounce"
+
+    eng._entry_blocks_flushed_at = 0.0
+    eng._flush_entry_blocks()
     assert writes.count("entry_block_events") == 1
 
 
@@ -156,3 +164,33 @@ def test_the_entry_path_does_not_read_the_event_ring():
     try_entry = src.split("def _try_entry(", 1)[1].split("\n    def ", 1)[0]
     assert "_entry_events" not in try_entry
     assert "entry_block_events" not in try_entry
+
+
+def test_shutdown_force_flushes_the_event_ring():
+    """F-1 made a clean restart lose up to 45s of observation rows.
+
+    execution.flush() already runs here; the ring must too. Flush after
+    join so the last in-flight cycle is not silenced by a fresh 45s window.
+    """
+    src = Path("micofx/engine.py").read_text(encoding="utf-8")
+    body = src.split("def shutdown(", 1)[1].split("\n    def ", 1)[0]
+    assert "self._flush_entry_blocks(force=True)" in body
+    assert "self.execution.flush()" in body
+    assert body.index("thread.join") < body.index("self.execution.flush()")
+    assert body.index("thread.join") < body.index(
+        "self._flush_entry_blocks(force=True)")
+
+    store = _Store()
+    eng = _engine(store)
+    eng._tally_entry("X", "spread", bar_key=(1, 0))
+    eng._flush_entry_blocks()
+    store.saved.clear()
+    eng._entry_blocks_flushed_at = time.time()
+    eng._tally_entry("X", "spread", bar_key=(2, 0))
+    eng.stop = lambda close_positions=None: None
+    eng.execution = SimpleNamespace(flush=lambda: None)
+    eng._stop = threading.Event()
+    eng._thread = None
+    Engine.shutdown(eng)
+    assert "entry_block_events" in store.saved
+    assert [e["bar_key"][0] for e in store.saved["entry_block_events"]] == [1, 2]

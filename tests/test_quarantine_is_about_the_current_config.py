@@ -1,21 +1,12 @@
-"""Quarantine judges the config that is running, and must have a way out.
+"""Quarantine judges the config that is running.
 
-The losing-streak breaker is what makes a low ``quarantine_losses`` usable at
-all. Before this, the loop the operator asked for could not close:
+The losing-streak breaker is what makes a low ``quarantine_losses`` usable.
+A search is operator-started; this file only keeps the sentence honest:
 
-    N losses -> quarantine -> re-optimise -> new config -> release
-
-Three things blocked it, and all three are here:
-
-1. The streak was counted over the whole 30-day window, so a freshly searched
-   config inherited the losses of the one it replaced and was re-quarantined on
-   the next review before a single trade had tested it.
-2. ``_queue_reoptimization`` skipped any symbol whose config was younger than
-   ``reopt_min_age_hours`` (48h). A symbol that broke a day after its last apply
-   sat quarantined with no attempt to fix it - the age bar is about not churning
-   a merely OLD config, but a quarantine is the breaker having already fired.
-3. Nothing lifted the quarantine when a new config landed: ``quarantine_until``
-   ran the full ``quarantine_hours`` regardless.
+1. The streak is counted on the current config, so a freshly applied
+   config does not inherit the previous one's losses.
+2. A new ``opt_updated_at`` after the quarantine stamp lifts the clock.
+   The same config serves its sentence.
 
 Deliberately narrow: only the STREAK is scoped to the current config. PF, the
 trade count and the watch bar keep their full window, so a symbol cannot
@@ -56,7 +47,6 @@ def _sup() -> Supervisor:
     s.store = _SettingsStore()
     s.verdicts = {}
     s.notes = []
-    s.reopt_queue = []
     s.risk_scale = 1.0
     s.optimizer = None
     return s
@@ -159,13 +149,13 @@ class TestQuarantineReleasesWhenTheConfigIsReplaced:
         assert v.quarantine_until > NOW
 
 
-class TestTheBreakerCanReachAReoptimisation:
+class TestQuarantineStartsASearch:
     def _wire(self, sup, cfg, verdict, cfgs):
         class _Opt:
             busy = False
             started: list = []
 
-            def start(self, symbols, apply_best=True):
+            def start(self, symbols, apply_best=True, **_kw):
                 type(self).started = list(symbols)
 
         sup.store.symbols = {cfg.symbol: cfg}
@@ -174,26 +164,23 @@ class TestTheBreakerCanReachAReoptimisation:
         sup._queue_reoptimization(cfgs)
         return _Opt
 
-    def test_a_quarantine_is_not_blocked_by_the_config_age_bar(self):
-        """The gap: a symbol that broke a day after its apply had no way out."""
+    def test_a_quarantine_starts_a_search(self):
+        """A breaker that already fired is not left sitting until the operator."""
         sup = _sup()
         cfg = SymbolConfig(symbol="NAS100", opt_updated_at=NOW - 1 * HOUR, enabled=True)
         v = SymbolVerdict(symbol="NAS100", state="quarantine")
 
         opt = self._wire(sup, cfg, v, _cfgs(reopt_min_age_hours=48))
 
-        assert sup.reopt_queue == ["NAS100"]
         assert opt.started == ["NAS100"]
 
-    def test_a_merely_young_healthy_config_is_still_left_alone(self):
-        """The age bar must keep doing its job for everything that is not broken."""
+    def test_a_decayed_watch_does_not_start_a_search(self):
         sup = _sup()
         cfg = SymbolConfig(symbol="NAS100", opt_updated_at=NOW - 1 * HOUR, enabled=True)
         v = SymbolVerdict(symbol="NAS100", state="watch", expected_r=0.5)
 
         opt = self._wire(sup, cfg, v, _cfgs(reopt_min_age_hours=48))
 
-        assert sup.reopt_queue == []
         assert opt.started == []
 
     def test_the_retry_cooldown_still_stops_a_tight_loop(self):
@@ -202,10 +189,32 @@ class TestTheBreakerCanReachAReoptimisation:
         v = SymbolVerdict(symbol="NAS100", state="quarantine",
                           last_reopt_attempt=NOW - 60)
 
-        self._wire(sup, cfg, v, _cfgs(reopt_min_age_hours=48,
-                                      reopt_retry_cooldown_hours=1.0))
+        opt = self._wire(sup, cfg, v, _cfgs(reopt_retry_cooldown_hours=1.0))
 
-        assert sup.reopt_queue == [], "a quarantine must not re-search every review"
+        assert opt.started == [], "a quarantine must not re-search every review"
+
+    def test_a_failed_start_does_not_burn_the_retry_cooldown(self):
+        """last_reopt_attempt used to be stamped before start() ran.
+
+        A busy race or empty-target refuse then silenced the breaker for the
+        whole reopt_retry_cooldown_hours even though no search began.
+        """
+        sup = _sup()
+        cfg = SymbolConfig(symbol="NAS100", opt_updated_at=NOW - 1 * HOUR, enabled=True)
+        v = SymbolVerdict(symbol="NAS100", state="quarantine", last_reopt_attempt=0.0)
+
+        class _Opt:
+            busy = False
+
+            def start(self, symbols, apply_best=True, **_kw):
+                return {"ok": False, "error": "Optimizasyon zaten calisiyor."}
+
+        sup.store.symbols = {cfg.symbol: cfg}
+        sup.optimizer = _Opt()
+        sup.verdicts = {cfg.symbol: v}
+        sup._queue_reoptimization(_cfgs(reopt_retry_cooldown_hours=1.0))
+
+        assert v.last_reopt_attempt == 0.0
 
 
 def test_the_option_is_reachable_from_the_panel():
@@ -214,7 +223,55 @@ def test_the_option_is_reachable_from_the_panel():
               / "micofx" / "web" / "static" / "app.js").read_text(encoding="utf-8")
     assert '"quarantine_losses"' in app_js
     assert '"quarantine_hours"' in app_js
-    assert '"auto_reoptimize"' in app_js
+    assert '"auto_reoptimize"' not in app_js
+
+
+def test_ok_reason_names_both_windows_when_they_differ():
+    """Live NAS100: pill says ok, reason says PF 0.54, decision used 37 trades.
+
+    After a release the watch/quarantine bars read the short window; the
+    panel PF is still the 30-day book. Same label, two quantities.
+    """
+    sup = _sup()
+    cleared = NOW - 3 * HOUR
+    cfg = SymbolConfig(symbol="NAS100")
+    sup.verdicts["NAS100"] = SymbolVerdict(
+        symbol="NAS100", history_cleared_at=cleared)
+    old = [_deal(cleared - 600 * i, -5.0) for i in range(80, 0, -1)]
+    new = [_deal(cleared + 60 * i, 2.0 if i % 3 == 0 else -1.0)
+           for i in range(1, 38)]
+    v, _ = _judge(sup, cfg, old + new, _cfgs(
+        min_trades=80, watch_min_trades=80, quarantine_losses=11,
+        quarantine_pf=0.8, watch_pf=1.0))
+    assert v.state == "ok"
+    assert "(30g)" in v.reason, v.reason
+    assert f"karar {v.judged_trades} islem" in v.reason, v.reason
+    assert f"PF {v.judged_pf:.2f}" in v.reason.split("karar", 1)[1], v.reason
+
+
+def test_watch_reason_names_the_window_the_decision_used():
+    """Same split as the ok case, but n after release is enough to watch.
+
+    Decision reads watch_n / watch_pf_val (since release). Reason used to
+    print only the 30-day profit_factor.
+    """
+    sup = _sup()
+    cleared = NOW - 10 * HOUR
+    cfg = SymbolConfig(symbol="NAS100")
+    sup.verdicts["NAS100"] = SymbolVerdict(
+        symbol="NAS100", history_cleared_at=cleared)
+    old = [_deal(cleared - 600 * i, 5.0) for i in range(30, 0, -1)]
+    new = [_deal(cleared + 60 * i, 1.0 if i % 2 == 0 else -1.2)
+           for i in range(1, 81)]
+    v, _ = _judge(sup, cfg, old + new, _cfgs(
+        min_trades=80, watch_min_trades=80, quarantine_losses=11,
+        quarantine_pf=0.8, watch_pf=1.0))
+    assert v.state == "watch", v.reason
+    assert "(30g)" in v.reason, v.reason
+    assert f"karar {80} islem" in v.reason, v.reason
+    assert "karar" in v.reason
+    after = v.reason.split("karar", 1)[1]
+    assert "PF " in after, v.reason
 
 
 @pytest.mark.parametrize("losses,expected", [(3, True), (4, True), (5, False)])

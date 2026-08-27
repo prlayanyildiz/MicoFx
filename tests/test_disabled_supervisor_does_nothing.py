@@ -39,7 +39,7 @@ class _Opt:
         self.busy = False
         self.started: list = []
 
-    def start(self, symbols, apply_best=True):
+    def start(self, symbols, apply_best=True, **_kw):
         self.started = list(symbols)
 
 
@@ -64,7 +64,6 @@ def _sup(enabled: bool):
     s._lock = threading.RLock()
     s.verdicts = {}
     s.notes = []
-    s.reopt_queue = []
     s.risk_scale = 1.0
     s.optimizer = _Opt()
     s.store = _Store(enabled)
@@ -148,9 +147,8 @@ class TestTheReoptimiser:
         sup._queue_reoptimization(_cfgs())
 
         assert sup.optimizer.started == []
-        assert sup.reopt_queue == []
 
-    def test_an_enabled_layer_still_queues_it(self):
+    def test_an_enabled_layer_starts_a_search_for_quarantine(self):
         sup = _sup(enabled=True)
         self._wire(sup)
 

@@ -1,7 +1,7 @@
 """A symbol may not be switched on until the optimizer has chosen its config.
 
 EURUSD reached ``enabled`` carrying nothing but the dataclass defaults -
-opt_updated_at 0.0, opt_score 0.0, an empty opt_summary and t3_stoch/M5. That
+opt_updated_at 0.0, opt_score 0.0, an empty opt_summary and stoch_flip/M5. That
 is not a config the search picked, it is the factory setting, and the search
 had already refused this symbol outright: 365 days, four timeframes, fourteen
 families, no candidate cleared the accept gate. On M5 an FX symbol pays 25-28%
@@ -103,11 +103,11 @@ def test_an_unsearched_symbol_cannot_be_switched_on():
 
 
 def test_the_message_names_what_it_is_actually_carrying():
-    """"t3_stoch/M5" is the default, and saying so is the whole point."""
+    """"stoch_flip/M5" is the default, and saying so is the whole point."""
     tc, _ = _client([_cfg("EURUSD", optimised=False)])
     body = tc.post("/api/symbols/EURUSD", json={"enabled": True}).text
     assert "EURUSD" in body
-    assert "t3_stoch" in body and "M5" in body
+    assert "stoch_flip" in body and "M5" in body
 
 
 def test_bulk_enable_is_refused_for_the_same_reason():

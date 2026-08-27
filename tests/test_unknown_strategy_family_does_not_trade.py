@@ -47,6 +47,20 @@ def _forget_warned():
     S._UNKNOWN_FAMILIES.clear()
 
 
+def _empty_cache():
+    z = np.zeros(0)
+    return S.IndicatorCache(close=z, high=z, low=z)
+
+
+@pytest.mark.parametrize("name", ["belirsiz_aile", *sorted(S._FAMILIES)])
+def test_an_empty_series_does_not_crash_or_signal(name):
+    """Unknown families fail closed. Empty bars used to IndexError in 8/11."""
+    sig = S.compute(_empty_cache(), _params(name))
+    assert not sig.buy.any()
+    assert not sig.sell.any()
+    assert sig.buy.size == 0
+
+
 def test_an_unknown_family_produces_no_entries():
     sig = S.compute(_cache(), _params("belirsiz_aile"))
 
@@ -54,14 +68,20 @@ def test_an_unknown_family_produces_no_entries():
     assert not sig.sell.any()
 
 
-def test_it_does_not_silently_run_t3_stoch():
-    """The old behaviour: the fallback made these two identical."""
+def test_it_does_not_silently_run_a_real_family():
+    """The old behaviour: the fallback made these two identical.
+
+    The fallback used to be ``_t3_stoch``; that family retired 27.08, so the
+    control is a live one. What is being pinned is unchanged - an unknown
+    name must not produce the signals of SOME family, whichever the first
+    entry in the table happens to be.
+    """
     cache = _cache()
     unknown = S.compute(cache, _params("belirsiz_aile"))
-    t3 = S.compute(cache, _params("t3_stoch"))
+    known = S.compute(cache, _params("stoch_flip"))
 
-    assert t3.buy.any() or t3.sell.any(), "control: t3_stoch does signal here"
-    assert not np.array_equal(unknown.buy, t3.buy)
+    assert known.buy.any() or known.sell.any(), "control: stoch_flip does signal here"
+    assert not np.array_equal(unknown.buy, known.buy)
 
 
 def test_it_says_so_at_a_level_that_reaches_disk(monkeypatch):

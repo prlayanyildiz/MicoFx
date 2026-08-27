@@ -162,39 +162,15 @@ def rolling_sum(src: np.ndarray, length: int) -> np.ndarray:
     return out
 
 
-def wavetrend(high: np.ndarray, low: np.ndarray, close: np.ndarray,
-             channel_len: int, avg_len: int) -> tuple[np.ndarray, np.ndarray]:
-    """WaveTrend oscillator (LazyBear's formula): wt1 (fast) and wt2 (its SMA-4 signal).
-
-    A third read on the same OHLC data, mathematically distinct from T3
-    (single smoothed price line): WaveTrend normalises price against its own
-    *mean absolute deviation* from a smoothed typical price, so its scale is
-    bounded and comparable across symbols/volatility regimes rather than a
-    raw price-unit spread. wt1 crossing wt2 is the flip; nothing here reads
-    the classic +-60/100 overbought/oversold bands, that is a separate,
-    optional read a family can still add on top.
-    """
-    channel_len = max(1, int(channel_len))
-    avg_len = max(1, int(avg_len))
-    typical = (high + low + close) / 3.0
-    esa = ema(typical, channel_len)
-    d = ema(np.abs(typical - esa), channel_len)
-    ci = (typical - esa) / np.where(d > 1e-12, 0.015 * d, 1.0)
-    wt1 = ema(ci, avg_len)
-    wt2 = sma(wt1, 4)
-    return wt1, wt2
-
-
 def stochastic_slow(high: np.ndarray, low: np.ndarray, close: np.ndarray,
                     k_period: int, k_smooth: int, d_smooth: int) -> tuple[np.ndarray, np.ndarray]:
     """Classic slow Stochastic: %K = close's position in its own H/L range,
     smoothed twice (raw %K -> slow %K -> slow %D).
 
-    Not the same read as ``stoch_rsi`` (Stochastic applied to RSI, already
-    used by ``t3_stoch``) - this measures where price sits inside its own
-    recent high/low range directly, RSI is never computed. A fourth
-    mathematically distinct basis alongside T3 (price smoothing), MACD (EMA
-    spread) and WaveTrend (deviation-normalised oscillator).
+    Not the same read as ``stoch_rsi`` (Stochastic applied to RSI, which
+    ``_common`` reports for every family) - this measures where price sits inside its own
+    recent high/low range directly, RSI is never computed. A distinct
+    basis alongside T3 (price smoothing) and MACD (EMA spread).
     """
     period = max(1, int(k_period))
     hi = rolling_min_max(high, period)[1]
@@ -377,9 +353,9 @@ def parabolic_sar(high: np.ndarray, low: np.ndarray,
                   af_step: float, af_max: float) -> np.ndarray:
     """Wilder's Parabolic SAR direction (+1/-1), the dot flip as a signed line.
 
-    Neither a smoothed price (T3), an MA spread (MACD), a deviation-normalised
-    oscillator (WaveTrend) nor a range-position oscillator (Stochastic) - the
-    SAR walks toward price at an *accelerating* rate that resets to the slow
+    Neither a smoothed price (T3), an MA spread (MACD), nor a range-position
+    oscillator (Stochastic) - the SAR walks toward price at an *accelerating*
+    rate that resets to the slow
     step every time a new extreme is made, and flips side the instant price
     crosses it. Same trailing-band shape as SuperTrend, different construction
     entirely: SuperTrend's band width is ATR, SAR's is its own acceleration

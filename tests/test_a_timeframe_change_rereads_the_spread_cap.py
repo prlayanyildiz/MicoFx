@@ -146,7 +146,7 @@ def test_the_apply_path_calls_it():
         "a refused apply must not trigger a recalibration")
 
 
-def _finish_plan(symbol="NAS100", timeframe="M5", strategy="micro_rev"):
+def _finish_plan(symbol="NAS100", timeframe="M5", strategy="burst"):
     from micofx.models import SymbolConfig
 
     slice_ok = {
@@ -154,7 +154,7 @@ def _finish_plan(symbol="NAS100", timeframe="M5", strategy="micro_rev"):
         "net_r": 20.0, "expectancy": 0.25, "profit_factor": 1.4,
         "max_dd_r": 4.0, "score": 8.0, "cost_per_trade_r": 0.04,
     }
-    cfg = SymbolConfig(symbol=symbol, magic=1, strategy="t3_stoch",
+    cfg = SymbolConfig(symbol=symbol, magic=1, strategy="stoch_flip",
                        timeframe="M15", sl_atr_mult=1.0)
     cfg.opt_updated_at = 0.0
     cfg.opt_summary = {}

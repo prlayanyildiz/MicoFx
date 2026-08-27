@@ -153,7 +153,6 @@ def _engine(equity, positions, flatten=True, profit_pct=0.0, remaining=0, closed
     eng._apply_pending_exits = lambda *a, **k: None
     eng._scan_orphan_candidates = lambda *a, **k: None
     eng.manage_positions = lambda *a, **k: None
-    eng._maybe_schedule_reopt = lambda *a, **k: None
     eng._flush_spread_ratio = lambda *a, **k: None
     eng._save_entry_blocks = lambda *a, **k: None
     eng.supervisor = SimpleNamespace(due=lambda: False, gate=lambda *a, **k: (True, "", 1.0))
@@ -209,11 +208,12 @@ def test_an_untroubled_day_does_not_flatten():
     assert client.close_all_calls == 0
 
 
-def test_the_switch_is_respected():
+def test_the_switch_is_gone_flatten_always_runs():
+    """Leftover daily_loss_flatten=False must not leave the book bleeding."""
     eng, client, guard = _engine(equity=800.0, positions=[_pos(1)], flatten=False)
     _run(eng)
     assert guard.loss_halted is True, "halt yine de tripmeli"
-    assert client.close_all_calls == 0, "flatten kapaliyken kapatmamali"
+    assert client.close_all_calls == 1, "limit asilinca acik pozisyon kapanmali"
 
 
 def test_a_flat_book_does_not_call_close_all():

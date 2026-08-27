@@ -2,20 +2,20 @@
 
 ``models.STRATEGIES`` is what the optimiser searches and what a config may
 name. ``STRATEGY_LABEL`` in app.js turns those keys into the Turkish names a
-human reads - and it is not only cosmetic: line 639 builds the strategy
-dropdown itself from ``Object.entries(STRATEGY_LABEL)``, so a family missing
-from the map cannot be selected in the panel at all, and one appearing only in
-the map offers a choice the search does not know.
+human reads on the symbol card header. A family missing from the map
+degrades to the raw key; a stale one is a lie about a family that cannot
+run. The strategy dropdown left the card 27.08 (hands-off); the map still
+has to cover every live family.
 
 Nothing bound the two. It has already drifted once: six flip families were
 absent from the map, so four live symbols displayed a raw key like
-``wavetrend_flip`` where a name belonged and could not be picked from the
-dropdown. That was repaired by hand; nothing stopped it happening again.
+``wavetrend_flip`` where a name belonged. That was repaired by hand;
+nothing stopped it happening again.
 
-Both sides are currently correct - 14 keys against 14 families - so this adds
-no behaviour. It exists because the failure is silent on both ends: a missing
-label degrades to the raw key rather than raising, and a stale one just offers
-a dead option.
+Both sides are currently correct - eight keys against eight families - so this adds
+no behaviour. It exists because the failure is silent: a missing label
+degrades to the raw key rather than raising, and a stale one lies about
+a family that cannot run.
 """
 from __future__ import annotations
 
@@ -42,11 +42,11 @@ def _labelled() -> set[str]:
 def test_every_family_the_optimiser_can_pick_has_a_label():
     missing = sorted(set(models.STRATEGIES) - _labelled())
     assert not missing, (
-        f"panelde ham anahtar gorunur ve acilir listeden secilemez: {missing}")
+        f"panelde ham anahtar gorunur: {missing}")
 
 
 def test_no_label_names_a_family_that_no_longer_exists():
-    """The dropdown is built from this map, so a stale key is a dead option."""
+    """The card header reads this map, so a stale key is a lie."""
     extra = sorted(_labelled() - set(models.STRATEGIES))
     assert not extra, f"silinmis aile hala listede: {extra}"
 
@@ -57,15 +57,15 @@ def test_the_two_sides_are_the_same_size():
 
 # --------------------------------------------------- the test's own footing
 
-def test_the_dropdown_really_is_built_from_this_map():
-    """If the panel stops deriving its options here, the tests above are
-    guarding something that no longer decides anything."""
-    assert "Object.entries(STRATEGY_LABEL)" in APP_JS
+def test_the_card_header_really_reads_this_map():
+    """If the panel stops printing the label, the tests above are guarding
+    a dictionary nobody reads."""
+    assert "STRATEGY_LABEL[cfg.strategy]" in APP_JS
 
 
 def test_the_family_registry_and_the_model_list_agree():
     """The other half of the same class: a key models can name but
-    strategy.py cannot dispatch falls back to _t3_stoch without a word."""
+    strategy.py cannot dispatch must not silently run a different family."""
     from micofx import strategy
     assert set(models.STRATEGIES) == set(strategy._FAMILIES)
 

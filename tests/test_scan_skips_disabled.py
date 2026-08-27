@@ -6,8 +6,8 @@ could never be re-scored after the grid moved. Closing is a decision; applying
 the winner is not automatic - ``_finish_symbol`` records ``opt_runs`` and leaves
 ``enabled`` / ``opt_summary`` alone.
 
-``supervisor._maybe_reoptimize`` still skips a disabled symbol. Naming a symbol
-still searches it. An empty book is still "Sembol secilmedi."
+Calendar auto-queue is gone. Naming a symbol still searches it even when
+``enabled`` is false. An empty book is still "Sembol secilmedi."
 """
 from __future__ import annotations
 

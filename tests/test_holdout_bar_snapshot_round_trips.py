@@ -71,13 +71,21 @@ def test_a_thin_histogram_is_refused_not_stored_as_one(tmp_path):
           min_stop=0.5, spread_scale=1.0, spread_scale_n=400, **_pin())
 
 
-def test_a_cost_free_snapshot_is_refused(tmp_path):
+def test_a_cost_free_snapshot_stamps_false_and_round_trips(tmp_path):
+    """Operator may run with charge_costs off. Capture must still pin bars.
+
+    27.08 00:00 gece wrote 0/6 because write() refused False. The stamp
+    is archive metadata for the capture regime, not an apply gate.
+    """
     pin = _pin()
     pin["charge_costs"] = False
-    with pytest.raises(ValueError, match="charge_costs"):
-        write(tmp_path / "x.npz", symbol="GER40", timeframe="M30", bars=_bars(),
-              info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
-              min_stop=0.5, spread_scale=3.35, spread_scale_n=400, **pin)
+    path = tmp_path / "x.npz"
+    write(path, symbol="GER40", timeframe="M30", bars=_bars(),
+          info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
+          min_stop=0.5, spread_scale=3.35, spread_scale_n=400, **pin)
+    got = read(path)
+    assert got["charge_costs"] is False
+    assert len(got["bars"]) == 8
 
 
 def test_importing_the_snapshot_does_not_load_metatrader5():

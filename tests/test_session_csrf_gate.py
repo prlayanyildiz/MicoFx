@@ -209,3 +209,11 @@ def test_same_origin_panic_with_cookie_is_allowed():
     res = tc.post("/api/bot/panic",
                   headers={"Origin": "http://testserver"})
     assert res.status_code == 200, res.text
+
+
+def test_openapi_schema_is_not_public():
+    """docs_url=None still left GET /openapi.json ungated (not under /api/)."""
+    tc = TestClient(_app(), unauth=True)
+    assert tc.get("/openapi.json").status_code == 404
+    assert tc.get("/docs").status_code == 404
+    assert tc.get("/redoc").status_code == 404

@@ -104,21 +104,13 @@ def _client():
     return TestClient(create_app(store, _Client(), _Engine(), _Optimizer())), store
 
 
-@pytest.mark.parametrize("value", [-0.01, -5.0, -100.0, -1e9])
-def test_a_negative_commission_is_refused(value):
+@pytest.mark.parametrize("value", [-0.01, -5.0, -100.0, -1e9, 0.0, 7.0])
+def test_commission_is_not_an_operator_write(value):
+    """Card no longer offers it; HTTP must not be the leftover door."""
     tc, store = _client()
     res = tc.post("/api/symbols/XAUUSD", json={"commission_per_lot": value})
     assert res.status_code == 400, f"{value} kabul edildi"
     assert store.symbols["XAUUSD"].commission_per_lot == 5.0
-
-
-@pytest.mark.parametrize("value", [0.0, 0.5, 7.0, 250.0])
-def test_a_non_negative_commission_still_goes_through(value):
-    """Zero is a real setting - most CFD accounts charge no commission."""
-    tc, store = _client()
-    res = tc.post("/api/symbols/XAUUSD", json={"commission_per_lot": value})
-    assert res.status_code == 200, res.text
-    assert store.symbols["XAUUSD"].commission_per_lot == value
 
 
 def test_bulk_is_gated_too():

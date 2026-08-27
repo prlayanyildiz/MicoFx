@@ -163,8 +163,8 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
     logbus.py       ring + rotating file
     mt5client.py    locked MT5 bridge
     sessions.py     broker-time windows
-    indicators.py   T3, StochRSI, ATR, ADX, SuperTrend, WaveTrend, Aroon, TRIX, helpers
-    strategy.py     Params, IndicatorCache, 4 families → Signals
+    indicators.py   T3, StochRSI, ATR, ADX, SuperTrend, Aroon, helpers
+    strategy.py     Params, IndicatorCache, 8 families → Signals
     backtest.py     bar replay + walk_forward
     optimizer.py    background TF×strategy search + apply gates
     risk.py         DailyGuard + lot_for + can_open + edge_scale
@@ -216,7 +216,7 @@ Turkish UI. Poll `/api/state` ~3s (faster while opt running; slower if tab hidde
 
 Key APIs: `/api/state`, symbols CRUD/bulk/seed/reset, system patch, bot start/stop/panic, day resume, opt params/run/cancel/history/apply, AI settings/review, logs, app shutdown.
 
-No OpenAPI docs UI (`docs_url=None`).
+No OpenAPI docs UI (`docs_url=None`, `openapi_url=None`).
 
 ---
 
@@ -255,7 +255,7 @@ Bars where both `buy` and `sell` are True must be **dropped** (neither side). Do
 
 ## 7. Strategy families (shared)
 
-`STRATEGIES = ["t3_stoch", "mtf_pullback", "micro_rev", "burst", "dual_t3", "t3_flip", "wavetrend_flip", "stoch_flip", "parabolic_flip", "aroon_flip", "ichimoku"]` — 11 aile.
+`STRATEGIES = ["mtf_pullback", "burst", "dual_t3", "t3_flip", "stoch_flip", "parabolic_flip", "aroon_flip", "ichimoku"]` — 8 aile.
 
 Kivanc combo (25.08): `ichimoku` is TK cross vs the cloud from i-26 (no forward displacement). `alpha_trend` and `mavilim` retired 26.08 (emekli): AlphaTrend could not clear `MIN_TEST_TRADES` (7 vs 12, lag-2 cross); MavilimW had enough trades and lost (GER −20.2 R / PF 0.92). `st_trend` and `macd_flip` retired 26.08 (emekli): neither was live, neither was ever applied, and each still consumed a full `max_combos` slot per TF. BBW is not a family (`atr_pct_min` already gates dead regimes). TD Sequential is a fade counter and was skipped. `ichimoku` is not applied live until holdout beats the same-TF incumbent.
 
@@ -277,17 +277,6 @@ Optimizer does **not** guess which family fits a symbol: it searches **all enabl
 - `_trend_gate`: if `htf_mode=="t3"` and `htf_factor>1`, higher-TF T3 must agree; else allow both sides.
 - `Params`: flat dataclass view of SymbolConfig fields + overrides for grid search.
 
-### `t3_stoch`
-Long: T3 rising ∧ %K crosses above %D ∧ `K < 50+stoch_band` ∧ `D < stoch_extreme` ∧ regime ∧ HTF long.  
-Short: mirror. Optional body-ratio and ATR-percentile filters. Warmup bars suppressed.
-
-### `micro_rev` (M5-native scalp)
-Micro mean reversion whose entry threshold is measured in **round-turn cost multiples**,
-not ATR: `|close - EMA(mr_fast)| / (bar spread + commission) >= mr_stretch_cost`. Optional
-`mr_confirm` requires the bar to already be turning back. This is the one family that asks
-"is this displacement worth more than what it costs to harvest", which is the question that
-decides an M5 scalp and that every ATR-scaled family is blind to.
-
 ### `burst` (M5-native scalp)
 Continuation off a single **range-expansion** bar: range above `mean + brst_range_z * sd`
 of the trailing `brst_lookback` distribution, closing inside the top/bottom
@@ -306,16 +295,16 @@ itself pure ATR; the grid may keep it off, and it must earn its place in walk-fo
 Engine-level rails (session, spread, cooldown, DailyGuard, supervisor) still apply — those
 are portfolio safety, not signal indicators.
 
-### `cost_rank_max` (shared by the two scalping families)
+### `cost_rank_max` (burst scalp)
 Adaptive cost-regime gate: the bar's cost-to-range ratio must sit inside the given
 percentile of its own trailing distribution. Unlike `max_spread_atr` it is not a fixed
 number, so it follows the symbol and the session. Measured 25.08 US30 M5: **1/44 fills**
 while ATR was ~12.5 (ceiling 2.21 → 1.51 pts). The ratio does not follow the session;
-`cost_rank_max` does, and is only wired on `micro_rev` / `burst`.
+`cost_rank_max` does, and is only wired on `burst` (`micro_rev` retired 27.08).
 
 **Cost series contract:** `IndicatorCache(..., cost=...)` carries `bar spread * point +
 commission_in_price` — the exact round turn the backtest charges. Callers that cannot
-supply it pass `None`, and `micro_rev` then emits **no signals at all** rather than trading
+supply it pass `None`, and `burst` then emits **no signals at all** rather than trading
 a guessed cost. Both `backtest.walk_forward` and `Engine._refresh_signals` /
 `_refresh_secondary` supply it.
 
@@ -377,7 +366,7 @@ _slice_ok = net_r > 0 AND trades >= 12 AND profit_factor >= 1.10
 validated = _slice_ok(validation) AND _slice_ok(holdout)
 ```
 
-Auto-apply (`_is_improvement`) requires ALL of:
+Auto-apply (`reject_reason` empty and `_beats_incumbent`) requires ALL of:
 1. `_slice_ok(validation)` and `_slice_ok(holdout)`
 2. `positive_ratio >= 0.6`
 3. `holdout.cost_per_trade_r <= MAX_COST_PER_TRADE_R (0.25)`
@@ -486,11 +475,10 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 
 | Name | Value | Role |
 |---|---|---|
-| OPT_FIELDS | t3/stoch/htf/adx/sl_atr_mult/trail_start/trail_step/trail_mode/body/atr%/orb/vwap/don… | Opt may overwrite only these. `Store.opt_params()` filters saved grids to this set, so a removed axis can never be resurrected by a stale saved blob. |
+| OPT_FIELDS | Axes in `models.OPT_FIELDS` only. `Store.opt_params()` filters saved grids to this set, so a removed axis can never be resurrected by a stale saved blob. |
 | MIN_TEST_TRADES | 12 | OOS slice |
 | MIN_OOS_PF | 1.10 | OOS slice |
 | MAX_COST_PER_TRADE_R | 0.25 | Apply gate |
-| STOCH_MID | 50 | Band midpoint |
 | EDGE_MIN / EDGE_MAX | 0.6 / 2.2 | Size-by-edge |
 | Default port | 8900 | Web |
 | Default lookback | 180 days | Opt |
@@ -536,8 +524,8 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 7. Daily halt survives process restart until resume.
 8. Opt apply may write `SECONDARY_FIELDS`, but never `ensemble_enabled` —
    storing a second candidate must not start trading it.
-9. Scheduled re-optimization uses the identical `_slice_ok` / `_is_improvement`
-   apply path as a manual run; it never force-applies.
+9. Apply uses `_slice_ok` / `reject_reason` / `_beats_incumbent`; it never
+   force-applies. FX calendar reopt is gone (quarantine search only).
 
 ---
 

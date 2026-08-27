@@ -11,7 +11,7 @@ healthy.
 walk_forward now screens candidates on the same ceiling, expressed as a
 share of R rather than a percentage.
 
-The fixture is a rising series with regular pullbacks, which t3_stoch can
+The fixture is a rising series with regular pullbacks, which stoch_flip can
 actually trade - a random walk yields no winning candidate at all, so the
 cost gate would never be reached and the assertions would pass vacuously.
 """
@@ -33,7 +33,12 @@ TF = 300
 # What this fixture's winner actually costs per trade, in R, at spread 20.
 # Pinned by test_the_fixture_costs_what_these_thresholds_assume below so the
 # thresholds here cannot silently stop meaning anything.
-FIXTURE_COST_R = 0.165
+# Re-measured 27.08 when t3_stoch retired. The bars are unchanged; the stop
+# grid widened because no surviving family clears a 0.5-ATR stop against this
+# fixture's spread. What the file measures - that max_cost_share filters on
+# cost/R - is unchanged, and test_the_fixture_costs_what_these_thresholds_assume
+# below still guards the relationship.
+FIXTURE_COST_R = 0.124
 
 
 class _Bars:
@@ -60,17 +65,18 @@ def _bars(spread_points: float = 20.0):
 
 
 def _cfg():
-    return SymbolConfig(symbol="TEST", magic=1, timeframe="M5", strategy="t3_stoch",
+    return SymbolConfig(symbol="TEST", magic=1, timeframe="M5", strategy="t3_flip",
                         use_sessions=False)
 
 
-GRID = {"sl_atr_mult": [0.5, 1.5], "trail_start_atr": [0.5], "trail_step_atr": [1.0]}
+GRID = {"sl_atr_mult": [1.0, 2.0, 3.0], "trail_start_atr": [1.0, 2.0],
+        "trail_step_atr": [1.0, 2.0]}
 
 
 def _run(max_cost_share: float, spread_points: float = 20.0):
     return backtest.walk_forward(
         _cfg(), _bars(spread_points), point=0.01, tf_seconds=TF, grid=GRID,
-        min_trades=5, segments=5, max_combos=40, min_positive_ratio=0.0,
+        min_trades=5, segments=5, max_combos=60, min_positive_ratio=0.0,
         plateau_weight=0.0, refine_rounds=0, max_cost_share=max_cost_share)
 
 

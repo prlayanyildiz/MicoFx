@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -22,13 +23,14 @@ from micofx.models import SymbolConfig, SystemConfig
 from micofx.web.app import create_app
 
 
-def _bars(n=900):
+def _bars(n=20000, *, stale=False):
     rates = np.zeros(n, dtype=[
         ("time", np.int64), ("open", np.float64), ("high", np.float64),
         ("low", np.float64), ("close", np.float64), ("spread", np.float64),
         ("tick_volume", np.float64),
     ])
-    rates["time"] = np.arange(n, dtype=np.int64) * 1800 + 1_700_000_000
+    origin = 1_700_000_000 if stale else int(time.time()) - n * 1800
+    rates["time"] = np.arange(n, dtype=np.int64) * 1800 + origin
     rates["open"] = 100.0
     rates["high"] = 101.0
     rates["low"] = 99.0

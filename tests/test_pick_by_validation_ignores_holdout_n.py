@@ -29,12 +29,12 @@ def _row(strategy: str, val_n: int, hold_n: int, score: float = 10.0,
 
 
 def test_swapping_holdout_n_does_not_change_a_validation_tie():
-    """t3_stoch vs wavetrend_flip, same validation score and n, opposite holdout n."""
+    """t3_flip vs dual_t3, same validation score and n, opposite holdout n."""
     opt = Optimizer.__new__(Optimizer)
-    a_hi = _row("t3_stoch", 20, 999)
-    b_lo = _row("wavetrend_flip", 20, 1)
-    a_lo = _row("t3_stoch", 20, 1)
-    b_hi = _row("wavetrend_flip", 20, 999)
+    a_hi = _row("t3_flip", 20, 999)
+    b_lo = _row("dual_t3", 20, 1)
+    a_lo = _row("t3_flip", 20, 1)
+    b_hi = _row("dual_t3", 20, 999)
     left = opt._pick_by_validation([a_hi, b_lo])["strategy"]
     right = opt._pick_by_validation([a_lo, b_hi])["strategy"]
     assert left == right, (
@@ -42,23 +42,23 @@ def test_swapping_holdout_n_does_not_change_a_validation_tie():
 
 
 def test_two_scalp_peers_also_ignore_holdout_n():
-    """micro_rev vs burst share the scalp flag, so holdout cannot hide behind it."""
+    """burst vs stoch_flip: holdout n must not hide behind family identity."""
     opt = Optimizer.__new__(Optimizer)
-    a_hi = _row("micro_rev", 20, 999)
-    b_lo = _row("burst", 20, 1)
-    a_lo = _row("micro_rev", 20, 1)
-    b_hi = _row("burst", 20, 999)
+    a_hi = _row("burst", 20, 999)
+    b_lo = _row("stoch_flip", 20, 1)
+    a_lo = _row("burst", 20, 1)
+    b_hi = _row("stoch_flip", 20, 999)
     left = opt._pick_by_validation([a_hi, b_lo])["strategy"]
     right = opt._pick_by_validation([a_lo, b_hi])["strategy"]
     assert left == right, (
-        f"holdout n flipped a scalp/scalp tie: {left} vs {right}")
+        f"holdout n flipped a two-family tie: {left} vs {right}")
 
 
 def test_timeframe_name_breaks_a_validation_tie_not_list_order():
     """Same family, same validation: winner must not follow whoever was first."""
     opt = Optimizer.__new__(Optimizer)
-    h1 = _row("t3_stoch", 20, 1, timeframe="H1")
-    m15 = _row("t3_stoch", 20, 999, timeframe="M15")
+    h1 = _row("stoch_flip", 20, 1, timeframe="H1")
+    m15 = _row("stoch_flip", 20, 999, timeframe="M15")
     first = opt._pick_by_validation([h1, m15])
     second = opt._pick_by_validation([m15, h1])
     # max() on the name, not list order. Holdout n differs on purpose.

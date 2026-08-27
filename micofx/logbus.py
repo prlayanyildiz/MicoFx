@@ -56,6 +56,14 @@ class LogBus:
         self._buf: deque[dict[str, Any]] = deque(maxlen=_RING)
         self._seq = 0
         self._file = LOG_DIR / "micofx.log"
+        # Off until run.py calls enable_disk(). Importing this module from a
+        # script must not append the live audit file (27.08 t3_stoch /
+        # TOTALLY_MADE_UP WARN lines were not the running bot).
+        self._disk = False
+
+    def enable_disk(self) -> None:
+        """The live process is the only writer of logs/micofx.log."""
+        self._disk = True
 
     def emit(self, message: str, level: Level = "INFO", symbol: str = "") -> None:
         # One physical line: a payload with CR/LF must not mint a second
@@ -89,6 +97,8 @@ class LogBus:
         TRADE line disappearing from the audit trail exactly when the system
         is busiest is the failure mode that matters here.
         """
+        if not self._disk:
+            return
         with self._file_lock:
             try:
                 LOG_DIR.mkdir(parents=True, exist_ok=True)

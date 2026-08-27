@@ -47,8 +47,9 @@ def test_required_bars_does_not_depend_on_flow_length():
     src = inspect.getsource(required_bars)
     assert "flow_length" not in src
     # Retired term was flow_length*6+240 = 360 at the shipped default.
-    # t3_stoch default is t3_length*20*htf_factor = 720, so 360 never bound.
-    assert required_bars(Params(strategy="t3_stoch")) == 720
+    # mtf_pullback is t3_length*20*htf(6) = 720, so 360 never bound.
+    # (t3_stoch was the subject here until it retired 27.08.)
+    assert required_bars(Params(strategy="mtf_pullback")) == 720
 
 
 def test_the_panel_does_not_edit_a_retired_flow_family():

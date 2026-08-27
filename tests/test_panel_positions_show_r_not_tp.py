@@ -21,23 +21,34 @@ def _positions_thead() -> str:
     return HTML[start:HTML.index("</thead>", start)]
 
 
-def test_positions_table_has_r_and_mfe_instead_of_tp():
+def test_positions_table_still_has_no_tp_column():
+    """Operator 26.08 dropped the R and MFE columns from the open book.
+
+    What this file was really guarding survives that: tp is always 0 by
+    constitution, so a TP column would be a permanently empty one. R stays
+    reachable - the status pill still reads ``p.r_open`` and the autopsy
+    grid still carries realised R and MFE per closed trade.
+    """
     head = _positions_thead()
-    assert 'data-help="th.pos.R"' in head
-    assert 'data-help="th.pos.MFE"' in head
-    assert 'data-help="th.pos.Durum"' in head
     assert 'data-help="th.pos.TP"' not in head
+    assert 'data-help="th.pos.Durum"' in head
+    assert 'data-help="th.pos.R"' not in head
+    assert 'data-help="th.pos.MFE"' not in head
     assert "harvest-note" in HTML
 
 
-def test_render_positions_paints_r_open_and_giveback():
+def test_render_positions_still_reads_r_for_the_status_pill():
     body = JS.split("function renderPositions()", 1)[1].split(
         "function renderDayTable()", 1)[0]
-    assert "p.r_open" in body
-    assert "p.mfe_r" in body
+    assert "p.r_open" in body, "harvest/BE pill decides on open R"
     assert "partial_done" in body
     assert "harvest-note" in JS or "renderHarvest" in JS
     assert "p.tp" not in body or "price(p.tp" not in body
+
+
+def test_the_dropped_columns_left_no_orphan_help():
+    assert '"th.pos.R"' not in HELP
+    assert '"th.pos.MFE"' not in HELP
 
 
 def test_opt_test_r_titles_capture_when_present():
@@ -46,8 +57,3 @@ def test_opt_test_r_titles_capture_when_present():
     assert "h.capture" in body
 
 
-def test_r_help_says_original_stop_not_cash():
-    text = HELP.split('"th.pos.R"', 1)[1].split('"', 2)[1]
-    low = text.lower()
-    assert "orijinal" in low or "original" in low or "ilk stop" in low
-    assert "r" in low

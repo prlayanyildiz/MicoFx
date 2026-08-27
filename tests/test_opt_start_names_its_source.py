@@ -65,14 +65,14 @@ def test_a_manual_start_logs_kaynak_on_the_opt_line(monkeypatch):
     assert any("kaynak=manual" in m for m in lines)
 
 
-def test_a_scheduled_start_is_not_logged_as_manual(monkeypatch):
+def test_a_quarantine_start_is_not_logged_as_manual(monkeypatch):
     seen: list[str] = []
     monkeypatch.setattr(
         "micofx.optimizer.LOG.emit",
         lambda message, level="INFO", symbol="": seen.append(message))
-    _opt(BOOK).start(source="scheduled", apply_best=False, force=True)
+    _opt(BOOK).start(source="quarantine", apply_best=False, force=True)
     line = next(m for m in seen if "kaynak=" in m)
-    assert "kaynak=scheduled" in line
+    assert "kaynak=quarantine" in line
     assert "apply_best=false" in line
     assert "force=true" in line
 
@@ -98,6 +98,29 @@ def test_cancel_persists_so_a_kill_does_not_leave_running():
     blob = opt.store.settings["last_opt_job"]
     assert blob["state"] == "cancelled"
     assert blob.get("finished_at")
+
+
+def test_cancel_logs_how_far_the_cut_search_had_got(monkeypatch):
+    """Panel restart 05:15: last_opt_job cancelled, no OPT line, 1.776M gone."""
+    seen: list[str] = []
+    monkeypatch.setattr(
+        "micofx.optimizer.LOG.emit",
+        lambda message, level="INFO", symbol="": seen.append(f"{level}|{message}"))
+    opt = _opt(BOOK)
+    opt.job = {
+        "state": "running", "current": "GER40, JPN225, NAS100",
+        "combo_done": 1776000, "combo_total": 2376000,
+    }
+    opt.store.settings["last_opt_job"] = {"state": "running"}
+    opt.cancel()
+    line = next(m for m in seen if "yari da kesiliyor" in m)
+    assert line.startswith("OPT|")
+    assert "GER40, JPN225, NAS100" in line
+    assert "1776000" in line
+    assert "2376000" in line
+    blob = opt.store.settings["last_opt_job"]
+    assert blob.get("combo_done") == 1776000
+    assert blob.get("combo_total") == 2376000
 
 
 def test_idle_cancel_does_not_rewrite_a_finished_job():

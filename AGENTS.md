@@ -22,15 +22,17 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   `breakeven_at_r` (live 1.5, not 0.5 — BE-2 GER40 −32 R), one-shot
   `partial_at_r` (ticket lot × 1/3, broker min/step), and
   `harvest_at_r` / `harvest_step_atr` (tighten trail_step once paid;
-  live 1.5 / 0.4 on the leaky book, off on XAUUSD). None is an
+  live off book-wide — paper net R 26.08). None is an
   `OPT_FIELDS` axis.
 - `exits.overlay_stop` is the closed-bar trail/BE level. Live still owns
   broker clamp + modify. Change the helper or both callers. Cover
   identity tests.
 - A forming candle never signals. Buy ∧ sell on one bar → neither.
 - Opt apply writes `OPT_FIELDS` only (plus documented secondary fields).
-  Never silently enable `ensemble_enabled`. `_slice_ok` /
-  `_is_improvement` is the only gate; scheduled reopt uses the same path.
+  Never silently enable `ensemble_enabled`. Apply gates are `_slice_ok`,
+  `reject_reason` and `_beats_incumbent`. Calendar reopt is gone.
+  AI auto-search is **quarantine only** (not decay, not weekly). Manual
+  `POST /api/opt/run` still starts a search.
 - `EXIT_RISK_FIELDS` mid-trade → **409**. `breakeven_at_r`,
   `partial_at_r`, `harvest_at_r` and `harvest_step_atr` are
   deliberately **not** in that set.
@@ -41,8 +43,13 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Do not holdout-capture with positions open. Do not start a live search
   unasked.
 - Tests must not append `logs/micofx.log` or `logs/gece_restart.log`.
-  `gece_restart.say()` tests must patch the log path.
-- **11 families.** Do not re-add `alpha_trend` or `mavilim`. `st_trend`
+  `gece_restart.say()` tests must patch the log path. Disk sink is off
+  until `run.py` calls `LOG.enable_disk()`; ad-hoc `import micofx` must
+  not enable it.
+- Hands-off keys (system plumbing, cost toggles, AI knobs, strategy guts)
+  return **400** on POST. Search `apply()` still writes `OPT_FIELDS`.
+  Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
+- **8 families.** Do not re-add `alpha_trend` or `mavilim`. `st_trend`
   and `macd_flip` retired 26.08 (never applied, not live). `ichimoku`
   stays. Leftover DB names fail closed (no signal), they do not crash.
 - **No restart while positions are open.** `track()` first-sights
@@ -66,28 +73,35 @@ Fail-first: write the test, watch it fail, then implement.
   `MetaTrader5`.
 - New search axis: add to `OPT_FIELDS` **and** pay the grid cost, or
   `Store.opt_params()` drops it.
-- **Yellow** (ask): `risk_percent`, `max_positions`, supervisor,
-  `size_by_edge`. **Red** (explicit): leverage, account lock, daily
-  brake, live flatten-all.
+- **Yellow** (ask): supervisor. **Red** (explicit):
+  leverage, account lock, daily brake, live flatten-all.
+- HTTP writes match the panel. Symbol POST: sessions +
+  `enabled` / `group` / `broker_symbol`. System POST: `max_margin_usage_pct`
+  / `mt5_terminal_path` / `autostart_mt5`.
+  Opt POST: `lookback_days` /
+  `refine_rounds` / `max_combos`. Family / TF / exits / magic / grid /
+  lot_mode / max_lot / max_positions / daily_loss_* / size_by_edge /
+  max_concurrent_risk_pct / `max_total_positions` / `risk_percent` are 400. `POST .../reset` is
+  400. GET still returns readout fields.
 - `POST /api/opt/run` `strategies` is **one-off**. Empty inherits the
   saved list. Do not persist a subset into `opt_params`. `apply_best`
   still defaults true.
 - Holdout `capture = net_r / sum(mfe_r)` is a visible column. **Not** a
   score input and **not** an apply gate.
-- Cursor is project lead and codes. Claude inspects and **must**
-  question; no live PATCH/search/restart without Cursor OK. Antigravity
-  suite is **manual only** (auto-bridge cut 26.08). Yellow/red stay
-  operator.
+- Cursor is project lead and codes, **full authority vs Claude**.
+  Claude executes Cursor briefs, scans on its own, and if the operator
+  asks Claude, Claude does it and writes `claude/FOR_CURSOR.md`.
+  No Antigravity auto-bridge. Yellow/red stay operator.
 - Commit/push only when the operator asks. Named files; no secrets; no
   `--no-verify`. `cursor/`, `claude/`, `antigravity/` are gitignored.
 
 ## Important locations (only non-obvious)
 
 - Runtime: `data/micofx.db`, `logs/micofx.log` (gitignored).
-- Bridge (gitignored): `cursor/FOR_CLAUDE.md`, `claude/FOR_CURSOR.md`,
-  `cursor/HANDOFF_NEW_CHAT.md`. Cursor inbound: `cursor/watch_bridges.ps1`
-  (**Claude only**; Antigravity auto-bridge cut). Claude inbox:
-  `claude/WATCH.ps1`. Do not watch a file you write.
+- Bridge (gitignored): Cursor writes `cursor/FOR_CLAUDE.md`; Claude
+  writes `claude/FOR_CURSOR.md`. Shared wake `.bridge/WAKE.txt`.
+  Cursor arms `cursor/ARM.bat` (watches Claude inbox). Claude arms
+  `claude/ARM.bat` (watches Cursor inbox). Do not watch a file you write.
 - Installer: `KUR.bat` → `KUR.ps1`. Launchers stay at repo root.
 - Audit notes (not executable): `OPTIMIZATIONS.md`. Trust the closed
   ledger at the top.
@@ -101,8 +115,27 @@ Fail-first: write the test, watch it fail, then implement.
 
 ## Known gotchas
 
+- Next process loads HTTP-off exits (family/TF/magic/grid/reset 400).
+  This PID still PATCHes them. GER40 `pending_exit_patch` still
+  apply()s on flat either way. Do not add `/exit-override` unasked.
 - Day cuts use `gmtime(naive broker epoch)` — "do not shift a second
   time", not "convert to UTC". A 00:00–03:00 local close is **today**.
+  Hour buckets on autopsy `fill_time` are the same clock. Do not
+  `fromtimestamp`/`localtime` those stamps (invents a 00:00 SL bucket).
+- `_flush_entry_blocks` 45s window covers counters **and**
+  `entry_block_events`. Do not restore `not events_dirty` skip.
+  `reset` / symbol-delete / `shutdown` (after the worker joins) pass
+  `force=True`. `execution.flush()` sits on the same side of `join`.
+  Do not flush either blob before `_stop.set()` — the last in-flight
+  cycle then hits a fresh window and drops its rows.
+- Leftover `max_positions`, `max_concurrent_risk_pct` and
+  `max_total_positions` are unread. Live stacks until margin / reverse.
+  Search still scores `max_open=1`.
+- Do not add an adverse-fill entry gate on `fill_vs_signal_close_r`.
+  Walk-forward is fill-next-open (zero variance). Claude 18:45: Q4
+  looks cursed in-sample; threshold scan is a curve-fit; unverifiable.
+- `GET /api/ai` and `POST /api/logs/clear` are gone. Panel reads
+  `STATE.ai`; Temizle is DOM-only. Do not restore the ring-wipe POST.
 - Autopsy R divides by `|entry − original_sl|`. Do not rewrite pre-fix
   `sl`+`r=+1.0` rows; cash is the truth. Flatten rows before
   `fill["profit"]` have empty `profit` — **R is still valid**; do not
@@ -119,18 +152,30 @@ Fail-first: write the test, watch it fail, then implement.
 - `scale_out_done` prunes to live tickets (same lock as
   `weekend_pending`). Clamp `filled` to position volume.
 - `/api/state` every 3s shares the MT5 lock. Symbol rows live on
-  `/api/symbols`; state carries `symbols_sig`. A 14-worker search can
-  stall state for minutes (148s measured 26.08) — do not add a second
-  `initialize()` to dodge it. Opt jobs share one npy folder per
-  `(symbol, TF)` (`bars_path`); do not pickle the window onto every family.
+  `/api/symbols`; state carries `symbols_sig`. While `optimizer.busy`,
+  snapshot serves the last cycle book (positions/account/flags/capacity)
+  instead of blocking. Halt/flatten still wait inside `_cycle`. Do not
+  add a second `initialize()` to dodge it. Opt jobs share one npy folder
+  per `(symbol, TF)` (`bars_path`); do not pickle the window onto every
+  family.
 - `STRATEGY_TIMEFRAMES` empty = unlocked. Opt start line must use
   `tf_lock_status`; do not hardcode `scalp TF kilidi acik`.
 - Panel flatten-all must pass `close_all(reason=)`. A reason-less
   `Pozisyon kapatildi kar~` burst (26.08 12:22) cannot be autopsied.
 - Fill verifier `sleep`s on a **side thread** (`defer_verify`). Do not
-  delete the sleeps; do not return `verified_unfilled` early.
-- `_BAR_INTEGRITY_REFRESH = 900s` is the no-new-bar full fetch.
-  `_STALE_BAR_REFRESH = 45` is unused — do not wire it back. `due` uses
-  **broker** clock.
+  delete the sleeps; do not return `verified_unfilled` early. Drain
+  books the **send-time** `signal_source` + `last_bar`. Do not mark or
+  clear live `state.last_bar` after the verifier sleeps — that wipes a
+  T+1 signal and files `filled_bars` under `""`.
+- `_BAR_INTEGRITY_REFRESH = 900s` pins window ends (two small
+  `copy_rates`) and full-fetches only on mismatch. `due` uses **broker**
+  clock. Do not re-add a stale-bar 45s refresh. Pins are
+  `(bars.time[0], bars.last_closed_time)` — **not** `forming_time`.
+  `Bars` ctor 2nd arg is the forming candle. A middle-bar hole with
+  both ends unchanged is the remaining miss.
+- Calendar `_maybe_reoptimize` is gone. Apply age is `reject_reason`
+  + `reopt_min_age_hours`. Quarantine still queues via
+  `_queue_reoptimization` (retry cooldown). Do not resurrect a
+  weekly/decay auto-search.
 - `_MAX_SIGNAL_BAR_AGE_BARS = 2` × timeframe. US30 is the only M5; its
   600 s `bar_bosluk` on overnight drought is normal.

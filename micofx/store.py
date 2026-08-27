@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from .logbus import LOG
-from .models import OPT_FIELDS, TIMEFRAMES, SymbolConfig, SystemConfig
+from .models import OPT_FIELDS, STRATEGIES, TIMEFRAMES, SymbolConfig, SystemConfig
 from .paths import DB_PATH, ensure_dirs, load_defaults
 
 _SCHEMA = """
@@ -418,7 +418,7 @@ class Store:
 
         Always born disabled. The caller (and the group preset) may ask for
         enabled=True; that is the hole that put nine unsearched symbols live
-        on factory t3_stoch. Enable is a later, guarded write.
+        on factory stoch_flip. Enable is a later, guarded write.
         """
         name = str(symbol or "").strip().upper().replace(" ", "_")
         # The hyphen is not decoration: this broker names 158 tradeable
@@ -461,9 +461,6 @@ class Store:
                 payload["magic"] = int(wanted)
         cfg = SymbolConfig.from_dict(payload)
         self.save_symbol(cfg, position=len(self.symbols))
-        if self.system.max_total_positions < len(self.symbols):
-            self.update_system({"max_total_positions": len(self.symbols)},
-                               source="sembol ekleme (otomatik buyutme)")
         self.sort_symbols_by_group()
         cfg = self.symbols[name]
         LOG.emit(f"{name} portfoye eklendi (kapali; optimizasyon sonrasi acilabilir).",
@@ -540,7 +537,7 @@ class Store:
             # magic, sessions and the enabled flag; strategy, timeframe and
             # every exit parameter live only in the database, so a fresh
             # install would otherwise start eighteen symbols live on the
-            # dataclass default - t3_stoch/M5, which nothing has validated and
+            # dataclass default - stoch_flip/M5, which nothing has validated and
             # which on an FX symbol pays 25-28% of risk in spread against an
             # 18% live ceiling.
             #
@@ -646,11 +643,12 @@ class Store:
         allowed = set(OPT_FIELDS)
         if isinstance(base.get("grid"), dict):
             base["grid"] = {k: v for k, v in base["grid"].items() if k in allowed}
+        known_fam = set(STRATEGIES)
         if isinstance(base.get("strategy_grids"), dict):
             base["strategy_grids"] = {
                 fam: {k: v for k, v in axes.items() if k in allowed}
                 for fam, axes in base["strategy_grids"].items()
-                if isinstance(axes, dict)
+                if fam in known_fam and isinstance(axes, dict)
             }
         # Same reasoning, one axis over: a stored family->timeframe map outlives
         # the timeframes it was written against. The live blob still carried
@@ -664,10 +662,15 @@ class Store:
             base["strategy_timeframes"] = {
                 fam: [t for t in tfs if t in TIMEFRAMES]
                 for fam, tfs in base["strategy_timeframes"].items()
-                if isinstance(tfs, list)
+                if fam in known_fam and isinstance(tfs, list)
             }
         if isinstance(base.get("timeframes"), list):
             base["timeframes"] = [t for t in base["timeframes"] if t in TIMEFRAMES]
+        # Same class as the TF/axis filters: a saved strategies list outlives
+        # the families it named. Drop here so GET and the next merge stay
+        # honest; save_opt_params applies the same drop so a POST cannot
+        # write them back.
+        self._drop_unsearchable_families(base)
         # Same reasoning for the whole exit-style block: the optimizer no longer
         # splits a family into targeted/trail sweeps because there is only one
         # exit regime left, so a stored block is dead weight, not configuration.
@@ -684,8 +687,20 @@ class Store:
         for key, value in params.items():
             if value is not None:
                 base[key] = value
+        self._drop_unsearchable_families(base)
         self.set_setting("opt_params", base)
         return base
+
+    @staticmethod
+    def _drop_unsearchable_families(base: dict[str, Any]) -> None:
+        """Leftover family names are not configuration. They cannot be searched."""
+        known = set(STRATEGIES)
+        if isinstance(base.get("strategies"), list):
+            base["strategies"] = [s for s in base["strategies"] if s in known]
+        for key in ("strategy_grids", "strategy_max_combos", "strategy_timeframes"):
+            blob = base.get(key)
+            if isinstance(blob, dict):
+                base[key] = {fam: val for fam, val in blob.items() if fam in known}
 
     def reset_opt_params(self) -> dict[str, Any]:
         self.set_setting("opt_params", {})

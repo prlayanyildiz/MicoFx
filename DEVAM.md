@@ -10,7 +10,10 @@ mesajları neden'leri taşıyor, kod ne'yi.
 > 16.08.2026 notu: bu dosya aslında git'te DEĞİLDİ — eski makinede hiç
 > commit edilmemişti ve `MicoFxOld` klasörü taşıma sonrası silinince tek
 > kopyası kaybolmak üzereydi. İçeriği oturum belleğinden geri yazıldı ve
-> commit edildi. Bir daha silinmesin diye artık gerçekten takipte.
+> 27.08.2026: `t3_stoch` / `wavetrend_flip` / `micro_rev` emekli. Canlı
+> 8 aile: mtf_pullback, burst, dual_t3, t3_flip, stoch_flip, parabolic_flip,
+> aroon_flip, ichimoku. Aşağıdaki tarihli tablolar arşivdir; o isimler
+> artık aranmaz ve panelde yoktur.
 
 ---
 

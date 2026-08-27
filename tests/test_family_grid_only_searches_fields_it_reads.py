@@ -35,7 +35,9 @@ def test_t3_flip_does_not_read_adx_min():
 
 
 def test_a_family_that_calls_regime_does_read_adx_min():
-    assert "adx_min" in opt_fields_read("t3_stoch")
+    # Measured 27.08: burst / dual_t3 / mtf_pullback are the three that call
+    # _regime. stoch_flip does not, so it cannot stand in here.
+    assert "adx_min" in opt_fields_read("burst")
 
 
 def test_no_family_grid_axis_is_unread():

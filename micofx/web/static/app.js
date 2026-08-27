@@ -69,6 +69,7 @@ let optPickerSig = "";
 let portfolioSig = "";
 let aiTableSig = "";
 let refreshBusy = false;
+let refreshQueued = false;
 let lastViewPulse = "";
 let lastViewTab = "";
 
@@ -190,6 +191,7 @@ function selectTab(name) {
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === `page-${name}`));
   if (name === "opt") {
+    renderOptJob();
     if (!OPT_PARAMS) loadOptParams().then(loadOptHistory);
     else syncOptPicker();
   }
@@ -198,7 +200,7 @@ function selectTab(name) {
     renderExecution(); renderLive();
   }
   if (name === "panel" && STATE && STATE.bot) {
-    renderTop(); renderCards(); renderCapacity(); renderPositions(); renderHarvest(); renderDayTable();
+    renderTop(); renderCapacity(); renderPositions(); renderHarvest(); renderDayTable();
     renderExecution(); renderLive();
   }
   // These three used to render only on the next poll, so switching to them
@@ -325,20 +327,7 @@ async function loadSpreadRatio() {
   if (note) note.textContent = data.note || "";
 }
 
-let SCHEMA = {};
 let symbolsSig = "";
-
-async function loadSchema() {
-  // Which OPT axes each family reads. Static for the life of the process, so
-  // it is fetched once instead of riding on every ~3s /api/state poll. Failure
-  // is not fatal: optFieldVisible() falls back to showing the field, which is
-  // what an unknown axis did before this endpoint existed.
-  try {
-    SCHEMA = await api("/api/schema");
-  } catch (err) {
-    SCHEMA = {};
-  }
-}
 
 async function loadSymbols() {
   try {
@@ -434,38 +423,98 @@ function renderTop() {
   const bot = STATE.bot || {};
   const mt5 = STATE.mt5 || {};
   const day = STATE.day || {};
-  const cap = STATE.capacity || {};
+  const cap = overlayCapacityFromPositions(STATE.capacity || {});
 
-  const botText = bot.running ? "CALISIYOR" : (bot.watching ? "IZLIYOR" : "DURDU");
+  const ai = STATE.ai || {};
+
+  // Operator 26.08: the four gauges moved up here too, so the strip below is
+  // gone entirely and the whole account picture is on one row, on every tab.
+  // A chip may now carry a progress bar; that is the only thing the cards did
+  // that a chip could not.
+  const marginPct = cap.margin_usage_pct || 0;
+  const marginMax = cap.max_margin_usage_pct || 100;
+  const marginRatio = Math.min(100, (marginPct / Math.max(1, marginMax)) * 100);
+
+  const unbounded = cap.open_risk_unbounded === true;
+
+  const paper = Number(cap.projected_monthly ?? 0);
+  // 0 is a defined JSON number, so ?? does not fall through. A search-frozen
+  // blob with costed=0 and paper=0 is what overlayMonthlyProjection fills;
+  // a missing costed slice that left costed at 0 used to keep the chip blank
+  // while paper was hundreds.
+  const costed = Number(cap.projected_costed_monthly) || paper;
+  const projPct = (Number(cap.projected_costed_monthly) ? cap.projected_costed_monthly_pct
+                   : null) ?? cap.projected_monthly_pct;
+  const projDaily = (Number(cap.projected_costed_monthly) ? cap.projected_costed_daily
+                     : null) ?? cap.projected_daily;
+  const projDenom = Math.max(Math.abs(paper), Math.abs(costed), 1e-9);
+  const projGap = Math.abs(paper - costed) / projDenom;
+
+  // Operator 26.08: ordered by how often it is looked at, not by where the
+  // number happens to live. State (is it even running) -> today (the figure
+  // checked most) -> the gauges that decide the next entry -> account totals
+  // -> the projection, which is the slowest-moving thing on the bar.
+  const clockStale = mt5.clock_stale === true || Object.values(STATE.states || {}).some(
+    (st) => String((st && st.note) || "").includes("broker saati bayat"));
+  const botText = clockStale ? "SAAT BAYAT"
+    : (bot.running ? "CALISIYOR" : (bot.watching ? "IZLIYOR" : "DURDU"));
   const items = [
-    ["Bot", botText, bot.running ? "pos" : (bot.watching ? "muted" : "dim")],
-    ["MT5", mt5.connected ? "BAGLI" : "KOPUK", mt5.connected ? "pos" : "neg"],
-    ["Saat", (mt5.server_time || "").slice(11, 16), ""],
+    { lbl: "Bot", val: botText, cls: clockStale ? "neg" : (bot.running ? "pos" : (bot.watching ? "muted" : "dim")) },
+    { lbl: "MT5", val: mt5.connected ? "BAGLI" : "KOPUK", cls: mt5.connected ? "pos" : "neg" },
+    { lbl: "Saat", val: clockStale ? "BAYAT" : (mt5.server_time || "").slice(11, 16),
+      cls: clockStale ? "neg" : "",
+      sub: clockStale ? (mt5.server_time || "").slice(11, 16) : "",
+      tip: clockStale
+        ? `broker saati donmus (${mt5.server_time || "-"}) - yeni giris yok`
+        : (mt5.server_time || "") },
+    { lbl: "Gun", val: signed(day.realised), cls: cls(day.realised),
+      sub: `${signed(day.pnl_pct, 2)}%`,
+      tip: `${day.closed_trades || 0} islem %${num(day.win_rate, 0)} basari`
+        + ` | lot x${num(ai.risk_scale ?? 1, 2)}`
+        + (ai.risk_scale_enforced === false ? " (carpan uygulanmiyor)" : "") },
+    { lbl: "Acik K/Z", val: signed(acc.profit),
+      cls: unbounded ? "neg" : cls(acc.profit),
+      sub: unbounded ? "STOPSUZ" : "",
+      tip: unbounded ? "ciplak pozisyon - SL yok, yeni giris yok" : "" },
+    { lbl: "Marj Kullanimi", val: `%${num(marginPct, 1)}`,
+      tip: `tavan %${num(marginMax, 0)}`,
+      bar: marginRatio, barClass: marginRatio > 85 ? "bad" : marginRatio > 60 ? "warn" : "" },
+    { lbl: "Varlik", val: num(acc.equity) },
     // Currency and leverage ride in the label, not a second line: the top bar
     // has spare width and no spare height, and these two never change while
     // the account is up - they are context for the number, not a reading.
-    ["Bakiye", num(acc.balance), "", `${acc.currency || ""} 1:${acc.leverage || "-"}`],
-    ["Varlik", num(acc.equity), ""],
-    ["Acik K/Z", signed(acc.profit), cls(acc.profit)],
-    ["Gun", `${signed(day.realised)} (${signed(day.pnl_pct, 2)}%)`, cls(day.realised)],
-    // Operator 26.08: the strip below is for gauges (a bar, a ceiling, a
-    // projection). Plain scalars belong up here, where they are on screen on
-    // every tab - so Serbest Marj moved up, and Acilabilir Islem folded into
-    // the Pozisyon chip it was already half-repeating (3/100 on both).
-    ["Serbest Marj", num(acc.margin_free), "", `kullanilan ${num(acc.margin)}`],
-    ["Pozisyon", `${cap.open_total ?? 0} / ${cap.max_total_positions ?? 0}`, "",
-      `${cap.global_free_slots ?? 0} bos | sembol basi ${cap.max_positions_per_symbol ?? "-"}`],
+    // A value is never ellipsised - truncating "-256,23 (-9,75%)" to
+    // "-256,23 (-9..." hides the number the chip exists for. Anything that
+    // does not fit becomes a short sub plus a hover title instead.
+    { lbl: "Bakiye", val: num(acc.balance), sub: acc.currency || "",
+      tip: `${acc.currency || ""} | kaldirac 1:${acc.leverage || "-"}` },
+    { lbl: "Serbest Marj", val: num(acc.margin_free),
+      tip: `kullanilan ${num(acc.margin)}` },
+    { lbl: "Beklenen Aylik",
+      val: signed(costed),
+      cls: cap.projected_costed_negative ? "neg"
+        : costed >= 0 ? "pos" : "neg",
+      sub: "kagit",
+      tip: `holdout kagidi, canli sonuc degil | %${num(projPct, 2)} | gunluk ${signed(projDaily)}`
+        + ` | maliyet odenmeden ${signed(paper)}`
+        + (projGap > 0.25 ? ` | kagit/maliyetli fark %${num(projGap * 100, 0)}` : "") },
   ];
   if (acc.netting) {
-    items.push(["Hesap modu", "NETTING - ISLEM DURDU", "neg"]);
+    items.push({ lbl: "Hesap modu", val: "NETTING - ISLEM DURDU", cls: "neg" });
   }
   if (Number(acc.trade_mode) === 2) {
-    items.push(["Hesap", "GERCEK PARA", "neg"]);
+    items.push({ lbl: "Hesap", val: "GERCEK PARA", cls: "neg" });
   }
 
-  $("#topstats").innerHTML = items.map(([lbl, val, klass, sub]) =>
-    `<div class="tstat" title="${esc(helpTitle("top." + lbl))}"><div class="lbl">${lbl}${
-      sub ? ` <span class="dim">${esc(sub)}</span>` : ""}</div><div class="val ${klass}">${val}</div></div>`
+  $("#topstats").innerHTML = items.map((it) =>
+    `<div class="tstat"`
+    + ` title="${esc([helpTitle("top." + it.lbl), it.tip].filter(Boolean).join(" — "))}">`
+    + `<div class="lbl">${esc(it.lbl)}${
+      it.sub ? ` <span class="dim">${esc(it.sub)}</span>` : ""}</div>`
+    + `<div class="val ${it.cls || ""}">${esc(it.val)}</div>`
+    + (it.bar !== undefined
+      ? `<div class="bar"><i class="${it.barClass || ""}" style="width:${it.bar}%"></i></div>` : "")
+    + `</div>`
   ).join("");
 
   $("#btn-start").disabled = !!bot.running;
@@ -483,109 +532,6 @@ function renderTop() {
     const lockText = (lock.reason || "").trim();
     lockBanner.hidden = !lockText;
     lockBanner.textContent = lockText;
-  }
-}
-
-function renderCards() {
-  const acc = STATE.account || {};
-  const day = STATE.day || {};
-  const cap = STATE.capacity || {};
-  const sys = STATE.system || {};
-
-  const marginPct = cap.margin_usage_pct || 0;
-  const marginMax = cap.max_margin_usage_pct || 100;
-  const marginRatio = Math.min(100, (marginPct / Math.max(1, marginMax)) * 100);
-
-  const lossLimit = sys.daily_loss_pct || 0;
-  const dayPct = day.pnl_pct || 0;
-  const lossRatio = lossLimit > 0 ? Math.min(100, Math.max(0, (-dayPct / lossLimit) * 100)) : 0;
-
-  const riskCap = Number(cap.max_concurrent_risk_pct || sys.max_concurrent_risk_pct || 0);
-  // Absent is not zero. A backend that predates this field would otherwise
-  // paint an empty bar over a book that is actually carrying risk, which is
-  // the one reading this card exists to prevent.
-  const unbounded = cap.open_risk_unbounded === true;
-  const riskKnown = unbounded || cap.open_risk_pct != null;
-  const riskPct = Number(cap.open_risk_pct || 0);
-  const riskRatio = riskKnown && riskCap > 0
-    ? Math.min(100, Math.max(0, (riskPct / riskCap) * 100)) : 0;
-
-  const ai = STATE.ai || {};
-  const costCeiling = Number(sys.max_cost_pct_of_risk || cap.max_cost_pct_of_risk || 0);
-
-  // Bakiye / Varlik / Gunluk Sonuc used to sit here AND in the top bar, which
-  // is on screen on every tab - the same three numbers read twice, costing a
-  // full card row. The bar keeps them (balance now carries currency+leverage
-  // in its label); what stays below is only what the bar has no room for: the
-  // margin pair, the three gauges with progress bars, and the projection.
-  const cards = [
-    {
-      lbl: "Marj Kullanimi", val: `%${num(marginPct, 1)}`, foot: `limit %${num(marginMax, 0)}`,
-      bar: marginRatio, barClass: marginRatio > 85 ? "bad" : marginRatio > 60 ? "warn" : "",
-    },
-    {
-      // Absorbs the old Gunluk Sonuc card: the cash figure is in the top bar,
-      // but trade count and win rate are nowhere else, so they move into this
-      // card's foot rather than disappearing with it.
-      lbl: "Gunluk Limit", val: `${signed(dayPct, 2)}%`,
-      foot: `${lossLimit > 0 ? `zarar limiti %${num(lossLimit, 1)}` : "limit kapali"}`
-        + ` | ${day.closed_trades || 0} islem %${num(day.win_rate, 0)} basari`
-        + ` | lot x${num(ai.risk_scale ?? 1, 2)}`,
-      bar: lossRatio, barClass: lossRatio > 80 ? "bad" : lossRatio > 50 ? "warn" : "",
-      accent: day.halted ? "red" : "",
-    },
-    {
-      // The daily-loss bar next to it answers "how much have I lost today".
-      // This one answers "how much is still at risk right now" - the number
-      // can_open() refuses on. They move independently: a book of trailed
-      // stops carries almost no remaining risk while the day's loss stays.
-      lbl: "Eszamanli Risk",
-      val: unbounded ? "STOPSUZ"
-        : (riskKnown ? `%${num(riskPct, 2)}` : "-"),
-      foot: unbounded
-        ? "ciplak pozisyon - tavan olculemiyor"
-        : (!riskKnown
-          ? "sunucu bu alani vermiyor - yeniden baslatma gerekiyor"
-          : (riskCap > 0
-            ? `tavan %${num(riskCap, 2)} | acik risk ${num(cap.open_risk)}`
-            : "tavan kapali")),
-      bar: unbounded ? 100 : riskRatio,
-      barClass: unbounded || riskRatio > 80 ? "bad" : riskRatio > 50 ? "warn" : "",
-      accent: unbounded ? "red" : "",
-    },
-    {
-      lbl: "Beklenen Aylik",
-      val: signed(cap.projected_costed_monthly ?? cap.projected_monthly),
-      foot: (() => {
-        const paper = Number(cap.projected_monthly ?? 0);
-        const costed = Number(cap.projected_costed_monthly ?? paper);
-        const pct = cap.projected_costed_monthly_pct ?? cap.projected_monthly_pct;
-        const daily = cap.projected_costed_daily ?? cap.projected_daily;
-        const denom = Math.max(Math.abs(paper), Math.abs(costed), 1e-9);
-        const gap = Math.abs(paper - costed) / denom;
-        const gapNote = gap > 0.25
-          ? ` | kagit/maliyetli fark %${num(gap * 100, 0)}`
-          : "";
-        return `%${num(pct, 2)} | gunluk ${signed(daily)}`
-          + ` | maliyet odenmeden ${signed(paper)}${gapNote}`;
-      })(),
-      accent: cap.projected_costed_negative ? "red"
-        : (cap.projected_costed_monthly ?? cap.projected_monthly ?? 0) >= 0 ? "green" : "red",
-    },
-  ];
-
-  $("#account-cards").innerHTML = cards.map((c) => `
-    <div class="card ${c.accent ? "accent-" + c.accent : ""}" title="${esc(helpTitle("card." + c.lbl))}">
-      <div class="lbl">${c.lbl}</div>
-      <div class="val">${c.val}</div>
-      <div class="foot">${c.foot || ""}</div>
-      ${c.bar !== undefined ? `<div class="bar"><i class="${c.barClass}" style="width:${c.bar}%"></i></div>` : ""}
-    </div>`).join("");
-
-  if (day.halted) {
-    $("#day-note").innerHTML = `<span class="pill bad">DURDURULDU</span> ${esc(day.halt_reason || "")}`;
-  } else {
-    $("#day-note").textContent = `${day.day_key || ""} | baslangic ${num(day.start_balance)}`;
   }
 }
 
@@ -631,7 +577,7 @@ function costTitle(r) {
     if (r.cost_inflation >= 1.8) {
       lines.push(`Su an normalin ${num(r.cost_inflation, 1)} katinda - spread gecici olarak sismis `
                + `(broker rollover / ince seans). Sembolun kalici ozelligi degil.`);
-      lines.push(`Bu haldeyken block_high_cost zaten girisleri engelliyor; spread normale `
+      lines.push(`Bu haldeyken maliyet kapisi girisleri engeller; spread normale `
                + `donunce kendiliginden acilir.`);
     }
   } else {
@@ -640,8 +586,93 @@ function costTitle(r) {
   return lines.join("\n");
 }
 
+function overlayCapacityFromPositions(cap) {
+  // This PID's engine still returns the 10:03 copy while a search holds
+  // the MT5 lock. Open count and floating P/L are already on STATE.positions.
+  const busy = !!(STATE.opt && (STATE.opt.busy || STATE.opt.state === "running"));
+  if (!busy && !cap.search_frozen) {
+    if (!(Number(cap.projected_monthly) || Number(cap.projected_costed_monthly))) {
+      return Object.assign({}, cap, overlayMonthlyProjection(cap));
+    }
+    return cap;
+  }
+  const by = {};
+  for (const p of (STATE.positions || [])) {
+    const s = p.symbol;
+    if (!by[s]) by[s] = { n: 0, pnl: 0 };
+    by[s].n += 1;
+    by[s].pnl += Number(p.profit || 0) + Number(p.swap || 0);
+  }
+  const rows = (cap.rows || []).map((r) => {
+    const hit = by[r.symbol] || by[r.broker_symbol] || { n: 0, pnl: 0 };
+    const oldN = r.open_positions || 0;
+    const oldFree = r.free_slots || 0;
+    const n = hit.n;
+    return Object.assign({}, r, {
+      open_positions: n,
+      open_profit: hit.pnl,
+      free_slots: r.enabled ? Math.max(0, oldFree - (n - oldN)) : 0,
+    });
+  });
+  const nAll = (STATE.positions || []).length;
+  const oldTotal = cap.open_total || 0;
+  const oldGlobal = cap.global_free_slots || 0;
+  const out = Object.assign({}, cap, {
+    rows,
+    search_frozen: true,
+    open_total: nAll,
+    global_free_slots: Math.max(0, oldGlobal - (nAll - oldTotal)),
+  });
+  if (!(Number(out.projected_monthly) || Number(out.projected_costed_monthly))) {
+    Object.assign(out, overlayMonthlyProjection(out));
+  }
+  return out;
+}
+
+function overlayMonthlyProjection(cap) {
+  // Search-frozen capacity often ships risk_per_trade=0, which zeroes the
+  // chip. Recompute from the holdout stamp at configured risk % — paper,
+  // not live P/L, which is what the card always was.
+  const acc = STATE.account || {};
+  const equity = Number(acc.equity || acc.balance || 0);
+  const bal = Number(acc.balance || equity || 0);
+  const byRow = {};
+  for (const r of (cap.rows || [])) byRow[r.symbol] = r;
+  let paper = 0;
+  let costed = 0;
+  for (const s of (typeof SYMBOLS !== "undefined" ? SYMBOLS : [])) {
+    if (!s.enabled) continue;
+    const osu = s.opt_summary || {};
+    const hold = osu.holdout || {};
+    const days = Number(osu.holdout_days || 0);
+    const net = Number(hold.net_r || 0);
+    if (!(days > 0) || !net) continue;
+    const row = byRow[s.symbol] || {};
+    let risk = Number(row.risk_per_trade || 0);
+    if (!(risk > 0) && bal > 0) {
+      risk = bal * Number(s.risk_percent || 0) / 100;
+      const es = Number(row.edge_scale);
+      if (es > 0) risk *= es;
+    }
+    if (!(risk > 0)) continue;
+    paper += net * risk / days;
+    const cnet = Number((osu.holdout_costed || {}).net_r || 0);
+    costed += (cnet || net) * risk / days;
+  }
+  const monthly = paper * 21;
+  const costedM = costed * 21;
+  return {
+    projected_daily: paper,
+    projected_monthly: monthly,
+    projected_monthly_pct: bal > 0 ? monthly / bal * 100 : 0,
+    projected_costed_daily: costed,
+    projected_costed_monthly: costedM,
+    projected_costed_monthly_pct: bal > 0 ? costedM / bal * 100 : 0,
+  };
+}
+
 function renderCapacity() {
-  const cap = STATE.capacity || {};
+  const cap = overlayCapacityFromPositions(STATE.capacity || {});
   const rows = (cap.rows || []).map((r) => {
     const tr = el("tr");
     tr.innerHTML = `
@@ -650,12 +681,11 @@ function renderCapacity() {
       <td><span class="pill ${r.enabled ? "on" : "off"}">${r.enabled ? "aktif" : "kapali"}</span></td>
       <td class="num">${num(r.lot, 2)}</td>
       <td class="num ${r.edge_scale > 1 ? "pos" : (r.edge_scale < 1 ? "neg" : "dim")}" title="holdout net R / maxDD, karekok medyan, 0.6-2.2">${r.edge_scale != null ? "x" + num(r.edge_scale, 2) : "-"}</td>
-      <td class="num dim">${esc(r.lot_note || r.lot_mode)}</td>
+      <td class="num dim">${esc(r.lot_note || "risk %")}</td>
       <td class="num ${r.open_positions ? "pos" : "dim"}">${r.open_positions}</td>
-      <td class="num dim">${r.max_positions}</td>
       <td class="num ${r.free_slots > 0 ? "pos" : "neg"}"><b>${r.free_slots}</b></td>
       <td class="num">${num(r.margin_per_trade)}</td>
-      <td class="num">${r.risk_per_trade ? `${num(r.risk_per_trade)} <span class="dim">${esc(r.risk_sizing || (r.lot_mode === "risk" ? "risk %" : "sabit"))}</span>` : "-"}</td>
+      <td class="num">${r.risk_per_trade ? `${num(r.risk_per_trade)} <span class="dim">${esc(r.risk_sizing || "risk %")}</span>` : "-"}</td>
       <td class="num ${costCls(r)}" title="${costTitle(r)}">${costCell(r)}</td>
       <td class="num ${cls(r.expected_per_trade)}">${r.expectancy_r ? signed(r.expected_per_trade, 3) : '<span class="dim">-</span>'}</td>
       <td class="num ${cls(r.open_profit)}">${r.open_positions ? signed(r.open_profit) : "-"}</td>`;
@@ -687,12 +717,11 @@ function renderCapacity() {
     + (cap.projected_costed_monthly
       ? ` | maliyetli dilim ${signed(cap.projected_costed_monthly)}` : "");
   $("#capacity-summary").innerHTML =
-    `slot limitinde en kotu risk ${num(cap.concurrent_risk)} (%${num(cap.concurrent_risk_pct, 2)})` +
-    `${cap.max_concurrent_risk_pct > 0
-      ? ` <b class="${cap.concurrent_risk_pct > cap.max_concurrent_risk_pct ? "neg" : "dim"}">tavan %${num(cap.max_concurrent_risk_pct, 2)}</b>`
-      : ' <span class="dim">tavan kapali</span>'} | ` +
     `projeksiyon ${cap.projected_charge_costs ? "maliyetli" : "maliyetsiz"} OPT'ten` +
-    costedNote;
+    costedNote +
+    (cap.search_frozen
+      ? ` <span class="pill dim" title="Marj ve lot arama kilidinde donuk; acik sayi ve K/Z pozisyon listesinden taze">arama: marj/lot donuk</span>`
+      : "");
 }
 
 function renderExecution() {
@@ -742,7 +771,6 @@ function renderPositions() {
     // quiet blank. The log has said STOPSUZ since this morning; the table
     // showed the same state as a dimmed zero (review 24.08 15:12).
     const naked = !(Number(p.sl) > 0) && Number(p.volume) > 0;
-    const give = (p.mfe_r != null && p.r_open != null) ? p.mfe_r - p.r_open : 0;
     const cfg = SYMBOLS.find((s) => s.symbol === p.config_symbol
       || s.resolved_symbol === p.symbol) || {};
     const harvestAt = Number(cfg.harvest_at_r || 0);
@@ -762,9 +790,6 @@ function renderPositions() {
       <td class="num">${price(p.price_current, digits)}</td>
       <td class="num ${naked ? "neg" : (p.sl ? "" : "dim")}">${
         naked ? '<b>STOPSUZ</b>' : price(p.sl, digits)}</td>
-      <td class="num ${cls(p.r_open)}">${p.r_open != null ? signed(p.r_open, 2) : "-"}</td>
-      <td class="num ${Number(p.r_open) > 0 && give >= 1 ? "neg" : "dim"}">${
-        p.mfe_r != null ? num(p.mfe_r, 2) : "-"}</td>
       <td class="num ${cls(p.profit + p.swap)}">${signed(p.profit + p.swap)}</td>
       <td>${status}</td>
       <td class="dim mono">${duration(now - p.time)}</td>
@@ -788,7 +813,7 @@ function renderPositions() {
     })));
     return tr;
   });
-  rowsInto($("#positions-table"), rows, "Acik pozisyon yok", 14);
+  rowsInto($("#positions-table"), rows, "Acik pozisyon yok", 12);
 }
 
 function renderHarvest() {
@@ -806,7 +831,11 @@ function renderHarvest() {
   if (worst) text += ` | en cok ${String(worst[0])} ${num(worst[1], 1)}R`;
   text += ` | parca acik: ${on.length ? on.map((s) => String(s)).join(", ") : "yok"}`;
   text += ` | hasat trail: ${harvest.length ? harvest.map((s) => String(s)).join(", ") : "yok"}`;
+  // Operator 26.08: this note used to wrap to two lines above the button and
+  // cost the open book that height on every screen. One line beside the
+  // button now; the full sentence is on hover.
   node.textContent = text;
+  node.title = text;
 }
 
 function renderDayTable() {
@@ -887,217 +916,21 @@ function renderLive() {
 /* --------------------------------------------------------- symbols: spec */
 
 const STRATEGY_LABEL = {
-  t3_stoch: "T3 + Stochastic RSI",
   mtf_pullback: "Ust TF Trend Geri Cekilmesi",
-  micro_rev: "Mikro Ortalamaya Donus (maliyet olcekli)",
   burst: "Momentum Patlamasi Devami",
   dual_t3: "Ikili T3 + ATR (sade cekirdek)",
   t3_flip: "Tek Tillson T3 Yon Donusu (tek cizgi)",
-  // The flip families were missing here entirely, so four of the ten live
-  // symbols showed a raw key instead of a name. Must stay in step with
-  // models.STRATEGIES - the dropdown below is the same list.
-  wavetrend_flip: "WaveTrend Yon Donusu",
+  // The flip families were missing here entirely, so live symbols showed
+  // a raw key instead of a name. Must stay in step with models.STRATEGIES;
+  // the card header and live-table title read this map.
   stoch_flip: "Stochastic Yon Donusu",
   parabolic_flip: "Parabolic SAR Yon Donusu",
   aroon_flip: "Aroon Yon Donusu",
   ichimoku: "Ichimoku TK + bulut (gecikmeli, ileri bakissiz)",
 };
 
-// Visible on every symbol card without expanding anything: pure risk/sizing
-// dials someone actually turns by hand. Everything the optimizer tunes for
-// you (strategy choice, entry-signal internals, exit/ATR mechanics, filters)
-// lives in ADVANCED_SECTIONS instead, collapsed by default.
-const POSITION_SECTION = {
-  title: "Pozisyon Boyutu",
-  fields: [
-    { k: "lot_mode", t: "select", label: "Lot modu", opts: [["fixed", "Sabit lot"], ["risk", "Risk yuzdesi"]] },
-    { k: "fixed_lot", t: "num", label: "Sabit lot", step: 0.01, min: 0.01, max: 20 },
-    { k: "risk_percent", t: "num", label: "Risk %", step: 0.05, min: 0.05 },
-    { k: "max_lot", t: "num", label: "Maks lot", step: 0.01, min: 0.01, max: 20 },
-    { k: "max_positions", t: "int", label: "Maks pozisyon", min: 1, max: 10 },
-    { k: "symbol_daily_loss_pct", t: "num", label: "Sembol gunluk zarar limiti % (0=kapali)", step: 0.1, min: 0 },
-  ],
-};
-
-const SECTIONS = [
-  {
-    title: "Strateji (optimizer ayarlar)",
-    fields: [
-      {
-        k: "strategy", t: "select", label: "Strateji ailesi",
-        opts: Object.entries(STRATEGY_LABEL),
-      },
-      { k: "timeframe", t: "select", label: "Zaman dilimi", opts: [["M5", "M5"], ["M15", "M15"], ["M30", "M30"]] },
-    ],
-  },
-  {
-    title: "Sinyal (T3 + Stochastic RSI)",
-    fields: [
-      { k: "t3_length", t: "int", label: "T3 uzunluk", min: 2, max: 60 },
-      { k: "t3_volume_factor", t: "num", label: "T3 hacim faktoru", step: 0.05, min: 0.1, max: 1 },
-      { k: "rsi_length", t: "int", label: "RSI periyot", min: 2, max: 60 },
-      { k: "stoch_length", t: "int", label: "Stoch periyot", min: 2, max: 60 },
-      { k: "smooth_k", t: "int", label: "%K yumusatma", min: 1, max: 20 },
-      { k: "smooth_d", t: "int", label: "%D yumusatma", min: 1, max: 20 },
-      { k: "stoch_band", t: "num", label: "Kesisim bandi", step: 1, min: 1, max: 50 },
-      { k: "stoch_extreme", t: "num", label: "Asiri bolge", step: 1, min: 50, max: 100 },
-      {
-        k: "htf_factor", t: "int", label: "Ust TF carpani (0=kapali)",
-        min: 0, max: 24,
-      },
-    ],
-  },
-  {
-    title: "Risk ve Cikis (sert ATR stop + ATR takip)",
-    fields: [
-      { k: "atr_period", t: "int", label: "ATR periyot", min: 2, max: 100 },
-      { k: "sl_atr_mult", t: "num", label: "SL x ATR", step: 0.1, min: 0.1 },
-      { k: "trail_start_atr", t: "num", label: "Trail baslangic x ATR", step: 0.1, min: 0.1 },
-      { k: "trail_step_atr", t: "num", label: "Trail mesafe x ATR", step: 0.1, min: 0.1 },
-      { k: "breakeven_at_r", t: "num", label: "Basabas kilit (R, 0=kapali)", step: 0.5, min: 0, max: 5 },
-      { k: "partial_at_r", t: "num", label: "Parca esigi (R, 0=kapali; lot otomatik)", step: 0.5, min: 0, max: 5 },
-      { k: "harvest_at_r", t: "num", label: "Hasat esigi (R, 0=kapali)", step: 0.5, min: 0, max: 5 },
-      { k: "harvest_step_atr", t: "num", label: "Hasat trail x ATR (0=kapali)", step: 0.1, min: 0, max: 20 },
-      {
-        k: "trail_mode", t: "select", label: "Trail modu",
-        opts: [["atr", "ATR (klasik)"], ["structure", "Yapisal (swing H/L)"], ["hybrid", "Hibrit (en siki)"]],
-      },
-      { k: "trail_lookback", t: "int", label: "Yapisal trail geriye bakis (bar)", min: 3, max: 100 },
-    ],
-  },
-  {
-    title: "Ust TF Trend Geri Cekilmesi",
-    fields: [
-      { k: "pull_fast", t: "int", label: "Hizli EMA uzunlugu", min: 2, max: 60 },
-      { k: "pull_depth_atr", t: "num", label: "Geri cekilme derinligi x ATR", step: 0.1, min: 0, max: 3 },
-      { k: "pull_max_bars", t: "int", label: "Geri cekilme penceresi (bar)", min: 2, max: 40 },
-    ],
-  },
-  {
-    title: "Mikro Ortalamaya Donus (maliyet olcekli)",
-    fields: [
-      { k: "mr_fast", t: "int", label: "Hizli ortalama (bar)", min: 2, max: 60 },
-      { k: "mr_stretch_cost", t: "num", label: "Uzama esigi x islem maliyeti", step: 0.5, min: 1, max: 40 },
-      { k: "mr_confirm", t: "bool", label: "Bar ortalamaya donmus olsun" },
-    ],
-  },
-  {
-    title: "Momentum Patlamasi Devami",
-    fields: [
-      { k: "brst_lookback", t: "int", label: "Menzil penceresi (bar)", min: 5, max: 120 },
-      { k: "brst_range_z", t: "num", label: "Menzil genislemesi (z skor)", step: 0.1, min: 0.5, max: 5 },
-      { k: "brst_close_pct", t: "num", label: "Kapanis barin ucunda (oran)", step: 0.05, min: 0.5, max: 0.99 },
-    ],
-  },
-  {
-    title: "Ikili T3 + ATR (sade cekirdek)",
-    fields: [
-      { k: "t3_fast", t: "int", label: "Hizli T3 uzunluk", min: 2, max: 60 },
-      { k: "t3_slow_mult", t: "num", label: "Yavas T3 carpani", step: 0.5, min: 1.2, max: 10 },
-      { k: "t3_volume_factor", t: "num", label: "Yavas T3 hacim faktoru", step: 0.05, min: 0.1, max: 1 },
-      { k: "t3_fast_vf", t: "num", label: "Hizli T3 hacim faktoru (0=yavas ile ayni)", step: 0.001, min: 0, max: 1 },
-      { k: "st_period", t: "int", label: "SuperTrend ATR periyodu", min: 2, max: 100 },
-      { k: "st_mult", t: "num", label: "SuperTrend x ATR onayi (0=kapali)", step: 0.1, min: 0, max: 10 },
-    ],
-  },
-  {
-    title: "SuperTrend Donusu (hedefsiz, sadece trail)",
-    fields: [
-      // Same two fields as the dual_t3 block above - there they are an optional
-      // confirmation, here they are the entire signal. The regime gate is the
-      // shared adx_min in "Giris Filtreleri"; the exit is the hard ATR stop
-      // plus the trail, both in "Risk ve Cikis".
-      { k: "st_period", t: "int", label: "SuperTrend ATR periyodu", min: 2, max: 100 },
-      { k: "st_mult", t: "num", label: "SuperTrend x ATR bant genisligi (sinyal)", step: 0.1, min: 0, max: 10 },
-    ],
-  },
-  {
-    title: "Tek Tillson T3 Yon Donusu (tek cizgi)",
-    fields: [
-      // The whole signal is these two fields: one T3 line, and the bar its own
-      // direction changes. The third is the only optional filter - the same
-      // line's curvature at the flip bar - and 0 turns it off completely. The
-      // exit is the hard ATR stop plus the trail, both in "Risk ve Cikis".
-      { k: "t3_length", t: "int", label: "T3 uzunluk", min: 2, max: 60 },
-      { k: "t3_volume_factor", t: "num", label: "T3 hacim faktoru", step: 0.05, min: 0.1, max: 1 },
-      { k: "t3_accel_min", t: "num", label: "Min T3 ivmesi x ATR (0=kapali, yatay piyasa filtresi)", step: 0.01, min: 0, max: 1 },
-    ],
-  },
-  {
-    title: "Giris Filtreleri",
-    fields: [
-      { k: "adx_period", t: "int", label: "ADX periyot", min: 2, max: 100 },
-      { k: "adx_min", t: "num", label: "Min ADX (0=kapali)", step: 1, min: 0, max: 60 },
-      { k: "max_spread_atr", t: "num", label: "Maks spread x ATR (0=kapali)", step: 0.05, min: 0 },
-      { k: "cost_rank_max", t: "num", label: "Maks maliyet yuzdeligi (0=kapali, scalp aileleri)", step: 0.05, min: 0, max: 1 },
-      { k: "min_atr_ratio", t: "num", label: "Min ATR/fiyat", step: 0.0001, min: 0 },
-      { k: "min_body_ratio", t: "num", label: "Min mum govdesi (0=kapali)", step: 0.05, min: 0, max: 1 },
-      { k: "atr_pct_min", t: "num", label: "Min ATR yuzdeligi (0=kapali)", step: 0.05, min: 0, max: 1 },
-      { k: "cooldown_sec", t: "int", label: "Bekleme (sn)", min: 0, max: 86400 },
-    ],
-  },
-  {
-    title: "Maliyet",
-    fields: [
-      { k: "commission_per_lot", t: "num", label: "Komisyon (1 lot gidis-donus)", step: 0.5, min: 0 },
-    ],
-  },
-];
-
-function optFieldVisible(cfg, k) {
-  if (k === "strategy" || k === "timeframe") return true;
-  const all = SCHEMA.opt_fields;
-  if (!all || !all.includes(k)) return true;
-  const read = (SCHEMA.strategy_opt_fields || {})[cfg.strategy] || [];
-  const eng = SCHEMA.engine_opt_fields || [];
-  return read.includes(k) || eng.includes(k);
-}
-
-function buildField(cfg, spec) {
-  let input;
-  if (spec.t === "bool") {
-    input = el("input", { type: "checkbox" });
-    input.dataset.key = spec.k;
-    input.checked = !!cfg[spec.k];
-    input.addEventListener("change", () => {
-      saveSymbol(cfg.symbol, { [spec.k]: input.checked }, input);
-    });
-    const box = el("div", { class: "field" }, [
-      el("label", { class: "chk" }, [input, el("span", { text: spec.label })]),
-    ]);
-    const tip = helpTitle(spec.k);
-    if (tip) box.title = tip;
-    return box;
-  }
-  if (spec.t === "select") {
-    input = el("select", {}, spec.opts.map(([v, l]) => el("option", { value: v, text: l })));
-  } else {
-    input = el("input", {
-      type: "number", step: spec.t === "int" ? 1 : (spec.step ?? 0.01),
-      min: spec.min, max: spec.max,
-    });
-  }
-  input.dataset.key = spec.k;
-  input.value = cfg[spec.k];
-  if (spec.k === "risk_percent" && cfg.lot_mode === "fixed") {
-    input.disabled = true;
-    spec = { ...spec, label: spec.label + " (fixed modda kullanilmiyor)" };
-  }
-  if (spec.k === "fixed_lot" && cfg.lot_mode === "risk") {
-    input.disabled = true;
-    spec = { ...spec, label: spec.label + " (risk modda kullanilmiyor)" };
-  }
-  input.addEventListener("change", () => {
-    const raw = input.value;
-    const value = spec.t === "select" ? raw : (spec.t === "int" ? parseInt(raw, 10) : parseFloat(raw));
-    if (spec.t !== "select" && !isFinite(value)) { input.value = cfg[spec.k]; return; }
-    saveSymbol(cfg.symbol, { [spec.k]: value }, input);
-  });
-  const box = el("div", { class: "field" }, [el("label", { text: spec.label }), input]);
-  const tip = helpTitle(spec.k);
-  if (tip) box.title = tip;
-  return box;
-}
+// Card body is session hours only. Stored risk_percent still sizes
+// lots; the header live line prints it. Search writes exits.
 
 function buildSessionEditor(cfg) {
   const wrap = el("div", { class: "sessions" });
@@ -1185,27 +1018,6 @@ function buildSymbolCard(cfg) {
 
   const body = el("div", { class: "scard-body" });
 
-  body.appendChild(el("div", { class: "subgrid" }, [
-    el("div", { class: "title", text: POSITION_SECTION.title }),
-    el("div", { class: "form-grid" }, POSITION_SECTION.fields.map((f) => buildField(cfg, f))),
-  ]));
-
-  // Strateji secimi, sinyal ic parametreleri, ATR cikis mekanigi, filtreler -
-  // hepsi optimizer'in ayarladigi seyler. Elle mudahale edilmeyecekse
-  // gorunumde gurultu; katlanir blokta duruyor, silinmedi.
-  const advDetails = el("details", { class: "subgrid" });
-  advDetails.appendChild(el("summary", { class: "title", text: "Ileri duzey / Strateji Parametreleri" }));
-  SECTIONS.forEach((section) => {
-    const fields = section.fields.filter((f) => optFieldVisible(cfg, f.k));
-    if (!fields.length) return;
-    const grid = el("div", { class: "subgrid" }, [
-      el("div", { class: "title", text: section.title }),
-      el("div", { class: "form-grid" }, fields.map((f) => buildField(cfg, f))),
-    ]);
-    advDetails.appendChild(grid);
-  });
-  body.appendChild(advDetails);
-
   const useSessions = el("input", { type: "checkbox" });
   useSessions.checked = !!cfg.use_sessions;
   useSessions.dataset.key = "use_sessions";
@@ -1250,18 +1062,6 @@ function buildSymbolCard(cfg) {
         } catch (e) { toast(e.message, "err"); }
       },
     }),
-    el("button", {
-      class: "btn btn-sm btn-ghost", text: "Varsayilana Don",
-      onclick: async () => {
-        if (!confirm(`${cfg.symbol} ayarlari varsayilana donsun mu?`)) return;
-        try {
-          await api(`/api/symbols/${cfg.symbol}/reset`, { method: "POST" });
-          toast(`${cfg.symbol} sifirlandi`, "ok");
-          cardsBuilt = false;
-          refresh();
-        } catch (e) { toast(e.message, "err"); }
-      },
-    }),
   ]));
 
   card.appendChild(body);
@@ -1290,7 +1090,6 @@ function updateSymbolCards() {
       if (input.type === "checkbox") input.checked = !!cfg[key];
       else if (String(input.value) !== String(cfg[key])) input.value = cfg[key];
     });
-
     const st = states[cfg.symbol] || {};
     const sess = st.session || {};
     const optAge = cfg.opt_updated_at
@@ -1302,7 +1101,7 @@ function updateSymbolCards() {
     $(".scard-live", card).innerHTML = `
       <span><b>strateji</b> ${esc(STRATEGY_LABEL[cfg.strategy] || cfg.strategy)} <span class="dim">${esc(cfg.timeframe)}</span></span>
       <span><b>seans</b> ${sess.open ? '<span class="pos">acik</span>' : '<span class="dim">kapali</span>'} ${esc(cfg.session_text)}</span>
-      <span><b>lot</b> ${num(cfg.lot_mode === "risk" ? cfg.max_lot : cfg.fixed_lot, 2)}${cfg.lot_mode === "risk" ? " (risk)" : ""}</span>
+      <span><b>lot</b> ${num(cfg.risk_percent, 2)}% bakiye</span>
       <span><b>T3</b> ${(!st.bars_ready || st.t3_rising == null) ? "-" : (st.t3_rising ? '<span class="pos">yukari</span>' : '<span class="neg">asagi</span>')}</span>
       <span><b>K/D</b> ${st.k != null ? num(st.k, 0) + "/" + num(st.d, 0) : "-"}</span>
       <span><b>opt</b> <span class="opt-badge ${cfg.opt_score > 0 ? "pos" : "dim"}">${num(cfg.opt_score, 1)}</span> <span class="dim">${optAge}</span> ${
@@ -1349,28 +1148,17 @@ function saveSymbol(symbol, patch, flashNode) {
 /* ------------------------------------------------------------- optimizer */
 
 // "How thorough/fast is the search" - the dials actually discussed and tuned
-// this far (opt speed vs. depth). Everything below is statistical-gate
-// internals nobody hand-tunes day to day; kept in OPT_SETTING_FIELDS_ADVANCED.
+// this far (opt speed vs. depth). Statistical-gate internals left the panel
+// 27.08; they stay in opt_params.
 const OPT_SETTING_FIELDS = [
   { k: "lookback_days", label: "Gecmis penceresi (gun)", step: 10, min: 20 },
   { k: "refine_rounds", label: "Yerel iyilestirme turu", step: 1, min: 0, max: 5 },
   { k: "max_combos", label: "Maks kombinasyon", step: 100, min: 20 },
 ];
 
-const OPT_SETTING_FIELDS_ADVANCED = [
-  { k: "max_bars", label: "Maks bar (hiz siniri)", step: 5000, min: 2000 },
-  { k: "segments", label: "Segment sayisi (son= dogrulama)", step: 1, min: 3, max: 8 },
-  { k: "min_trades", label: "Min islem sayisi", step: 1, min: 5 },
-  { k: "min_positive_ratio", label: "Min pozitif segment orani", step: 0.05, min: 0.3, max: 1 },
-  { k: "plateau_weight", label: "Plato agirligi", step: 0.05, min: 0, max: 0.8 },
-];
-
-let SWING_OVERLAY = {};
-
 async function loadOptParams() {
   const res = await api("/api/opt/params");
   OPT_PARAMS = res.params;
-  SWING_OVERLAY = res.swing_overlay || {};
   renderOptForm();
   renderOptPicker();
   renderOptTfPicker();
@@ -1395,26 +1183,6 @@ function renderOptForm() {
     input.dataset.optKey = f.k;
     $("#opt-settings").appendChild(titled(
       el("div", { class: "field" }, [el("label", { text: f.label }), input]), f.k));
-  });
-
-  $("#opt-settings-advanced").innerHTML = "";
-  OPT_SETTING_FIELDS_ADVANCED.forEach((f) => {
-    const input = el("input", { type: "number", step: f.step, min: f.min, max: f.max });
-    input.value = OPT_PARAMS[f.k];
-    input.dataset.optKey = f.k;
-    $("#opt-settings-advanced").appendChild(titled(
-      el("div", { class: "field" }, [el("label", { text: f.label }), input]), f.k));
-  });
-
-  const grid = OPT_PARAMS.grid || {};
-  $("#opt-grid").innerHTML = "";
-  Object.keys(grid).forEach((key) => {
-    const input = el("input", { type: "text", value: (grid[key] || []).join(", ") });
-    input.dataset.gridKey = key;
-    const overlayOn = SWING_OVERLAY[key] === true;
-    const label = overlayOn ? key + " (M15/M30 swing overlay etkin)" : key;
-    $("#opt-grid").appendChild(titled(
-      el("div", { class: "field" }, [el("label", { text: label }), input]), key));
   });
 }
 
@@ -1472,7 +1240,7 @@ function syncOptPicker() {
 }
 
 async function saveOptParams() {
-  const body = { grid: {} };
+  const body = {};
   const skipped = [];
   // A blank/non-numeric field must NOT be sent at all - parseFloat("") is
   // NaN, and JSON.stringify(NaN) silently serialises to null, which the
@@ -1488,10 +1256,14 @@ async function saveOptParams() {
     if (isFinite(value)) body[i.dataset.optKey] = value;
     else skipped.push(i.dataset.optKey);
   });
+  // Grid left the panel 27.08. An empty {} here would overwrite the live
+  // search axes. Only send a grid when the form still has those inputs.
+  const grid = {};
   $$("[data-grid-key]").forEach((i) => {
     const values = i.value.split(",").map((x) => parseFloat(x.trim())).filter((x) => isFinite(x));
-    if (values.length) body.grid[i.dataset.gridKey] = values;
+    if (values.length) grid[i.dataset.gridKey] = values;
   });
+  if (Object.keys(grid).length) body.grid = grid;
   try {
     const res = await api("/api/opt/params", { method: "POST", body });
     OPT_PARAMS = res.params;
@@ -1544,8 +1316,9 @@ function renderOptJob() {
   }
   if (job.error) text += ` | ${job.error}`;
   $("#opt-status").textContent = text;
-  $("#btn-opt-run").disabled = job.state === "running";
-  $("#btn-opt-cancel").disabled = job.state !== "running";
+  const running = job.state === "running" || !!job.busy;
+  $("#btn-opt-run").disabled = running;
+  $("#btn-opt-cancel").disabled = !running;
 
   // Best score first; failed symbols sink to the bottom.
   const results = (job.results || []).slice().sort((a, b) => {
@@ -1700,6 +1473,8 @@ async function loadOptHistory() {
 
 /* -------------------------------------------------------------- ai tab */
 
+// Supervisor knobs still live on Store / POST /api/ai/settings. The panel
+// only offers Aktif; this list is the FIELD_HELP catalog, not a form.
 const AI_SETTING_FIELDS = [
   { k: "review_interval_sec", label: "Degerlendirme araligi (sn)", t: "int", min: 30, max: 3600 },
   { k: "lookback_days", label: "Gecmis penceresi (gun)", t: "int", min: 1, max: 90 },
@@ -1715,8 +1490,6 @@ const AI_SETTING_FIELDS = [
   { k: "dd_hard_pct", label: "Lot tabanina inme (%)", t: "num", step: 0.25, min: 0.5, max: 30 },
   { k: "risk_scale_floor", label: "Min lot carpani", t: "num", step: 0.05, min: 0.1, max: 1 },
   { k: "reopt_min_age_hours", label: "Yeniden OPT icin min yas (saat)", t: "int", min: 1, max: 720 },
-  { k: "auto_reoptimize", label: "Bozulanlari otomatik optimize et", t: "bool" },
-  { k: "reopt_on_decay", label: "Kenari dusenleri de yeniden optimize et", t: "bool" },
   { k: "prefer_strong_on_dd", label: "Gunluk kayipta guclu sembole oncelik", t: "bool" },
   { k: "hard_block_only_quarantine", label: "Sert ret yalniz karantina (watch/saat lot kisar)", t: "bool" },
   { k: "edge_decay_min_trades", label: "Kenar dususu: min toplam islem", t: "int", min: 20, max: 200 },
@@ -1735,11 +1508,6 @@ function renderAI() {
     { lbl: "Izlemede", val: counts.watch ?? 0, accent: "amber" },
     { lbl: "Karantinada", val: counts.quarantine ?? 0, accent: "red" },
     { lbl: "Veri Bekleyen", val: counts.idle ?? 0, accent: "blue" },
-    {
-      lbl: "Global Lot Carpani", val: num(ai.risk_scale ?? 1, 2),
-      foot: (ai.risk_scale ?? 1) < 1 ? "gunluk zarar nedeniyle kisildi" : "normal",
-      accent: (ai.risk_scale ?? 1) < 1 ? "amber" : "green",
-    },
     {
       lbl: "Son Degerlendirme",
       val: ai.last_review ? new Date(ai.last_review * 1000).toLocaleTimeString("tr-TR") : "-",
@@ -1822,10 +1590,8 @@ function renderAI() {
   }
 
   const notes = (ai.notes || []).join(" | ");
-  const queue = (ai.reopt_queue || []).length
-    ? ` | yeniden optimize kuyrugu: ${ai.reopt_queue.join(", ")}` : "";
   $("#ai-note").textContent = ai.enabled
-    ? (notes ? notes + queue : "Tum semboller normal calisiyor." + queue)
+    ? (notes || "Tum semboller normal calisiyor.")
     : "Denetleyici kapali - kararlar uygulanmiyor.";
 
   const aiRows = ai.symbols || [];
@@ -1835,6 +1601,7 @@ function renderAI() {
   const nextAiSig = aiRows.map((r) =>
     [r.symbol, r.state, r.trades, r.net, r.profit_factor, r.priority, r.effective_scale,
       r.consecutive_losses, r.quarantine_left_min, r.hours_enforced,
+      r.gate_allowed, r.gate_reason || "",
       (r.blocked_hours || []).join(","),
       Object.keys(r.hour_risk_scales || {}).join(",")].join("|")).join(";");
   if (nextAiSig !== aiTableSig) {
@@ -1844,7 +1611,7 @@ function renderAI() {
       const tr = el("tr");
       tr.innerHTML = `
       <td class="sym">${esc(r.symbol)}${r.enabled ? "" : ' <span class="pill off">kapali</span>'}</td>
-      <td><span class="pill ${pill}">${esc(label)}</span>${r.quarantine_left_min ? ` <span class="dim mono">${r.quarantine_left_min}dk</span>` : ""}</td>
+      <td><span class="pill ${pill}">${esc(label)}</span>${r.quarantine_left_min ? ` <span class="dim mono">${r.quarantine_left_min}dk</span>` : ""}${r.gate_allowed === false && r.state !== "quarantine" ? ` <span class="pill bad" title="${esc(r.gate_reason || "")}">giris kapali</span>` : ""}</td>
       <td class="dim">${esc(r.reason || "")}</td>
       <td class="num">${r.trades}</td>
       <td class="num">${r.trades ? num(r.wins / r.trades * 100, 0) + "%" : "-"}</td>
@@ -1873,35 +1640,6 @@ function renderAI() {
     });
     rowsInto($("#ai-table"), rows, "Sembol yok", 14);
   }
-
-  const box = $("#ai-settings");
-  if (box.childElementCount !== AI_SETTING_FIELDS.length) {
-    box.innerHTML = "";
-    AI_SETTING_FIELDS.forEach((f) => {
-      let input;
-      if (f.t === "bool") {
-        input = el("input", { type: "checkbox" });
-        input.addEventListener("change", () => saveAI({ [f.k]: input.checked }, input));
-      } else {
-        input = el("input", { type: "number", step: f.t === "int" ? 1 : (f.step ?? 1), min: f.min, max: f.max });
-        input.addEventListener("change", () => {
-          const value = f.t === "int" ? parseInt(input.value, 10) : parseFloat(input.value);
-          if (isFinite(value)) saveAI({ [f.k]: value }, input);
-        });
-      }
-      input.dataset.aiKey = f.k;
-      box.appendChild(titled(el("div", { class: "field" }, [
-        el("label", { text: f.label }),
-        f.t === "bool" ? el("label", { class: "chk" }, [input, el("span", { text: "Aktif" })]) : input,
-      ]), f.k, "ai"));
-    });
-  }
-  $$("[data-ai-key]", box).forEach((input) => {
-    const key = input.dataset.aiKey;
-    if (input === document.activeElement || !(key in settings)) return;
-    if (input.type === "checkbox") input.checked = !!settings[key];
-    else if (String(input.value) !== String(settings[key])) input.value = settings[key];
-  });
 }
 
 async function saveAI(patch, flashNode) {
@@ -1917,71 +1655,25 @@ async function saveAI(patch, flashNode) {
 /* ---------------------------------------------------------------- system */
 
 const SYS_FIELDS = [
-  { k: "max_total_positions", label: "Maks toplam pozisyon", t: "int", min: 1, max: 200 },
-  { k: "lot_multiplier", label: "Global lot carpani", t: "num", step: 0.25, min: 0.1, max: 20 },
-  { k: "size_by_edge", label: "Holdout R/maxDD ile lot", t: "bool" },
-  { k: "daily_loss_pct", label: "Gunluk zarar limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
-  { k: "max_concurrent_risk_pct", label: "Eszamanli risk limiti % (0=kapali)", t: "num", step: 0.25, min: 0 },
-  { k: "daily_loss_flatten", label: "Limit asilinca acik pozisyonlari da kapat", t: "bool" },
-  { k: "daily_profit_pct", label: "Gunluk kar hedefi % (0=kapali)", t: "num", step: 0.25, min: 0 },
-  { k: "trade_all_hours", label: "Tum saatlerde islem (sembol seanslarini yoksay)", t: "bool" },
-  { k: "day_end_flatten_min", label: "Gun sonu kapanis (dk, 0=kapali)", t: "int", min: 0, max: 720 },
-  { k: "close_on_stop", label: "Durdurunca pozisyonlari kapat", t: "bool" },
-  { k: "autostart_bot", label: "Acilista botu baslat", t: "bool" },
-  { k: "auto_reopt", label: "Otomatik periyodik yeniden optimizasyon", t: "bool" },
-  { k: "auto_reopt_days", label: "Yeniden optimizasyon araligi (gun, 0=kapali)", t: "num", step: 0.5, min: 0, max: 90 },
-  { k: "auto_reopt_weekday", label: "Tercih edilen gun", t: "select",
-    opts: [["-1", "Farketmez"], ["0", "Pazartesi"], ["1", "Sali"], ["2", "Carsamba"],
-           ["3", "Persembe"], ["4", "Cuma"], ["5", "Cumartesi"], ["6", "Pazar"]] },
-  { k: "auto_reopt_hour", label: "Tercih edilen saat (bilgisayarin yerel/Windows saati)", t: "select",
-    opts: [["-1", "Farketmez"], ...Array.from({ length: 24 }, (_, h) => [String(h), `${String(h).padStart(2, "0")}:00`])] },
+  { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
 ];
 
-// Set-once / rarely-touched: connection plumbing and safety valves that are
-// fine at their shipped defaults for a single-tier portfolio. Kept editable
-// (nothing here was deleted) but tucked behind a collapsed <details> so the
-// main list is the dozen dials someone actually turns day to day.
-const SYS_FIELDS_ADVANCED = [
-  { k: "max_scalp_positions", label: "Maks scalp pozisyon (M5, 0=ayri limit yok)", t: "int", min: 0, max: 50 },
-  { k: "max_swing_positions", label: "Maks swing pozisyon (M15+, 0=ayri limit yok)", t: "int", min: 0, max: 50 },
-  { k: "block_high_cost", label: "Yuksek maliyetli girisi engelle (opsiyonel)", t: "bool" },
-  { k: "max_cost_pct_of_risk", label: "Maks maliyet / risk % (engel acikken)", t: "num", step: 1, min: 5, max: 80 },
-  { k: "charge_costs", label: "Aramada spread/komisyonu tahsil et", t: "bool" },
-  { k: "max_margin_usage_pct", label: "Maks marj kullanimi %", t: "num", step: 1, min: 1, max: 100 },
-  { k: "min_free_margin", label: "Min serbest marj", t: "num", step: 10, min: 0 },
-  { k: "slippage_points", label: "Slippage (point)", t: "int", min: 0, max: 500 },
-  { k: "poll_interval_sec", label: "Dongu araligi (sn)", t: "num", step: 0.5, min: 0.5 },
-  { k: "opt_max_workers", label: "Maks optimizasyon paralel surec (0=otomatik)", t: "int", min: 0, max: 32 },
-  { k: "mt5_terminal_path", label: "MT5 terminal yolu (terminal64.exe - hangi platform olursa)", t: "text", wide: true },
-  { k: "autostart_mt5", label: "Acilista MT5 terminalini baslat (yol ayarliysa ve kapaliysa)", t: "bool" },
-  { k: "autostart_mt5_wait_sec", label: "MT5 baglanti bekleme (sn)", t: "int", min: 15, max: 300 },
-  { k: "backup_enabled", label: "Otomatik aksam yedegi acik", t: "bool" },
-  { k: "backup_dir", label: "Yedek konumu (aksam otomatik yedek buraya gider)", t: "text", wide: true },
-  { k: "backup_dir_secondary", label: "Ikinci yedek konumu (bos = kapali; ayni yedek buraya da kopyalanir - farkli bir FIZIKSEL disk veya bulut klasoru secin)", t: "text", wide: true },
+// Plumbing and settled valves left the panel 27.08. Values stay on
+// SystemConfig; search and _try_entry still read them.
+const SYS_FIELDS_ADVANCED = [];
+
+// Broker path lives on the connection card, not in Sistem Ayarlari -
+// Pepperstone/NCM swap is a reconnect, not a risk dial.
+const MT5_PATH_FIELDS = [
+  { k: "mt5_terminal_path", label: "MT5 terminal yolu", t: "text", wide: true },
+  { k: "autostart_mt5", label: "MT5 otomatik baslat / baglan", t: "bool" },
+];
+
+const BACKUP_FIELDS = [
+  { k: "backup_dir", label: "Yedek konumu", t: "text", wide: true },
+  { k: "backup_dir_secondary", label: "Ikinci yedek konumu", t: "text", wide: true },
   { k: "backup_keep", label: "Tutulacak yedek sayisi", t: "int", min: 1, max: 30 },
 ];
-
-const SYS_DANGER_NOTES = {
-  trade_all_hours: {
-    when: true,
-    text: "seans kapisi kapali; arama rakamlari seans saatlerinde olculdu.",
-  },
-  charge_costs: {
-    when: false,
-    text: "arama makasi odemiyor; secilen konfig canlida odeyecek.",
-  },
-};
-
-function syncSysDangerNotes(sys) {
-  $$("[data-sys-warn]").forEach((node) => {
-    const spec = SYS_DANGER_NOTES[node.dataset.sysWarn];
-    if (!spec) return;
-    const on = !!sys[node.dataset.sysWarn];
-    const show = on === spec.when;
-    node.hidden = !show;
-    node.textContent = show ? spec.text : "";
-  });
-}
 
 function buildSysField(f) {
   let input;
@@ -1989,9 +1681,6 @@ function buildSysField(f) {
     input = el("input", { type: "checkbox" });
     input.addEventListener("change", () => {
       saveSystem({ [f.k]: input.checked }, input);
-      if (SYS_DANGER_NOTES[f.k]) {
-        syncSysDangerNotes({ ...(STATE.system || {}), [f.k]: input.checked });
-      }
     });
   } else if (f.t === "text") {
     input = el("input", { type: "text", spellcheck: "false" });
@@ -2018,73 +1707,8 @@ function buildSysField(f) {
     el("label", { text: f.label }),
     f.t === "bool" ? el("label", { class: "chk" }, [input, el("span", { text: "Aktif" })]) : input,
   ]);
-  const danger = SYS_DANGER_NOTES[f.k];
-  if (danger) {
-    field.appendChild(el("div", {
-      class: "field-warn",
-      "data-sys-warn": f.k,
-      hidden: "hidden",
-    }));
-  }
   if (f.wide) field.classList.add("field-wide");
   return titled(field, f.k);
-}
-
-function renderSymbolLimits() {
-  // Operator 26.08: per-symbol max_positions was only reachable by opening a
-  // symbol card on another tab, so the number that decides how much of the
-  // book can stack was the hardest one to see. Same field, same POST as the
-  // card - this is a second view, not a second source of truth.
-  const box = $("#sys-symbol-limits");
-  if (!box) return;
-  const rows = (SYMBOLS || []).slice().sort((a, b) => a.symbol.localeCompare(b.symbol));
-  const sig = rows.map((c) => c.symbol).join(",");
-  if (box.dataset.sig !== sig) {
-    box.innerHTML = "";
-    rows.forEach((cfg) => {
-      const input = el("input", {
-        type: "number", step: "1", min: "1", max: "10",
-        "data-limit-symbol": cfg.symbol,
-      });
-      input.value = cfg.max_positions ?? 1;
-      input.addEventListener("change", () => {
-        const val = parseInt(input.value, 10);
-        if (!(val >= 1 && val <= 10)) {
-          toast(`${cfg.symbol}: sembol basi limit 1-10 arasinda olmali`, "err");
-          input.value = cfg.max_positions ?? 1;
-          return;
-        }
-        saveSymbol(cfg.symbol, { max_positions: val }, input);
-      });
-      const cell = el("div", { class: "limit-cell" + (cfg.enabled ? "" : " off") });
-      cell.appendChild(el("span", { class: "limit-sym", text: cfg.symbol }));
-      cell.appendChild(input);
-      box.appendChild(cell);
-    });
-    box.dataset.sig = sig;
-  }
-  $$("[data-limit-symbol]", box).forEach((input) => {
-    if (input === document.activeElement) return;
-    const cfg = (SYMBOLS || []).find((s) => s.symbol === input.dataset.limitSymbol);
-    if (cfg && String(input.value) !== String(cfg.max_positions)) {
-      input.value = cfg.max_positions ?? 1;
-    }
-  });
-
-  // Raising these is exactly what walks the book into the concurrent-risk
-  // ceiling, and that ceiling refuses entries one at a time rather than
-  // rejecting the configuration - so say the arithmetic here, where the
-  // number is actually being typed.
-  const note = $("#sys-limit-risk");
-  const cap = STATE.capacity || {};
-  if (note) {
-    const want = Number(cap.concurrent_risk_pct || 0);
-    const ceil = Number(cap.max_concurrent_risk_pct || 0);
-    note.className = "panel-note" + (ceil > 0 && want > ceil ? " neg" : "");
-    note.textContent = ceil > 0
-      ? `slot limitinde en kotu risk %${num(want, 2)} / tavan %${num(ceil, 2)}`
-      : `slot limitinde en kotu risk %${num(want, 2)} - tavan kapali`;
-  }
 }
 
 function renderSystem() {
@@ -2094,23 +1718,25 @@ function renderSystem() {
   if (!box.dataset.built) {
     box.innerHTML = "";
     SYS_FIELDS.forEach((f) => box.appendChild(buildSysField(f)));
-    const details = el("details", { class: "field-wide" });
-    details.appendChild(el("summary", { text: "Ileri duzey (nadiren degisir)" }));
-    const advGrid = el("div", { class: "form-grid" });
-    SYS_FIELDS_ADVANCED.forEach((f) => advGrid.appendChild(buildSysField(f)));
-    details.appendChild(advGrid);
-    box.appendChild(details);
     box.dataset.built = "1";
   }
+  const pathBox = $("#sys-mt5-path");
+  if (pathBox && !pathBox.dataset.built) {
+    MT5_PATH_FIELDS.forEach((f) => pathBox.appendChild(buildSysField(f)));
+    pathBox.dataset.built = "1";
+  }
+  const bak = $("#sys-backup");
+  if (bak && !bak.dataset.built) {
+    BACKUP_FIELDS.forEach((f) => bak.appendChild(buildSysField(f)));
+    bak.dataset.built = "1";
+  }
 
-  $$("[data-sys-key]", box).forEach((input) => {
+  $$("[data-sys-key]").forEach((input) => {
     const key = input.dataset.sysKey;
     if (input === document.activeElement || !(key in sys)) return;
     if (input.type === "checkbox") input.checked = !!sys[key];
     else if (String(input.value) !== String(sys[key])) input.value = sys[key];
   });
-  syncSysDangerNotes(sys);
-  renderSymbolLimits();
 
   const mt5 = STATE.mt5 || {};
   const acc = STATE.account || {};
@@ -2138,10 +1764,6 @@ function renderSystem() {
     ["AutoTrading", mt5.trade_allowed ? "Acik" : "KAPALI"],
     ["Terminal build", mt5.build || "-"],
     ["Terminal saati", mt5.server_time || "-"],
-    // Full filesystem paths. In a shared column they wrapped onto three lines
-    // and dragged every neighbouring row's height with them, so they take the
-    // whole width and wrap on their own.
-    ["Ayarlanan yol", sys.mt5_terminal_path || "(bos - baglanmaz)", true],
     ["Bagli terminal", mt5.path || "-", true],
   ];
   $("#sys-mt5").innerHTML = rows.map(([k, v, wide]) =>
@@ -2171,9 +1793,11 @@ function renderSystem() {
   }
 
   const day = STATE.day || {};
+  // The daily-loss % dial left the panel; leftover stored halt still
+  // needs a way out. A quiet day does not reprint "limit normal".
   $("#sys-day-note").innerHTML = day.halted
-    ? `<span class="pill bad">DURDURULDU</span> ${esc(day.halt_reason)} - devam etmek icin asagidaki butona basin`
-    : `Gunluk limit normal (${signed(day.pnl_pct, 2)}%)`;
+    ? `<span class="pill bad">DURDURULDU</span> ${esc(day.halt_reason)} - devam etmek icin Gunu Devam Ettir`
+    : "";
   $("#sys-resume-day").classList.toggle("btn-danger", !!day.halted);
   $("#sys-resume-day").classList.toggle("btn-ghost", !day.halted);
 
@@ -2222,21 +1846,6 @@ function renderPortfolio() {
       } catch (e) { toast(e.message, "err"); enable.checked = !enable.checked; }
     });
 
-    const lotMode = el("select", {}, [
-      el("option", { value: "fixed", text: "Sabit" }),
-      el("option", { value: "risk", text: "Risk %" }),
-    ]);
-    lotMode.value = cfg.lot_mode || "fixed";
-    lotMode.addEventListener("change", async () => {
-      try {
-        await api(`/api/symbols/${encodeURIComponent(cfg.symbol)}`, {
-          method: "POST", body: { lot_mode: lotMode.value },
-        });
-        toast(`${cfg.symbol} lot modu: ${lotMode.value === "fixed" ? "sabit" : "risk %"}`, "ok");
-        refresh();
-      } catch (e) { toast(e.message, "err"); }
-    });
-
     const broker = el("input", {
       type: "text", spellcheck: "false", value: cfg.broker_symbol || "",
       placeholder: cfg.symbol,
@@ -2271,13 +1880,13 @@ function renderPortfolio() {
     const tr = el("tr");
     tr.innerHTML = `<td class="sym">${esc(cfg.symbol)}</td>
       <td><span class="pill ${esc(cfg.group)}">${esc(GROUP_LABEL[cfg.group] || cfg.group)}</span></td>
-      <td></td><td></td><td></td>
+      <td></td>
+      <td></td>
       <td class="mono ${ok ? "" : "dim"}">${esc(cfg.resolved_symbol || "-")}</td>
       <td>${status}</td><td></td>`;
     tr.children[2].appendChild(enable);
-    tr.children[3].appendChild(lotMode);
-    tr.children[4].appendChild(broker);
-    tr.children[7].appendChild(remove);
+    tr.children[3].appendChild(broker);
+    tr.children[6].appendChild(remove);
     body.appendChild(tr);
   });
 }
@@ -2296,10 +1905,8 @@ async function addPortfolioSymbol(symbol, brokerSymbol = "", group = "") {
   const name = String(symbol || "").trim();
   if (!name) { toast("Sembol adi yazin", "err"); return; }
   const g = group || ($("#portfolio-group") && $("#portfolio-group").value) || guessGroup(name);
-  const minLotInput = $("#portfolio-minlot");
   const openInput = $("#portfolio-openhour");
   const closeInput = $("#portfolio-closehour");
-  const minLot = minLotInput && minLotInput.value ? parseFloat(minLotInput.value) : null;
   const openHour = openInput && openInput.value ? openInput.value : "";
   const closeHour = closeInput && closeInput.value ? closeInput.value : "";
   try {
@@ -2312,12 +1919,6 @@ async function addPortfolioSymbol(symbol, brokerSymbol = "", group = "") {
     cardsBuilt = false;
     const addedSymbol = (res.config && res.config.symbol) || name.toUpperCase().replace(/ /g, "_");
     let extra = "";
-    if (minLot && minLot > 0) {
-      await api(`/api/symbols/${encodeURIComponent(addedSymbol)}`, {
-        method: "POST", body: { lot_mode: "fixed", fixed_lot: minLot },
-      });
-      extra += `, min lot ${minLot} sabit referans`;
-    }
     if (openHour || closeHour) {
       const cfg = res.config || {};
       const windows = Array.isArray(cfg.sessions) && cfg.sessions.length ? cfg.sessions : [{ start: "00:00", end: "23:59" }];
@@ -2338,7 +1939,6 @@ async function addPortfolioSymbol(symbol, brokerSymbol = "", group = "") {
     const brInput = $("#portfolio-broker");
     if (symInput) symInput.value = "";
     if (brInput) brInput.value = "";
-    if (minLotInput) minLotInput.value = "";
     if (openInput) openInput.value = "";
     if (closeInput) closeInput.value = "";
     refresh();
@@ -2613,13 +2213,18 @@ function viewPulse(s) {
   const bot = s.bot || {};
   const mt5 = s.mt5 || {};
   const hv = s.harvest || {};
+  const opt = s.opt || {};
   return [bot.last_cycle_at, bot.running, mt5.connected, acc.equity, acc.profit,
           day.realised, day.halted, pos, notes, s.ai && s.ai.last_review,
-          hv.left_on_table_r, (hv.partial_on || []).join(",")].join("\0");
+          hv.left_on_table_r, (hv.partial_on || []).join(","),
+          opt.state, opt.busy, opt.combo_done, opt.done, opt.current].join("\0");
 }
 
 async function refresh() {
-  if (refreshBusy) return;
+  if (refreshBusy) {
+    refreshQueued = true;
+    return;
+  }
   refreshBusy = true;
   try {
     STATE = await api("/api/state");
@@ -2641,7 +2246,7 @@ async function refresh() {
     if (!same) {
       renderTop();
       if (activeTab === "panel") {
-        renderCards(); renderCapacity(); renderPositions(); renderHarvest(); renderDayTable();
+        renderCapacity(); renderPositions(); renderHarvest(); renderDayTable();
       }
       if (activeTab === "panel" || activeTab === "tani") {
         renderExecution(); renderLive();
@@ -2659,11 +2264,16 @@ async function refresh() {
   } finally {
     refreshBusy = false;
     clearTimeout(pollTimer);
-    const hidden = typeof document !== "undefined" && document.hidden;
-    // Do not drop to 1.5s while a search is running: that is when the
-    // engine, workers, and this poll already share one MT5 lock.
-    const delay = hidden ? 6000 : 3000;
-    pollTimer = setTimeout(refresh, delay);
+    if (refreshQueued) {
+      refreshQueued = false;
+      refresh();
+    } else {
+      const hidden = typeof document !== "undefined" && document.hidden;
+      // Do not drop to 1.5s while a search is running: that is when the
+      // engine, workers, and this poll already share one MT5 lock.
+      const delay = hidden ? 6000 : 3000;
+      pollTimer = setTimeout(refresh, delay);
+    }
   }
 }
 
@@ -2866,71 +2476,16 @@ function wire() {
     };
   });
 
-  $("#btn-lotmode-check").onclick = async () => {
-    try {
-      toast("Risk modu kontrol ediliyor...", "ok");
-      const res = await api("/api/symbols/lot-mode-check");
-      const flagged = (res.rows || []).filter((r) => r.flagged);
-      if (!flagged.length) {
-        toast("Risk modundaki semboller temiz, min lot asimi yok", "ok");
-        return;
-      }
-      const list = flagged.map((r) => `${r.symbol} (${r.overshoot}x)`).join(", ");
-      const ok = confirm(
-        `Min lot risk% ayarini 2x+ asan semboller: ${list}\n\n`
-        + `Bunlari Sabit lot moduna cevireyim mi?`,
-      );
-      if (!ok) return;
-      const res2 = await api("/api/symbols-bulk", {
-        method: "POST",
-        body: { symbols: flagged.map((r) => r.symbol), patch: { lot_mode: "fixed" } },
-      });
-      SYMBOLS = res2.symbols;
-      cardsBuilt = false;
-      toastBulkResult(res2, "sabit lota cevrildi");
-      refresh();
-    } catch (e) { toast(e.message, "err"); }
-  };
-
-  $$("[data-lotmode-bulk]").forEach((btn) => {
-    btn.onclick = confirmThen(
-      `Tum semboller "${btn.dataset.lotmodeBulk === "fixed" ? "Sabit" : "Risk %"}" lot moduna gececek. Onayliyor musunuz?`,
-      async () => {
-        const lot_mode = btn.dataset.lotmodeBulk;
-        const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { lot_mode } } });
-        SYMBOLS = res.symbols;
-        cardsBuilt = false;
-        toastBulkResult(res, `lot modu ${lot_mode === "fixed" ? "sabit" : "risk %"} yapildi`);
-        refresh();
-      },
-    );
-  });
-
-  $("#btn-maxpos-bulk").onclick = confirmThen(
-    "Tum sembollerin maks pozisyonu bu deger olacak. Onayliyor musunuz?",
-    async () => {
-      const val = parseInt($("#portfolio-maxpos-bulk").value, 10);
-      if (!(val > 0) || val > 50) { toast("Maks pozisyon 1-50 arasinda olmali", "err"); return; }
-      const res = await api("/api/symbols-bulk", { method: "POST", body: { patch: { max_positions: val } } });
-      SYMBOLS = res.symbols;
-      cardsBuilt = false;
-      toastBulkResult(res, `maks pozisyon ${val} yapildi`);
-      refresh();
-    },
-  );
-
   $("#symbol-filter").addEventListener("input", applySymbolFilter);
   $("#group-filter").addEventListener("change", applySymbolFilter);
   $("#btn-opt-all").onclick = () => runOptimizer(null);
   $("#btn-opt-run").onclick = () => runOptimizer(Array.from(optSelection));
-  $("#btn-opt-cancel").onclick = () => call("/api/opt/cancel");
+  $("#btn-opt-cancel").onclick = async () => {
+    toast("Iptal isteniyor...", "ok");
+    $("#btn-opt-cancel").disabled = true;
+    await call("/api/opt/cancel");
+  };
   $("#btn-opt-save").onclick = saveOptParams;
-  $("#btn-opt-reset").onclick = confirmThen("Izgara varsayilana donecek. Onayliyor musunuz?", async () => {
-    const res = await api("/api/opt/params/reset", { method: "POST" });
-    OPT_PARAMS = res.params;
-    renderOptForm();
-    toast("Varsayilana donuldu", "ok");
-  });
   $("#btn-opt-history").onclick = loadOptHistory;
   $("#opt-history-sort").onchange = loadOptHistory;
   $("#btn-opt-history-clear").onclick = confirmThen(
@@ -2964,7 +2519,7 @@ function wire() {
     refresh();
   });
   $("#btn-log-clear").onclick = () => {
-    // View-only: do not call /api/logs/clear (that wipes the shared ring).
+    // View-only: the shared ring and the log file stay; this tab's DOM does not.
     logEpoch += 1;
     $("#logview").innerHTML = "";
     logPending = [];
@@ -3044,37 +2599,5 @@ function wire() {
 
 wire();
 fillGroupSelects();
-// Schema first: buildSymbolCards() hides OPT axes a family never reads, and
-// with an empty SCHEMA every axis shows. Fetch before the first refresh so the
-// symbol form does not flash the full field list.
-loadSchema().then(loadSymbols).then(refresh);
+loadSymbols().then(refresh);
 
-/* --------------------------------------------------------------- density */
-// Operator request 26.08: the terminal is read all day, so it ships tight and
-// the roomier set is a choice. Kept as a self-contained block at the end
-// rather than a branch inside wire() so it stays out of the way of the log
-// toolbar work in the same file. The stylesheet holds every number; this only
-// writes the attribute that picks a column of them.
-(function density() {
-  const KEY = "micofx-density";
-  const btn = $("#btn-density");
-  const apply = (mode) => {
-    // Compact is the default, so it is the ABSENCE of the attribute - that
-    // way a stylesheet that ever loads without this script still renders the
-    // dense set instead of falling back to a layout nobody chose.
-    if (mode === "cozy") document.documentElement.dataset.density = "cozy";
-    else delete document.documentElement.dataset.density;
-    if (btn) btn.textContent = mode === "cozy" ? "Sik" : "Ferah";
-  };
-  let saved = null;
-  try { saved = localStorage.getItem(KEY); } catch (_) { /* private mode */ }
-  apply(saved === "cozy" ? "cozy" : "compact");
-  if (btn) {
-    btn.onclick = () => {
-      const next = document.documentElement.dataset.density === "cozy"
-        ? "compact" : "cozy";
-      apply(next);
-      try { localStorage.setItem(KEY, next); } catch (_) { /* private mode */ }
-    };
-  }
-})();

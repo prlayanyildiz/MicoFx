@@ -6,7 +6,7 @@ which one it is - and those are the ones that go wrong quietly, because no
 single family's test is the place to notice them.
 
 Five invariants, run over every family in the registry against
-M5/M15/M30/H1:
+M5/M15/M30:
 
   * it computes at all, on ordinary bars;
   * every series it hands back is the length of the input and free of NaN and
@@ -27,7 +27,7 @@ M5/M15/M30/H1:
 The timeframe axis matters because it is not cosmetic here: uses_swing_exits()
 switches the exit grid at 900s, htf_t3_trend buckets by wall-clock seconds, and
 the scalping families size their entry threshold against per-bar cost. A family
-that is fine on M15 is not thereby fine on H1.
+that is fine on M15 is not thereby fine on M30.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx.strategy import _FAMILIES, IndicatorCache, Params, compute
 
 FAMILIES = sorted(_FAMILIES)
-TIMEFRAMES = {"M5": 300, "M15": 900, "M30": 1800, "H1": 3600}
+TIMEFRAMES = {"M5": 300, "M15": 900, "M30": 1800}
 N = 900
 
 
@@ -108,7 +108,11 @@ def test_the_registry_is_the_whole_book():
     # gates dead regimes, and TD is a fade counter against an ATR-trail book.
     # 13 -> 11 on 26.08: st_trend and macd_flip never applied (1 and 5
     # searches), neither live, each still paid a full max_combos slot.
-    assert len(FAMILIES) == 11, f"aile sayisi degisti: {FAMILIES}"
+    # 11 -> 8 on 27.08: t3_stoch, wavetrend_flip, micro_rev. Retired for
+    # SEARCH COST, not a bad holdout - none owned its exit axes, so the
+    # shared 6x6x5 product multiplied their grids (t3_stoch to ~1.43e9
+    # against a 2000 budget, coverage 0.0001) and none was live.
+    assert len(FAMILIES) == 8, f"aile sayisi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

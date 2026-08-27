@@ -237,7 +237,7 @@ def test_counter_flush_waits_when_only_tallies_changed():
     assert store.saved == {}
 
 
-def test_a_new_episode_still_flushes_immediately():
+def test_a_new_episode_also_waits_the_debounce():
     store = _Store()
     eng = _engine(store)
     eng._tally_entry("X", "spread", bar_key=(1, 0))
@@ -246,7 +246,8 @@ def test_a_new_episode_still_flushes_immediately():
     eng._entry_blocks_flushed_at = time.time()
     eng._tally_entry("X", "spread", bar_key=(2, 0))
     eng._flush_entry_blocks()
-    assert "entry_block_events" in store.saved
+    assert store.saved == {}
+    assert len(eng._entry_events) == 2
 
 
 def test_a_reset_starts_a_fresh_window():

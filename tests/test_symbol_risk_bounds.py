@@ -90,11 +90,12 @@ def test_patch_symbol_rejects_max_lot_over_ceiling():
     assert store.symbols["XAUUSD"].max_lot != 21
 
 
-def test_patch_symbol_accepts_max_lot_at_ceiling():
+def test_patch_symbol_rejects_max_lot_at_the_old_ceiling():
     tc, store = _client()
+    before = store.symbols["XAUUSD"].max_lot
     res = tc.post("/api/symbols/XAUUSD", json={"max_lot": 20})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].max_lot == 20
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].max_lot == before
 
 
 def test_patch_symbol_rejects_fixed_lot_over_ceiling():
@@ -104,11 +105,12 @@ def test_patch_symbol_rejects_fixed_lot_over_ceiling():
     assert store.symbols["XAUUSD"].fixed_lot != 20.5
 
 
-def test_patch_symbol_accepts_fixed_lot_at_ceiling():
+def test_patch_symbol_rejects_fixed_lot_at_the_old_ceiling():
     tc, store = _client()
+    before = store.symbols["XAUUSD"].fixed_lot
     res = tc.post("/api/symbols/XAUUSD", json={"fixed_lot": 20})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].fixed_lot == 20
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].fixed_lot == before
 
 
 # --------------------------------------------------------- exit-model bounds
@@ -144,25 +146,28 @@ def test_patch_symbol_rejects_zero_trail_step_and_zero_stop():
         assert getattr(store.symbols["XAUUSD"], field) == before, field
 
 
-def test_patch_symbol_still_accepts_a_small_positive_trail_start():
-    """The gate is "> 0", not a tuning opinion - 0.1 and start<=step stay legal."""
+def test_patch_symbol_refuses_a_small_positive_trail_start():
+    """Exit numbers are a readout. apply() still accepts 0.1 / start<=step."""
     tc, store = _client()
+    before_start = store.symbols["XAUUSD"].trail_start_atr
+    before_step = store.symbols["XAUUSD"].trail_step_atr
     res = tc.post("/api/symbols/XAUUSD", json={"trail_start_atr": 0.1,
                                                "trail_step_atr": 1.6})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].trail_start_atr == 0.1
-    assert store.symbols["XAUUSD"].trail_step_atr == 1.6
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].trail_start_atr == before_start
+    assert store.symbols["XAUUSD"].trail_step_atr == before_step
 
 
-def test_patch_symbol_accepts_zero_breakeven_and_one_point_five():
-    """0 disables the lock; 1.5 is the live threshold. Both must pass the door."""
+def test_patch_symbol_refuses_zero_breakeven_and_one_point_five():
+    """0 disables the lock; 1.5 is the live threshold. HTTP cannot type either."""
     tc, store = _client()
+    before = store.symbols["XAUUSD"].breakeven_at_r
     res = tc.post("/api/symbols/XAUUSD", json={"breakeven_at_r": 0})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].breakeven_at_r == 0.0
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].breakeven_at_r == before
     res = tc.post("/api/symbols/XAUUSD", json={"breakeven_at_r": 1.5})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].breakeven_at_r == 1.5
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].breakeven_at_r == before
 
 
 def test_patch_symbol_rejects_negative_and_oversize_breakeven():

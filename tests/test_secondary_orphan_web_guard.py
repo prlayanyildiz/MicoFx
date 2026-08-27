@@ -92,36 +92,36 @@ def test_patch_symbol_family_blocked_by_pending_orphan_scan():
     # secondary_tickets is empty (never got tagged) - only the orphan-scan
     # entry knows this magic has an unresolved fill. Identity fields of the
     # retired second leg are ignored; the scan still blocks a primary family swap.
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="stoch_flip")}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
     tc, store = _client(symbols, positions=[], settings=settings)
 
     res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst"})
 
-    assert res.status_code == 409
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
 def test_patch_symbol_family_blocked_by_live_orphan_ticket():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="stoch_flip")}
     settings = {"secondary_orphan_tickets": [501]}
     positions = [{"ticket": 501, "magic": 1, "symbol": "XAUUSD"}]
     tc, store = _client(symbols, positions=positions, settings=settings)
 
     res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst"})
 
-    assert res.status_code == 409
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
-def test_patch_symbol_family_allowed_when_clear():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
+def test_patch_symbol_family_refused_when_clear():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="stoch_flip")}
     tc, store = _client(symbols, positions=[])
 
     res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst"})
 
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].strategy == "burst"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
 def test_patch_symbol_exit_field_blocked_by_pending_scan():
@@ -131,36 +131,32 @@ def test_patch_symbol_exit_field_blocked_by_pending_scan():
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 
 def test_bulk_patch_family_change_rejects_symbol_with_pending_scan():
     symbols = {
-        "XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch"),
-        "EURUSD": _cfg("EURUSD", magic=2, strategy="t3_stoch"),
+        "XAUUSD": _cfg("XAUUSD", magic=1, strategy="stoch_flip"),
+        "EURUSD": _cfg("EURUSD", magic=2, strategy="stoch_flip"),
     }
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
     tc, store = _client(symbols, positions=[], settings=settings)
 
     res = tc.post("/api/symbols-bulk", json={"patch": {"strategy": "burst"}})
 
-    assert res.status_code == 200
-    body = res.json()
-    assert "XAUUSD" in body.get("rejected", [])
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
-    assert store.symbols["EURUSD"].strategy == "burst"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
+    assert store.symbols["EURUSD"].strategy == "stoch_flip"
 
 
 def test_bulk_patch_family_change_rejects_symbol_with_live_orphan_ticket():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="stoch_flip")}
     settings = {"secondary_orphan_tickets": [601]}
     positions = [{"ticket": 601, "magic": 1, "symbol": "XAUUSD"}]
     tc, store = _client(symbols, positions=positions, settings=settings)
 
     res = tc.post("/api/symbols-bulk", json={"patch": {"strategy": "burst"}})
 
-    assert res.status_code == 200
-    body = res.json()
-    assert "XAUUSD" in body.get("rejected", [])
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"

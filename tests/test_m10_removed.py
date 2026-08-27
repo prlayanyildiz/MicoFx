@@ -58,7 +58,7 @@ def test_the_family_timeframe_table_is_empty_or_clean():
         assert set(allowed) & set(TIMEFRAMES), f"{family} hicbir TF'de calisamaz"
 
 
-@pytest.mark.parametrize("family", ["micro_rev", "burst"])
+@pytest.mark.parametrize("family", ["burst"])
 def test_a_scalp_family_may_use_m5_and_not_m10(family):
     """The scalp families are the ones M5 exists for.
 

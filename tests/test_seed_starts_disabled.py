@@ -3,7 +3,7 @@
 config/defaults.json carries symbol, group, magic, sessions and the enabled
 flag. Strategy, timeframe and every exit parameter live only in the gitignored
 database, so seeding from the template produces symbols with opt_updated_at
-0.0, an empty opt_summary and the dataclass default of t3_stoch/M5.
+0.0, an empty opt_summary and the dataclass default of stoch_flip/M5.
 
 Before this, all eighteen template symbols marked enabled came up live in
 exactly that state - the same position EURUSD reached tonight, at book scale.

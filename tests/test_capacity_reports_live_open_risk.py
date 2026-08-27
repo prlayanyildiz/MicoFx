@@ -101,26 +101,32 @@ def test_a_trail_to_entry_drops_out_of_the_reported_number_too():
     assert risk.capacity([_pos(sl=2000.0)], ACCOUNT)["open_risk_pct"] == 0.0
 
 
-def test_the_ceiling_travels_with_it_so_the_bar_has_a_denominator():
+def test_the_leftover_ceiling_is_still_in_the_payload():
+    """GET honesty. The number is unread by can_open."""
     risk = RiskManager(_Store(), _Client())
     cap = risk.capacity([_pos(sl=1925.0)], ACCOUNT)
     assert cap["max_concurrent_risk_pct"] == 8.0
 
 
-def test_reported_risk_and_the_gate_agree_on_the_same_book():
-    """One expression, two readers. A drift here is the defect this catches."""
+def test_leftover_cap_does_not_refuse_when_reported_risk_is_over_it():
     risk = RiskManager(_Store(), _Client())
     cfg = risk.store.symbols["XAUUSD"]
     book = [_pos(sl=1925.0)]
     reported = risk.capacity(book, ACCOUNT)["open_risk_pct"]
-    # The gate refuses when reported + new > 8.0; size the entry to straddle it.
-    headroom_r = (8.0 - reported) / 100.0 * ACCOUNT["equity"]
-    just_over = risk.can_open(cfg, "buy", 1.0, book, ACCOUNT,
-                              sl_distance=headroom_r + 1.0)
-    just_under = risk.can_open(cfg, "buy", 1.0, book, ACCOUNT,
-                               sl_distance=headroom_r - 1.0)
-    assert not just_over.ok and "eszamanli risk" in just_over.reason
-    assert just_under.ok, just_under.reason
+    assert reported == 7.5
+    allowed = risk.can_open(cfg, "buy", 1.0, book, ACCOUNT, sl_distance=400.0)
+    assert allowed.ok, allowed.reason
+
+
+def test_leftover_total_slot_cap_does_not_clip_free_slots():
+    """Operator: acilabilir is marj, not leftover max_total_positions=100."""
+    risk = RiskManager(_Store(), _Client())
+    risk.store.system.max_total_positions = 1
+    risk.store.symbols["XAUUSD"].enabled = True
+    cap = risk.capacity([_pos(sl=1925.0)], ACCOUNT)
+    row = cap["rows"][0]
+    assert row["free_slots"] > 0
+    assert cap["global_free_slots"] > 0
 
 
 def test_a_naked_stop_does_not_serialise_infinity():

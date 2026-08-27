@@ -67,20 +67,20 @@ def _detail(validated):
 
 
 def test_apply_copies_validated_true_onto_the_symbol():
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15")
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, strategy="stoch_flip", timeframe="M15")
     assert cfg.validated is None
     opt = _opt(cfg)
     opt.apply("XAUUSD", {"sl_atr_mult": 1.5}, score=9.0,
-              detail=_detail(True), timeframe="M15", strategy="t3_stoch")
+              detail=_detail(True), timeframe="M15", strategy="stoch_flip")
     assert cfg.validated is True
     assert cfg.opt_summary.get("validated") is True
 
 
 def test_apply_copies_validated_false_and_that_is_not_none():
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15")
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, strategy="stoch_flip", timeframe="M15")
     opt = _opt(cfg)
     opt.apply("XAUUSD", {"sl_atr_mult": 1.5}, score=9.0,
-              detail=_detail(False), timeframe="M15", strategy="t3_stoch")
+              detail=_detail(False), timeframe="M15", strategy="stoch_flip")
     assert cfg.validated is False
     assert cfg.opt_summary.get("validated") is False
 

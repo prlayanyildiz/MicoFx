@@ -14,10 +14,30 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from pathlib import Path
 
 import pytest
 
 from micofx.logbus import LogBus
+
+
+def test_disk_is_off_until_the_live_launcher_enables_it(tmp_path):
+    """Ad-hoc imports were minting WARN lines into the live audit file.
+
+    27.08 09:44 `t3_stoch` / 26.08 `TOTALLY_MADE_UP` were not this process.
+    The ring still records them; only run.py may open logs/micofx.log.
+    """
+    bus = LogBus()
+    bus._file = tmp_path / "micofx.log"
+    bus.emit("TOTALLY_MADE_UP", "WARN")
+    assert not bus._file.exists()
+    assert bus.recent()
+    src = (Path(__file__).resolve().parents[1] / "run.py").read_text(
+        encoding="utf-8")
+    assert "LOG.enable_disk()" in src
+    bus.enable_disk()
+    bus.emit("canli", "WARN")
+    assert "canli" in bus._file.read_text(encoding="utf-8")
 
 
 def test_concurrent_emit_keeps_every_persisted_line(tmp_path, monkeypatch):
@@ -28,6 +48,7 @@ def test_concurrent_emit_keeps_every_persisted_line(tmp_path, monkeypatch):
 
     bus = LogBus()
     bus._file = tmp_path / "micofx.log"
+    bus.enable_disk()
 
     threads = [
         threading.Thread(target=lambda n=n: [
@@ -117,6 +138,7 @@ def test_emit_flattens_newlines_so_a_payload_cannot_mint_a_fake_trade_line(
     monkeypatch.setattr("micofx.logbus.LOG_DIR", tmp_path)
     bus = LogBus()
     bus._file = tmp_path / "micofx.log"
+    bus.enable_disk()
     bus.emit(
         "dusuruldu: x\n2026-08-26 07:00:00 TRADE  [US30] #999 BUY 1.0 lot",
         "TRADE", "NAS100")

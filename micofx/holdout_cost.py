@@ -1,32 +1,17 @@
-"""File-only holdout cost/R share. Does not import engine or mt5client.
-
-``_holdout_costed`` stays the apply path and still talks to the bot's own
-client. This module is the night measurement: same slice arithmetic, pinned
-snapshot inputs, per-trade cost/R share against the live 18% gate.
-
-Do not drop expensive trades and rescore. Live would have refused the fill,
-so the rest of the sequence would have been different. Report the share.
+"""File-only holdout capture and charged slice. Does not import engine at
+module load; capture() imports it late. ``_holdout_costed`` stays the apply
+path and still talks to the bot's own client.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
-
-import numpy as np
 
 from . import backtest
 from .logbus import LOG
 from .models import SymbolConfig
 from .strategy import IndicatorCache, Params, compute
-
-_TF_SECONDS = {"M5": 300, "M15": 900, "M30": 1800}
-
-
-def _tf_seconds(name: str) -> int:
-    key = str(name).upper()
-    if key not in _TF_SECONDS:
-        raise ValueError(f"unknown timeframe {name!r} - no silent M5 fallback")
-    return _TF_SECONDS[key]
 
 
 def charged_holdout(*, bars, cfg: SymbolConfig, point: float, tick_value: float,
@@ -35,8 +20,8 @@ def charged_holdout(*, bars, cfg: SymbolConfig, point: float, tick_value: float,
                     tf_seconds: int):
     """One charged holdout slice. Inputs already resolved — no client, no store.
 
-    Apply gathers from the live terminal; replay gathers from the snapshot.
-    The arithmetic lives here once so the two cannot drift (review 24.08 09:20).
+    Apply gathers from the live terminal. The arithmetic lives here once so
+    capture and apply cannot drift (review 24.08 09:20).
     """
     n = len(bars)
     segs = int(segments)
@@ -66,71 +51,11 @@ def charged_holdout(*, bars, cfg: SymbolConfig, point: float, tick_value: float,
     return res, lo, hi
 
 
-def cost_share(cost_rs: list[float] | np.ndarray, trade_rs: list[float] | np.ndarray,
-               threshold_pct: float) -> dict[str, Any]:
-    """n / median / p90 / share above the live cost gate. No net R."""
-    costs = np.asarray(cost_rs, dtype=float)
-    rs = np.asarray(trade_rs, dtype=float)
-    if costs.size != rs.size:
-        raise ValueError("trade_cost_rs and trade_rs must be the same length")
-    n = int(costs.size)
-    if n == 0:
-        return {
-            "n": 0, "median": None, "p90": None,
-            "threshold_pct": float(threshold_pct),
-            "n_above": 0, "share_above": None,
-            "wins_above": 0, "losses_above": 0,
-        }
-    thr = float(threshold_pct) / 100.0
-    above = costs > thr
-    n_above = int(np.count_nonzero(above))
-    return {
-        "n": n,
-        "median": float(np.median(costs)),
-        "p90": float(np.percentile(costs, 90)),
-        "threshold_pct": float(threshold_pct),
-        "n_above": n_above,
-        "share_above": n_above / n,
-        "wins_above": int(np.count_nonzero(above & (rs > 0))),
-        "losses_above": int(np.count_nonzero(above & (rs <= 0))),
-    }
-
-
-def replay(snap: dict[str, Any]) -> dict[str, Any]:
-    """Charged holdout share from a snapshot. No client, no store, no live histogram."""
-    if not snap.get("charge_costs"):
-        raise ValueError("snapshot charge_costs is off - refusing a cost-free replay")
-    info = snap["info"]
-    point = float(info["point"])
-    if not point > 0:
-        raise ValueError("snapshot point must be positive")
-    bars = snap["bars"]
-    segments = int(snap["segments"])
-    n = len(bars)
-    if n < 800 or n < segments * 150:
-        raise ValueError(f"snapshot window too short for holdout edges: n={n} segments={segments}")
-    cfg = SymbolConfig.from_dict(dict(snap["config"]))
-    overlay = cfg.to_dict()
-    overlay["timeframe"] = snap["timeframe"]
-    overlay["symbol"] = snap["symbol"]
-    tmp = SymbolConfig.from_dict(overlay)
-    res, lo, hi = charged_holdout(
-        bars=bars, cfg=tmp, point=point,
-        tick_value=float(info.get("tick_value") or 0),
-        tick_size=float(info.get("tick_size") or 0),
-        spread_scale=float(snap["spread_scale"]),
-        min_stop=float(snap["min_stop"]),
-        segments=segments,
-        trade_all_hours=bool(snap["trade_all_hours"]),
-        day_end_flatten_min=int(snap["day_end_flatten_min"]),
-        tf_seconds=_tf_seconds(snap["timeframe"]))
-    report = cost_share(res.trade_cost_rs, res.trade_rs, float(snap["max_cost_pct_of_risk"]))
-    report["symbol"] = snap["symbol"]
-    report["timeframe"] = snap["timeframe"]
-    report["spread_scale"] = float(snap["spread_scale"])
-    report["lo"] = lo
-    report["hi"] = hi
-    return report
+# Live GER40 pin was 900 bars ending 2023-12-03. Night capture asks
+# max_bars (20k). Refuse a short or years-stale window so the old file
+# stays (capture_book WARNs, does not overwrite). Weekend gap is < 14d.
+MIN_CAPTURE_BARS = 5000
+MAX_CAPTURE_AGE_SEC = 14 * 86400
 
 
 def capture(*, client: Any, store: Any, symbol: str, timeframe: str,
@@ -166,8 +91,15 @@ def capture(*, client: Any, store: Any, symbol: str, timeframe: str,
     opt = store.opt_params() or {}
     want = int(opt.get("max_bars") or 0) or 20000
     bars = client.bars(symbol, timeframe, want)
-    if bars is None or len(bars) < 800:
-        raise ValueError(f"{symbol}: bar window too short to be a holdout")
+    if bars is None or len(bars) < MIN_CAPTURE_BARS:
+        raise ValueError(
+            f"{symbol}: bar window too short to be a holdout "
+            f"(n={0 if bars is None else len(bars)} < {MIN_CAPTURE_BARS})")
+    last = float(getattr(bars, "last_closed_time", 0) or 0)
+    if last > 0 and (time.time() - last) > MAX_CAPTURE_AGE_SEC:
+        raise ValueError(
+            f"{symbol}: holdout last bar is stale "
+            f"({int((time.time() - last) / 86400)}d old)")
     min_stop = float(client.min_stop_distance(symbol))
     scaler = Optimizer(store=store, client=client)
     scale = float(scaler._spread_scale(symbol))

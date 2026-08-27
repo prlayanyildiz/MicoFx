@@ -72,7 +72,7 @@ def test_max_positions_one_is_bit_identical_to_the_default():
     assert a.get("net_r") == b.get("net_r")
 
 
-def test_walk_forward_forwards_cfg_max_positions(monkeypatch):
+def test_walk_forward_ignores_leftover_max_positions(monkeypatch):
     seen: list[int] = []
     flags: list[bool] = []
     real = bt.simulate
@@ -85,18 +85,13 @@ def test_walk_forward_forwards_cfg_max_positions(monkeypatch):
     monkeypatch.setattr(bt, "simulate", wrap)
     _run(max_positions=2)
     assert seen, "walk_forward never called simulate"
-    assert set(seen) == {2}
-    assert set(flags) == {True}
-    seen.clear()
-    flags.clear()
-    _run(max_positions=1)
     assert set(seen) == {1}
     assert set(flags) == {True}
 
 
-def test_max_open_from_cfg_clamps_junk_to_one():
+def test_max_open_from_cfg_ignores_leftover_slots():
     assert bt.max_open_from_cfg(SymbolConfig(symbol="X", magic=1)) == 1
-    assert bt.max_open_from_cfg(SymbolConfig(symbol="X", magic=1, max_positions=2)) == 2
+    assert bt.max_open_from_cfg(SymbolConfig(symbol="X", magic=1, max_positions=2)) == 1
     assert bt.max_open_from_cfg(SymbolConfig(symbol="X", magic=1, max_positions=0)) == 1
     assert bt.max_open_from_cfg(object()) == 1
 

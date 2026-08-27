@@ -33,10 +33,11 @@ def test_field_help_file_exists_as_one_dictionary():
 def test_every_setting_key_has_a_help_entry():
     help_keys = _help_keys()
     missing: list[str] = []
-    opt = set(_keys(_block("OPT_SETTING_FIELDS")) + _keys(_block("OPT_SETTING_FIELDS_ADVANCED")))
+    opt = set(_keys(_block("OPT_SETTING_FIELDS")))
     for name in (
-        "POSITION_SECTION", "SECTIONS", "OPT_SETTING_FIELDS",
-        "OPT_SETTING_FIELDS_ADVANCED", "SYS_FIELDS", "SYS_FIELDS_ADVANCED",
+        "OPT_SETTING_FIELDS",
+        "SYS_FIELDS", "SYS_FIELDS_ADVANCED",
+        "BACKUP_FIELDS", "MT5_PATH_FIELDS",
     ):
         for k in _keys(_block(name)):
             if k not in help_keys:
@@ -53,7 +54,6 @@ def test_every_setting_key_has_a_help_entry():
 
 def test_builders_read_help_from_the_dictionary():
     assert "helpTitle(" in JS
-    assert "buildField" in JS
     assert "applyStaticHelp" in JS
 
 

@@ -50,7 +50,6 @@ def _sup(symbol: str, hold: dict | None) -> Supervisor:
     sup.risk_scale = 1.0
     sup.verdicts = {}
     sup.notes = []
-    sup.reopt_queue = []
     sup.last_review = 0.0
     return sup
 

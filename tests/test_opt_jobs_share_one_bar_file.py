@@ -44,7 +44,7 @@ def test_same_tf_jobs_share_one_bars_path():
     variants = [
         {"key": name, "strategy": name, "own": {}, "grid": dict(shared),
          "shared": shared}
-        for name in ("t3_stoch", "stoch_flip")
+        for name in ("dual_t3", "stoch_flip")
     ]
     opt = _opt()
     try:

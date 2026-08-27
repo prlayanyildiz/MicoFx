@@ -47,7 +47,7 @@ def _check(patch):
 # ------------------------------------------------------------- the defect
 
 @pytest.mark.parametrize("field", ["t3_fast", "st_period", "rsi_length",
-                                   "wt_channel_len", "aroon_length"])
+                                   "stoch_k_period", "aroon_length"])
 def test_a_negative_period_is_refused(field):
     with pytest.raises(HTTPException) as exc:
         _check({field: -5})
@@ -64,15 +64,15 @@ def test_a_zero_period_is_refused(field):
 
 def test_the_message_names_the_field_and_the_bound():
     with pytest.raises(HTTPException) as exc:
-        _check({"wt_channel_len": 0})
+        _check({"stoch_k_period": 0})
     detail = str(exc.value.detail)
-    assert "wt_channel_len" in detail and "1" in detail
+    assert "stoch_k_period" in detail and "1" in detail
 
 
 # --------------------------------------------------- what must keep working
 
 @pytest.mark.parametrize("field,value", [
-    ("t3_fast", 5), ("st_period", 10), ("wt_avg_len", 21),
+    ("t3_fast", 5), ("st_period", 10), ("aroon_length", 21),
     ("aroon_length", 14), ("stoch_d_smooth", 3), ("trail_lookback", 5),
 ])
 def test_the_values_the_live_book_actually_runs_are_accepted(field, value):

@@ -13,24 +13,21 @@ from . import indicators as ind
 from .logbus import LOG
 from .models import EXIT_RISK_FIELDS, OPT_FIELDS, SymbolConfig
 
-STOCH_MID = 50.0
+# mtf_pullback: a shallower dip is index noise, not a pullback. Search used
+# to offer 0.3; NAS100 live (27.08) paid 22 SL of 34 closes on that value.
+MIN_PULL_DEPTH_ATR = 0.5
 
 
 @dataclass
 class Params:
     """Flat parameter view so the optimizer can vary values without a full config."""
 
-    strategy: str = "t3_stoch"
+    strategy: str = "stoch_flip"
 
     # ---- higher-timeframe trend pullback ----
     pull_fast: int = 8
     pull_depth_atr: float = 0.5
     pull_max_bars: int = 6
-
-    # ---- cost-scaled micro mean reversion (M5-native scalp) ----
-    mr_fast: int = 6
-    mr_stretch_cost: float = 4.0
-    mr_confirm: bool = True
 
     # ---- range-expansion momentum burst (M5-native scalp) ----
     brst_lookback: int = 20
@@ -49,15 +46,11 @@ class Params:
     st_period: int = 10              # ATR period of the SuperTrend envelope
     st_mult: float = 0.0             # 0 disables the confirmation entirely
 
-    # ---- adaptive cost-regime gate, shared by the scalping families ----
+    # ---- adaptive cost-regime gate (burst) ----
     cost_rank_max: float = 0.0       # 0 disables; percentile ceiling on cost/range
 
     # ---- reversion regime ceiling (_regime) ----
     adx_max: float = 0.0             # 0 disables; reversion dies in strong trends
-
-    # ---- WaveTrend crossover ----
-    wt_channel_len: int = 10
-    wt_avg_len: int = 21
 
     # ---- Slow Stochastic crossover (price range, not RSI) ----
     stoch_k_period: int = 10
@@ -77,7 +70,6 @@ class Params:
     stoch_length: int = 9
     smooth_k: int = 3
     smooth_d: int = 3
-    stoch_band: float = 20.0
     stoch_extreme: float = 80.0
     htf_factor: int = 6
     htf_mode: str = "t3"
@@ -118,18 +110,16 @@ class Params:
         deliberately absent - they never move a signal bar.
         """
         return (self.strategy, self.t3_length, self.t3_volume_factor, self.rsi_length,
-                self.stoch_length, self.smooth_k, self.smooth_d, self.stoch_band,
+                self.stoch_length, self.smooth_k, self.smooth_d,
                 self.stoch_extreme, self.atr_period, self.adx_period, self.adx_min,
                 self.adx_max, self.htf_factor, self.htf_mode, self.min_body_ratio,
                 self.atr_pct_min,
                 self.pull_fast, self.pull_depth_atr, self.pull_max_bars,
-                self.mr_fast, self.mr_stretch_cost, self.mr_confirm,
                 self.brst_lookback, self.brst_range_z, self.brst_close_pct,
                 self.t3_fast, self.t3_slow_mult, self.t3_fast_vf,
                 self.t3_accel_min,
                 self.st_period, self.st_mult,
                 self.cost_rank_max,
-                self.wt_channel_len, self.wt_avg_len,
                 self.stoch_k_period, self.stoch_k_smooth, self.stoch_d_smooth,
                 self.psar_af_step, self.psar_af_max,
                 self.aroon_length)
@@ -163,7 +153,6 @@ class IndicatorCache:
         self._body: np.ndarray | None = None
         self._ema: dict[int, np.ndarray] = {}
         self._supertrend: dict[tuple, np.ndarray] = {}
-        self._wavetrend: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._stoch_slow: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._psar: dict[tuple, np.ndarray] = {}
         self._aroon: dict[int, np.ndarray] = {}
@@ -196,10 +185,9 @@ class IndicatorCache:
         if self._cost is None:
             # Gate is requested (rank_max > 0) but there is nothing to rank -
             # "unknown cost" is not "cheap enough", it is the one case this
-            # filter exists to catch. micro_rev already refuses to trade blind
-            # when cost is unavailable; every other cost_ok() caller (burst,
-            # was silently getting an all-pass instead, which turned
-            # a real cost gate into a no-op exactly when it mattered.
+            # filter exists to catch. burst used to get an all-pass instead,
+            # which turned a real cost gate into a no-op exactly when it
+            # mattered.
             return np.zeros(size, dtype=bool)
         key = int(window)
         rank = self._cost_rank.get(key)
@@ -250,12 +238,6 @@ class IndicatorCache:
         if key not in self._atr:
             self._atr[key] = ind.atr(self.high, self.low, self.close, key)
         return self._atr[key]
-
-    def wavetrend(self, channel_len: int, avg_len: int) -> tuple[np.ndarray, np.ndarray]:
-        key = (int(channel_len), int(avg_len))
-        if key not in self._wavetrend:
-            self._wavetrend[key] = ind.wavetrend(self.high, self.low, self.close, *key)
-        return self._wavetrend[key]
 
     def stoch_slow(self, k_period: int, k_smooth: int, d_smooth: int) -> tuple[np.ndarray, np.ndarray]:
         key = (int(k_period), int(k_smooth), int(d_smooth))
@@ -392,6 +374,12 @@ def compute(cache: IndicatorCache, p: Params) -> Signals:
     cannot explain it. The warning is persisted (WARN) and emitted once per
     name, because this can only come from a config that needs fixing.
     """
+    if cache.close.size == 0:
+        # Same fail-closed as an unknown name. Eight families used to
+        # IndexError on an empty series; three did not. Live never hands
+        # n=0 in (bars() returns None below 2), but compute() is a leaf
+        # other callers reach.
+        return _no_signal(cache, p)
     builder = _FAMILIES.get(p.strategy)
     if builder is None:
         if p.strategy not in _UNKNOWN_FAMILIES:
@@ -466,70 +454,6 @@ def _resolve_conflicts(buy: np.ndarray, sell: np.ndarray) -> tuple[np.ndarray, n
     return buy & ~both, sell & ~both
 
 
-def _t3_stoch(cache: IndicatorCache, p: Params) -> Signals:
-    """T3 trend direction gated by a Stochastic RSI %K/%D cross.
-
-    A long needs the T3 line turning up, %K crossing above %D from below, and the
-    cross to happen before momentum is already exhausted. When the higher
-    timeframe filter is on, the slower T3 must point the same way, which keeps
-    the scalper from fading the dominant trend. Shorts are the mirror.
-    """
-    close = cache.close
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-
-    t3_prev = np.roll(t3, 1)
-    t3_prev[0] = t3[0]
-    rising = t3 > t3_prev
-    falling = t3 < t3_prev
-
-    k_prev, d_prev = np.roll(k, 1), np.roll(d, 1)
-    k_prev[0], d_prev[0] = k[0], d[0]
-    bull_cross = (k_prev <= d_prev) & (k > d)
-    bear_cross = (k_prev >= d_prev) & (k < d)
-
-    hi_gate = STOCH_MID + p.stoch_band
-    lo_gate = STOCH_MID - p.stoch_band
-    upper = p.stoch_extreme
-    lower = 100.0 - p.stoch_extreme
-
-    regime = _regime(p, adx_series, close.size)
-    htf_up, htf_down, trend_long, trend_short = _trend_gate(cache, p)
-
-    buy = rising & bull_cross & (k < hi_gate) & (d < upper) & regime & trend_long
-    sell = falling & bear_cross & (k > lo_gate) & (d > lower) & regime & trend_short
-
-    if p.min_body_ratio > 0:
-        # A signal bar that closed near its open is indecision, not an impulse.
-        body = cache.body_ratio()
-        strong = body >= p.min_body_ratio
-        buy &= strong & (close >= cache.open)
-        sell &= strong & (close <= cache.open)
-
-    if p.atr_pct_min > 0:
-        lively = cache.atr_rank(p.atr_period) >= p.atr_pct_min
-        buy &= lively
-        sell &= lively
-
-    if p.t3_accel_min > 0:
-        # "Rising" is a one-bar fact and half of those bars are the tail of a
-        # move that is already decelerating. Requiring the T3 curve to still be
-        # *bending* the trade's way keeps the entry on the building half.
-        accel = _t3_accel(t3, atr_series)
-        thr = float(p.t3_accel_min)
-        buy &= accel >= thr
-        sell &= accel <= -thr
-
-    # The warmup window of the cascaded EMAs is meaningless; suppress it.
-    warmup = min(close.size, max(p.t3_length * 6 * max(1, p.htf_factor),
-                                 p.rsi_length + p.stoch_length + 10, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
 def _mtf_pullback(cache: IndicatorCache, p: Params) -> Signals:
     """Buy the dip inside a higher-timeframe uptrend (and the mirror).
 
@@ -540,7 +464,8 @@ def _mtf_pullback(cache: IndicatorCache, p: Params) -> Signals:
     entry is the first bar that resumes in the trend direction. Buying a
     pullback rather than a breakout puts the stop behind recent structure
     instead of under an extended move, which is where the R:R of a scalp comes
-    from.
+    from. Depth below ``MIN_PULL_DEPTH_ATR`` is noise: the search used to
+    offer 0.3 and NAS100's 1.0 ATR stop ate those tickets inside the fill bar.
     """
     close, open_ = cache.close, cache.open
     t3, k, d, atr_series, adx_series = _common(cache, p)
@@ -552,7 +477,7 @@ def _mtf_pullback(cache: IndicatorCache, p: Params) -> Signals:
     up, down = cache.htf(factor, p.t3_length, p.t3_volume_factor)
     htf_up, htf_down = up, down
 
-    depth = atr_series * max(0.0, p.pull_depth_atr)
+    depth = atr_series * max(MIN_PULL_DEPTH_ATR, float(p.pull_depth_atr))
     window = max(2, int(p.pull_max_bars))
     swing_hi = ind.swing_highs(cache.high, window)
     swing_lo = ind.swing_lows(cache.low, window)
@@ -589,73 +514,6 @@ def _mtf_pullback(cache: IndicatorCache, p: Params) -> Signals:
                    htf_up=htf_up, htf_down=htf_down)
 
 
-def _micro_rev(cache: IndicatorCache, p: Params) -> Signals:
-    """Micro mean reversion whose entry threshold is measured in *cost*, not ATR.
-
-    Every other family in this file asks "how far has price moved relative to
-    its own volatility". That is the right question for a swing and the wrong
-    one for a scalp: on an M5 bar the number that decides whether a reversion is
-    worth taking is not ATR, it is the round-turn spread plus commission, and
-    the ratio between the two is exactly what makes the same setup pay on gold
-    and lose on EURUSD. So the displacement from a *fast* mean - ``mr_fast``
-    bars, half an hour rather than a session - is divided by the real cost this
-    trade will be charged, and the entry needs that quotient above
-    ``mr_stretch_cost``. A five-cost stretch is worth fading; a one-cost stretch
-    is noise you pay a spread to touch, whatever ATR says about it.
-
-    On top of that sits the cost-regime gate: scalping profitability is decided
-    at least as much by *when* you are willing to trade as by the signal, so
-    ``cost_rank_max`` keeps entries to bars whose cost-to-range ratio sits in the
-    cheaper part of its own recent distribution. Reversion also needs a
-    two-sided tape, which is what ``adx_max`` is for.
-    """
-    close, open_ = cache.close, cache.open
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    htf_up, htf_down, _, _ = _trend_gate(cache, p)
-    regime = _regime(p, adx_series, close.size)
-
-    cost = cache.cost()
-    if cost is None:
-        # No honest cost series -> this family has nothing to measure against.
-        dead = np.zeros(close.size, dtype=bool)
-        return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series,
-                       buy=dead, sell=dead, htf_up=htf_up, htf_down=htf_down)
-
-    mean = cache.ema(max(2, int(p.mr_fast)))
-    priced = cost > 0
-    stretch = np.zeros(close.size, dtype=np.float64)
-    np.divide(np.abs(close - mean), cost, out=stretch, where=priced)
-
-    far = priced & (stretch >= max(1.0, float(p.mr_stretch_cost)))
-    ok = far & regime & cache.cost_ok(p.cost_rank_max)
-
-    sell = ok & (close > mean)
-    buy = ok & (close < mean)
-    if p.mr_confirm:
-        # The bar itself must already be rolling back toward the mean.
-        sell = sell & (close < open_)
-        buy = buy & (close > open_)
-
-    if p.min_body_ratio > 0:
-        body = cache.body_ratio()
-        buy &= body >= p.min_body_ratio
-        sell &= body >= p.min_body_ratio
-    if p.atr_pct_min > 0:
-        lively = cache.atr_rank(p.atr_period) >= p.atr_pct_min
-        buy &= lively
-        sell &= lively
-
-    warmup = min(close.size, max(p.mr_fast * 6, 260, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy = ind.first_of_run(buy)
-    sell = ind.first_of_run(sell)
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
 def _burst(cache: IndicatorCache, p: Params) -> Signals:
     """Continuation off a single range-expansion bar that closed on its extreme.
 
@@ -670,7 +528,7 @@ def _burst(cache: IndicatorCache, p: Params) -> Signals:
 
     Because it is anchored to nothing but the current bar it is available at any
     hour, which is the point on M5 - and because a burst is exactly when spreads
-    widen, it carries the same ``cost_rank_max`` regime gate as ``micro_rev``:
+    widen, it carries a ``cost_rank_max`` regime gate:
     an expansion bar you have to pay up for is not an edge.
     """
     close, open_ = cache.close, cache.open
@@ -798,11 +656,9 @@ def _dual_t3(cache: IndicatorCache, p: Params) -> Signals:
 def _t3_flip(cache: IndicatorCache, p: Params) -> Signals:
     """ONE Tillson T3 line. The line's own direction change IS the entry.
 
-    This is the smallest T3 rule that exists, and it is deliberately not any of
-    the three T3 families already in this file. ``t3_stoch`` only asks the line a
-    yes/no question ("is it rising?") and lets a Stochastic RSI pick the bar;
-    ``dual_t3`` needs a *second* line and trades the
-    crossover. Here there is no second line and no second indicator: the bar on
+    This is the smallest T3 rule that exists, and it is deliberately not the
+    other T3 family in this file: ``dual_t3`` needs a *second* line and trades
+    the crossover. Here there is no second line and no second indicator: the bar on
     which the single line stops falling and starts rising is the long, the bar on
     which it stops rising and starts falling is the short. That is exactly the
     green/red line a T3 is drawn as on a chart, traded literally.
@@ -878,51 +734,12 @@ def _t3_flip(cache: IndicatorCache, p: Params) -> Signals:
                    htf_up=flat, htf_down=flat)
 
 
-def _wavetrend_flip(cache: IndicatorCache, p: Params) -> Signals:
-    """WaveTrend wt1/wt2 crossover - an independent flip read.
-
-    ``t3_flip`` reads a smoothed price line's own direction. This reads price
-    normalised against its own mean absolute deviation from a smoothed typical
-    price - a bounded, volatility-relative oscillator rather than a raw
-    price-unit spread, so its crossovers are on a comparable scale across
-    symbols and regimes instead of needing per-symbol re-scaling.
-
-    Same rule as the other flip families: wt1 crossing wt2 is the whole
-    entry, transition bar only, no state, no filter menu, no zone (the
-    classic +-60/100 overbought/oversold read is a different, separately
-    justified strategy and not bolted on here).
-    """
-    close = cache.close
-    size = close.size
-    wt1, wt2 = cache.wavetrend(p.wt_channel_len, p.wt_avg_len)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-
-    above = wt1 > wt2
-    below = wt1 < wt2
-    was_above = np.roll(above, 1)
-    was_below = np.roll(below, 1)
-    was_above[0] = False
-    was_below[0] = False
-    buy = above & ~was_above
-    sell = below & ~was_below
-
-    warmup = min(size, max(p.wt_channel_len * 8, p.wt_avg_len * 4, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=zeros, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
-
-
 def _stoch_flip(cache: IndicatorCache, p: Params) -> Signals:
     """Slow Stochastic %K/%D crossover - a fourth, independent flip read.
 
-    Not ``t3_stoch`` wearing a different name: ``t3_stoch`` runs a Stochastic
-    calculation *on RSI values* (StochRSI) as a yes/no gate alongside a T3
-    line, and the T3 line's own direction still picks the bar. This measures
+    Not the StochRSI read the panel shows: that runs a Stochastic calculation
+    *on RSI values* and `_common` computes it for every family as a display
+    series. This measures
     where the close sits inside its own recent high/low range directly - RSI
     is never computed - and the %K/%D crossover *is* the entry, with no T3
     line involved at all. Genuinely different information: RSI reads
@@ -1061,13 +878,10 @@ def _ichimoku(cache: IndicatorCache, p: Params) -> Signals:
 
 
 _FAMILIES = {
-    "t3_stoch": _t3_stoch,
     "mtf_pullback": _mtf_pullback,
-    "micro_rev": _micro_rev,
     "burst": _burst,
     "dual_t3": _dual_t3,
     "t3_flip": _t3_flip,
-    "wavetrend_flip": _wavetrend_flip,
     "stoch_flip": _stoch_flip,
     "parabolic_flip": _parabolic_flip,
     "aroon_flip": _aroon_flip,
@@ -1119,17 +933,6 @@ def searchable_axes(family: str, axes: dict[str, Any]) -> dict[str, Any]:
             if k in allow or k not in OPT_FIELDS}
 
 
-def stamp_fields(family: str) -> frozenset[str]:
-    """OPT axes a live-vs-stamp audit may treat as behaviour.
-
-    Unread family fields do not move signals (AUDIT-B). Comparing them
-    against the stamp produces the false positives STAMP-1b exists to stop.
-    Intersected with OPT_FIELDS so engine-only names like ``atr_period``
-    (never written into ``params``) do not flag every row.
-    """
-    return (opt_fields_read(family) | ENGINE_OPT_FIELDS) & frozenset(OPT_FIELDS)
-
-
 def required_bars(p: Params) -> int:
     """Lookback needed before the indicator stack is trustworthy."""
     # searchable_axes already drops unread OPT axes. This fetch size used to
@@ -1144,11 +947,10 @@ def required_bars(p: Params) -> int:
                    (p.rsi_length + p.stoch_length + p.smooth_k + p.smooth_d) * 8,
                    p.atr_period * 10, p.adx_period * 10,
                    p.pull_fast * 10,
-                   # The scalping families rank cost against a 240-bar window.
-                   p.mr_fast * 8 + 260, p.brst_lookback * 6 + 260,
+                   # burst ranks cost against a 240-bar window.
+                   p.brst_lookback * 6 + 260,
                    # dual_t3's slow line is a cascade over t3_fast * mult.
                    int(p.t3_fast * max(1.2, p.t3_slow_mult)) * 20,
                    int(p.st_period) * 10 if p.st_mult > 0 else 0,
-                   (p.wt_channel_len + p.wt_avg_len) * 10,
                    (p.stoch_k_period + p.stoch_k_smooth + p.stoch_d_smooth) * 8,
                    p.aroon_length * 8))

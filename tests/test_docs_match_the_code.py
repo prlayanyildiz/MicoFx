@@ -16,11 +16,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx.models import STRATEGIES, TIMEFRAMES
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = ["README.md", "MASTER_PROMPT.md"]
+DOCS = ["README.md", "MASTER_PROMPT.md", "AGENTS.md"]
+COUNTED = [*DOCS, "OPTIMIZATIONS.md"]
 RETIRED = ("trix_flip", "flow_rev", "t3_ribbon", "squeeze_brk", "orb",
            "vwap_rev", "donchian", "liq_sweep", "alpha_trend", "mavilim",
-           "st_trend", "macd_flip")
+           "st_trend", "macd_flip",
+           "t3_stoch", "wavetrend_flip", "micro_rev")
 RETIRED_TF = ("H1", "H4", "M10", "M1 ", "M3 ")
+AILE_RE = re.compile(r"(\d+)\s+(?:strateji\s+)?aile", re.I)
+FAM_RE = re.compile(r"(\d+)\s+families", re.I)
 
 
 def _read(name: str) -> str:
@@ -28,10 +32,13 @@ def _read(name: str) -> str:
 
 
 def test_the_family_count_matches_the_code():
-    for name in DOCS:
-        for hit in re.findall(r"(\d+)\s+(?:strateji\s+)?aile", _read(name)):
-            assert int(hit) == len(STRATEGIES), (
-                f"{name}: '{hit} aile' yaziyor, kodda {len(STRATEGIES)} var")
+    n = len(STRATEGIES)
+    for name in COUNTED:
+        for i, line in enumerate(_read(name).splitlines(), start=1):
+            if "(arsiv)" in line.lower():
+                continue
+            for hit in AILE_RE.findall(line) + FAM_RE.findall(line):
+                assert int(hit) == n, f"{name}:{i}: {line[:80]}"
 
 
 # Bir emekli ismin gecmesi tek basina hata degil - "su aileler kaldirildi"
@@ -39,7 +46,8 @@ def test_the_family_count_matches_the_code():
 # soylemeden** gecmesi. O yuzden satirin kendisine degil, etrafindaki iki
 # satirlik pencereye bakiyoruz.
 GONE_WORDS = ("kaldirildi", "kaldirilmis", "silindi", "emekli", "retired",
-              "gone", "artik yok")
+              "gone", "artik yok", "unlike", "do not re-add", "do not port",
+              "removed", "resurrected")
 
 
 def _says_removed(lines: list[str], i: int) -> bool:
@@ -54,7 +62,7 @@ def test_a_retired_family_is_not_presented_as_live():
             for fam in RETIRED:
                 # Kelime siniri sart: "orb" duz arandiginda "forbidding"
                 # icinde eslesiyor ve bekci kendi yanlis pozitifini uretiyor.
-                if re.search(rf"{re.escape(fam)}", line) and not _says_removed(lines, i):
+                if re.search(rf"\b{re.escape(fam)}\b", line) and not _says_removed(lines, i):
                     assert False, (
                         f"{name}:{i+1} emekli aile '{fam}' canliymis gibi geciyor: "
                         f"{line[:70]}")

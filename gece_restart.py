@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import http.cookiejar
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -48,6 +49,117 @@ RETRIES = 2
 PANEL = f"http://127.0.0.1:{PORT}"
 MT5_WAIT_SEC = 60
 CAPTURE_TIMEOUT_SEC = 300
+
+
+def interpreter_images(executable: str) -> list[str]:
+    """Paths a Windows venv worker may show as WMI ExecutablePath.
+
+    ``sys.executable`` is the venv Scripts launcher. ProcessPool children
+    report the base install (``Python312\\pythonw.exe``). Matching only the
+    launcher left the 26.08 12:32 pool alive through the 00:00 restart.
+    """
+    seen: list[str] = []
+
+    def add(path: str) -> None:
+        raw = (path or "").strip()
+        if not raw:
+            return
+        abs_path = os.path.abspath(raw)
+        folder, name = os.path.split(abs_path)
+        variants = [abs_path]
+        low = name.lower()
+        if low == "pythonw.exe":
+            variants.append(os.path.join(folder, "python.exe"))
+        elif low == "python.exe":
+            variants.append(os.path.join(folder, "pythonw.exe"))
+        for item in variants:
+            if item not in seen:
+                seen.append(item)
+
+    add(executable)
+    add(getattr(sys, "_base_executable", "") or "")
+    cfg = Path(os.path.abspath(executable)).parent.parent / "pyvenv.cfg"
+    if cfg.is_file():
+        try:
+            text = cfg.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            key, _, value = line.partition("=")
+            if key.strip().lower() == "home" and value.strip():
+                add(os.path.join(value.strip(), "python.exe"))
+                add(os.path.join(value.strip(), "pythonw.exe"))
+                break
+    return seen
+
+
+def cleanup_orphan_workers(executable: str | None = None) -> None:
+    """Kill leftover optimizer pool children whose parent is already gone.
+
+    Best-effort: any failure here must never block a boot or a night restart.
+    """
+    try:
+        images = interpreter_images(executable or sys.executable)
+        quoted = ",".join("'" + p.replace("'", "''") + "'" for p in images)
+        script = (
+            "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' or Name='python.exe'\" "
+            f"| Where-Object {{ ($_.CommandLine -like '*--multiprocessing-fork*' "
+            f"-or $_.CommandLine -like '*spawn_main*') "
+            f"-and @({quoted}) -contains $_.ExecutablePath "
+            f"-and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) }} "
+            "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, timeout=15, check=False,
+        )
+        if result.returncode:
+            err = (result.stderr or result.stdout or b"").decode(
+                "utf-8", errors="replace").strip().replace("\n", " ")[:240]
+            say(f"yetim supurge powershell rc={result.returncode} {err}")
+            # Boot path (run.py) never reads gece_restart.log. Same line on
+            # the live ring/disk so a parse miss cannot hide for six months.
+            try:
+                from micofx.logbus import LOG
+                LOG.emit(
+                    f"yetim supurge powershell rc={result.returncode} {err}",
+                    "WARN")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def note_in_flight_search(opener, base: str) -> None:
+    """Record a running search before this script kills the process tree.
+
+    Midnight restart is still unconditional. 26.08 12:32 ran 11h27m and
+    died with no OPT/gece line; this is the missing sentence.
+    """
+    try:
+        with opener.open(base + "/api/state", timeout=10) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        say(f"opt durumu okunamadi ({type(exc).__name__}: {exc})")
+        return
+    opt = data.get("opt") if isinstance(data, dict) else None
+    if not isinstance(opt, dict):
+        say("opt durumu okunamadi")
+        return
+    if not opt.get("busy"):
+        say("calisan arama yok")
+        return
+    current = opt.get("current") or "?"
+    done = opt.get("combo_done")
+    total = opt.get("combo_total")
+    say(f"Optimizasyon yari da kesiliyor: {current} {done}/{total}")
+
+
+def _note_search_if_up(base: str) -> None:
+    try:
+        note_in_flight_search(panel_session(base), base)
+    except Exception as exc:
+        say(f"opt durumu okunamadi ({type(exc).__name__}: {exc})")
 
 
 def say(text: str) -> None:
@@ -166,9 +278,11 @@ def main() -> int:
     say("--- gece restart basliyor ---")
     pid = port_owner()
     if pid:
+        _note_search_if_up(PANEL)
         say(f"calisan bot bulundu (port {PORT} pid {pid}) - agac durduruluyor")
         stop_tree(pid)
         time.sleep(6)
+        cleanup_orphan_workers(str(PYTHONW))
     else:
         say(f"port {PORT} zaten bos - bot calismiyordu")
 

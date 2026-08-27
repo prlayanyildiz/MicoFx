@@ -129,3 +129,76 @@ def test_snapshot_uses_the_panel_account_helper():
     src = inspect.getsource(Engine.snapshot)
     assert "self._panel_account()" in src
     assert "self.refresh_account()" not in src
+    assert "self._panel_terminal_flags()" in src
+    assert "self.client.terminal_flags()" not in src
+
+
+def test_a_search_reuses_a_stale_cycle_book():
+    """Workers hold the MT5 lock for minutes. A 30s-old cycle book is still
+    the last honest positions_get; blocking the panel is how state hit 148s."""
+    eng = _eng()
+    eng.search_busy = lambda: True
+    eng.client._next = [{"ticket": 9, "magic": 1, "symbol": "GER40"}]
+    eng._positions = [{"ticket": 1, "magic": 1, "symbol": "GER40"}]
+    eng.last_cycle_at = time.time() - 30.0
+
+    out = Engine._panel_positions(eng)
+
+    assert eng.client.calls == 0
+    assert out[0]["ticket"] == 1
+
+
+def test_optimizer_busy_on_the_supervisor_is_enough():
+    """run.py wires engine.supervisor.optimizer; no extra callback needed."""
+    eng = _eng()
+    eng.supervisor = SimpleNamespace(optimizer=SimpleNamespace(busy=True))
+    eng._positions = [{"ticket": 1, "magic": 1, "symbol": "GER40"}]
+    eng.last_cycle_at = time.time() - 30.0
+
+    out = Engine._panel_positions(eng)
+
+    assert eng.client.calls == 0
+    assert out[0]["ticket"] == 1
+
+
+def test_a_search_reuses_a_stale_account():
+    eng = _eng()
+    eng.search_busy = lambda: True
+    eng._account = {"equity": 1.0, "balance": 1.0}
+    eng.last_cycle_at = time.time() - 30.0
+    eng.client.account = lambda: (_ for _ in ()).throw(
+        AssertionError("account_info during a search"))
+
+    out = Engine._panel_account(eng)
+
+    assert out["equity"] == 1.0
+
+
+def test_a_search_does_not_take_terminal_info():
+    eng = _eng()
+    eng.search_busy = lambda: True
+    eng._terminal_flags_cache = {"company": "cached", "trade_allowed": True}
+    eng.client.terminal_flags = lambda: (_ for _ in ()).throw(
+        AssertionError("terminal_info during a search"))
+
+    out = Engine._panel_terminal_flags(eng)
+
+    assert out["company"] == "cached"
+
+
+def test_idle_snapshot_still_refreshes_stale_flags():
+    eng = _eng()
+    eng._terminal_flags_cache = {"company": "old"}
+    eng.client.flags_calls = 0
+
+    def _flags():
+        eng.client.flags_calls += 1
+        return {"company": "fresh", "trade_allowed": True}
+
+    eng.client.terminal_flags = _flags
+
+    out = Engine._panel_terminal_flags(eng)
+
+    assert eng.client.flags_calls == 1
+    assert out["company"] == "fresh"
+    assert eng._terminal_flags_cache["company"] == "fresh"

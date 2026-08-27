@@ -27,16 +27,21 @@ from .mt5client import (
     MT5Client,
     timeframe_seconds,
 )
-from .risk import RiskManager
+from .risk import RiskManager, shakeout_size_note, shakeout_sl_atr_mult
 from .store import Store, as_dict, as_list, as_number
 from .strategy import IndicatorCache, Params, Signals, compute, required_bars
 from .supervisor import Supervisor
 
-_STALE_BAR_REFRESH = 45.0   # kept as a name; due uses the broker clock now
 _BAR_INTEGRITY_REFRESH = 900.0  # rare full copy_rates with no new bar
 _ENTRY_BLOCK_FLUSH_SEC = 45.0
 _ACCOUNT_TTL = 2.0
 _CAPACITY_TTL = 3.0
+_CASH_FLOW_TTL = 30.0
+_TERMINAL_FLAGS_TTL = 5.0
+_PANEL_STATE_KEYS = (
+    "symbol", "atr", "adx", "t3_rising", "htf", "k", "d", "signal",
+    "bars_ready", "note", "session", "spread_atr",
+)
 
 # A cooldown is meant to stop the same setup re-firing on the next bar or two,
 # so it belongs on the strategy's own clock. The stored seconds were written for
@@ -72,6 +77,8 @@ SPREAD_RATIO_BUCKETS = 51
 # has to catch is a shut market, which is hours away from this bound, not
 # minutes.
 BROKER_CLOCK_MAX_AGE_SEC = DECISION_CLOCK_MAX_AGE_SEC
+CLOCK_STALE_WARN_SEC = 900.0
+CLOCK_STALE_WARN_AFTER_CYCLES = 30
 # Below this many samples the ratio is not reported or applied - a handful of
 # ticks from one hour is exactly the reading that misled us once already.
 SPREAD_RATIO_MIN_SAMPLES = 400
@@ -254,7 +261,6 @@ class SymbolState:
             "primary_signal": self.primary_signal,
             "bars_ready": self.bars_ready, "note": self.note, "session": self.session,
             "spread": round(self.spread, 6), "spread_atr": round(self.spread_atr, 3),
-            "cooldown_left": max(0, int(self.cooldown_until - time.time())),
             "last_signal_at": self.last_signal_at,
         }
 
@@ -366,10 +372,12 @@ class Engine:
         self._account: dict[str, Any] = {}
         self._account_at = 0.0
         self._positions: list[dict[str, Any]] = []
+        self._terminal_flags_cache: dict[str, Any] = {}
         self.cycle_count = 0
         self.last_cycle_at = 0.0
         self.last_cycle_ms = 0.0
         self.last_error = ""
+        self._clock_stale_warned_at = 0.0
         # Last logged broker-vs-local hour gap. None until first read; a
         # change to a non-zero value is the October DST leak becoming visible.
         #
@@ -397,6 +405,7 @@ class Engine:
             self._session_clock_skew = None
         self._day_cache: dict[str, Any] = {}
         self._day_cache_at = 0.0
+        self._cash_flow_at = 0.0
         self._capacity_cache: dict[str, Any] = {}
         self._capacity_cache_at = 0.0
         self._capacity_pos_sig: tuple = ()
@@ -541,7 +550,6 @@ class Engine:
         self._symbol_halted: dict[str, str] = {
             str(k): str(v) for k, v in (as_dict(store.get_setting("symbol_daily_halted"), "symbol_daily_halted")).items()
         }
-        self._reopt_at = as_number(store.get_setting("auto_reopt_at"), 0.0, "auto_reopt_at")
         # Why entries do not happen, counted per symbol per gate.
         #
         # Every symbol in this book trades far under the frequency its own
@@ -734,11 +742,12 @@ class Engine:
     def shutdown(self) -> None:
         """Tear the worker thread down for good (application exit)."""
         self.stop(close_positions=False)
-        self.execution.flush()
         self._stop.set()
         thread = self._thread
         if thread and thread.is_alive():
             thread.join(timeout=8.0)
+        self.execution.flush()
+        self._flush_entry_blocks(force=True)
         self._thread = None
 
     def panic(self) -> dict[str, Any]:
@@ -822,8 +831,10 @@ class Engine:
         if not account:
             return
 
+        self._probe_book_ticks()
         getter = getattr(self.client, "decision_now", None)
         server_now = getter() if callable(getter) else None
+        self._note_stale_decision_clock(server_now)
         self._note_session_clock(self.client.server_now())
         self._note_risk_capacity()
         login = int(account.get("login") or 0)
@@ -877,7 +888,6 @@ class Engine:
         # still open so "daily loss limit" actually stops the daily loss.
         # Runs every cycle while halted, not just once - self-healing if a
         # partial close_all() attempt left something behind.
-        sys_cfg = self.store.system
         # Sticky (DailyGuard.loss_halted), not re-derived from live equity -
         # re-checking pnl_pct here every cycle meant a bounce back above the
         # threshold (another position's floating P/L recovering, a stray
@@ -885,7 +895,7 @@ class Engine:
         # the day is still halted and still supposed to be flattening. The
         # halt itself only ever clears on rollover/resume, so this should too.
         loss_halted = self.risk.daily.halted and self.risk.daily.loss_halted
-        if loss_halted and sys_cfg.daily_loss_flatten and self._positions:
+        if loss_halted and self._positions:
             closed, remaining = self.close_all()
             if closed:
                 LOG.emit(f"Gunluk zarar limiti: {closed} pozisyon flatten edildi.", "WARN")
@@ -904,9 +914,7 @@ class Engine:
                 pnl = 0.0
             self._kick_supervisor_review(pnl)
 
-        self._maybe_schedule_reopt()
-
-        # Every position-count guard here (max_positions, weekend/secondary
+        # Every position-count guard here (max_positions, weekend/secondary)
         # ticket tracking, partial-TP ladder bookkeeping) assumes one ticket
         # per opened trade - a netting account merges same-direction trades
         # on a symbol into a single ticket instead, silently defeating all of
@@ -1102,10 +1110,23 @@ class Engine:
         )
         state.cooldown_until = time.time() + _cooldown_for(cfg)
         self._save_cooldown(cfg.symbol, state.cooldown_until)
-        self._mark_bar_filled(cfg.symbol, state.signal_source, state.last_bar)
-        state.signal = ""
-        state.signal_source = ""
-        state.primary_signal = ""
+        # Book the bar that was sent, not whatever evaluate armed while the
+        # verifier slept. Cycle order is evaluate → drain → entries, so T+1
+        # can already be live here. Marking live last_bar / clearing the
+        # chain both: misses that new entry, and files filled_bars under ""
+        # once live source was already wiped.
+        booked_source = str(item.get("signal_source") or state.signal_source or "")
+        booked_bar = int(item.get("last_bar") or 0)
+        if not booked_bar:
+            key = item.get("bar_key") or ()
+            booked_bar = int(key[0] or 0) if key else 0
+        if not booked_bar:
+            booked_bar = int(state.last_bar or 0)
+        self._mark_bar_filled(cfg.symbol, booked_source, booked_bar)
+        if int(state.last_bar or 0) == booked_bar:
+            state.signal = ""
+            state.signal_source = ""
+            state.primary_signal = ""
         state.note = "islem acildi"
         state.entry_block = "acildi"
         ticket = int(result.get("position", 0) or 0)
@@ -1124,7 +1145,7 @@ class Engine:
                 atr_pct = float(state.atr) / sig_close
             note_fill(
                 ticket,
-                signal_bar_time=int(state.last_bar or 0) or None,
+                signal_bar_time=int(booked_bar or 0) or None,
                 fill_time=self._broker_now_int(),
                 fill_price=fill_px,
                 signal_close=sig_close,
@@ -1407,7 +1428,7 @@ class Engine:
         if dropped:
             self._entry_blocks_dirty = True
             self._entry_events_dirty = True
-            self._flush_entry_blocks()
+            self._flush_entry_blocks(force=True)
 
     def _load_entry_events(self) -> None:
         """Restore the observation ring. Corrupt rows are skipped, not coerced."""
@@ -1458,13 +1479,13 @@ class Engine:
             self._entry_events = events[-limit:]
         self._entry_events_dirty = True
 
-    def _flush_entry_blocks(self) -> None:
+    def _flush_entry_blocks(self, force: bool = False) -> None:
         """Persist counters and, separately, the observation ring.
 
-        Counters are ~1 KB and may hit disk every poll while a signal is
-        held off. The ring is ~200 KB at capacity; writing it on every
-        attempt would be ~9 GB/day. It is marked dirty only when a new
-        episode is appended.
+        Both blobs share one 45s window. A new episode used to skip that
+        window (``not events_dirty``), rewriting ~86 KB every poll while
+        a gate held a bar off. Crash may lose up to 45s of observation
+        rows; ``reset`` / symbol-delete pass ``force=True``.
         """
         try:
             blocks_dirty = getattr(self, "_entry_blocks_dirty", False)
@@ -1473,7 +1494,7 @@ class Engine:
                 return
             now = time.time()
             last = float(getattr(self, "_entry_blocks_flushed_at", 0.0) or 0.0)
-            if (blocks_dirty and not events_dirty and last
+            if (not force and last
                     and now - last < _ENTRY_BLOCK_FLUSH_SEC):
                 return
             live = set(self.store.symbols)
@@ -1555,7 +1576,7 @@ class Engine:
         self._entry_blocks_since = time.time()
         self._entry_blocks_dirty = True
         self._entry_events_dirty = True
-        self._flush_entry_blocks()
+        self._flush_entry_blocks(force=True)
 
     def _broker_now_int(self) -> int:
         """Broker wall-clock as a naive epoch, same stamps as deal.time.
@@ -1992,99 +2013,6 @@ class Engine:
             "rows": rows,
         }
 
-    # ------------------------------------------------- scheduled re-optimize
-
-    def reopt_status(self) -> dict[str, Any]:
-        sys_cfg = self.store.system
-        days = float(sys_cfg.auto_reopt_days or 0)
-        every = (max(0.5, days) * 86400.0) if days > 0 else 0.0
-        return {
-            "enabled": bool(sys_cfg.auto_reopt) and days > 0,
-            "every_days": days,
-            "hour": int(sys_cfg.auto_reopt_hour),
-            "weekday": int(sys_cfg.auto_reopt_weekday),
-            "last_at": self._reopt_at,
-            "next_at": (self._reopt_at + every) if self._reopt_at and every else 0.0,
-        }
-
-    def _maybe_schedule_reopt(self) -> None:
-        """Fire a full portfolio re-optimization once per configured interval.
-
-        Nothing here bypasses the usual apply path: it calls the same
-        ``Optimizer.start(apply_best=True)`` a manual run uses, so every symbol
-        still has to clear ``_slice_ok`` on both out-of-sample slices and
-        ``_is_improvement`` before anything is written. A symbol whose fresh
-        search is worse than what it already runs simply keeps its config.
-        """
-        sys_cfg = self.store.system
-        optimizer = getattr(self.supervisor, "optimizer", None)
-        if not sys_cfg.auto_reopt or optimizer is None:
-            return
-        days = float(sys_cfg.auto_reopt_days or 0)
-        # <=0 means "interval disabled" (distinct from auto_reopt=false). The
-        # old max(0.5, days) clamp turned an intentional 0 into a half-day
-        # cadence, so the only way to park the scheduler was the master bool.
-        if days <= 0:
-            return
-        every = max(0.5, days) * 86400.0
-        now = time.time()
-        if self._reopt_at <= 0:
-            # First run ever: start the clock instead of firing at boot, so a
-            # restart never kicks off an unexpected full sweep.
-            self._reopt_at = now
-            self.store.set_setting("auto_reopt_at", self._reopt_at)
-            return
-        weekday = int(sys_cfg.auto_reopt_weekday)
-        # A preferred weekday recurs every 7 days no matter what ``every`` is
-        # set to. If the last successful run happened to land on a different
-        # day of the week than the preference (e.g. whatever day the bot
-        # first ran on, or a week it caught up late), the raw interval and
-        # the weekday permanently disagree: by the time ``every`` has fully
-        # elapsed the preferred weekday has already passed for that cycle, so
-        # it waits a full extra week and lands one day short again - the
-        # configured day is never actually hit. A couple of days of early
-        # tolerance lets the preferred weekday catch the window before the
-        # raw interval technically elapses, locking the cadence onto it.
-        tolerance = min(2 * 86400.0, every / 3.0) if 0 <= weekday <= 6 else 0.0
-        if now - self._reopt_at < every - tolerance:
-            return
-        # Missing the exact weekday+hour once (bot offline through that whole
-        # hour, market closed, etc.) used to mean waiting a full extra
-        # ``every`` for the next match - the window never catches up on its
-        # own. Two days past due is well past any single missed slot, so
-        # drop the weekday/hour gate at that point and just run on the next
-        # cycle instead of silently skipping a week (or more) of re-opt.
-        catch_up = now - self._reopt_at - every >= 2 * 86400.0
-        # Gated on the machine's own local clock, not the broker/server time:
-        # server_now() used to depend on a detected MT5 offset that could
-        # drift or be briefly wrong (e.g. a broker/cloud clock hiccup), which
-        # made this fire on the wrong weekday. The System tab's day/hour
-        # pickers should mean exactly what they say against Windows time.
-        local = time.localtime(now)
-        if not catch_up and 0 <= weekday <= 6 and local.tm_wday != weekday:
-            return                       # wait for the preferred local weekday
-        hour = int(sys_cfg.auto_reopt_hour)
-        if not catch_up and 0 <= hour <= 23 and local.tm_hour != hour:
-            return                       # wait for the preferred local hour
-        if catch_up:
-            LOG.emit("Haftalik yeniden optimizasyon: planlanan pencere kacirilmisti, "
-                     "telafi olarak simdi baslatiliyor.", "OPT")
-        if optimizer.busy:
-            LOG.emit("Haftalik yeniden optimizasyon ertelendi: optimizer mesgul.", "OPT")
-            return
-        targets = [c.symbol for c in list(self.store.symbols.values()) if c.enabled]
-        if not targets:
-            return
-        result = optimizer.start(targets, apply_best=True, source="scheduled")
-        if not result.get("ok"):
-            LOG.emit(f"Haftalik yeniden optimizasyon baslatilamadi: "
-                     f"{result.get('error', '?')}", "OPT")
-            return
-        self._reopt_at = now
-        self.store.set_setting("auto_reopt_at", self._reopt_at)
-        LOG.emit(f"Haftalik yeniden optimizasyon basladi ({len(targets)} sembol) - "
-                 f"sonuclar ayni dogrulama kapilarindan gececek, zorla uygulanmaz.", "OPT")
-
     # ------------------------------------------------------------ evaluation
 
     def _evaluate_disabled(self, cfg: SymbolConfig, state: SymbolState,
@@ -2343,6 +2271,23 @@ class Engine:
         logged.add(key)
         LOG.emit(message, "WARN", symbol)
 
+    def _bar_window_pins(self, symbol: str, timeframe: str,
+                         closed_count: int) -> tuple[int, int] | None:
+        """Oldest and last-closed stamps, or None to force a full copy."""
+        getter = getattr(self.client, "bar_window_pins", None)
+        if not callable(getter):
+            return None
+        try:
+            pins = getter(symbol, timeframe, closed_count)
+        except Exception:
+            return None
+        if not pins or len(pins) != 2:
+            return None
+        try:
+            return (int(pins[0]), int(pins[1]))
+        except (TypeError, ValueError):
+            return None
+
     def _refresh_signals(self, cfg: SymbolConfig, state: SymbolState, params: Params) -> bool:
         """Pull bars and recompute indicators when a new bar has closed."""
         now = time.time()
@@ -2365,13 +2310,24 @@ class Engine:
         broker_now = self.client.broker_now()
         due = broker_now > 0.0 and broker_now >= state.next_bar_at
         # 15.08: stale-every-45s silently carried the system when `due` used
-        # the machine clock. `due` is broker-clock now. A full required_bars
-        # fetch with no new bar is an integrity pass, not a substitute for due.
+        # the machine clock. `due` is broker-clock now. A 900s pass with no
+        # new bar pins the window ends (two small copy_rates) and only
+        # full-fetches on mismatch. A middle-bar hole with both ends
+        # unchanged is the remaining miss — rarer than the old 900s lock hold.
         integrity = now - state.last_fetch > _BAR_INTEGRITY_REFRESH
         if not (due or integrity or state.last_bar == 0):
             return False
 
         need = required_bars(params)
+        if (integrity and not due and state.last_bar
+                and state.bars is not None and len(state.bars) >= need):
+            pins = self._bar_window_pins(cfg.symbol, cfg.timeframe, len(state.bars))
+            if pins is not None:
+                oldest, last_closed = pins
+                if (last_closed == int(state.last_bar)
+                        and oldest == int(state.bars.time[0])):
+                    state.last_fetch = now
+                    return False
         bars = self.client.bars(cfg.symbol, cfg.timeframe, need)
         state.last_fetch = now
         # required_bars() states what the indicator stack needs to be
@@ -2386,8 +2342,7 @@ class Engine:
         # comparing the last bar's signal against the same bar computed with
         # full history: 720 bars disagreed on 0 of 116 real signals, 360 on 2,
         # 240 on 2, then 200 on 24 and 60 on 82 - wrong more often than right
-        # at the old floor, and 100% wrong for mtf_pullback, wavetrend_flip
-        # and stoch_flip.
+        # at the old floor, and 100% wrong for mtf_pullback and stoch_flip.
         #
         # Half of required_bars sits in the flat part of that curve and is
         # derived from the number the code already computes rather than one
@@ -2597,7 +2552,10 @@ class Engine:
         # The hard stop. Always sent with the entry and never lifted: it is the
         # only protection that survives this process dying, and the broker's own
         # minimum distance is a floor on it, never a reason to skip it.
-        sl_dist = max(atr * cfg.sl_atr_mult, min_stop)
+        sl_mult = shakeout_sl_atr_mult(
+            cfg.sl_atr_mult, cfg.symbol,
+            getattr(self, "_trade_autopsies", None))
+        sl_dist = max(atr * sl_mult, min_stop)
         # No take-profit, ever. A trailing system decides when a move is over by
         # watching the move, not by naming a price in advance; a fixed target is
         # just a cap on the winners that pay for the losers. mt5client.open_market
@@ -2619,6 +2577,17 @@ class Engine:
                     return
 
         lot, note = self.risk.lot_for(cfg, sl_dist, account.get("balance", 0.0), ai_scale=scale)
+        if sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
+            logged = getattr(self, "_sl_floor_logged", None)
+            if logged is None:
+                self._sl_floor_logged = logged = {}
+            if logged.get(cfg.symbol) != sl_mult:
+                logged[cfg.symbol] = sl_mult
+                extra = shakeout_size_note(lot, note)
+                LOG.emit(
+                    f"{cfg.symbol} stop {cfg.sl_atr_mult:g}->{sl_mult:g} ATR "
+                    f"(sembol orijinal SL kaybi, sonraki giris, {extra})",
+                    "WARN")
         if lot <= 0:
             state.note = f"lot hesaplanamadi ({note})"
             state.entry_block = "lot"
@@ -2698,6 +2667,8 @@ class Engine:
                                 int(state.pending_bar_key[1] or 0)
                                 if state.pending_bar_key else 0),
                     "probe_count": len(before_tickets),
+                    "signal_source": str(state.signal_source or ""),
+                    "last_bar": int(state.last_bar or 0),
                     "verify_kwargs": result.get("verify_kwargs") or {},
                 }
                 state.note = "emir dogrulaniyor"
@@ -3167,18 +3138,21 @@ class Engine:
                 self._scale_out_done = done & live
                 self.store.set_setting("scale_out_done", sorted(self._scale_out_done))
         if not getattr(self, "_open_resume_logged", False):
-            self._open_resume_logged = True
+            # First connected manage_positions is a trusted book (_cycle
+            # already bailed if positions() flipped connected). Latch even
+            # when flat so a fill hours later is not stamped "Restart".
             claimed = [
                 f"#{int(p['ticket'])} {by_magic[p['magic']].symbol}"
                 for p in self._positions
                 if p.get("magic") in by_magic
             ]
+            self._open_resume_logged = True
             if claimed:
                 LOG.emit(
                     "Restart: magic ile "
                     f"{len(claimed)} acik ticket devam ediyor: "
                     + ", ".join(claimed),
-                    "INFO")
+                    "WARN")
         for pos in self._positions:
             if pos["ticket"] in self._orphan_tickets:
                 # An unresolved secondary fill from a prior cycle - never let it
@@ -3269,7 +3243,7 @@ class Engine:
             # _symbol_daily_halt() only ever blocked new entries for THIS
             # symbol, so one instrument could keep bleeding floating loss
             # past its own configured cap while every other symbol traded on.
-            if self.store.system.daily_loss_flatten and self._symbol_daily_halt(cfg):
+            if self._symbol_daily_halt(cfg):
                 fill = {}
                 if self._close_tracked(pos, "MicoFX sembol gunluk zarar limiti",
                                        "exit", fill=fill):
@@ -3319,12 +3293,15 @@ class Engine:
                     bars = state.bars
                     last_bar = state.last_bar
                 ticket = pos["ticket"]
-                if last_bar and last_bar != self._stop_bar.get(ticket):
-                    # Marked done only once _update_stop reports the bar
-                    # settled. It answers False when the live quote - not the
-                    # closed bar the trail level comes from - is what blocked
-                    # the move, and marking the bar regardless silently threw
-                    # away an earned trail update until the next bar closed.
+                if last_bar:
+                    # Always re-run overlay_stop on this closed bar. The level
+                    # does not move until last_bar does, so a same-target retry
+                    # is a no-op (min_step). What used to skip here was a BE /
+                    # harvest PATCH after overlay_stop had returned None: the
+                    # bar was marked settled and the new overlay sat idle until
+                    # the next candle, which is the opposite of "overlays apply
+                    # to open tickets". False still means "ask again this bar"
+                    # because the live quote, not the close, blocked placement.
                     if self._update_stop(cfg, pos, atr, bars):
                         self._stop_bar[ticket] = last_bar
                 self._maybe_scale_out(cfg, pos, atr, bars)
@@ -3792,8 +3769,8 @@ class Engine:
                          bars: Any = None) -> bool:
         """Bank about one third of the ticket once closed-bar profit hits the R gate.
 
-        Size comes from the ticket and the broker min/step, not from
-        ``partial_close_lots``. Remainder keeps the trail. False means not
+        Size comes from the ticket and the broker min/step, not a leftover
+        lot dial. Remainder keeps the trail. False means not
         this poll (below the gate, unsplittable, already done, or refused).
         """
         at_r = float(getattr(cfg, "partial_at_r", 0.0) or 0.0)
@@ -4043,6 +4020,25 @@ class Engine:
         interval = float(getattr(self.store.system, "poll_interval_sec", 2.0) or 2.0)
         return (time.time() - self.last_cycle_at) <= max(4.0, 2.0 * interval)
 
+    def _search_is_busy(self) -> bool:
+        probe = getattr(self, "search_busy", None)
+        if callable(probe):
+            return bool(probe())
+        opt = getattr(getattr(self, "supervisor", None), "optimizer", None)
+        return bool(getattr(opt, "busy", False))
+
+    def _panel_reuse_cycle_book(self) -> bool:
+        """True when /api/state must not take the MT5 lock.
+
+        Fresh cycle book is the idle path. A search holds that same lock
+        for minutes (148s measured 26.08); the cycle then looks stale and
+        a blocking positions_get/account_info/terminal_info hangs the
+        panel. Halt/flatten still wait inside ``_cycle``, not here.
+        """
+        if self._cycle_book_is_fresh():
+            return True
+        return bool(self._search_is_busy() and self.last_cycle_at)
+
     def _panel_positions(self) -> list[dict[str, Any]]:
         """Positions for /api/state. Reuse the cycle book when it is fresh.
 
@@ -4050,7 +4046,7 @@ class Engine:
         same MT5 lock the worker already held at cycle start. Empty is a
         valid flat book, so this must not fall through with ``or``.
         """
-        if self._cycle_book_is_fresh():
+        if self._panel_reuse_cycle_book():
             return self._decorate_positions(self._positions)
         return self.positions_view()
 
@@ -4062,9 +4058,27 @@ class Engine:
         already held. Empty is not a valid cached book (no reading yet),
         so this *does* fall through on a missing snapshot.
         """
-        if self._cycle_book_is_fresh() and self._account:
+        if self._panel_reuse_cycle_book() and self._account:
+            return self._account
+        if self._search_is_busy():
             return self._account
         return self.refresh_account()
+
+    def _panel_terminal_flags(self) -> dict[str, Any]:
+        """terminal_info for /api/state. Same lock as copy_rates."""
+        cache = getattr(self, "_terminal_flags_cache", None) or {}
+        now = time.time()
+        last = float(getattr(self, "_terminal_flags_at", 0.0) or 0.0)
+        if self._search_is_busy():
+            return cache
+        if cache and now - last < _TERMINAL_FLAGS_TTL:
+            return cache
+        flags = self.client.terminal_flags()
+        if flags:
+            self._terminal_flags_cache = flags
+            self._terminal_flags_at = now
+            return flags
+        return cache or flags
 
     def _panel_capacity(self, positions: list[dict[str, Any]],
                         account: dict[str, Any],
@@ -4078,14 +4092,62 @@ class Engine:
             (int(p.get("ticket") or 0), round(float(p.get("volume") or 0), 4))
             for p in positions))
         now = time.time()
+        # Search holds the MT5 lock for order_calc_margin. Lot/margin stay on
+        # the frozen copy; open count, floating P/L and enabled do not need
+        # that lock (27.08: capacity said US30=0 / 6 tickets while the book
+        # had 7). Overlay from the positions this snapshot already holds.
+        if self._search_is_busy() and self._capacity_cache:
+            return self._overlay_capacity_opens(self._capacity_cache, positions)
         if (self._capacity_cache
                 and sig == self._capacity_pos_sig
                 and now - self._capacity_cache_at < _CAPACITY_TTL):
             return self._capacity_cache
-        out = self.risk.capacity(positions, account, atrs)
+        out = self.risk.capacity(
+            positions, account, atrs,
+            autopsies=getattr(self, "_trade_autopsies", None))
         self._capacity_cache = out
         self._capacity_cache_at = now
         self._capacity_pos_sig = sig
+        return out
+
+    def _overlay_capacity_opens(self, blob: dict[str, Any],
+                                positions: list[dict[str, Any]]) -> dict[str, Any]:
+        """Refresh open count / P/L / enabled on a search-frozen capacity blob."""
+        out = dict(blob)
+        rows = []
+        for raw in blob.get("rows") or []:
+            row = dict(raw)
+            names = {row.get("symbol"), row.get("broker_symbol")} - {None, ""}
+            mine = [p for p in positions if p.get("symbol") in names]
+            n = len(mine)
+            old_n = int(row.get("open_positions") or 0)
+            old_free = int(row.get("free_slots") or 0)
+            row["open_positions"] = n
+            row["open_profit"] = round(sum(
+                float(p.get("profit") or 0) + float(p.get("swap") or 0)
+                for p in mine), 2)
+            cfg = (getattr(self.store, "symbols", None) or {}).get(row.get("symbol"))
+            if cfg is not None:
+                row["enabled"] = bool(getattr(cfg, "enabled", False))
+            if not row.get("enabled"):
+                row["free_slots"] = 0
+            else:
+                row["free_slots"] = max(0, old_free - (n - old_n))
+            rows.append(row)
+        out["rows"] = rows
+        n_all = len(positions)
+        old_total = int(blob.get("open_total") or 0)
+        old_global = int(blob.get("global_free_slots") or 0)
+        out["open_total"] = n_all
+        out["global_free_slots"] = max(0, old_global - (n_all - old_total))
+        out["search_frozen"] = True
+        acc = getattr(self, "_account", None) or {}
+        try:
+            balance = float(acc.get("balance") or acc.get("equity") or 0.0)
+        except (TypeError, ValueError):
+            balance = 0.0
+        proj = self.risk.fill_holdout_projection(rows, balance)
+        out.update(proj)
         return out
 
     def _symbol_daily_halt(self, cfg: SymbolConfig) -> str:
@@ -4103,7 +4165,7 @@ class Engine:
         the halt - and the flatten manage_positions() drives off it - flap
         back off for that cycle even though the day's cap was already blown.
         """
-        if cfg.symbol_daily_loss_pct <= 0:
+        if float(getattr(cfg, "symbol_daily_loss_pct", 0.0) or 0.0) <= 0:
             return ""
         if cfg.symbol in self._symbol_halted:
             return self._symbol_halted[cfg.symbol]
@@ -4162,8 +4224,23 @@ class Engine:
         return self.client.server_now() - 86400
 
     def _refresh_cash_flow(self) -> None:
-        self.risk.daily.set_cash_flow(
-            self.client.cash_flow_since(self._day_start_epoch()))
+        # Deposits/withdrawals rarely move. history_deals_get shares the MT5
+        # lock with trail/flatten; skip while balance is unchanged and the
+        # last good fetch is fresh. A jump (13.08 +500) fetches immediately.
+        now = time.time()
+        balance = float((self._account or {}).get("balance") or 0.0)
+        last_bal = getattr(self, "_cash_flow_balance", None)
+        last_at = float(getattr(self, "_cash_flow_at", 0.0) or 0.0)
+        if (last_bal is not None
+                and abs(balance - last_bal) < 0.005
+                and now - last_at < _CASH_FLOW_TTL):
+            return
+        flow = self.client.cash_flow_since(self._day_start_epoch())
+        self.risk.daily.set_cash_flow(flow)
+        if flow is None:
+            return
+        self._cash_flow_at = now
+        self._cash_flow_balance = balance
 
     def _handle_daily_rollover(self, server_now: float, balance: float, login: int = 0) -> None:
         if self.risk.daily.rollover(server_now, balance, login=login):
@@ -4174,6 +4251,7 @@ class Engine:
                 self._save_symbol_halted()
             self._day_cache = {}
             self._day_cache_at = 0.0
+            self._cash_flow_at = 0.0
 
     def _empty_day_stats(self) -> dict[str, Any]:
         guard = self.risk.daily
@@ -4242,58 +4320,10 @@ class Engine:
         return stats
 
     def _states_view(self) -> dict[str, Any]:
-        """Per-symbol live state, plus what the spread costs against the edge.
-
-        ``expected_r`` (the holdout's edge per trade) and the live spread were
-        held in different places - the supervisor verdict and the symbol state -
-        so the one comparison that says whether a symbol can pay its own costs
-        needed a manual three-way join. Measured that way on 14.08 the book read:
-
-            beklenen kenar 0.058-0.212 R/islem   vs   spread 0.02-0.18 R/islem
-
-        Five of ten symbols had a spread at or above their entire expected edge -
-        negative before a tick moves - and nothing surfaced it. The cost gate
-        does not catch this: ``max_cost_pct_of_risk`` measures cost against R,
-        and R is 5-20x the edge, so a trade costing 17% of R clears an 18% gate
-        while spending more than twice what it expects to make.
-
-        ``edge_cover`` is cost / expected_r: below 1.0 the edge pays for its
-        costs, at 1.0 they cancel, above 1.0 the symbol is structurally short.
-
-        CORRECTION (14.08). The first version of this divided the LIVE
-        instantaneous spread/ATR by expected_r and read four to five symbols as
-        structurally negative. That was wrong, and web/app.py's portfolio-gates
-        docstring already says why: an instantaneous spread/ATR averages every
-        bar, while the walk-forward charges cost only where a signal fired, so
-        it runs 5-14x high on short timeframes - and five of ten symbols here
-        are M5. It was also sampled at 07:00, with GER40/UK100/FRA40 out of
-        session and Brent not yet open, which is exactly the reading #14b says
-        is not evidence. The operator caught it.
-
-        So the number comes from the holdout's own ``cost_per_trade_r``, the
-        same figure the cost gate is measured against. Where the search ran
-        with ``charge_costs`` off that figure is 0.0 - not "free", but "never
-        measured" - and edge_cover is reported as None rather than a flattering
-        zero. Measured properly on the two symbols that do carry it, cost is
-        17-20% of the edge, not several times it.
-
-        Reported, not enforced - what to do about it is a book decision (#30).
-        """
         out: dict[str, Any] = {}
-        verdicts = getattr(self.supervisor, "verdicts", {}) or {}
         for name, st in list(self.states.items()):
-            row = st.as_dict()
-            cfg = self.store.symbols.get(name)
-            summary = (cfg.opt_summary or {}) if cfg else {}
-            holdout = summary.get("holdout") or {}
-            # 0.0 means the search never charged costs, not that they are zero.
-            cost_r = float(holdout.get("cost_per_trade_r") or 0.0)
-            measured = cost_r > 0
-            expected = float(getattr(verdicts.get(name), "expected_r", 0.0) or 0.0)
-            row["cost_r"] = round(cost_r, 4) if measured else None
-            row["edge_cover"] = (round(cost_r / expected, 2)
-                                 if measured and expected > 0 else None)
-            out[name] = row
+            raw = st.as_dict()
+            out[name] = {k: raw[k] for k in _PANEL_STATE_KEYS if k in raw}
         return out
 
     def _measured_clock_skew(self, server_now: float) -> int | None:
@@ -4316,64 +4346,54 @@ class Engine:
     def _session_clock_payload(self) -> dict[str, Any]:
         skew = self._measured_clock_skew(self.client.server_now())
         return {
-            "session_clock_skew_hours": skew,
             "session_clock_warning": sessions.session_clock_warning(skew),
         }
 
     def _note_risk_capacity(self) -> None:
-        """Say so when the book is configured to want more risk than the cap allows.
+        """Leftover max_concurrent_risk_pct is unread. Do not warn about it."""
+        return
 
-        ``max_concurrent_risk_pct`` is enforced one entry at a time, at the
-        moment of the entry, and it refuses. Nothing compares the book's own
-        arithmetic against it beforehand - so a portfolio configured to want
-        more than the cap does not fail, it degrades: entries are taken until
-        the ceiling is reached and refused afterwards, which means whichever
-        symbol signals first that hour gets the room and the selector's
-        ranking stops deciding anything. The refusal even reads like an
-        ordinary condition in the log.
+    def _probe_book_ticks(self) -> None:
+        """Read every book symbol so a recovered feed can unstick the clock.
 
-        Reachable two ways, and one of them arrived today. Raising slots is
-        the obvious one: five symbols at three slots plus gold is 12.8% under
-        a 15% cap, but five slots would be 24%. The other is quieter - the
-        shipped and dataclass defaults for this cap are 8.0, sized for a
-        freshly seeded book at one slot per symbol, so a system row that has
-        to fall back to defaults while the symbol rows survive puts an 8% cap
-        under a 12.8% book. Same shape as max_total_positions defaulting to
-        thirteen under a sixteen-position book, found earlier today.
-
-        A third way is already live and was silent here: ``size_by_edge``
-        scales every lot up to ``EDGE_MAX`` (2.2). The 12.8% book is then a
-        28.16% ask against the same 15% cap. Counting only ``risk_percent``
-        made today's configuration look like it fitted.
-
-        Latched on the pair, so a steady configuration is silent and a change
-        speaks once.
+        ``decision_now`` is computed once per cycle and handed to every
+        ``_evaluate``. That method used to call ``tick()`` only *after* the
+        stale-clock return, and a flat book never reached ``_update_stop``
+        either. 27.08 00:00 seeded 23:58:59, the 60s pace window expired,
+        and 8400 cycles later the six names were still 'broker saati bayat'
+        with a green panel. The refuse is correct; never polling again is
+        the deadlock.
         """
-        try:
-            sys_cfg = self.store.system
-            cap = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
-            # size_by_edge scales lots between EDGE_MIN and EDGE_MAX. The
-            # notice is about the book's configured ceiling, not last hour's
-            # realised edges: with the flag on, 12.8% of risk_percent is not
-            # the number that can actually be asked for.
-            edge_ceil = (float(RiskManager.EDGE_MAX)
-                         if bool(getattr(sys_cfg, "size_by_edge", False)) else 1.0)
-            lot_mult = max(0.1, float(getattr(sys_cfg, "lot_multiplier", 1.0) or 1.0))
-            nominal = sum(
-                float(c.risk_percent or 0.0) * max(1, int(c.max_positions or 1))
-                * edge_ceil * lot_mult
-                for c in list(self.store.symbols.values()) if c.enabled)
-            state = (round(nominal, 2), round(cap, 2))
-            if state == getattr(self, "_risk_capacity_noted", None):
-                return
-            self._risk_capacity_noted = state
-            if cap > 0 and nominal > cap:
-                LOG.emit(f"kitap %{nominal:.2f} eszamanli risk istiyor, tavan "
-                         f"%{cap:.2f} - tavan dolunca girisler sinyal sirasina "
-                         f"gore reddedilir, secici siralamasi devre disi kalir",
-                         "WARN")
-        except Exception as exc:                  # a notice never stops a cycle
-            self._flush_failed("risk_capacity", exc)
+        tick = getattr(self.client, "tick", None)
+        if not callable(tick):
+            return
+        for cfg in list(self.store.symbols.values()):
+            try:
+                tick(cfg.symbol)
+            except Exception:
+                pass
+
+    def _note_stale_decision_clock(self, server_now: float | None) -> None:
+        """Say so when the refuse has lasted past the startup unknown window.
+
+        ``last_error`` is wiped on every successful cycle, so it cannot
+        carry this. One WARN per ``CLOCK_STALE_WARN_SEC``; the first minute
+        after a restart is still quiet on purpose.
+        """
+        if server_now is not None:
+            self._clock_stale_warned_at = 0.0
+            return
+        if int(getattr(self, "cycle_count", 0) or 0) < CLOCK_STALE_WARN_AFTER_CYCLES:
+            return
+        now = time.time()
+        last = float(getattr(self, "_clock_stale_warned_at", 0.0) or 0.0)
+        if now - last < CLOCK_STALE_WARN_SEC:
+            return
+        self._clock_stale_warned_at = now
+        stamp = time.strftime(
+            "%Y-%m-%d %H:%M:%S",
+            time.gmtime(float(self.client.broker_now() or 0.0)))
+        LOG.emit(f"broker saati bayat ({stamp}) - yeni giris yok", "WARN")
 
     def _note_session_clock(self, server_now: float) -> None:
         """Log once when broker wall clock leaves the machine's wall clock.
@@ -4414,7 +4434,10 @@ class Engine:
         capacity = self._panel_capacity(
             positions, account,
             {s: st.atr for s, st in list(self.states.items())})
+        day = self.day_stats(max_age=15.0, fetch=False)
         equity = float(account.get("equity", 0.0))
+        getter = getattr(self.client, "decision_now", None)
+        clock_stale = getter() is None if callable(getter) else False
         return {
             "bot": {
                 "running": self.running,
@@ -4423,14 +4446,14 @@ class Engine:
                 "last_cycle_at": self.last_cycle_at,
                 "last_cycle_ms": round(self.last_cycle_ms, 1),
                 "last_error": self.last_error,
-                "poll_interval_sec": self.store.system.poll_interval_sec,
             },
             "mt5": {
                 "connected": self.client.connected,
                 "error": self.client.last_error,
                 "server_time": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(
                     self.client.broker_now() or self.client.server_now())),
-                **self.client.terminal_flags(),
+                "clock_stale": clock_stale,
+                **self._panel_terminal_flags(),
                 **self._session_clock_payload(),
             },
             "account": account,
@@ -4441,16 +4464,15 @@ class Engine:
                 "expected_server": str(getattr(self.store.system, "account_lock_server", "") or ""),
             },
             "day": {
-                **self.day_stats(max_age=15.0, fetch=False),
+                "closed_trades": day.get("closed_trades", 0),
+                "win_rate": day.get("win_rate", 0.0),
+                "realised": day.get("realised", 0.0),
+                "per_symbol": day.get("per_symbol") or [],
+                "halted": bool(day.get("halted")),
+                "halt_reason": day.get("halt_reason", "") or "",
                 "pnl_pct": round(self.risk.daily.pnl_pct(equity), 2),
-                "floating": round(float(account.get("profit", 0.0)), 2),
-                # Surfaced so a pnl_pct that no longer matches naive
-                # (equity-start_balance) arithmetic is explainable from the
-                # panel alone, instead of looking like a reporting bug.
-                "cash_flow": round(self.risk.daily.cash_flow, 2),
             },
             "capacity": capacity,
-            "reopt": self.reopt_status(),
             "execution": self.execution.stats(),
             "positions": positions,
             "harvest": self._harvest_view(),

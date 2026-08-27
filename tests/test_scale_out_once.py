@@ -5,8 +5,9 @@ About one third of the position, snapped down to ``volume_step``, at least
 because that is what the grid allows, not because 0.20 is a product constant.
 A 0.01 gold or a 0.10 JPN cannot split and is skipped.
 
-The R gate (``partial_at_r``) is the on-switch. ``partial_close_lots`` is
-leftover and must not drive the close. Not a TP ladder. Not an OPT_FIELD.
+The R gate (``partial_at_r``) is the on-switch. Lot size is the ticket
+and the broker grid, not a leftover lots dial. Not a TP ladder. Not an
+OPT_FIELD.
 """
 from __future__ import annotations
 
@@ -46,7 +47,6 @@ class _ScaleCfg:
     trail_mode = "atr"
     trail_lookback = 5
     breakeven_at_r = 1.5
-    partial_close_lots = 0.0
     partial_at_r = 1.5
     partial_close_frac = 0.0
 
@@ -108,17 +108,17 @@ def _eng(client=None):
 
 
 def test_not_a_search_axis():
-    for name in ("partial_close_lots", "partial_at_r", "partial_close_frac",
+    for name in ("partial_at_r", "partial_close_frac",
                  "harvest_at_r", "harvest_step_atr"):
         assert name not in OPT_FIELDS
     src = inspect.getsource(Params.key)
     assert "partial_close" not in src and "partial_at_r" not in src
     assert "harvest_at_r" not in src and "harvest_step_atr" not in src
+    assert "partial_close_lots" not in SymbolConfig.__dataclass_fields__
 
 
 def test_zero_is_off():
     cfg = SymbolConfig(symbol="GER40", magic=1)
-    assert cfg.partial_close_lots == 0.0
     assert cfg.partial_at_r == 0.0
     assert cfg.partial_close_frac == 0.0
     assert Params().partial_at_r == 0.0
@@ -134,8 +134,6 @@ def test_params_from_config_carries_the_paper_frac():
 
 
 def test_api_zero_lots_is_legal():
-    lo, hi, inclusive = _SYMBOL_RISK_BOUNDS["partial_close_lots"]
-    assert lo == 0.0 and inclusive and hi >= 0.20
     lo, hi, inclusive = _SYMBOL_RISK_BOUNDS["partial_at_r"]
     assert lo == 0.0 and inclusive and hi >= 1.5
 
@@ -186,9 +184,9 @@ def test_live_closes_a_third_once_past_the_r_gate():
     assert eng.store.settings["scale_out_done"] == [11]
 
 
-def test_leftover_lots_field_does_not_pick_the_size():
-    """GER still has 0.20 in the DB from the first overlay. The ticket size
-    must win, not that leftover."""
+def test_a_leftover_lots_attr_does_not_pick_the_size():
+    """Old GER rows stored 0.20. The field is gone; a leftover attr must not
+    drive the close — ticket size still wins."""
     client = _ScaleClient(bid=101.6)
     eng = _eng(client)
     pos = _pos(sl=100.0, entry=100.0, ticket=14)

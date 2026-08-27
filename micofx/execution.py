@@ -574,7 +574,6 @@ class ExecutionMonitor:
             "favourable": len(favourable),
             "adverse_ratio": round(ratio, 2),
             "mean_points": round(statistics.fmean(points), 3) if points else 0.0,
-            "median_points": round(statistics.median(points), 3) if points else 0.0,
             "worst_points": round(max(points), 3) if points else 0.0,
             "mean_r": round(statistics.fmean(r_vals), 4) if r_vals else 0.0,
             "money": round(sum(money), 2) if money else 0.0,
@@ -594,7 +593,7 @@ class ExecutionMonitor:
         every = [r for _, rows in samples for r in rows]
         total = self._summarise(every)
         total["flagged"] = sorted(s for s, v in per_symbol.items() if self._verdict(v))
-        return {"total": total, "per_symbol": per_symbol, "tracked": len(self._open)}
+        return {"total": total, "per_symbol": per_symbol}
 
     @staticmethod
     def _verdict(summary: dict[str, Any]) -> str:

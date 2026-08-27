@@ -5,18 +5,12 @@ hand-maintained lists in two files, and they must not drift.
 ``strategy``/``secondary_strategy`` outside it, and ``Optimizer.start`` filters
 its search list against it. ``strategy._FAMILIES`` is the dispatch table
 ``compute()`` actually routes on. Nothing ties them together, and the failure is
-silent in the dangerous direction:
+silent in the dangerous direction: a name in STRATEGIES but not in
+``_FAMILIES`` used to fall through to the first T3 builder. ``compute()`` now
+returns ``_no_signal`` for an unknown name, but the lists must still
+match so the optimizer never offers a family the engine cannot run.
 
-    builder = _FAMILIES.get(p.strategy, _t3_stoch)
-
-A name added to STRATEGIES but not to _FAMILIES passes validation, is offered by
-the optimizer, is written into a live config, is displayed on the panel - and
-trades as ``t3_stoch``. The walk-forward would evaluate t3_stoch too, so the
-holdout would look consistent and nothing would ever contradict the label. The
-opposite direction is merely wasteful: a family present in _FAMILIES but absent
-from STRATEGIES cannot be reached by any route.
-
-They match today (eleven each). This exists so they still match after the next
+They match today (eight each). This exists so they still match after the next
 family is added - the same reason test_risk_block_keys_cover_every_reason.py
 exists for the other pair of hand-kept lists in this codebase.
 
@@ -41,7 +35,7 @@ def test_every_name_a_config_may_carry_can_actually_be_dispatched():
     missing = sorted(set(STRATEGIES) - set(_FAMILIES))
     assert not missing, (
         f"{missing} STRATEGIES'de var ama _FAMILIES'de yok - compute() bunlari "
-        f"sessizce t3_stoch'a dusurur, panel baska bir aile adi gosterirken")
+        f"sessizce sinyal uretmez, panel baska bir aile adi gosterirken")
 
 
 def test_every_family_the_engine_can_run_is_reachable():
@@ -75,11 +69,11 @@ def test_the_fallback_is_what_makes_this_matter():
     """
     sig = compute.__globals__["_FAMILIES"]
     assert sig.get("bu_aile_yok") is None
-    fallback = compute.__globals__["_t3_stoch"]
+    fallback = compute.__globals__["_stoch_flip"]
     assert sig.get("bu_aile_yok", fallback) is fallback
 
 
 def test_a_known_family_routes_to_its_own_builder():
-    for name in ("aroon_flip", "micro_rev", "mtf_pullback"):
-        assert _FAMILIES[name] is not compute.__globals__["_t3_stoch"] or name == "t3_stoch"
+    for name in ("aroon_flip", "burst", "mtf_pullback"):
+        assert _FAMILIES[name] is not compute.__globals__["_stoch_flip"]
         assert Params(strategy=name).strategy == name

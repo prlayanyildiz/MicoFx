@@ -5,12 +5,9 @@ module constants, so they cannot change while the process is up - yet they
 rode on every /api/state, which the panel polls every ~3s and every 1.5s while
 a search runs (2155 bytes and twelve sorted() calls per poll, measured 25.08).
 
-The risk of moving them is silent: `optFieldVisible()` in app.js returns
-"show the field" when the catalogue is missing, so a panel reading the old
-keys would not error - it would quietly show axes the family never reads, and
-nobody would notice until an operator tuned a dead dial. These tests fail
-loudly instead: the values must be present on /api/schema, and absent from
-/api/state so a stale consumer cannot half-work.
+The catalogues stay on GET /api/schema so tests (and a future panel) can
+read them without stuffing 2 KB onto every /api/state poll. The panel no
+longer consumes them: symbol guts left the card 27.08.
 """
 from __future__ import annotations
 

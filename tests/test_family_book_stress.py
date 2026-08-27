@@ -87,7 +87,7 @@ def test_every_family_survives_hostile_tape(name, shape):
 
 def test_scalps_without_cost_stay_flat_not_crash():
     cache = _cache(_shapes()["walk"], cost=None)
-    for name in ("micro_rev", "burst"):
+    for name in ("burst",):
         sig = compute(cache, Params(strategy=name))
         assert not sig.buy.any() and not sig.sell.any()
 
@@ -111,7 +111,7 @@ def test_live_book_families_are_still_searchable():
     for name in LIVE_NOW:
         assert name in STRATEGIES
         assert name in _FAMILIES
-    assert len(STRATEGIES) == 11
+    assert len(STRATEGIES) == 8
     assert set(STRATEGIES) == set(_FAMILIES)
 
 

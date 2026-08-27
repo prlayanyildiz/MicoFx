@@ -166,7 +166,7 @@ def test_optimizer_apply_itself_refuses_poisoned_params(params, ok):
     }
 
     result = opt.apply("XAUUSD", params, score=1.0, detail=stamp,
-                       timeframe="M15", strategy="t3_stoch")
+                       timeframe="M15", strategy="stoch_flip")
     assert result.get("ok") is ok, result
     if not ok:
         assert "gecersiz" in result.get("error", "")

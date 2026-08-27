@@ -26,11 +26,12 @@ def _eng() -> Engine:
     eng._capacity_pos_sig = ()
     eng.risk = SimpleNamespace(capacity_calls=0)
 
-    def _cap(positions, account, atrs):
+    def _cap(positions, account, atrs, autopsies=None):
         eng.risk.capacity_calls += 1
         return {"rows": [], "open_total": len(positions)}
 
     eng.risk.capacity = _cap
+    eng.risk.fill_holdout_projection = lambda rows, balance: {}
     return eng
 
 
@@ -52,3 +53,78 @@ def test_a_new_ticket_invalidates_capacity():
     Engine._panel_capacity(eng, [{"ticket": 1, "volume": 0.1}], acc, atrs)
     Engine._panel_capacity(eng, [{"ticket": 2, "volume": 0.1}], acc, atrs)
     assert eng.risk.capacity_calls == 2
+
+
+def test_a_search_reuses_expired_capacity():
+    """order_calc_margin shares the same lock the workers hold."""
+    eng = _eng()
+    acc = {"equity": 1000.0}
+    atrs = {"GER40": 10.0}
+    pos = [{"ticket": 1, "volume": 0.1}]
+    Engine._panel_capacity(eng, pos, acc, atrs)
+    eng.search_busy = lambda: True
+    eng._capacity_cache_at = time.time() - 30.0
+    Engine._panel_capacity(eng, pos, acc, atrs)
+    assert eng.risk.capacity_calls == 1
+
+
+def test_a_search_still_refreshes_opens_without_margin():
+    """NAS100 closed then reopened while opt ran; US30 filled a new ticket.
+    Capacity kept the 10:03 copy (6 opens, US30=0) because search busy
+    skipped even a ticket-sig change. Open count and floating P/L do not
+    need order_calc_margin — they come off the positions list snapshot
+    already holds.
+    """
+    eng = _eng()
+    acc = {"equity": 1000.0}
+    atrs = {"GER40": 10.0}
+
+    def _cap(positions, account, atrs, autopsies=None):
+        eng.risk.capacity_calls += 1
+        return {"rows": [{
+            "symbol": "GER40", "broker_symbol": "GER40", "enabled": True,
+            "open_positions": 1, "open_profit": 1.0,
+            "free_slots": 2, "max_positions": 3,
+            "margin_per_trade": 99.0,
+        }], "open_total": 1, "global_free_slots": 12, "max_total_positions": 13}
+
+    eng.risk.capacity = _cap
+    first = [{"ticket": 1, "volume": 0.1, "symbol": "GER40",
+              "profit": 1.0, "swap": 0.0, "magic": 1}]
+    Engine._panel_capacity(eng, first, acc, atrs)
+    eng.search_busy = lambda: True
+    second = first + [{"ticket": 2, "volume": 0.1, "symbol": "GER40",
+                       "profit": 2.0, "swap": 0.5, "magic": 1}]
+    out = Engine._panel_capacity(eng, second, acc, atrs)
+    assert eng.risk.capacity_calls == 1
+    row = out["rows"][0]
+    assert row["open_positions"] == 2
+    assert row["open_profit"] == 3.5
+    assert row["margin_per_trade"] == 99.0
+    assert row["free_slots"] == 1
+    assert out.get("search_frozen") is True
+    assert out["open_total"] == 2
+    assert out["global_free_slots"] == 11
+
+
+def test_a_search_overlay_picks_up_an_enabled_flip():
+    eng = _eng()
+    acc = {"equity": 1000.0}
+    atrs = {"GER40": 10.0}
+
+    def _cap(positions, account, atrs, autopsies=None):
+        eng.risk.capacity_calls += 1
+        return {"rows": [{
+            "symbol": "GER40", "enabled": True,
+            "open_positions": 0, "open_profit": 0.0,
+            "free_slots": 3, "max_positions": 3,
+        }]}
+
+    eng.risk.capacity = _cap
+    Engine._panel_capacity(eng, [], acc, atrs)
+    eng.search_busy = lambda: True
+    eng.store.symbols["GER40"].enabled = False
+    out = Engine._panel_capacity(eng, [], acc, atrs)
+    assert eng.risk.capacity_calls == 1
+    assert out["rows"][0]["enabled"] is False
+    assert out["rows"][0]["free_slots"] == 0

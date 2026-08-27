@@ -119,7 +119,7 @@ class _Optimizer:
 def _row(age_days: float | None, live_trades: int = 5):
     """US2000's live shape: holdout 336 trades over 100 days -> 100.8 per 30."""
     cfg = SymbolConfig(symbol="US2000", magic=1, timeframe="M15",
-                       strategy="micro_rev")
+                       strategy="burst")
     cfg.opt_updated_at = 0.0 if age_days is None else time.time() - age_days * DAY
     cfg.opt_summary = {
         "holdout_days": 100.0,

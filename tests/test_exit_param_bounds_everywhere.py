@@ -1,14 +1,15 @@
 """The exit model's bounds must hold at every door, including the ones with
 no HTTP handler in front of them.
 
-test_symbol_risk_bounds / test_opt_apply_validation cover the request bodies.
-This file covers the two paths a request never touches:
+test_opt_apply_validation covers apply() request bodies. HTTP no longer
+writes the grid (hands-off 400). This file covers:
 
 - Optimizer.apply(), which the auto-apply path of a search
-  run reaches directly. The search grid is user-editable, so a poisoned axis
-  could be searched, win on score, and be written straight to a live symbol.
-- POST /api/opt/params, which sets that grid - refused at the point it is set,
-  while there is a human to read the message, rather than only at the far end.
+  run reaches directly. The search grid lives in the saved blob / defaults,
+  so a poisoned axis could still be searched, win on score, and be written
+  straight to a live symbol.
+- POST /api/opt/params, which used to set that grid. The door is shut; a
+  well-formed axis is the same 400 as a poisoned one.
 """
 from __future__ import annotations
 
@@ -96,7 +97,7 @@ def test_opt_params_refuses_a_poisoned_shared_grid_axis():
     tc, store = _params_client()
     res = tc.post("/api/opt/params", json={"grid": {"trail_start_atr": [0.0, 0.5]}})
     assert res.status_code == 400
-    assert "trail_start_atr" in res.json()["detail"]
+    assert "grid" in res.json()["detail"]
     assert store.saved is None
 
 
@@ -109,20 +110,22 @@ def test_opt_params_refuses_a_poisoned_per_strategy_grid_axis():
     assert store.saved is None
 
 
-def test_opt_params_still_accepts_a_valid_grid():
+def test_opt_params_still_refuses_a_valid_grid():
+    # Grid is apply()/defaults, not an HTTP write. A well-formed axis is
+    # the same closed door as a poisoned one.
     tc, store = _params_client()
     res = tc.post("/api/opt/params", json={
         "grid": {"trail_start_atr": [0.3, 0.5], "sl_atr_mult": [1.0, 2.0],
                  "trail_step_atr": [0.8, 1.6]},
         "max_combos": 2000,
     })
-    assert res.status_code == 200
-    assert store.saved is not None
+    assert res.status_code == 400
+    assert store.saved is None
 
 
 def test_opt_params_leaves_non_exit_axes_alone():
-    """adx_min 0 is a legitimate grid value; the gate owns three fields only."""
+    """adx_min 0 is a legitimate grid value; HTTP cannot write the grid."""
     tc, store = _params_client()
     res = tc.post("/api/opt/params", json={"grid": {"adx_min": [0, 15, 25]}})
-    assert res.status_code == 200
-    assert store.saved is not None
+    assert res.status_code == 400
+    assert store.saved is None

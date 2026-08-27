@@ -30,6 +30,14 @@ goto launch
 
 :portfree
 :launch
+REM Cheap extra sweep. Port-not-listening is not "parent dead" (05:15:
+REM new bot bound while 12372 was still dying). Gece sweeps after
+REM taskkill /T, which is a real kill. This pass no-ops if the parent
+REM is still up. The 8s/45s resweep in run.py is what closes that race.
+REM portstuck jumps here too - same best-effort, same backstop.
+if exist "C:\MicoFX-venv\Scripts\python.exe" (
+  "C:\MicoFX-venv\Scripts\python.exe" -c "from gece_restart import cleanup_orphan_workers; cleanup_orphan_workers(r'C:\MicoFX-venv\Scripts\pythonw.exe')" >nul 2>&1
+)
 REM "restart" argumani: eski sekme zaten acik, start_silent.vbs yenisini acmasin.
 start "" wscript.exe //B //Nologo "%~dp0start_silent.vbs" restart
 exit

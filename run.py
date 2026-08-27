@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -118,44 +117,42 @@ def startup_fail(message: str) -> int:
 
 
 def cleanup_orphan_workers() -> None:
-    """Kill any leftover optimizer worker processes from a previous instance.
+    """Kill leftover optimizer pool children from a previous instance.
 
-    The optimizer's process pool spawns ``pythonw --multiprocessing-fork``
-    children; if a previous run was ended by killing only its own PID (the
-    old stop.bat, before it gained ``/T``) those children survived as
-    orphans - real memory sitting idle with nothing left to hand results
-    back to, indistinguishable from a live pool without checking whether
-    their parent still exists. This runs once at startup as a backstop for
-    any launcher/crash path that still misses the tree, never during normal
-    operation. Best-effort: any failure here must never block startup.
+    The filter lives in gece_restart so the night restart can use it
+    without importing this file (uvicorn / MT5). Same rule: parent gone,
+    ``--multiprocessing-fork``, and an image that belongs to this venv
+    *or* its base interpreter - the Scripts launcher path alone missed
+    the 26.08 12:32 pool.
     """
     try:
-        # Scoped to THIS interpreter. The filter named only the process name
-        # and --multiprocessing-fork, which describes every orphaned Python
-        # worker on the machine, not ours - on a box running anything else in
-        # Python this reaches past MicoFx entirely. A multiprocessing-fork
-        # child's command line carries no script path, so the executable is
-        # what identifies it: MicoFx runs from its own venv, and a worker
-        # started by that venv's interpreter is one of ours.
-        #
-        # Strictly narrowing - it can only ever kill fewer processes than
-        # before, never more. The parent-alive check is left as it was; PID
-        # reuse makes it MISS an orphan rather than kill a live process, which
-        # is the safe direction for a best-effort sweep.
-        exe = os.path.abspath(sys.executable).replace("'", "''")
-        script = (
-            "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' or Name='python.exe'\" "
-            "| Where-Object { $_.CommandLine -like '*--multiprocessing-fork*' "
-            f"-and $_.ExecutablePath -eq '{exe}' "
-            "-and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) } "
-            "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-        )
-        subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, timeout=15, check=False,
-        )
+        import gece_restart
+        gece_restart.cleanup_orphan_workers(sys.executable)
     except Exception:
         pass
+
+
+def _resweep_orphans_later() -> None:
+    """Boot sweep can run while the previous process is still dying.
+
+    27.08 05:15: new PID 6264 swept while 12372 was still alive, so the
+    fourteen workers were skipped; then 12372 exited and they sat as
+    orphans (~1 GB). A second cause (27.08 17:52): the PowerShell
+    Where-Object closer was not an f-string, so every sweep including
+    this backstop parsed as nothing. Gece and restart.bat still sweep
+    after the old tree is gone.
+    """
+    if "pytest" in sys.modules:
+        return
+
+    def _later() -> None:
+        for delay in (8.0, 45.0):
+            time.sleep(delay)
+            cleanup_orphan_workers()
+
+    threading.Thread(
+        target=_later, name="micofx-orphan-resweep", daemon=True,
+    ).start()
 
 
 def port_busy(host: str, port: int) -> bool:
@@ -169,8 +166,12 @@ def port_busy(host: str, port: int) -> bool:
 
 
 def main() -> int:
+    # Before Store() / Engine: those emit WARN/ERROR. Ad-hoc imports of
+    # micofx must not reach this line, so they cannot append the live log.
+    LOG.enable_disk()
     ensure_streams()
     cleanup_orphan_workers()
+    _resweep_orphans_later()
     try:
         # Inside the same guard as load_defaults: ensure_dirs raises
         # RuntimeError for the same reason and must not be the one step that
@@ -198,6 +199,7 @@ def main() -> int:
         # exit code 1 instead of a traceback into pythonw.exe's void.
         return startup_fail(f"[{APP_NAME}] {exc}")
     client = MT5Client(store.system.mt5_terminal_path)
+    client.autostart = bool(store.system.autostart_mt5)
 
     if store.system.autostart_mt5:
         # Optional convenience: launch the *configured* terminal64.exe only if

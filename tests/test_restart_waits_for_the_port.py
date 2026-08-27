@@ -91,3 +91,18 @@ def test_restart_cancels_a_running_search_before_mt5_dies():
 def test_shutdown_cancels_too():
     body = APP[APP.index("def app_shutdown"):APP.index("def app_restart")]
     assert "optimizer.cancel()" in body
+
+
+def test_it_sweeps_orphans_after_the_port_is_free():
+    """05:15 API restart: boot sweep ran while PID 12372 was still dying, so
+    fourteen workers survived as orphans (~1 GB). Gece already sweeps after
+    taskkill. The panel restart path must sweep once the port is free - that
+    is the old process gone - before the new one launches.
+    """
+    launch = RESTART[RESTART.index(":launch"):]
+    sweep_at = launch.find("cleanup_orphan_workers")
+    start_at = launch.find("start_silent.vbs")
+    assert sweep_at != -1, (
+        "API restart yetimleri boot'a birakiyor - ebeveyn olmeden kaciyorlar")
+    assert start_at != -1
+    assert sweep_at < start_at, "supurge yeni surecten sonra - yarisi tekrarlar"

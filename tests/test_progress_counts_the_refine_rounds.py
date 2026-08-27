@@ -67,10 +67,12 @@ def test_the_optimizer_reports_the_same_unit_it_spends():
     from micofx import optimizer
 
     src = inspect.getsource(optimizer.Optimizer._run_all)
-    assert "sweep_budget(max_combos, refine_rounds)" in src, \
-        "progress must be counted in the same unit walk_forward spends"
+    assert "run_combo_budget(" in src, \
+        "progress must use the helper that honours family_max_combos"
     assert "combo_done=done_sweeps * max_combos" not in src, \
         "the fourfold undercount is back"
+    assert "done_sweeps * per_sweep" not in src, \
+        "global per_sweep understates a family with its own cap"
 
 
 @pytest.mark.parametrize("max_combos,rounds,expected", [

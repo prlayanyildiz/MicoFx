@@ -48,7 +48,8 @@ def test_the_bulk_door_checks_indicator_periods_too():
 def test_both_doors_run_the_same_checks():
     """Whatever the list becomes, the two doors have to agree on it."""
     single, bulk = _door("patch_symbol"), _door("bulk_patch")
-    for check in ("_reject_internal_fields", "_validate_enum_fields",
+    for check in ("_reject_internal_fields", "_reject_hands_off_fields",
+                  "_validate_enum_fields",
                   "_validate_risk_bounds", "_validate_sessions",
                   "_INDICATOR_PERIOD_BOUNDS"):
         assert check in single, f"{check} missing from the single-symbol door"

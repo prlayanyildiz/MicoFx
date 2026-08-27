@@ -127,11 +127,18 @@ def test_ai_settings_endpoint_rejects_string_for_numeric_field():
     assert engine.supervisor.update_calls == []  # never reached the store
 
 
-def test_ai_settings_endpoint_accepts_valid_patch():
+def test_ai_settings_endpoint_accepts_enabled_only():
+    tc, engine = _client()
+    res = tc.post("/api/ai/settings", json={"enabled": True})
+    assert res.status_code == 200
+    assert engine.supervisor.update_calls == [{"enabled": True}]
+
+
+def test_ai_settings_endpoint_refuses_a_hidden_knob():
     tc, engine = _client()
     res = tc.post("/api/ai/settings", json={"quarantine_hours": 24, "enabled": True})
-    assert res.status_code == 200
-    assert engine.supervisor.update_calls == [{"quarantine_hours": 24, "enabled": True}]
+    assert res.status_code == 400
+    assert engine.supervisor.update_calls == []
 
 
 def test_ai_review_endpoint_returns_500_instead_of_crashing_on_bad_stored_settings():

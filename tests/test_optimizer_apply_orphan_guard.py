@@ -50,7 +50,7 @@ class _Client:
 
 
 def _cfg():
-    return SymbolConfig(symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15",
+    return SymbolConfig(symbol="XAUUSD", magic=1, strategy="stoch_flip", timeframe="M15",
                         sl_atr_mult=1.0, trail_step_atr=0.6)
 
 
@@ -96,7 +96,7 @@ def test_apply_refuses_family_swap_when_orphan_scan_pending():
                        strategy="burst", timeframe="M5")
 
     assert result["ok"] is False
-    assert cfg.strategy == "t3_stoch"  # unchanged
+    assert cfg.strategy == "stoch_flip"  # unchanged
 
 
 def test_apply_unaffected_by_orphan_scan_for_other_symbol():
@@ -163,7 +163,7 @@ def test_apply_family_swap_does_not_depend_on_secondary_clear():
     a later stage clears them.
     """
     cfg = SymbolConfig(
-        symbol="XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15", sl_atr_mult=1.0, trail_step_atr=0.6,
+        symbol="XAUUSD", magic=1, strategy="stoch_flip", timeframe="M15", sl_atr_mult=1.0, trail_step_atr=0.6,
     )
     store = _Store(cfg)
     opt = _make_opt(store, _Client(positions=[]))

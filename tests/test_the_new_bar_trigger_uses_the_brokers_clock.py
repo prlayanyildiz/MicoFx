@@ -167,6 +167,17 @@ class _Client:
         return {"point": 0.01, "tick_value": 1.0, "tick_size": 0.01}
 
 
+class _PinClient(_Client):
+    def __init__(self, last_closed: int, oldest: int):
+        super().__init__(last_closed)
+        self._oldest = oldest
+        self.pin_calls = 0
+
+    def bar_window_pins(self, symbol, timeframe, count):
+        self.pin_calls += 1
+        return (self._oldest, self._last_closed)
+
+
 def _engine(client) -> Engine:
     eng = Engine.__new__(Engine)
     eng.client = client
@@ -186,7 +197,7 @@ def _state(next_bar_at: float, last_bar: int):
 def _params():
     from micofx.models import SymbolConfig
     from micofx.strategy import Params
-    return Params.from_config(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+    return Params.from_config(SymbolConfig(symbol="XAUUSD", strategy="stoch_flip",
                                            timeframe="M5"))
 
 
@@ -204,7 +215,7 @@ def test_a_closed_bar_on_the_brokers_clock_triggers_a_refetch():
     state = _state(next_bar_at=time.time() + _Client.OFFSET - 30,
                    last_bar=broker_last_closed - 300)
 
-    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="stoch_flip",
                                       timeframe="M5"), state, _params())
 
     assert client.bar_calls == 1, (
@@ -223,7 +234,7 @@ def test_a_bar_that_has_not_closed_yet_does_not_refetch():
     state = _state(next_bar_at=time.time() + _Client.OFFSET + 600,
                    last_bar=broker_last_closed)
 
-    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="stoch_flip",
                                       timeframe="M5"), state, _params())
 
     assert client.bar_calls == 0, "refetched a bar that has not closed"
@@ -242,7 +253,7 @@ def test_a_forty_five_second_timer_does_not_copy_rates_without_a_new_bar():
                    last_bar=broker_last_closed)
     state.last_fetch = time.time() - 60
 
-    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="stoch_flip",
                                       timeframe="M5"), state, _params())
 
     assert client.bar_calls == 0
@@ -261,7 +272,56 @@ def test_an_integrity_refresh_still_fetches_without_a_new_bar():
                    last_bar=broker_last_closed)
     state.last_fetch = time.time() - (_BAR_INTEGRITY_REFRESH + 1)
 
-    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="t3_stoch",
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="stoch_flip",
                                       timeframe="M5"), state, _params())
 
+    assert client.bar_calls == 1
+
+
+def test_integrity_skips_full_copy_when_window_pins_match():
+    """900s used to copy required_bars with no new bar. Ends matching is enough."""
+    import time
+
+    from micofx.engine import _BAR_INTEGRITY_REFRESH
+    from micofx.models import SymbolConfig
+    from micofx.strategy import required_bars
+
+    broker_last_closed = int(time.time() + _Client.OFFSET) - 60
+    need = required_bars(_params())
+    bars = _Bars(broker_last_closed, n=need)
+    client = _PinClient(broker_last_closed, int(bars.time[0]))
+    eng = _engine(client)
+    state = _state(next_bar_at=time.time() + _Client.OFFSET + 600,
+                   last_bar=broker_last_closed)
+    state.bars = bars
+    state.last_fetch = time.time() - (_BAR_INTEGRITY_REFRESH + 1)
+
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="stoch_flip",
+                                      timeframe="M5"), state, _params())
+
+    assert client.pin_calls == 1
+    assert client.bar_calls == 0
+
+
+def test_integrity_refetches_when_the_oldest_pin_moves():
+    import time
+
+    from micofx.engine import _BAR_INTEGRITY_REFRESH
+    from micofx.models import SymbolConfig
+    from micofx.strategy import required_bars
+
+    broker_last_closed = int(time.time() + _Client.OFFSET) - 60
+    need = required_bars(_params())
+    bars = _Bars(broker_last_closed, n=need)
+    client = _PinClient(broker_last_closed, int(bars.time[0]) - 300)
+    eng = _engine(client)
+    state = _state(next_bar_at=time.time() + _Client.OFFSET + 600,
+                   last_bar=broker_last_closed)
+    state.bars = bars
+    state.last_fetch = time.time() - (_BAR_INTEGRITY_REFRESH + 1)
+
+    eng._refresh_signals(SymbolConfig(symbol="XAUUSD", strategy="stoch_flip",
+                                      timeframe="M5"), state, _params())
+
+    assert client.pin_calls == 1
     assert client.bar_calls == 1

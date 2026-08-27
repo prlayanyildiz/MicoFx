@@ -17,7 +17,7 @@ full history behind it:
     200 bars  24
      60 bars  82        - wrong more often than right
 
-and at 60 bars mtf_pullback, wavetrend_flip and stoch_flip were wrong on
+and at 60 bars mtf_pullback, parabolic_flip and stoch_flip were wrong on
 every single signal they produced.
 """
 from __future__ import annotations
@@ -59,10 +59,17 @@ def _signals(series, family, start=0):
 
 
 def test_the_floor_is_derived_from_required_bars_not_a_constant():
-    """Pins the relationship, so a family raising its lookback moves the floor."""
-    need = required_bars(Params())
-    assert need >= 240
-    assert max(60, need // 2) >= 240, "taban guvenli bolgenin altina dustu"
+    """Pins the relationship, so a family raising its lookback moves the floor.
+
+    Checked per family, not on a bare ``Params()``: ``engine._refresh_bars``
+    always passes the symbol's own params, so the dataclass default is never
+    the live floor. Reading it as a proxy tied this guard to whichever family
+    happened to be the default - it moved on 27.08 when t3_stoch retired.
+    """
+    for family in STRATEGIES:
+        need = required_bars(Params(strategy=family))
+        assert need >= 240, family
+        assert max(60, need // 2) >= 200, f"{family}: taban guvenli bolgenin altina dustu"
 
 
 @pytest.mark.parametrize("family", STRATEGIES)

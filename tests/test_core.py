@@ -265,23 +265,23 @@ class _FakeClient:
 
 
 def _cfg(**over):
-    base = {"symbol": "TEST", "lot_mode": "fixed", "fixed_lot": 0.1, "max_lot": 0.3}
+    base = {"symbol": "TEST", "lot_mode": "risk", "risk_percent": 1.0, "max_lot": 0.3}
     base.update(over)
     return SymbolConfig(**base)
 
 
 def test_lot_for_ai_scale_shrinks_lot_before_floor_when_room_allows():
     risk = RiskManager(_FakeStore(), _FakeClient())
-    cfg = _cfg(fixed_lot=1.0)  # floor is 0.1, so a 0.3 scale has room to actually shrink
+    # 1000 * 1% / (1.0 * 10) = 1.0 lot; 0.3 scale has room above the 0.1 floor.
+    cfg = _cfg(risk_percent=1.0)
     lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.3)
     assert lot == pytest.approx(0.3, abs=0.01)
 
 
 def test_lot_for_ai_scale_skips_trade_past_overshoot_guard():
     risk = RiskManager(_FakeStore(), _FakeClient())
-    # fixed_lot * ai_scale lands far below the 0.1 floor - beyond the 3x
-    # overshoot tolerance, so this should refuse rather than silently size up.
-    cfg = _cfg(fixed_lot=0.1)
+    # 0.1% of 1000 / 10 = 0.1 lot * 0.05 scale = 0.005 vs 0.1 floor → 20x skip
+    cfg = _cfg(risk_percent=0.1)
     lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.05)
     assert lot == 0.0
     assert "atlandi" in note
@@ -289,7 +289,7 @@ def test_lot_for_ai_scale_skips_trade_past_overshoot_guard():
 
 def test_lot_for_ai_scale_within_overshoot_forces_floor():
     risk = RiskManager(_FakeStore(), _FakeClient())
-    cfg = _cfg(fixed_lot=0.1)
+    cfg = _cfg(risk_percent=0.1)
     lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.5)
     assert lot == pytest.approx(0.1)
 
@@ -299,7 +299,7 @@ def test_lot_for_overshoot_guard_uses_tightened_3x_ceiling():
     # the old, looser ceiling would have tolerated (silently sizing a trade at
     # ~5x its configured risk) must now be refused instead.
     risk = RiskManager(_FakeStore(), _FakeClient())
-    cfg = _cfg(fixed_lot=0.1)
+    cfg = _cfg(risk_percent=0.1)
     lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.2)  # 5x overshoot
     assert lot == 0.0
     assert "atlandi" in note
@@ -322,13 +322,8 @@ def test_lot_for_risk_mode_fails_closed_without_tick_value():
 
 # --------------------------------------------------------------------------- can_open / position counts
 
-def test_can_open_symbol_limit_counts_every_ticket():
-    """Removing sec_tickets must not change the per-symbol stack count.
-
-    max_positions is the live honor (10 on the book). Tags never fed this
-    gate; only the scalp/swing bucket used them. Pin the symbol limit anyway
-    so a silent rewrite cannot hide behind the param deletion.
-    """
+def test_can_open_leftover_symbol_limit_does_not_block():
+    """max_positions leftover=1 must not refuse a second same-side ticket."""
     store = _FakeStore()
     store.system = _FakeSystem()
     cfg = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=1)
@@ -343,14 +338,8 @@ def test_can_open_symbol_limit_counts_every_ticket():
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
 
-    blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
-    assert not blocked.ok
-    assert "sembol pozisyon limiti" in blocked.reason
-
-    room = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=2)
-    store.symbols = {"XAUUSD": room}
-    allowed = risk.can_open(room, "buy", 0.1, existing, account)
-    assert allowed.ok
+    allowed = risk.can_open(cfg, "buy", 0.1, existing, account)
+    assert allowed.ok, allowed.reason
 
 
 def test_can_open_bucket_uses_primary_strategy_only():
@@ -372,7 +361,7 @@ def test_can_open_bucket_uses_primary_strategy_only():
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
 
-    scalp_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="micro_rev", max_positions=5)
+    scalp_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="burst", max_positions=5)
     scalp = risk.can_open(scalp_cfg, "buy", 0.1, existing, account)
     assert scalp.ok  # leftover sits in the swing bucket now
 
@@ -396,7 +385,7 @@ def test_can_open_allows_when_bucket_not_full():
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
 
-    new_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="micro_rev", max_positions=5)
+    new_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="burst", max_positions=5)
     verdict = risk.can_open(new_cfg, "buy", 0.1, existing, account)
     assert verdict.ok
 

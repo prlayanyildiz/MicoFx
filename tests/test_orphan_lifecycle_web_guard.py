@@ -261,29 +261,29 @@ def test_patch_primary_exit_field_blocked_by_pending_scan():
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 
 def test_patch_primary_family_change_blocked_by_pending_scan():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15")}
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="stoch_flip", timeframe="M15")}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
     tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst", "timeframe": "M5"})
 
-    assert res.status_code == 409
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
-def test_patch_primary_exit_field_allowed_without_scan():
+def test_patch_primary_exit_field_refused_without_scan():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
     tc, store, _eng = _client(symbols)
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].sl_atr_mult == 2.0
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 
 # ------------------------------------------------------------------- NOT-1
@@ -298,38 +298,35 @@ def test_bulk_primary_exit_field_blocked_by_pending_scan():
 
     res = tc.post("/api/symbols-bulk", json={"symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.0}})
 
-    assert res.status_code == 200
-    assert res.json()["rejected"] == ["XAUUSD"]
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 
 def test_bulk_primary_family_change_blocked_by_pending_scan():
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch", timeframe="M15")}
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="stoch_flip", timeframe="M15")}
     settings = {"secondary_orphan_scan": {"XAUUSD": {"magic": 1, "known": [], "since": 0.0}}}
     tc, store, _eng = _client(symbols, settings=settings)
 
     res = tc.post("/api/symbols-bulk",
                   json={"symbols": ["XAUUSD"], "patch": {"strategy": "burst", "timeframe": "M5"}})
 
-    assert res.status_code == 200
-    assert res.json()["rejected"] == ["XAUUSD"]
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
-def test_bulk_primary_exit_field_allowed_without_scan_or_position():
+def test_bulk_primary_exit_field_refused_without_scan_or_position():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
     tc, store, _eng = _client(symbols)
 
     res = tc.post("/api/symbols-bulk", json={"symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.0}})
 
-    assert res.status_code == 200
-    assert res.json().get("rejected", []) == []
-    assert store.symbols["XAUUSD"].sl_atr_mult == 2.0
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 
 def test_bulk_primary_family_still_blocked_by_live_open_position():
-    """Leftover tagged ticket is still an open magic; primary family swap stays 409."""
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="t3_stoch")}
+    """Leftover tagged ticket is still an open magic; HTTP cannot swap family."""
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, strategy="stoch_flip")}
     positions = [{"ticket": 500, "magic": 1}]
     settings = {"secondary_tickets": [500]}
     tc, store, _eng = _client(symbols, positions=positions, settings=settings)
@@ -337,9 +334,8 @@ def test_bulk_primary_family_still_blocked_by_live_open_position():
     res = tc.post("/api/symbols-bulk",
                   json={"symbols": ["XAUUSD"], "patch": {"strategy": "burst"}})
 
-    assert res.status_code == 200
-    assert res.json()["rejected"] == ["XAUUSD"]
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
 # ---------------------------------------------------------------------- L1
@@ -393,7 +389,7 @@ def test_reset_recreate_refused_when_disconnected_with_orphan_tickets():
 
     res = tc.post("/api/symbols/EURUSD/reset")
 
-    assert res.status_code == 409
+    assert res.status_code == 400
 
 
 def test_reset_existing_symbol_unaffected_by_orphan_tickets():
@@ -407,7 +403,7 @@ def test_reset_existing_symbol_unaffected_by_orphan_tickets():
 
     res = tc.post("/api/symbols/EURUSD/reset")
 
-    assert res.status_code == 200
+    assert res.status_code == 400
 
 
 def test_soft_seed_refused_when_disconnected_with_orphan_tickets():
@@ -479,7 +475,7 @@ def test_patch_primary_exit_refuses_when_positions_get_fails_mid_call():
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
 
-    assert res.status_code == 503
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.5
 
 
@@ -507,7 +503,7 @@ def test_bulk_primary_refuses_when_positions_get_fails_mid_call():
         "symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.5},
     })
 
-    assert res.status_code == 503
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.5
 
 
@@ -548,7 +544,7 @@ def test_patch_magic_blocked_by_ghost_orphan_scan_magic():
 
     res = tc.post("/api/symbols/XAUUSD", json={"magic": 990101})
 
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].magic == 1
 
 
@@ -561,13 +557,13 @@ def test_bulk_magic_blocked_by_ghost_orphan_scan_magic():
         "symbols": ["XAUUSD"], "patch": {"magic": 990101},
     })
 
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].magic == 1
 
 
 def test_patch_magic_blocked_by_live_orphan_ticket_magic():
     # Orphan ticket still open under a magic nobody in the portfolio owns -
-    # manual PATCH must refuse that magic the same way ghost scan does.
+    # HTTP cannot assign magics at all.
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1)}
     settings = {"secondary_orphan_tickets": [777]}
     positions = [{"ticket": 777, "magic": 990101, "symbol": "GONE"}]
@@ -575,8 +571,8 @@ def test_patch_magic_blocked_by_live_orphan_ticket_magic():
 
     res = tc.post("/api/symbols/XAUUSD", json={"magic": 990101})
 
-    assert res.status_code == 409
-    assert "orphan" in res.json()["detail"].lower() or "orphan" in res.text.lower() or "990101" in res.text
+    assert res.status_code == 400
+    assert "magic" in res.json()["detail"]
     assert store.symbols["XAUUSD"].magic == 1
 
 

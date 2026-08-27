@@ -38,7 +38,7 @@ def _grid(shared: dict, own: dict, family: str, tf: str) -> dict:
 def test_operator_sl_on_m30_must_not_contain_overlay_floor():
     """Panel set sl_atr_mult=[1.5,...]; M30 search still offered overlay 1.0."""
     shared = {**FACTORY, "sl_atr_mult": list(OPERATOR_SL)}
-    grid = _grid(shared, {}, "t3_stoch", "M30")
+    grid = _grid(shared, {}, "stoch_flip", "M30")
     assert 1.0 not in grid["sl_atr_mult"]
     assert grid["sl_atr_mult"] == OPERATOR_SL
 

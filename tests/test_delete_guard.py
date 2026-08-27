@@ -64,7 +64,7 @@ class _FakeStore:
         cfg = self.symbols.get(symbol)
         if cfg is None:
             return None
-        updated = SymbolConfig.from_dict({**cfg.to_dict(), "strategy": "t3_stoch", "timeframe": "M5"})
+        updated = SymbolConfig.from_dict({**cfg.to_dict(), "strategy": "stoch_flip", "timeframe": "M5"})
         self.symbols[symbol] = updated
         return updated
 
@@ -217,17 +217,17 @@ def test_patch_refuses_magic_change_with_open_position():
     tc, store = _client(symbols, positions)
 
     res = tc.post("/api/symbols/XAUUSD", json={"magic": 990099})
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].magic == 990021  # unchanged
 
 
-def test_patch_allows_magic_change_with_no_open_position():
+def test_patch_refuses_magic_even_when_flat():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"magic": 990099})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].magic == 990099
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].magic == 990021
 
 
 def test_patch_refuses_magic_change_that_collides_with_another_symbol():
@@ -238,7 +238,7 @@ def test_patch_refuses_magic_change_that_collides_with_another_symbol():
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"magic": 990107})
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].magic == 990021  # unchanged
 
 
@@ -252,7 +252,7 @@ def test_bulk_patch_refuses_magic_change_for_multiple_symbols():
     res = tc.post("/api/symbols-bulk", json={
         "symbols": ["XAUUSD", "COPPER"], "patch": {"magic": 990500},
     })
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].magic == 990021
     assert store.symbols["COPPER"].magic == 990107
 
@@ -267,7 +267,7 @@ def test_bulk_patch_refuses_magic_change_colliding_with_symbol_outside_targets()
     res = tc.post("/api/symbols-bulk", json={
         "symbols": ["XAUUSD"], "patch": {"magic": 990107},
     })
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].magic == 990021
 
 
@@ -284,26 +284,26 @@ def test_patch_allows_non_magic_fields_with_open_position():
 
 
 def test_patch_refuses_strategy_change_with_open_position():
-    # default SymbolConfig is strategy="t3_stoch", timeframe="M5"
+    # default SymbolConfig is strategy="stoch_flip", timeframe="M5"
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     positions = [{"ticket": 1, "symbol": "XAUUSD", "magic": 990021, "side": "sell"}]
     tc, store = _client(symbols, positions)
 
     res = tc.post("/api/symbols/XAUUSD", json={"strategy": "stoch_flip", "timeframe": "M30"})
-    assert res.status_code == 409
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"  # unchanged
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"  # unchanged
 
 
-def test_patch_allows_strategy_change_with_no_open_position():
+def test_patch_refuses_strategy_even_when_flat():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"strategy": "stoch_flip", "timeframe": "M30"})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].timeframe != "M30"
 
 
-def test_bulk_patch_skips_symbol_with_open_position_but_changes_the_rest():
+def test_bulk_patch_refuses_strategy_for_the_whole_request():
     symbols = {
         "XAUUSD": _cfg("XAUUSD", magic=990021),
         "COPPER": _cfg("COPPER", magic=990107),
@@ -315,12 +315,9 @@ def test_bulk_patch_skips_symbol_with_open_position_but_changes_the_rest():
         "symbols": ["XAUUSD", "COPPER"],
         "patch": {"strategy": "stoch_flip", "timeframe": "M30"},
     })
-    assert res.status_code == 200
-    body = res.json()
-    assert body["rejected"] == ["XAUUSD"]
-    assert body["changed"] == 1
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"  # untouched, open position
-    assert store.symbols["COPPER"].strategy == "stoch_flip"  # changed, no open position
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].timeframe != "M30"
+    assert store.symbols["COPPER"].timeframe != "M30"
 
 
 def test_bulk_patch_allows_non_strategy_fields_with_open_position():
@@ -344,8 +341,8 @@ def test_reset_refuses_with_open_position():
     tc, store = _client(symbols, positions)
 
     res = tc.post("/api/symbols/XAUUSD/reset")
-    assert res.status_code == 409
-    assert store.symbols["XAUUSD"].strategy == "t3_stoch"
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
 def test_seed_overwrite_refuses_with_open_bot_position():
@@ -397,17 +394,17 @@ def test_patch_refuses_exit_field_change_with_open_position():
     tc, store = _client(symbols, positions)
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
-    assert res.status_code == 409
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].sl_atr_mult != 2.5
 
 
-def test_patch_allows_exit_field_change_with_no_open_position():
+def test_patch_refuses_exit_field_even_when_flat():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].sl_atr_mult == 2.5
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].sl_atr_mult != 2.5
 
 
 def test_bulk_patch_refuses_exit_field_change_with_open_position():
@@ -418,9 +415,7 @@ def test_bulk_patch_refuses_exit_field_change_with_open_position():
     res = tc.post("/api/symbols-bulk", json={
         "symbols": ["XAUUSD"], "patch": {"trail_start_atr": 3.0},
     })
-    assert res.status_code == 200
-    body = res.json()
-    assert body["rejected"] == ["XAUUSD"]
+    assert res.status_code == 400
     assert store.symbols["XAUUSD"].trail_start_atr != 3.0
 
 
@@ -502,23 +497,14 @@ def test_patch_refuses_max_positions_out_of_range():
     assert res.status_code == 400
 
 
-def test_patch_refuses_max_positions_above_the_operator_cap():
-    """Operator cap is ten. 11 used to be a silent panel write (bound was 50)."""
-    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
-    tc, store = _client(symbols, [])
-
-    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 11})
-    assert res.status_code == 400
-    assert store.symbols["XAUUSD"].max_positions == 1
-
-
-def test_patch_accepts_max_positions_at_the_operator_cap():
+def test_patch_refuses_max_positions_even_inside_the_old_cap():
+    """Operator 27.08: the dial left HTTP. 10 used to be a live write."""
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
     res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 10})
-    assert res.status_code == 200
-    assert store.symbols["XAUUSD"].max_positions == 10
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].max_positions == 1
 
 
 def test_patch_refuses_nan_in_top_level_exit_field():
@@ -779,12 +765,15 @@ def test_a_magic_that_traded_today_cannot_be_handed_to_another_symbol():
 
     r = tc.post("/api/symbols/GER40", json={"magic": 990099})
 
-    assert r.status_code == 409
-    assert "990099" in r.json()["detail"]
+    assert r.status_code == 400
+    assert "magic" in r.json()["detail"]
 
 
-def test_a_magic_with_no_deals_today_is_still_assignable():
-    """The guard is about today's window, not about the number ever existing."""
+def test_a_magic_with_no_deals_today_is_still_not_http_writable():
+    """The guard is about today's window, not about the number ever existing.
+
+    HTTP cannot assign magics at all; apply()/create still own the number.
+    """
     tc = _app_with_deals(
         {"GER40": _cfg("GER40", magic=990011)},
         deals=[{"magic": 990077, "time": 1786600000, "symbol": "EURUSD",
@@ -792,7 +781,7 @@ def test_a_magic_with_no_deals_today_is_still_assignable():
 
     r = tc.post("/api/symbols/GER40", json={"magic": 990099})
 
-    assert r.status_code == 200, r.json()
+    assert r.status_code == 400
 
 
 def test_a_magic_is_not_cleared_while_disconnected():
@@ -815,4 +804,4 @@ def test_a_magic_is_not_cleared_while_disconnected():
 
     r = tc.post("/api/symbols/GER40", json={"magic": 990099})
 
-    assert r.status_code == 503, "a magic change must not proceed on unverifiable state"
+    assert r.status_code == 400, "a magic change must not proceed on unverifiable state"

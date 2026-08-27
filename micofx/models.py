@@ -91,21 +91,17 @@ class SymbolConfig:
     enabled: bool = True
     timeframe: str = "M5"
     broker_symbol: str = ""          # override when the broker renames an instrument
-    # t3_stoch | mtf_pullback | micro_rev | burst | dual_t3
-    # | t3_flip | wavetrend_flip | stoch_flip
+    # mtf_pullback | burst | dual_t3 | t3_flip | stoch_flip
     # | parabolic_flip | aroon_flip | ichimoku
     # (see models.STRATEGIES)
-    strategy: str = "t3_stoch"
+    # Default is the live majority: three of six symbols run stoch_flip, and
+    # a seed has to carry a name the enum check will still accept.
+    strategy: str = "stoch_flip"
 
     # ---- higher-timeframe trend pullback ----
     pull_fast: int = 8               # fast EMA the pullback must reach
     pull_depth_atr: float = 0.5      # how deep the pullback must run, in ATR
     pull_max_bars: int = 6           # pullback must resolve within this many bars
-
-    # ---- cost-scaled micro mean reversion (M5-native scalp) ----
-    mr_fast: int = 6                 # fast mean the scalp reverts to, in bars
-    mr_stretch_cost: float = 4.0     # displacement required, in ROUND-TURN COST multiples
-    mr_confirm: bool = True          # bar must already be turning back toward the mean
 
     # ---- range-expansion momentum burst (M5-native scalp) ----
     brst_lookback: int = 20          # trailing window the range distribution is built from
@@ -127,7 +123,7 @@ class SymbolConfig:
     # ``t3_volume_factor`` and reproduces a single-vf pair exactly.
     t3_fast_vf: float = 0.0
 
-    # ---- T3 slope quality / curvature (t3_stoch + t3_flip) ----
+    # ---- T3 slope quality / curvature (t3_flip + dual_t3) ----
     # Second difference of the T3 line in ATR units: "rising" is a one-bar fact,
     # this asks whether the curve is still bending the trade's way instead of
     # decelerating into exhaustion. 0 disables, so the search has to earn it.
@@ -152,10 +148,6 @@ class SymbolConfig:
     # ---- reversion regime ceiling (_regime) ----
     adx_max: float = 0.0             # reversion only; 0 disables
 
-    # ---- WaveTrend crossover ----
-    wt_channel_len: int = 10
-    wt_avg_len: int = 21
-
     # ---- Slow Stochastic crossover (price range, not RSI) ----
     stoch_k_period: int = 10
     stoch_k_smooth: int = 6
@@ -168,12 +160,13 @@ class SymbolConfig:
     # ---- Aroon oscillator zero-cross ----
     aroon_length: int = 14
 
-    # ---- position sizing ----
-    lot_mode: str = "risk"           # "fixed" | "risk"
-    fixed_lot: float = 0.01          # broker micro lot: 0.01 FX/commodity, 0.10 index
-    risk_percent: float = 0.5        # used when lot_mode == "risk"
-    max_lot: float = 0.10            # hard ceiling for risk-based sizing
-    max_positions: int = 1           # concurrent positions for this symbol
+    # Leftover DB keys. lot_for always uses risk_percent against balance;
+    # can_open stacks until concurrent 1R / total / margin. HTTP 400.
+    lot_mode: str = "risk"
+    fixed_lot: float = 0.01
+    risk_percent: float = 0.5        # % of balance at 1R (the live size knob)
+    max_lot: float = 0.10
+    max_positions: int = 1
     # Realised loss on THIS symbol today, as % of the day's start balance, that
     # stops new entries on it for the rest of the broker day - independent of
     # the account-wide daily_loss_pct circuit breaker, so one symbol going bad
@@ -190,7 +183,6 @@ class SymbolConfig:
     stoch_length: int = 9
     smooth_k: int = 3
     smooth_d: int = 3
-    stoch_band: float = 20.0         # cross must sit within mid +/- band
     stoch_extreme: float = 80.0      # block entries into an exhausted move
 
     # ---- higher timeframe trend agreement ----
@@ -253,10 +245,8 @@ class SymbolConfig:
     # One-shot scale-out (operator 25.08). Not a TP ladder: ``partial_tp_r``
     # stays gone. The R gate is the on-switch. Lot size is *not* a dial: live
     # closes about one third of the ticket, snapped to the broker min/step,
-    # and skips when the remainder would be under min. ``partial_close_lots``
-    # is leftover from the first GER 0.20 overlay and is not read. Paper uses
-    # the same third when ``partial_close_frac`` is 0. Not an OPT_FIELD.
-    partial_close_lots: float = 0.0  # leftover; not read (was GER 0.20)
+    # and skips when the remainder would be under min. Paper uses the same
+    # third when ``partial_close_frac`` is 0. Not an OPT_FIELD.
     partial_at_r: float = 0.0        # 0 = off; fire at this many original R
     partial_close_frac: float = 0.0  # 0 = paper uses SCALE_OUT_FRAC
     # Harvest overlay (operator 26.08). Not a TP and not an OPT axis. Once
@@ -519,12 +509,11 @@ def scale_out_slice(position_volume: float, volume_min: float, volume_step: floa
 # Parameters the optimizer is allowed to overwrite on a SymbolConfig.
 OPT_FIELDS = [
     "t3_length", "t3_volume_factor", "rsi_length", "stoch_length",
-    "smooth_k", "smooth_d", "stoch_band", "htf_factor", "adx_min", "adx_max",
+    "smooth_k", "smooth_d", "htf_factor", "adx_min", "adx_max",
     "sl_atr_mult", "trail_start_atr", "trail_step_atr",
     "trail_mode", "trail_lookback",
     "min_body_ratio", "atr_pct_min",
     "pull_fast", "pull_depth_atr", "pull_max_bars",
-    "mr_fast", "mr_stretch_cost", "mr_confirm",
     "brst_lookback", "brst_range_z", "brst_close_pct",
     "t3_fast", "t3_slow_mult", "t3_fast_vf", "t3_accel_min",
     "st_period", "st_mult",
@@ -533,31 +522,28 @@ OPT_FIELDS = [
     # the search is allowed to tune the spread/ATR entry gate per symbol rather
     # than leaving it disabled at the group default.
     "max_spread_atr",
-    "wt_channel_len", "wt_avg_len",
     "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
     "psar_af_step", "psar_af_max", "aroon_length",
 ]
 
-# flow_rev and trix_flip retired 14.08 on their own record: across 162 searched
-# candidates neither was ever applied to a symbol, neither is live, and their
-# best holdout score ever was 2.7 and 5.0 against a field whose next-worst is
-# 23.2 - not a marginal call. Dropping them is 2/14 of every sweep's work.
-# alpha_trend and mavilim retired 26.08 on the first holdout: alpha_trend
-# produced 7 trades against MIN_TEST_TRADES=12 (structural, lag-2 cross),
-# mavilim had enough trades and lost (GER -20.2 R / PF 0.92). ichimoku stayed
-# - it passed the same gates (GER 208 trades, +27.9 R, PF 1.21).
-# st_trend and macd_flip retired 26.08: neither was live, neither was ever
-# applied (1 and 5 searches), and each still consumed a full max_combos slot
-# per TF. Dropping them is 2/13 of every sweep's work.
-STRATEGIES = ["t3_stoch", "mtf_pullback",
-              "micro_rev", "burst", "dual_t3",
-              "t3_flip", "wavetrend_flip", "stoch_flip",
+# Leftover names fail closed at compute() (no signal). Do not re-add
+# retired families: they were never applied live and each still cost a
+# full max_combos slot per TF while they sat on a saved search list.
+# flow_rev / trix_flip 14.08; alpha_trend / mavilim / st_trend / macd_flip 26.08.
+# t3_stoch / wavetrend_flip / micro_rev 27.08 - these three went for SEARCH
+# COST, not for a bad holdout: none owned its exit axes, so the shared
+# 6x6x5 product multiplied their grids (t3_stoch to ~1.43e9 against a 2000
+# budget, coverage 0.0001), and none was live on a symbol.
+# ichimoku stayed (GER 208 trades, +27.9 R, PF 1.21).
+STRATEGIES = ["mtf_pullback", "burst", "dual_t3",
+              "t3_flip", "stoch_flip",
               "parabolic_flip", "aroon_flip",
               "ichimoku"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
 # Longer TFs turn them into slow mean-reversion with the wrong cost geometry.
-SCALP_STRATEGIES = frozenset({"micro_rev", "burst"})
+# ``micro_rev`` was the other member until 27.08; ``burst`` carries the set now.
+SCALP_STRATEGIES = frozenset({"burst"})
 
 # Which timeframes each family is allowed to search / trade. An absent family
 # means "every configured TF", so an empty map states that no family is
@@ -645,19 +631,11 @@ class SystemConfig:
     poll_interval_sec: float = 2.0
 
     # ---- account-level guards ----
-    # Has to be able to hold the book, and the book is now six symbols with
-    # up to ten slots each. It sat at 13 while the live configuration allows
-    # sixteen concurrent positions, so any construction that fell back to this
-    # default - a fresh install, a settings row missing the key - would have
-    # capped the portfolio three short and refused the rest by order of
-    # arrival. That is the entry lottery every other limit here was set to
-    # avoid, arriving from the one setting nobody touched.
+    # Leftover ticket-count ceiling. Unread by can_open (27.08 evening).
+    # Kept so old DB rows load; stacking binds on margin / reverse / STOPSUZ.
     max_total_positions: int = 60
-    # Separate sub-caps inside max_total_positions for scalp (micro_rev/burst,
-    # M5) vs swing (everything else) positions, so a run of scalp fills
-    # cannot use up the whole shared budget and leave no room for a swing
-    # setup to open, or vice versa. 0 disables a sub-cap (falls back to being
-    # limited only by max_total_positions, the old behaviour).
+    # Separate leftover sub-caps for scalp (burst, M5) vs swing. 0 disables
+    # a sub-cap (live both 0 = off).
     max_scalp_positions: int = 0
     max_swing_positions: int = 0
     lot_multiplier: float = 1.0       # scales every symbol's size at once
@@ -669,12 +647,8 @@ class SystemConfig:
     # on whatever stop distance each position already had. Default on: a
     # "daily loss limit" should stop the daily loss, not just further ones.
     daily_loss_flatten: bool = True
-    # Live 1R sum (open remaining stop distance + the entry about to open),
-    # as a percent of equity. Separate from daily_loss_pct: that one reads
-    # equity already lost and can halt the day; this one refuses a single
-    # fill before the book is oversized. 0 disables. Default 8: the daily
-    # halt is 10, and AT8 showed that without this gate the only concurrent
-    # cap was 1:100 margin accidentally binding.
+    # Live 1R sum leftover. Unread by can_open (27.08). Kept so old DB
+    # rows load; 0 or 30 both mean nothing. Default 8 is historical.
     max_concurrent_risk_pct: float = 8.0
     daily_profit_pct: float = 0.0     # 0 disables the profit stop
     min_free_margin: float = 50.0
@@ -760,25 +734,14 @@ class SystemConfig:
     # sweep does not starve the live trading loop and MT5 terminal of CPU.
     opt_max_workers: int = 0
 
-    # ---- scheduled re-optimization ----
-    # Markets drift; a parameter set validated three months ago is a different
-    # bet today. The scheduler re-runs the *same* walk-forward search on the
-    # same interval for every symbol and applies nothing that fails the normal
-    # out-of-sample gates, so a stale-but-still-good config simply survives.
-    auto_reopt: bool = True
-    auto_reopt_days: float = 7.0      # <=0 disables the interval; otherwise clamped to >= 0.5 days
-    auto_reopt_hour: int = -1         # local (Windows) hour to prefer; -1 = any hour
-    # Local-time weekday gate (time.tm_wday): 0=Mon ... 5=Sat ... 6=Sun; -1 = any day.
-    # Default Saturday so the heavy walk-forward runs when markets are quiet.
-    auto_reopt_weekday: int = 5
-
     mt5_terminal_path: str = ""
 
-    # ---- optional terminal autostart (off by default; never bypasses the path lock) ----
-    # When enabled, only launches the *configured* terminal64.exe if that exact
-    # process isn't already running - it never picks a different install and
-    # never substitutes for the mandatory mt5_terminal_path check.
-    autostart_mt5: bool = False
+    # ---- terminal autostart (on; never bypasses the path lock) ----
+    # Launches the *configured* terminal64.exe if that process isn't
+    # already running - never picks a different install, never substitutes
+    # for the mandatory mt5_terminal_path check. Boot wait is run.py;
+    # mid-cycle relaunch is ensure().
+    autostart_mt5: bool = True
     autostart_mt5_wait_sec: int = 90
 
     # Expected MT5 login + server. 0 / "" means unset: the first connected

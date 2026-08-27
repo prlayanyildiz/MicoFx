@@ -18,12 +18,8 @@
     "min_free_margin": 50.0,
     "slippage_points": 20,
     "close_on_stop": false,
-    "auto_reopt": true,
-    "auto_reopt_days": 7.0,
-    "auto_reopt_hour": -1,
-    "auto_reopt_weekday": 5,
     "mt5_terminal_path": "C:\\Program Files\\Pepperstone MetaTrader 5\\terminal64.exe",
-    "autostart_mt5": false,
+    "autostart_mt5": true,
     "autostart_mt5_wait_sec": 90,
     "backup_enabled": true,
     "backup_dir": "C:\\MicoFX_Yedek",
@@ -45,7 +41,6 @@
       "stoch_length": 8,
       "smooth_k": 2,
       "smooth_d": 2,
-      "stoch_band": 20.0,
       "stoch_extreme": 80.0,
       "htf_factor": 0,
       "htf_mode": "t3",
@@ -90,7 +85,6 @@
       "stoch_length": 9,
       "smooth_k": 3,
       "smooth_d": 3,
-      "stoch_band": 20.0,
       "stoch_extreme": 80.0,
       "htf_factor": 0,
       "htf_mode": "t3",
@@ -135,7 +129,6 @@
       "stoch_length": 10,
       "smooth_k": 3,
       "smooth_d": 3,
-      "stoch_band": 20.0,
       "stoch_extreme": 80.0,
       "htf_factor": 0,
       "htf_mode": "t3",
@@ -180,7 +173,6 @@
       "stoch_length": 10,
       "smooth_k": 3,
       "smooth_d": 3,
-      "stoch_band": 20.0,
       "stoch_extreme": 80.0,
       "htf_factor": 0,
       "htf_mode": "t3",
@@ -227,7 +219,6 @@
       "stoch_length": 9,
       "smooth_k": 3,
       "smooth_d": 3,
-      "stoch_band": 20.0,
       "stoch_extreme": 80.0,
       "htf_factor": 0,
       "htf_mode": "t3",
@@ -400,88 +391,16 @@
       "M30"
     ],
     "strategies": [
-      "micro_rev",
       "burst",
       "dual_t3",
       "mtf_pullback",
       "t3_flip",
-      "t3_stoch",
-      "wavetrend_flip",
       "stoch_flip",
       "parabolic_flip",
       "aroon_flip",
       "ichimoku"
     ],
     "strategy_grids": {
-      "t3_stoch": {
-        "t3_length": [
-          4,
-          5,
-          6,
-          8,
-          10,
-          12,
-          13,
-          21
-        ],
-        "t3_volume_factor": [
-          0.4,
-          0.618,
-          0.7,
-          0.9
-        ],
-        "t3_accel_min": [
-          0.0,
-          0.01,
-          0.03
-        ],
-        "rsi_length": [
-          8,
-          9,
-          10,
-          14
-        ],
-        "stoch_length": [
-          8,
-          9,
-          14
-        ],
-        "smooth_k": [
-          2,
-          3
-        ],
-        "smooth_d": [
-          2,
-          3
-        ],
-        "stoch_band": [
-          15.0,
-          20.0,
-          25.0
-        ],
-        "htf_factor": [
-          0,
-          3,
-          6,
-          12
-        ],
-        "adx_min": [
-          0.0,
-          15.0,
-          20.0,
-          25.0
-        ],
-        "min_body_ratio": [
-          0.0,
-          0.25,
-          0.4
-        ],
-        "atr_pct_min": [
-          0.0,
-          0.25,
-          0.4
-        ]
-      },
       "mtf_pullback": {
         "pull_fast": [
           5,
@@ -490,7 +409,6 @@
           21
         ],
         "pull_depth_atr": [
-          0.3,
           0.5,
           0.8,
           1.2
@@ -511,45 +429,6 @@
           20.0
         ],
         "atr_pct_min": [
-          0.0,
-          0.25
-        ]
-      },
-      "micro_rev": {
-        "mr_fast": [
-          3,
-          5,
-          8,
-          13,
-          21
-        ],
-        "mr_stretch_cost": [
-          2.0,
-          3.0,
-          4.0,
-          5.0,
-          6.0,
-          7.0,
-          9.0,
-          11.0,
-          14.0
-        ],
-        "mr_confirm": [
-          false,
-          true
-        ],
-        "cost_rank_max": [
-          0.3,
-          0.5,
-          0.7
-        ],
-        "adx_max": [
-          0.0,
-          20.0,
-          25.0,
-          30.0
-        ],
-        "min_body_ratio": [
           0.0,
           0.25
         ]
@@ -651,42 +530,6 @@
           0.02,
           0.04,
           0.08
-        ],
-        "sl_atr_mult": [
-          1.0,
-          1.5,
-          2.0,
-          2.5,
-          3.0
-        ],
-        "trail_start_atr": [
-          0.3,
-          0.5,
-          0.8,
-          1.0,
-          1.4,
-          2.0
-        ],
-        "trail_step_atr": [
-          0.4,
-          0.6,
-          0.8,
-          1.2,
-          1.6,
-          2.2
-        ]
-      },
-      "wavetrend_flip": {
-        "wt_channel_len": [
-          6,
-          9,
-          10,
-          14
-        ],
-        "wt_avg_len": [
-          12,
-          21,
-          28
         ],
         "sl_atr_mult": [
           1.0,

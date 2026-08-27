@@ -51,13 +51,19 @@ class _Bars:
         return self.close.size
 
 
-GRID = {"t3_length": [5, 8], "sl_atr_mult": [1.5, 2.0]}
+GRID = {"t3_length": [5, 8], "sl_atr_mult": [2.0, 3.0, 4.0]}
 
-
+# The family is named rather than inherited: this fixture relied on the
+# dataclass default, which moved on 27.08 when t3_stoch retired. Measured
+# against these bars: stoch_flip on a 2-4 ATR stop is the surviving family
+# whose edge still clears at scale 1.0 AND 2.0, which is what the comparison
+# needs - a config that only wins unscaled cannot show the gap. Charged cost
+# rises 0.0013 -> 0.0025 -> 0.0038 across scale 1/2/3. The file measures how
+# spread_scale moves that cost, not which family wins.
 def _run(**kw):
-    args = {"cfg": SymbolConfig(symbol="FRA40", magic=1), "bars": _Bars(),
+    args = {"cfg": SymbolConfig(symbol="FRA40", magic=1, strategy="stoch_flip"), "bars": _Bars(),
                 "point": 1e-4, "tf_seconds": 300, "grid": GRID, "min_trades": 10,
-                "segments": 4, "max_combos": 8, "min_positive_ratio": 0.0}
+                "segments": 4, "max_combos": 12, "min_positive_ratio": 0.0}
     args.update(kw)
     return bt.walk_forward(**args)
 

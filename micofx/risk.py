@@ -10,12 +10,70 @@ from .logbus import LOG
 from .models import SymbolConfig, SystemConfig, is_scalp_strategy
 from .mt5client import MT5Client
 from .store import Store, as_number
+from .supervisor import Supervisor
 
 
 @dataclass
 class Verdict:
     ok: bool
     reason: str = ""
+
+
+# GER40 27.08: six original-SL deaths, later through_entry. Search still
+# prefers 1.0. Last N autopsies of THIS symbol, not the book.
+_SHAKEOUT_SL_WINDOW = 10
+_SHAKEOUT_SL_DEATHS = 3
+_SHAKEOUT_SL_FLOOR = 2.0
+
+
+def shakeout_sl_atr_mult(base: float, symbol: str,
+                         autopsies: list[dict[str, Any]] | None) -> float:
+    """Hard-stop ATR multiple for the NEXT entry, not an open ticket.
+
+    Counts original-SL losers in the last ``_SHAKEOUT_SL_WINDOW`` closes
+    for ``symbol``. Trail / flatten / weekend do not count. A searched
+    stop already at or above the floor is left alone.
+
+    While the floor is live the next entry's hard stop may not match the
+    searched trio: trail stays at the searched values. When the window
+    cools, stored sl/trail are the scored set again — do not scale trail
+    with the floor, and do not drop a pending trail because SL was floored.
+    """
+    try:
+        floor_base = float(base or 0.0)
+    except (TypeError, ValueError):
+        floor_base = 0.0
+    if floor_base <= 0:
+        return floor_base
+    mine = [row for row in (autopsies or [])
+            if str((row or {}).get("symbol") or "") == symbol]
+    window = mine[-_SHAKEOUT_SL_WINDOW:]
+    deaths = 0
+    for row in window:
+        if str(row.get("exit_reason") or "") != "sl":
+            continue
+        try:
+            realised = float(row.get("r_realised") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if realised < 0:
+            deaths += 1
+    if deaths < _SHAKEOUT_SL_DEATHS:
+        return floor_base
+    return max(floor_base, _SHAKEOUT_SL_FLOOR)
+
+
+def shakeout_size_note(lot: float, lot_note: str) -> str:
+    """Dollar-risk side effect of a wider stop, from lot_for's answer.
+
+    Free lot: risk$ stays. Min-lot pin: stop x2 with the same lot is
+    risk x2. Skip: MAX_MIN_LOT_OVERSHOOT refused the trade.
+    """
+    if lot <= 0:
+        return "islem atlandi"
+    if "min lot" in lot_note and "riski asiyor" in lot_note:
+        return "lot tabanda, gercek risk buyuyor"
+    return "lot serbest, risk ayni"
 
 
 class DailyGuard:
@@ -246,10 +304,18 @@ class RiskManager:
         productive than an M30 symbol with the same total R over ~610 days.
         Net R and max_dd_r are earned on the same slice, so the ratio does not
         care how long the cap happened to run. Unmeasurable input (no DD,
-        non-positive DD, non-positive net R) returns 0 so edge_scale stays
-        the 1.0 neutral — not EDGE_MIN.
+        non-positive DD, non-positive net R) and an unvalidated stamp
+        (``validated is False``) return 0 so edge_scale stays the 1.0
+        neutral — not EDGE_MIN.
         """
         summary = cfg.opt_summary or {}
+        # Docstring says validated. GAP-5 wrote validated=false and a +93 R
+        # holdout; size_by_edge still treated that as edge and sized NAS100
+        # as a winner while live 30d ran PF 0.50.
+        if getattr(cfg, "validated", None) is False:
+            return 0.0
+        if summary.get("validated") is False:
+            return 0.0
         hold = summary.get("holdout") or {}
         net_r = float(hold.get("net_r", 0.0) or 0.0)
         max_dd = float(hold.get("max_dd_r", 0.0) or 0.0)
@@ -304,69 +370,48 @@ class RiskManager:
             return 0.0, "sembol bilgisi yok"
 
         floor = float(info["volume_min"])
-        ceiling = min(float(info["volume_max"]), max(floor, float(cfg.max_lot)))
+        try:
+            ceiling = float(info["volume_max"])
+        except (TypeError, ValueError, KeyError):
+            ceiling = 0.0
+        if ceiling <= 0:
+            ceiling = floor
 
         multiplier = max(0.1, float(self.store.system.lot_multiplier or 1.0))
         edge = self.edge_scale(cfg)
         multiplier *= edge
         multiplier *= max(0.0, float(ai_scale))
 
-        if cfg.lot_mode == "fixed" or sl_distance <= 0:
-            raw = float(cfg.fixed_lot) * multiplier
-            note = "sabit" if multiplier == 1.0 else f"sabit x{multiplier:.2f}"
-            if raw <= 0:
-                # Nothing below can express "size zero": every branch from here
-                # divides by ``raw`` to report the overshoot, and max(floor, 0)
-                # would hand back the broker's minimum lot - the largest
-                # position this function can produce - as the answer to a
-                # config that asked for none at all. Fail closed instead. The
-                # API refuses fixed_lot <= 0 and every ai_scale of 0 blocks the
-                # entry before this call, so this is the backstop for a value
-                # that reached the DB some other way (hand-edited row, restored
-                # backup), not a path in normal use.
-                return 0.0, f"lot sifir ({note}), islem atlandi"
-            if raw < floor:
-                # Same floor-vs-overshoot guard as the risk branch below - a
-                # fixed lot scaled down by the AI throttle silently got
-                # rounded straight back up to the floor otherwise, exactly
-                # negating a "size 3x down" decision on any symbol whose
-                # fixed_lot already sits at or near the broker's minimum.
-                if floor > raw * self.MAX_MIN_LOT_OVERSHOOT:
-                    return 0.0, (f"min lot {floor:g} sabit lotu {floor / raw:.1f}x asiyor, "
-                                  f"islem atlandi ({note})")
-                note += f" (min lot {floor:g} sabit lotu asiyor, {floor / raw:.1f}x)"
-            lot = max(floor, raw)
-        else:
-            raw, multiplier, note_edge_capped, money_per_unit = self._risk_raw_lot(
-                cfg, sl_distance, balance, multiplier, edge)
-            if money_per_unit <= 0:
-                # Fail closed, not "size off fixed_lot instead": that fallback
-                # skipped max_lot, edge/AI scaling and the overshoot guard
-                # entirely - a missing tick value silently produced a trade
-                # with none of this function's other safety checks applied.
-                return 0.0, "tick degeri yok, islem atlandi (risk % hesaplanamadi)"
-            note = f"risk %{cfg.risk_percent * multiplier:.3g} -> {raw:.3f}"
-            if note_edge_capped:
-                note += " (SL broker min'e yapisik, avantaj carpani kisildi)"
-            if raw <= 0:
-                # Same fail-closed backstop as the fixed branch: a zero risk%
-                # (or a zero balance on a fresh/blown account) means "risk
-                # nothing", and max(floor, 0) would answer that with the
-                # broker's minimum lot rather than no trade.
-                return 0.0, f"lot sifir ({note}), islem atlandi"
-            if raw < floor:
-                # Rounding up to the broker's minimum lot silently inflates the
-                # real risk taken - a raw of 0.024 forced to a 0.1 floor trades
-                # at ~4x the intended risk, not the configured 0.5%. A small
-                # overshoot is an unavoidable broker-granularity rounding and
-                # still worth taking; past MAX_MIN_LOT_OVERSHOOT the position no
-                # longer represents the configured risk at all, so the trade is
-                # skipped rather than silently oversized.
-                if floor > raw * self.MAX_MIN_LOT_OVERSHOOT:
-                    return 0.0, (f"min lot {floor:g} riski {floor / raw:.1f}x asiyor, "
-                                  f"islem atlandi ({note})")
-                note += f" (min lot {floor:g} riski asiyor, {floor / raw:.1f}x)"
-            lot = max(floor, raw)
+        # Account risk% only. Leftover lot_mode/fixed_lot/max_lot on the row
+        # are unread: a constant lot cannot see the kasa, and a typed ceiling
+        # used to clip the percent the operator still sets.
+        if sl_distance <= 0:
+            return 0.0, "lot sifir (stop yok), islem atlandi"
+        raw, multiplier, note_edge_capped, money_per_unit = self._risk_raw_lot(
+            cfg, sl_distance, balance, multiplier, edge)
+        if money_per_unit <= 0:
+            return 0.0, "tick degeri yok, islem atlandi (risk % hesaplanamadi)"
+        note = f"risk %{cfg.risk_percent * multiplier:.3g} -> {raw:.3f}"
+        if note_edge_capped:
+            note += " (SL broker min'e yapisik, avantaj carpani kisildi)"
+        if raw <= 0:
+            # A zero risk% (or a zero balance on a fresh/blown account) means
+            # "risk nothing", and max(floor, 0) would answer that with the
+            # broker's minimum lot rather than no trade.
+            return 0.0, f"lot sifir ({note}), islem atlandi"
+        if raw < floor:
+            # Rounding up to the broker's minimum lot silently inflates the
+            # real risk taken - a raw of 0.024 forced to a 0.1 floor trades
+            # at ~4x the intended risk, not the configured 0.5%. A small
+            # overshoot is an unavoidable broker-granularity rounding and
+            # still worth taking; past MAX_MIN_LOT_OVERSHOOT the position no
+            # longer represents the configured risk at all, so the trade is
+            # skipped rather than silently oversized.
+            if floor > raw * self.MAX_MIN_LOT_OVERSHOOT:
+                return 0.0, (f"min lot {floor:g} riski {floor / raw:.1f}x asiyor, "
+                              f"islem atlandi ({note})")
+            note += f" (min lot {floor:g} riski asiyor, {floor / raw:.1f}x)"
+        lot = max(floor, raw)
 
         if edge != 1.0:
             note += f" | avantaj x{edge:.2f}"
@@ -407,7 +452,9 @@ class RiskManager:
         risk_money = balance * float(cfg.risk_percent) / 100.0 * multiplier
         return risk_money / (sl_distance * money_per_unit), multiplier, edge_capped, money_per_unit
 
-    def lot_mode_diagnostics(self, balance: float) -> list[dict[str, Any]]:
+    def lot_mode_diagnostics(self, balance: float,
+                             autopsies: list[dict[str, Any]] | None = None
+                             ) -> list[dict[str, Any]]:
         """Flag risk-mode symbols whose broker min lot chronically overshoots
         their configured risk%, run against a fresh ATR read so the panel can
         warn before it happens on a real order.
@@ -424,7 +471,7 @@ class RiskManager:
 
         rows: list[dict[str, Any]] = []
         for cfg in list(self.store.symbols.values()):
-            if not cfg.enabled or cfg.lot_mode != "risk":
+            if not cfg.enabled:
                 continue
             info = self.client.info(cfg.symbol)
             if not info:
@@ -440,7 +487,9 @@ class RiskManager:
             # Without that floor the preview divides by a stop the broker would
             # not accept, so raw comes out larger and the overshoot smaller
             # than the order will actually take.
-            sl_distance = max(atr_now * max(cfg.sl_atr_mult, 0.01),
+            sl_mult = shakeout_sl_atr_mult(
+                cfg.sl_atr_mult, cfg.symbol, autopsies)
+            sl_distance = max(atr_now * max(sl_mult, 0.01),
                               self.client.min_stop_distance(cfg.symbol))
             floor = float(info["volume_min"])
             edge = self.edge_scale(cfg)
@@ -500,6 +549,8 @@ class RiskManager:
     def can_open(self, cfg: SymbolConfig, side: str, lot: float,
                  positions: list[dict[str, Any]], account: dict[str, Any],
                  sl_distance: float = 0.0) -> Verdict:
+        # Callers still pass sl_distance; leftover concurrent 1R unread.
+        _ = sl_distance
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
         mine = [p for p in positions if p["magic"] in magics]
@@ -513,17 +564,16 @@ class RiskManager:
             return Verdict(False, "stopsuz acik pozisyon")
 
         same_symbol = [p for p in mine if p["symbol"] == self.client.resolve(cfg.symbol)]
-        if len(same_symbol) >= cfg.max_positions:
-            return Verdict(False, f"sembol pozisyon limiti ({cfg.max_positions})")
         if any(p["side"] != side for p in same_symbol):
             return Verdict(False, "ters yonde acik pozisyon var")
 
-        if len(mine) >= sys_cfg.max_total_positions:
-            return Verdict(False, f"toplam pozisyon limiti ({sys_cfg.max_total_positions})")
+        # Leftover max_total_positions is unread. Stacking binds on
+        # margin / reverse / STOPSUZ (and scalp/swing only when those
+        # leftover caps are > 0). Search still scores max_open=1.
 
-        # Scalp and swing share the total budget above but are a different bet
-        # shape - many small M5 fills vs a few multi-hour holds - so a run of
-        # one should not crowd the other out of every remaining slot.
+        # Scalp and swing share margin but are a different bet shape -
+        # many small M5 fills vs a few multi-hour holds - so a run of
+        # one should not crowd the other out of remaining headroom.
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         cap = sys_cfg.max_scalp_positions if is_scalp_strategy(cfg.strategy) else sys_cfg.max_swing_positions
         if cap > 0:
@@ -548,20 +598,88 @@ class RiskManager:
             if projected > sys_cfg.max_margin_usage_pct:
                 return Verdict(False, f"marj kullanimi limiti (%{projected:.1f} > %{sys_cfg.max_margin_usage_pct:g})")
 
-        risk_cap = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
-        if risk_cap > 0 and equity > 0:
-            open_r = sum(self.remaining_position_risk(p) for p in mine)
-            new_r = self.risk_dollars(cfg.symbol, lot, sl_distance)
-            projected_r = (open_r + new_r) / equity * 100.0
-            if projected_r > risk_cap:
-                return Verdict(False, f"eszamanli risk limiti (%{projected_r:.1f} > %{risk_cap:g})")
+        # Leftover max_concurrent_risk_pct is unread. Lot is risk% of
+        # balance; stacking stops on margin / reverse / STOPSUZ.
 
         return Verdict(True)
 
     # ------------------------------------------------------------- dashboard
 
+    def _configured_r_dollars(self, cfg: SymbolConfig, balance: float) -> float:
+        """1R in account currency from the risk% setting, when ATR/lot is missing."""
+        try:
+            pct = float(getattr(cfg, "risk_percent", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        if balance <= 0 or pct <= 0:
+            return 0.0
+        return balance * pct / 100.0 * float(self.edge_scale(cfg) or 1.0)
+
+    def fill_holdout_projection(self, rows: list[dict[str, Any]],
+                                balance: float) -> dict[str, Any]:
+        """Paper holdout in dollars. Does not touch MT5.
+
+        A slim stamp without ``expectancy`` still has net_r / days. A
+        search-frozen row with risk_per_trade=0 still has risk_percent.
+        """
+        by_sym = {r.get("symbol"): r for r in rows if r.get("enabled")}
+        projected_daily = 0.0
+        projected_costed_daily = 0.0
+        stamps: list[bool] = []
+        projected_costed_negative = False
+        sys_cfg = self.store.system
+        for cfg in list(self.store.symbols.values()):
+            if not getattr(cfg, "enabled", False):
+                continue
+            row = by_sym.get(cfg.symbol) or {}
+            summary = cfg.opt_summary if isinstance(cfg.opt_summary, dict) else {}
+            if "charge_costs" in summary:
+                stamps.append(bool(summary.get("charge_costs")))
+            if summary.get("costed_negative"):
+                projected_costed_negative = True
+            hold = summary.get("holdout") or {}
+            try:
+                days = float(summary.get("holdout_days", 0) or 0)
+                net = float(hold.get("net_r") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if days <= 0 or net == 0:
+                continue
+            try:
+                risk = float(row.get("risk_per_trade") or 0.0)
+            except (TypeError, ValueError):
+                risk = 0.0
+            if risk <= 0:
+                risk = self._configured_r_dollars(cfg, balance)
+            if risk <= 0:
+                continue
+            projected_daily += net * risk / days
+            costed = summary.get("holdout_costed") or {}
+            try:
+                cnet = float(costed.get("net_r") or 0.0)
+            except (TypeError, ValueError):
+                cnet = 0.0
+            projected_costed_daily += (cnet or net) * risk / days
+        projected_charge_costs = all(stamps) if stamps else bool(
+            getattr(sys_cfg, "charge_costs", True))
+        monthly = projected_daily * 21.0
+        costed_m = projected_costed_daily * 21.0
+        return {
+            "projected_daily": round(projected_daily, 2),
+            "projected_monthly": round(monthly, 2),
+            "projected_monthly_pct": round(monthly / balance * 100.0, 2)
+            if balance > 0 else 0.0,
+            "projected_charge_costs": projected_charge_costs,
+            "projected_costed_daily": round(projected_costed_daily, 2),
+            "projected_costed_monthly": round(costed_m, 2),
+            "projected_costed_monthly_pct": round(costed_m / balance * 100.0, 2)
+            if balance > 0 else 0.0,
+            "projected_costed_negative": projected_costed_negative,
+        }
+
     def capacity(self, positions: list[dict[str, Any]], account: dict[str, Any],
-                 atr_by_symbol: dict[str, float] | None = None) -> dict[str, Any]:
+                 atr_by_symbol: dict[str, float] | None = None,
+                 autopsies: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         """Per-symbol and account-level 'how many more can I open, at what lot'."""
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
@@ -575,7 +693,6 @@ class RiskManager:
         margin_budget = max(0.0, equity * sys_cfg.max_margin_usage_pct / 100.0 - used) \
             if (equity > 0 and sys_cfg.max_margin_usage_pct > 0) else free
         budget = max(0.0, min(margin_budget, free - sys_cfg.min_free_margin))
-        global_slots = max(0, sys_cfg.max_total_positions - len(mine))
 
         rows = []
         for cfg in list(self.store.symbols.values()):
@@ -583,14 +700,17 @@ class RiskManager:
             open_now = [p for p in mine if p["symbol"] == broker]
             atr = float(atr_by_symbol.get(cfg.symbol, 0.0))
             # Route through the engine's own sizing so the table is the real number.
-            sl_dist = max(atr * cfg.sl_atr_mult, self.client.min_stop_distance(cfg.symbol)) \
+            sl_mult = shakeout_sl_atr_mult(
+                cfg.sl_atr_mult, cfg.symbol, autopsies)
+            sl_dist = max(atr * sl_mult, self.client.min_stop_distance(cfg.symbol)) \
                 if atr > 0 else 0.0
             lot, lot_note = self.lot_for(cfg, sl_dist, balance)
-            if cfg.lot_mode == "risk" and sl_dist <= 0:
+            if sl_dist <= 0:
                 lot_note = "risk (ATR bekleniyor)"
+            elif sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
+                lot_note = f"risk (SL x{sl_mult:g} shakeout)"
             margin = self.client.margin_for(cfg.symbol, lot, "buy")
             by_margin = int(budget // margin) if margin > 0 else 0
-            symbol_slots = max(0, cfg.max_positions - len(open_now))
 
             # What one unit of risk (1R) is worth in account currency at this lot.
             r_value = self.risk_dollars(cfg.symbol, lot, sl_dist)
@@ -600,7 +720,7 @@ class RiskManager:
                 cost += tick["spread"] * self.client.money_per_price_unit(cfg.symbol, lot)
             summary = cfg.opt_summary if isinstance(cfg.opt_summary, dict) else {}
             hold = summary.get("holdout") or {}
-            expectancy_r = float(hold.get("expectancy", 0.0) or 0.0)
+            expectancy_r = float(Supervisor.holdout_expectancy(cfg) or 0.0)
             # Long-run cost per trade in R, straight from the holdout slice.
             expectancy_cost = float(hold.get("cost_per_trade_r", 0.0) or 0.0)
             rows.append({
@@ -608,20 +728,15 @@ class RiskManager:
                 "broker_symbol": broker,
                 "group": cfg.group,
                 "enabled": cfg.enabled,
-                "lot_mode": cfg.lot_mode,
                 "lot_note": lot_note,
                 "lot": round(lot, 2),
-                "max_lot": cfg.max_lot,
                 "risk_percent": cfg.risk_percent,
                 "margin_per_trade": round(margin, 2),
                 "open_positions": len(open_now),
-                "max_positions": cfg.max_positions,
-                "free_slots": min(symbol_slots, global_slots, by_margin) if cfg.enabled else 0,
-                "slots_by_margin": by_margin,
-                "open_volume": round(sum(p["volume"] for p in open_now), 2),
+                "free_slots": by_margin if cfg.enabled else 0,
                 "open_profit": round(sum(p["profit"] + p["swap"] for p in open_now), 2),
                 "risk_per_trade": round(r_value, 2),
-                "risk_sizing": "risk %" if cfg.lot_mode == "risk" else "sabit",
+                "risk_sizing": "risk %",
                 "cost_per_trade": round(cost, 2),
                 "cost_pct_of_risk": round(cost / r_value * 100.0, 1) if r_value > 0 else 0.0,
                 # What the walk-forward measured this config costing per trade,
@@ -642,44 +757,25 @@ class RiskManager:
                 "edge_scale": round(self.edge_scale(cfg), 2),
             })
 
-        # Project the validated backtest expectancy onto real money at the live lots.
-        active = [r for r in rows if r["enabled"] and r["expectancy_r"] != 0]
-        projected_daily = 0.0
-        projected_costed_daily = 0.0
-        stamps: list[bool] = []
-        projected_costed_negative = False
-        for cfg in list(self.store.symbols.values()):
-            row = next((r for r in active if r["symbol"] == cfg.symbol), None)
-            if row is None:
-                continue
-            summary = cfg.opt_summary if isinstance(cfg.opt_summary, dict) else {}
-            if "charge_costs" in summary:
-                stamps.append(bool(summary.get("charge_costs")))
-            if summary.get("costed_negative"):
-                projected_costed_negative = True
-            hold = summary.get("holdout") or {}
-            days = float(summary.get("holdout_days", 0) or 0)
-            if days > 0 and hold.get("net_r"):
-                projected_daily += float(hold["net_r"]) * row["risk_per_trade"] / days
-            costed = summary.get("holdout_costed") or {}
-            if days > 0 and costed.get("net_r"):
-                projected_costed_daily += float(costed["net_r"]) * row["risk_per_trade"] / days
-        projected_charge_costs = all(stamps) if stamps else bool(
-            getattr(sys_cfg, "charge_costs", True))
+        # Project holdout net R onto dollars. A missing expectancy key is not
+        # "no edge" (GAP-5 slim stamps); a zero risk_per_trade (search-frozen
+        # ATR) is not "no size" — fall back to configured risk %.
+        proj = self.fill_holdout_projection(rows, balance)
+        projected_daily = proj["projected_daily"]
+        projected_costed_daily = proj["projected_costed_daily"]
+        projected_costed_negative = proj["projected_costed_negative"]
+        projected_charge_costs = proj["projected_charge_costs"]
 
         total_risk = sum(r["risk_per_trade"] for r in rows if r["enabled"])
-        total_margin = sum(r["margin_per_trade"] for r in rows if r["enabled"])
         multiplier = max(0.1, float(sys_cfg.lot_multiplier or 1.0))
+        global_slots = max((r["free_slots"] for r in rows), default=0)
 
-        # `can_open` hard-caps how many bot positions may exist at once, so the
-        # true worst case is the N largest risks, not every enabled symbol at
-        # once. Summing all of them understates headroom whenever the position
-        # cap is tighter than the portfolio.
-        slot_cap = max(1, int(sys_cfg.max_total_positions or 1))
-        enabled_risks = sorted((r["risk_per_trade"] for r in rows if r["enabled"]), reverse=True)
-        enabled_margins = sorted((r["margin_per_trade"] for r in rows if r["enabled"]), reverse=True)
-        concurrent_risk = sum(enabled_risks[:slot_cap])
-        concurrent_margin = sum(enabled_margins[:slot_cap])
+        # No ticket-count ceiling. Worst-case concurrent is every enabled
+        # name firing at once (search still scores max_open=1).
+        enabled_risks = [r["risk_per_trade"] for r in rows if r["enabled"]]
+        enabled_margins = [r["margin_per_trade"] for r in rows if r["enabled"]]
+        concurrent_risk = sum(enabled_risks)
+        concurrent_margin = sum(enabled_margins)
 
         # How far size could scale before either the risk budget or margin runs out.
         # The risk budget is one full daily-loss allowance across all open trades.
@@ -689,16 +785,12 @@ class RiskManager:
         by_margin_all = margin_room / concurrent_margin if concurrent_margin > 0 else 0.0
         headroom = max(0.0, min(by_risk, by_margin_all))
 
-        # What the concurrent-risk gate in can_open() is actually comparing right
-        # now. ``concurrent_risk`` below is a projection - the worst case if every
-        # slot filled - and the panel already shows it; without this the operator
-        # can read the ceiling and the projection but never the live number the
-        # refusal is decided on. Same expression as the gate, deliberately: a
-        # second way of computing it is a second thing that can drift.
-        #
-        # A naked stop is unbounded (``remaining_position_risk`` returns inf).
-        # ``json.dumps`` would write Infinity and /api/state would 500 the
-        # whole panel - the same class as execution's RATIO_ALL_ADVERSE.
+        # Live remaining 1R across the open book. Leftover
+        # max_concurrent_risk_pct is unread; this is for STOPSUZ and the
+        # panel, not a can_open ceiling. A naked stop is unbounded
+        # (remaining_position_risk returns inf). json.dumps would write
+        # Infinity and /api/state would 500 the whole panel - the same
+        # class as execution's RATIO_ALL_ADVERSE.
         risks = [self.remaining_position_risk(p) for p in mine]
         unbounded = any(not math.isfinite(r) for r in risks)
         if unbounded:
@@ -717,7 +809,6 @@ class RiskManager:
             "open_risk_unbounded": unbounded,
             "total_risk_per_trade": round(total_risk, 2),
             "total_risk_pct": round(total_risk / equity * 100.0, 2) if equity > 0 else 0.0,
-            "total_margin_if_all_open": round(total_margin, 2),
             "concurrent_risk": round(concurrent_risk, 2),
             "concurrent_risk_pct": round(concurrent_risk / equity * 100.0, 2) if equity > 0 else 0.0,
             "concurrent_margin": round(concurrent_margin, 2),
@@ -735,13 +826,10 @@ class RiskManager:
                 projected_costed_daily * 21.0 / balance * 100.0, 2)
             if balance > 0 else 0.0,
             "projected_costed_negative": projected_costed_negative,
+            # Leftover ticket-count ceiling. Unread by can_open; GET honesty.
             "max_total_positions": sys_cfg.max_total_positions,
-            "max_positions_per_symbol": max(
-                (int(cfg.max_positions or 1) for cfg in list(self.store.symbols.values())),
-                default=1),
             "max_cost_pct_of_risk": float(sys_cfg.max_cost_pct_of_risk or 0.0),
             "global_free_slots": global_slots,
-            "margin_used": round(used, 2),
             "margin_budget": round(budget, 2),
             "margin_usage_pct": round(used / equity * 100.0, 2) if equity > 0 else 0.0,
             "max_margin_usage_pct": sys_cfg.max_margin_usage_pct,

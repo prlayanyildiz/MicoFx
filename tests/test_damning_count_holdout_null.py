@@ -50,7 +50,6 @@ def _sup(holdout_wr=None) -> Supervisor:
     sup.risk_scale = 1.0
     sup.verdicts = {}
     sup.notes = []
-    sup.reopt_queue = []
     sup.last_review = 0.0
     return sup
 
@@ -113,8 +112,6 @@ def test_binom_cdf_matches_the_eleven_coin_values():
 
 def test_ger40_n11_threshold_does_not_include_two_wins():
     p = 0.2743
-    k = Supervisor.damning_max_wins(11, p)
-    assert k < 2
     assert not Supervisor.count_is_damning(2, 11, 27.43)
     assert not Supervisor.count_is_damning(2, 11, p)
     # Zero wins may or may not be in the 5% tail; the important bound is

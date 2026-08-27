@@ -2,20 +2,20 @@
 
 The family->timeframe map used to keep the scalps on M5 and hand M15+ to the
 swing families, on a budget argument its own comment stated: "so the opt budget
-is not wasted pairing micro_rev with H1". That argument does not survive
+is not wasted pairing burst with H1". That argument does not survive
 contact with how the budget actually works - ``max_combos`` is spent per sweep
 (one family x one timeframe), not shared across the search, so an extra pairing
 costs wall-clock and takes nothing away from the pairings already running.
 
 What the restriction did cost was optionality. M5 has been applied 55 times in
 this system's history, and the pairings that won were not the ones anyone would
-have predicted: XAUUSD came back with micro_rev/M5 and NAS100 with
+have predicted: XAUUSD came back with burst/M5 and NAS100 with
 stoch_flip/M5. Deciding in advance which family suits which bar length is the
 kind of judgement the out-of-sample gates exist to make on evidence.
 
 Opening the timeframes alone would have been a half-change. ``uses_swing_exits``
 refused the wider exit grid to any scalp family whatever the bar length, so
-micro_rev on H1 would have been searched with a stop envelope sized for
+burst on H1 would have been searched with a stop envelope sized for
 five-minute bars - the exact failure SWING_GRID_OVERLAY's own comment describes:
 "the search only ever offers H1 candidates a stop tight enough to be noise". The
 envelope now follows the bar, which is what its docstring said all along:
@@ -95,19 +95,20 @@ def test_the_wider_exit_grid_is_decided_by_bar_length_not_by_family(strategy):
 
 
 def test_a_scalp_family_on_long_bars_gets_the_swing_envelope():
-    """micro_rev/M30 used to search with a five-minute stop grid.
+    """burst/M30 used to search with a five-minute stop grid.
 
-    Written for micro_rev/H1; the hazard is the same at any bar longer than the
+    Written for burst/H1; the hazard is the same at any bar longer than the
     family's name suggests, and M30 is the longest one offered now.
     """
-    assert is_scalp_strategy("micro_rev")
-    assert uses_swing_exits("micro_rev", "M30") is True
-    assert uses_swing_exits("micro_rev", "M5") is False
+    assert is_scalp_strategy("burst")
+    assert uses_swing_exits("burst", "M30") is True
+    assert uses_swing_exits("burst", "M5") is False
 
 
 def test_scalp_classification_itself_is_unchanged():
     """Position caps and cooldowns read this; only the exit grid moved."""
-    assert SCALP_STRATEGIES == frozenset({"micro_rev", "burst"})
+    # burst retired 27.08; burst carries the scalp set alone.
+    assert SCALP_STRATEGIES == frozenset({"burst"})
 
 
 # ---------------------------------------------------- no timeframe crumbs left
@@ -119,23 +120,23 @@ def test_no_family_is_restricted_any_more():
 
 def test_an_explicit_restriction_still_works_if_one_is_ever_added():
     """The mechanism stays; only the shipped restrictions are gone."""
-    allow = {"micro_rev": ["M5"]}
-    assert strategy_allows_timeframe("micro_rev", "M5", allow)
-    assert not strategy_allows_timeframe("micro_rev", "H1", allow)
+    allow = {"burst": ["M5"]}
+    assert strategy_allows_timeframe("burst", "M5", allow)
+    assert not strategy_allows_timeframe("burst", "H1", allow)
 
 
 def test_an_empty_list_still_means_nothing_rather_than_everything():
-    allow = {"micro_rev": []}
+    allow = {"burst": []}
     for tf in TIMEFRAMES:
-        assert not strategy_allows_timeframe("micro_rev", tf, allow)
+        assert not strategy_allows_timeframe("burst", tf, allow)
 
 
 def test_an_unrecognised_bar_never_claims_the_swing_envelope():
     """Retired names are handled in test_no_retired_timeframes.py; here it is
     enough that anything unknown falls to the narrow envelope rather than the
     wide one."""
-    assert uses_swing_exits("t3_stoch", "beklenmeyen") is False
-    assert uses_swing_exits("t3_stoch", "") is False
+    assert uses_swing_exits("stoch_flip", "beklenmeyen") is False
+    assert uses_swing_exits("stoch_flip", "") is False
 
 
 def test_the_searchable_timeframes_are_exactly_these_three():

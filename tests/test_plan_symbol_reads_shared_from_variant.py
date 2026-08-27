@@ -85,8 +85,8 @@ def test_plan_symbol_does_not_nameerror_on_shared():
     """The live scan path: first symbol, M30, operator-widened sl."""
     shared = {**FACTORY, "sl_atr_mult": list(OPERATOR_SL)}
     variants = [{
-        "key": "t3_stoch",
-        "strategy": "t3_stoch",
+        "key": "stoch_flip",
+        "strategy": "stoch_flip",
         "own": {},
         "grid": dict(shared),
         "shared": shared,

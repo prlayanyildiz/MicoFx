@@ -44,13 +44,11 @@ DEFAULTS: dict[str, Any] = {
     "quarantine_losses": 10,
     "quarantine_pf": 0.80,           # profit factor below this is broken, not unlucky
     "watch_pf": 1.00,                # between watch_pf and quarantine_pf: keep trading, smaller
-    # A suspension is meant to stop the bleeding while the symbol gets a new
-    # config, not to bench it for half a day. The way out is the re-search the
-    # quarantine itself queues (see _queue_reoptimization), which finishes in
-    # minutes - so the clock only has to cover that, and anything longer just
-    # idles a symbol that has already been fixed. Operator-set 12 -> 1 (14.08)
-    # after NAS100 and XAUUSD sat the full twelve hours holding freshly
-    # validated configs.
+    # A suspension is meant to stop the bleeding while a search runs for
+    # that symbol (see _queue_reoptimization). The clock only has to cover
+    # that; anything longer just idles a symbol that has already been
+    # fixed. Operator-set 12 -> 1 (14.08) after NAS100 and XAUUSD sat the
+    # full twelve hours holding freshly validated configs.
     "quarantine_hours": 1,
     "watch_risk_scale": 0.6,
     "bad_hour_min_trades": 6,
@@ -64,9 +62,11 @@ DEFAULTS: dict[str, Any] = {
     # refuse; watch / idle / blocked hours / prefer_strong_on_dd only scale.
     # False restores the old refusals. AX: 156 signals, 34 died on ai_gate.
     "hard_block_only_quarantine": True,
-    "auto_reoptimize": True,
     "reopt_min_age_hours": 48,
-    "reopt_on_decay": True,          # also re-opt when live edge decays vs backtest
+    # Quarantine is the only auto-search: a breaker that already fired.
+    # A failed/empty apply never touches opt_updated_at, so without this
+    # the same symbol would re-queue every review cycle.
+    "reopt_retry_cooldown_hours": 1.0,
     # Trades needed before the live PF-halves decay check runs. Was 20; the
     # false-alarm rate at that bar was measured rather than assumed - 20000
     # Monte Carlo runs of a symbol whose true edge NEVER changes, drawn from
@@ -78,9 +78,8 @@ DEFAULTS: dict[str, Any] = {
     #     60 trades  1.5-5%
     #
     # At 20 that is roughly one symbol in seven cut to half size on nothing
-    # but noise, plus a walk-forward queued behind it by reopt_on_decay. The
-    # rule splits the sample in half and compares two 10-trade profit factors,
-    # which is why it is that noisy.
+    # but noise. The rule splits the sample in half and compares two
+    # 10-trade profit factors, which is why it is that noisy.
     #
     # The trade-off it was lowered to 20 for still stands (reacting to a real
     # regime turn inside ~10-15 trades rather than waiting a week longer), but
@@ -91,12 +90,6 @@ DEFAULTS: dict[str, Any] = {
     # Each half of the split must stand on its own. The total bar used to
     # allow 15-vs-15 (GER40: PF 2.53→0.92, still +65$ / PF 1.39, cut to 0.5x).
     "edge_decay_min_half": 25,
-    # A re-opt that finds nothing better than the current config never updates
-    # opt_updated_at, so without this a "watch" symbol whose decay is a genuine
-    # regime shift (not a stale parameter) gets re-queued and re-run in full
-    # every single review cycle - hammering the same expensive walk-forward
-    # search every couple of minutes for no new result.
-    "reopt_retry_cooldown_hours": 1.0,
 }
 
 
@@ -153,7 +146,7 @@ class Supervisor:
     It reads closed-trade history from MT5 and decides, per symbol, whether the
     strategy is still working: suspending instruments that break down, shrinking
     size while the day is bleeding, blocking hours that repeatedly lose, and
-    queueing a re-optimization when a symbol's edge has clearly decayed.
+    queueing a re-optimization when a symbol is quarantined.
 
     Everything it does is derived from realised results, so it cannot invent an
     edge - it only protects one. All decisions are logged and reversible.
@@ -167,7 +160,6 @@ class Supervisor:
         self.last_review = 0.0
         self.risk_scale = 1.0
         self.notes: list[str] = []
-        self.reopt_queue: list[str] = []
         # Guards self.verdicts (and the state that travels with it) against the
         # engine's background poll thread and an HTTP request thread (clear/
         # status/settings) touching it at the same time - the actual source of
@@ -253,7 +245,6 @@ class Supervisor:
         self.store.set_setting("supervisor_state", {
             "verdicts": {s: v.to_dict() for s, v in list(self.verdicts.items())},
             "risk_scale": self.risk_scale,
-            "saved_at": time.time(),
         })
 
     def forget(self, symbol: str) -> None:
@@ -688,21 +679,27 @@ class Supervisor:
                          watch_wins, watch_n, self.holdout_win_prob(cfg)))):
             v.state = "watch"
             v.risk_scale = float(cfgs["watch_risk_scale"])
-            # Same PF gate as watch; richer reason when backtest still promised edge
-            # so auto-reopt can pick these up under reopt_on_decay.
-            if cfgs.get("reopt_on_decay") and v.expected_r >= 0.12:
+            if v.expected_r >= 0.12:
                 v.reason = (
                     f"kenar dustu (beklenen {v.expected_r:+.2f}R, "
-                    f"canli PF {v.profit_factor:.2f})"
+                    f"canli PF {v.profit_factor:.2f} (30g))"
                 )
             else:
-                v.reason = f"PF {v.profit_factor:.2f} < 1.00, lot kisildi"
+                v.reason = f"PF {v.profit_factor:.2f} (30g) < 1.00, lot kisildi"
+            if watch_n != v.trades:
+                v.reason += (
+                    f" | karar {watch_n} islem PF {watch_pf_val:.2f}"
+                )
         else:
             v.state = "ok"
             if v.trades:
-                v.reason = f"PF {v.profit_factor:.2f}"
+                v.reason = f"PF {v.profit_factor:.2f} (30g)"
                 if v.edge_health > 0:
                     v.reason += f" | saglik %{v.edge_health * 100:.0f}"
+                if judged_n != v.trades:
+                    v.reason += (
+                        f" | karar {judged_n} islem PF {v.judged_pf:.2f}"
+                    )
 
         # Probation: released early - the config was replaced, or an operator
         # cleared the record - but nothing has been proved yet. The evidence
@@ -829,7 +826,7 @@ class Supervisor:
             if math.isfinite(value):
                 return value
         try:
-            trades = int(hold.get("trades") or 0)
+            trades = int(hold.get("trades") or hold.get("n") or 0)
             net = float(hold.get("net_r") or 0.0)
         except (TypeError, ValueError):
             return 0.0
@@ -930,23 +927,6 @@ class Supervisor:
         return min(1.0, total)
 
     @staticmethod
-    def damning_max_wins(n: int, p: float, alpha: float = DAMNING_ALPHA) -> int:
-        """Largest win count that still fires at this n and null p.
-
-        -1 means the left tail never reaches ``alpha``: even zero wins is
-        ordinary, so the count branch stays silent.
-        """
-        if n <= 0 or not (0.0 < p < 1.0):
-            return -1
-        k = -1
-        for wins in range(0, n + 1):
-            if Supervisor._binom_cdf_le(wins, n, p) <= alpha:
-                k = wins
-            else:
-                break
-        return k
-
-    @staticmethod
     def count_is_damning(wins: int, n: int, p: float | None,
                          alpha: float = DAMNING_ALPHA) -> bool:
         """True when ``wins`` is in the binomial left tail of holdout p.
@@ -1025,52 +1005,37 @@ class Supervisor:
         return sorted(blocked)
 
     def _queue_reoptimization(self, cfgs: dict[str, Any]) -> None:
-        # Same "off means off" rule as gate(). This is the supervisor's other
-        # way of acting on the account, and the louder one: it starts a search
-        # and REPLACES a live config. A disabled layer quietly rewriting the
-        # book is worse than a disabled layer quietly blocking an entry.
-        if not self.enabled:
+        """Search quarantined symbols. Calendar and decay do not start one."""
+        if not self.enabled or self.optimizer is None:
             return
-        if not cfgs["auto_reoptimize"] or self.optimizer is None:
-            return
-        min_age = float(cfgs["reopt_min_age_hours"]) * 3600.0
-        retry_cooldown = float(cfgs["reopt_retry_cooldown_hours"]) * 3600.0
+        retry_cooldown = float(cfgs.get("reopt_retry_cooldown_hours") or 1.0) * 3600.0
         now = time.time()
-        stale = []
+        stale: list[str] = []
         for v in list(self.verdicts.values()):
             cfg = self.store.symbols.get(v.symbol)
             if cfg is None or not cfg.enabled:
                 continue
-            broken = v.state == "quarantine"
-            # The age bar is about not churning a config that is merely OLD.
-            # A quarantine is not a staleness signal - it is the breaker having
-            # already fired on realised results, and re-searching is the only
-            # way out of it. Applying the age bar there meant a symbol that
-            # broke a day after its last apply sat quarantined with no attempt
-            # to fix it until the config happened to turn ``reopt_min_age_hours``
-            # old. The retry cooldown below still stops it from re-searching in
-            # a tight loop.
-            age = now - (cfg.opt_updated_at or 0)
-            if age < min_age and not broken:
+            if v.state != "quarantine":
                 continue
-            # A prior attempt that found nothing better never touches
-            # opt_updated_at, so age alone would re-queue this symbol every
-            # review cycle - wait out the cooldown before trying again.
             if now - v.last_reopt_attempt < retry_cooldown:
                 continue
-            decayed = (cfgs.get("reopt_on_decay") and v.state == "watch"
-                       and v.expected_r >= 0.12)
-            if broken or decayed:
-                stale.append(v.symbol)
-        self.reopt_queue = stale
+            stale.append(v.symbol)
         if not stale or self.optimizer.busy:
+            return
+        # Stamp only after start() actually accepted the job. Doing it first
+        # burned reopt_retry_cooldown_hours when start refused (busy race,
+        # empty target) and the breaker sat a full hour with no search.
+        started = self.optimizer.start(stale, apply_best=True, source="quarantine")
+        if isinstance(started, dict) and not started.get("ok", True):
             return
         for symbol in stale:
             v = self.verdicts.get(symbol)
             if v is not None:
                 v.last_reopt_attempt = now
-        LOG.emit(f"AI: kenari dusen semboller yeniden optimize ediliyor -> {', '.join(stale)}", "AI")
-        self.optimizer.start(stale, apply_best=True)
+        LOG.emit(
+            f"AI: karantinadaki semboller yeniden optimize ediliyor -> "
+            f"{', '.join(stale)}",
+            "AI")
 
     # ---------------------------------------------------------------- status
 
@@ -1132,7 +1097,6 @@ class Supervisor:
             "last_review": self.last_review,
             "settings": self.settings,
             "notes": self.notes,
-            "reopt_queue": self.reopt_queue,
             "symbols": rows,
             "counts": {
                 state: sum(1 for r in rows if r["state"] == state)

@@ -46,7 +46,10 @@ class _Bars:
 
 
 def _engine(last_closed, broker_now=0.0):
-    need = required_bars(Params())
+    # The family _cfg() actually configures, not the dataclass default - the
+    # engine sizes this window from the symbol's own params, and the default
+    # moved on 27.08 when t3_stoch retired.
+    need = required_bars(Params(strategy="mtf_pullback"))
     n = max(60, need // 2)
     now = float(broker_now)
 

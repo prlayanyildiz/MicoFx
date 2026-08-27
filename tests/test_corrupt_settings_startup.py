@@ -79,8 +79,6 @@ CORRUPT = [
     ("filled_bars", {"XAUUSD": [None, None]}),
     ("filled_bars", {"XAUUSD": ["sig"]}),
     # scalars that get coerced
-    ("auto_reopt_at", "yarin"),
-    ("auto_reopt_at", {"t": 1}),
     ("day_start_balance", "cok"),
     ("day_start_balance", ["x"]),
     ("day_start_login", "cok"),
@@ -102,7 +100,6 @@ def test_a_corrupt_setting_does_not_stop_the_engine_starting(key, value, tmp_pat
     assert isinstance(engine._orphan_scan, dict)
     assert isinstance(engine._cooldowns, dict)
     assert isinstance(engine._filled_bars, dict)
-    assert isinstance(engine._reopt_at, float)
     store.close()
 
 
@@ -114,7 +111,6 @@ def test_healthy_settings_are_still_restored(tmp_path, monkeypatch):
     store.set_setting("secondary_tickets", [333])
     store.set_setting("entry_cooldowns", {"XAUUSD": 1786400000.0})
     store.set_setting("filled_bars", {"XAUUSD": ["primary", 1786399999]})
-    store.set_setting("auto_reopt_at", 1786400123.0)
 
     engine = Engine(store, _Client())
 
@@ -125,7 +121,6 @@ def test_healthy_settings_are_still_restored(tmp_path, monkeypatch):
     # primary's already-taken bar. The single-slot shape written by older
     # versions is migrated on read rather than dropped.
     assert engine._filled_bars == {"XAUUSD": {"primary": 1786399999}}
-    assert engine._reopt_at == 1786400123.0
     store.close()
 
 

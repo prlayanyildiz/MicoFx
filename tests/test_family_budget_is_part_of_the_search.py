@@ -1,8 +1,8 @@
 """BUDGET-1: per-family search budget, falling back to the global max_combos.
 
 A single global 2000 puts every live family in a draw. GER40's stoch_flip
-grid is 28800 and finishes in 24 minutes; t3_stoch's grid is 1.43 billion
-and cannot be exhausted. The override has to travel on the job dict (the
+grid is 28800 and finishes in 24 minutes; a family without an override
+keeps the global cap. The override has to travel on the job dict (the
 worker is a spawned process) and the stamp already records max_combos from
 that job.
 
@@ -25,7 +25,8 @@ from test_plan_symbol_reads_shared_from_variant import (
     _Client,
 )
 
-from micofx.optimizer import family_max_combos
+from micofx.models import STRATEGIES
+from micofx.optimizer import family_max_combos, run_combo_budget
 
 
 def _store_with(blob: dict):
@@ -85,31 +86,51 @@ def test_family_max_combos_falls_back_when_the_map_is_absent():
 def test_family_max_combos_reads_only_that_family():
     blob = {"strategy_max_combos": {"stoch_flip": 28800}}
     assert family_max_combos(blob, "stoch_flip", 2000) == 28800
-    assert family_max_combos(blob, "t3_stoch", 2000) == 2000
+    assert family_max_combos(blob, "burst", 2000) == 2000
 
 
 def test_family_max_combos_rejects_unreadable_and_non_positive():
     blob = {"strategy_max_combos": {
-        "stoch_flip": "nope", "t3_stoch": 0, "mtf_pullback": -1,
+        "stoch_flip": "nope", "burst": 0, "mtf_pullback": -1,
     }}
     assert family_max_combos(blob, "stoch_flip", 2000) == 2000
-    assert family_max_combos(blob, "t3_stoch", 2000) == 2000
+    assert family_max_combos(blob, "burst", 2000) == 2000
     assert family_max_combos(blob, "mtf_pullback", 2000) == 2000
 
 
 def test_plan_puts_the_family_budget_on_the_job_dict():
     """Worker reads payload['max_combos']; a parent-only override would die."""
     opt = _opt({"strategy_max_combos": {"stoch_flip": 28800}})
-    plan = _plan(opt, ("stoch_flip", "t3_stoch"))
+    plan = _plan(opt, ("stoch_flip", "burst"))
     assert plan["error"] == ""
     by_fam = {j["strategy"]: j["max_combos"] for j in plan["jobs"]}
     assert by_fam["stoch_flip"] == 28800
-    assert by_fam["t3_stoch"] == 2000
+    assert by_fam["burst"] == 2000
+
+
+def test_combo_total_uses_the_family_cap_not_the_global_one():
+    """Live tonight: stoch_flip 28800, everyone else 2000, refine_rounds=5."""
+    families = list(STRATEGIES)
+    blob = {"strategy_max_combos": {"stoch_flip": 28800}}
+    total, per_sweep = run_combo_budget(
+        blob, families, ["M5", "M15", "M30"], 2000, 5, n_symbols=6)
+    assert per_sweep["stoch_flip"] == 28800 * 6
+    n_other = len(families) - 1
+    assert per_sweep["burst"] == 2000 * 6
+    assert total == 6 * 3 * (n_other * 12000 + 172800)
+
+
+def test_combo_total_without_a_family_map_matches_the_old_global_product():
+    families = ["burst", "stoch_flip"]
+    total, per_sweep = run_combo_budget(
+        {}, families, ["M5", "M30"], 2000, 5, n_symbols=3)
+    assert per_sweep["burst"] == per_sweep["stoch_flip"] == 12000
+    assert total == 3 * 2 * 2 * 12000
 
 
 def test_plan_without_a_family_map_keeps_the_global_budget():
     opt = _opt({})
-    plan = _plan(opt, ("stoch_flip", "t3_stoch"), max_combos=2000)
+    plan = _plan(opt, ("stoch_flip", "burst"), max_combos=2000)
     assert plan["jobs"]
     assert {j["max_combos"] for j in plan["jobs"]} == {2000}
 

@@ -49,7 +49,6 @@ def _sup(enabled: bool, risk_scale: float = 0.4) -> Supervisor:
     sup.risk_scale = risk_scale
     sup.verdicts = {}
     sup.notes = []
-    sup.reopt_queue = []
     sup.last_review = 0.0
     assert sup.enabled is enabled, "fixture failed to set the real switch"
     return sup
@@ -186,3 +185,12 @@ def test_a_blocked_hour_actually_blocks_only_at_that_hour():
     allowed_eleven, _, _ = sup.gate(cfg, at_eleven)
     assert allowed_ten is False and "10:00" in reason_ten
     assert allowed_eleven is True
+
+
+def test_the_panel_shows_a_live_gate_refusal():
+    """Classification `reason` is not the current block. The row must say both."""
+    js = (Path(__file__).resolve().parents[1]
+          / "micofx" / "web" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "gate_allowed" in js
+    assert "gate_reason" in js
+    assert "giris kapali" in js

@@ -36,6 +36,7 @@ from micofx.logbus import _PERSIST, LogBus
 def _bus(tmp_path: Path) -> LogBus:
     bus = LogBus()
     bus._file = tmp_path / "micofx.log"
+    bus.enable_disk()
     return bus
 
 

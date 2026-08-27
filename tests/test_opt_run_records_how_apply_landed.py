@@ -27,7 +27,7 @@ def test_an_applied_run_records_force_time_and_previous():
     assert payload["force"] is True
     assert payload["applied_at"] is not None
     assert payload["applied_at"] >= before
-    assert payload["previous"] == {"strategy": "t3_stoch", "timeframe": "M5"}
+    assert payload["previous"] == {"strategy": "stoch_flip", "timeframe": "M5"}
 
 
 def test_a_run_that_does_not_apply_does_not_pretend_it_did():
@@ -53,4 +53,4 @@ def test_force_false_is_not_the_same_as_a_missing_key():
     assert "force" in payload
     assert payload["force"] is False
     assert store.runs[-1]["applied"] is True
-    assert payload["previous"]["strategy"] == "t3_stoch"
+    assert payload["previous"]["strategy"] == "stoch_flip"

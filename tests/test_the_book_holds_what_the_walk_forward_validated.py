@@ -61,9 +61,10 @@ def test_the_cooldown_only_ever_pushes_the_resume_later():
 
 # ------------------------------------------------- what enforces it live
 
-def test_the_live_gate_reads_the_symbol_limit_per_call():
-    """Not a snapshot: a limit change has to take effect without a restart."""
-    assert "if len(same_symbol) >= cfg.max_positions:" in RISK
+def test_the_live_gate_does_not_count_per_symbol_slots():
+    """Operator 27.08: leftover max_positions and concurrent 1R are unread."""
+    assert "if len(same_symbol) >= cfg.max_positions:" not in RISK
+    assert "eszamanli risk limiti" not in RISK
 
 
 def test_the_opposite_direction_block_is_still_there():
@@ -72,8 +73,7 @@ def test_the_opposite_direction_block_is_still_there():
     assert 'if any(p["side"] != side for p in same_symbol):' in RISK
 
 
-def test_the_portfolio_wide_limit_still_exists():
-    """Per-symbol is not the only bound; the total is what stops ten
-    correlated symbols becoming one bet. Nothing here says what it should be -
-    only that the check has not been removed."""
-    assert "sys_cfg.max_total_positions" in RISK
+def test_the_leftover_total_slot_cap_is_unread():
+    """Operator 27.08 evening: stacking until margin / reverse / STOPSUZ."""
+    assert "len(mine) >= sys_cfg.max_total_positions" not in RISK
+    assert "toplam pozisyon limiti" not in RISK

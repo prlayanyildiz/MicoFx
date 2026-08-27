@@ -59,11 +59,12 @@ def _risk(cfg: SymbolConfig) -> RiskManager:
     return rm
 
 
-def test_zero_fixed_lot_skips_the_trade_instead_of_flooring_to_min_lot():
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, lot_mode="fixed", fixed_lot=0.0)
+def test_leftover_zero_fixed_lot_still_sizes_from_risk_percent():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, lot_mode="fixed",
+                       fixed_lot=0.0, risk_percent=1.0)
     lot, note = _risk(cfg).lot_for(cfg, sl_distance=1.0, balance=10_000.0)
-    assert lot == 0.0
-    assert "atlandi" in note
+    assert lot > 0
+    assert "atlandi" not in note
 
 
 def test_zero_risk_percent_skips_the_trade():
@@ -81,28 +82,19 @@ def test_zero_balance_skips_the_trade():
     assert "atlandi" in note
 
 
-@pytest.mark.parametrize("lot_mode", ["fixed", "risk"])
-def test_zero_ai_scale_skips_the_trade_in_both_branches(lot_mode):
-    """The supervisor's own 0.0 (quarantine) must not round back up to min lot.
-
-    The entry path blocks before reaching here, so this pins the arithmetic
-    rather than a live path - if that ordering ever changes, a quarantined
-    symbol must still not trade at the broker's minimum.
-    """
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, lot_mode=lot_mode,
-                       fixed_lot=0.1, risk_percent=0.5)
+def test_zero_ai_scale_skips_the_trade():
+    """The supervisor's own 0.0 (quarantine) must not round back up to min lot."""
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=0.5)
     lot, note = _risk(cfg).lot_for(cfg, sl_distance=1.0, balance=10_000.0,
                                    ai_scale=0.0)
     assert lot == 0.0
     assert "atlandi" in note
 
 
-@pytest.mark.parametrize("lot_mode", ["fixed", "risk"])
-def test_normal_sizing_is_untouched(lot_mode):
+def test_normal_sizing_is_untouched():
     """The guard is "exactly zero", not a new floor on small sizes."""
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, lot_mode=lot_mode,
-                       fixed_lot=0.5, risk_percent=1.0)
-    # risk branch: 10_000 * 1% / (1.0 * 10.0) = 10.0 lots
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=1.0)
+    # 10_000 * 1% / (1.0 * 10.0) = 10.0 lots
     lot, note = _risk(cfg).lot_for(cfg, sl_distance=1.0, balance=10_000.0)
     assert lot > 0
     assert "atlandi" not in note
@@ -114,7 +106,8 @@ def test_a_small_but_nonzero_lot_still_takes_the_overshoot_path():
     Guards the boundary the zero-check sits next to - `raw` of 0.05 against a
     0.1 floor is a 2x overshoot, under the 3.0x limit, so it still trades.
     """
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, lot_mode="fixed", fixed_lot=0.05)
+    # 10_000 * 0.005% / 10 = 0.05 lot vs 0.1 floor
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=0.005)
     lot, note = _risk(cfg).lot_for(cfg, sl_distance=1.0, balance=10_000.0)
     assert lot == pytest.approx(0.1)
     assert "atlandi" not in note

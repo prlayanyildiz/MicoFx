@@ -62,7 +62,7 @@ def _client():
 def test_opt_params_rejects_nan_in_strategy_grids():
     tc, store = _client()
     res = tc.post("/api/opt/params", json={
-        "strategy_grids": {"t3_stoch": {"sl_atr_mult": [1.0, 1.2, "NaN", 2.0]}},
+        "strategy_grids": {"stoch_flip": {"sl_atr_mult": [1.0, 1.2, "NaN", 2.0]}},
     })
     assert res.status_code == 400
     assert store.saved is None
@@ -84,15 +84,28 @@ def test_opt_params_rejects_top_level_nan_too():
     assert store.saved is None
 
 
-def test_opt_params_accepts_valid_nested_grids():
+def test_opt_params_refuses_nested_grids():
+    # Grid left the panel 27.08. NaN tests above still 400; this pins that a
+    # well-formed grid is the same closed door, not a special-case 200.
     tc, store = _client()
     res = tc.post("/api/opt/params", json={
-        "strategy_grids": {"t3_stoch": {"sl_atr_mult": [1.0, 1.2, 1.5]}},
+        "strategy_grids": {"stoch_flip": {"sl_atr_mult": [1.0, 1.2, 1.5]}},
         "grid": {"trail_start_atr": [0.5, 0.8, 1.0]},
         "min_trades": 20,
     })
+    assert res.status_code == 400
+    assert store.saved is None
+
+
+def test_opt_params_accepts_the_panel_dials():
+    tc, store = _client()
+    res = tc.post("/api/opt/params", json={
+        "lookback_days": 180, "refine_rounds": 1, "max_combos": 2000,
+    })
     assert res.status_code == 200
-    assert store.saved is not None
+    assert store.saved == {
+        "lookback_days": 180, "refine_rounds": 1, "max_combos": 2000,
+    }
 
 
 # ------------------------------------------------- RecursionError / depth
