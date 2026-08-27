@@ -88,6 +88,23 @@ def test_a_cost_free_snapshot_stamps_false_and_round_trips(tmp_path):
     assert len(got["bars"]) == 8
 
 
+def test_a_disabled_cost_gate_still_pins(tmp_path):
+    """block_high_cost off stores max_cost_pct_of_risk=0. That is not a
+    missing measurement - the live gate is off. 27.08 00:00 class of miss
+    if write() still demanded a positive threshold.
+    """
+    pin = _pin()
+    pin["charge_costs"] = False
+    pin["max_cost_pct_of_risk"] = 0.0
+    path = tmp_path / "x.npz"
+    write(path, symbol="GER40", timeframe="M30", bars=_bars(),
+          info={"point": 0.1, "tick_value": 1.0, "tick_size": 0.1},
+          min_stop=0.5, spread_scale=3.35, spread_scale_n=400, **pin)
+    got = read(path)
+    assert got["max_cost_pct_of_risk"] == 0.0
+    assert got["charge_costs"] is False
+
+
 def test_importing_the_snapshot_does_not_load_metatrader5():
     """Replay process must not import the MT5 binding. Isolated so other
     tests that already imported engine cannot poison sys.modules."""

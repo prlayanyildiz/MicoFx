@@ -1774,6 +1774,24 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def opt_cancel() -> dict[str, Any]:
         return optimizer.cancel()
 
+    def _refuse_if_bot_open(detail: str) -> None:
+        """409 while this process's magics still have tickets.
+
+        Capture must not pin across live fills. Restart/shutdown with opens
+        first-sights the trail and killed tonight's search (21:20 / 21:43 /
+        ~21:59). A wedged MT5 bind (connected False) skips the check so the
+        recovery POST can still run.
+        """
+        if not client.connected:
+            return
+        magics = {c.magic for c in list(store.symbols.values())}
+        pos = client.positions()
+        if not client.connected:
+            return
+        n = sum(1 for p in pos if p.get("magic") in magics)
+        if n:
+            raise HTTPException(409, f"acik pozisyon var ({n}) - {detail}")
+
     @app.post("/api/holdout/capture")
     def holdout_capture() -> dict[str, Any]:
         """Pin holdout bars through the live client. Night restart calls this.
@@ -1786,6 +1804,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             raise HTTPException(409, "optimizasyon calisirken holdout capture yok")
         if not client.connected:
             raise HTTPException(409, "MT5 baglantisi yok")
+        _refuse_if_bot_open("holdout capture yok")
         if not _holdout_capture_lock.acquire(blocking=False):
             raise HTTPException(409, "holdout capture zaten calisiyor")
         try:
@@ -1972,6 +1991,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/app/shutdown")
     def app_shutdown() -> dict[str, Any]:
+        _refuse_if_bot_open("kapatma yok")
         LOG.emit("Kapatma istegi alindi.", "WARN")
         optimizer.cancel()
         engine.shutdown()
@@ -1986,6 +2006,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/app/restart")
     def app_restart() -> dict[str, Any]:
+        _refuse_if_bot_open("restart yok")
         LOG.emit("Yeniden baslatma istegi alindi.", "WARN")
         # Kill used to skip this: last_opt_job stayed "running" and the OPT
         # cancel line never landed. Persist happens inside cancel() so a

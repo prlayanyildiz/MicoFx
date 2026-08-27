@@ -91,6 +91,9 @@ class _Cli:
     def min_stop_distance(self, s):
         return 0.5
 
+    def positions(self, magic=None, symbol=None):
+        return list(getattr(self, "open_pos", []) or [])
+
 
 class _Eng:
     def __init__(self):
@@ -142,6 +145,15 @@ def test_capture_endpoint_refuses_when_mt5_is_down():
     res = _capture(_tc(client=client))
     assert res.status_code == 409
     assert "mt5" in res.json()["detail"].lower()
+
+
+def test_capture_endpoint_refuses_while_a_bot_ticket_is_open():
+    """Night pin must not run across live fills (AGENTS + 27.08 book)."""
+    client = _Cli()
+    client.open_pos = [{"ticket": 1, "magic": 1, "symbol": "GER40"}]
+    res = _capture(_tc(client=client))
+    assert res.status_code == 409
+    assert "acik pozisyon" in res.json()["detail"].lower()
 
 
 def test_a_second_capture_is_refused_while_one_runs(monkeypatch):

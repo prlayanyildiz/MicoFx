@@ -40,8 +40,9 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   fallback.
 - Session / day-end / daily-loss flatten are settled (owner 09.08).
 - `trail_start_atr <= trail_step_atr` is legal; do not ban it.
-- Do not holdout-capture with positions open. Do not start a live search
-  unasked.
+- Do not holdout-capture with positions open. `POST /api/holdout/capture`
+  is **409** while this process's magics still have tickets. Do not start
+  a live search unasked.
 - Tests must not append `logs/micofx.log` or `logs/gece_restart.log`.
   `gece_restart.say()` tests must patch the log path. Disk sink is off
   until `run.py` calls `LOG.enable_disk()`; ad-hoc `import micofx` must
@@ -52,7 +53,10 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - **8 families.** Do not re-add `alpha_trend` or `mavilim`. `st_trend`
   and `macd_flip` retired 26.08 (never applied, not live). `ichimoku`
   stays. Leftover DB names fail closed (no signal), they do not crash.
-- **No restart while positions are open.** `track()` first-sights
+- **No restart while positions are open.** `POST /api/app/restart` and
+  `/api/app/shutdown` are **409** while this process's magics still have
+  tickets (MT5 down still allowed so a wedged bind can recover).
+  `gece_restart` still taskkills at midnight. `track()` first-sights
   missing `open_original_sl` to the *current trail*.
 
 ## Validation before finishing

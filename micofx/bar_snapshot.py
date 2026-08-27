@@ -69,8 +69,10 @@ def write(path: Path, *, symbol: str, timeframe: str, bars: Bars,
     if segs < 2:
         raise ValueError(f"segments must be >= 2, got {segments!r}")
     threshold = float(max_cost_pct_of_risk)
-    if not np.isfinite(threshold) or threshold <= 0:
-        raise ValueError(f"max_cost_pct_of_risk must be positive, got {max_cost_pct_of_risk!r}")
+    if not np.isfinite(threshold) or threshold < 0:
+        raise ValueError(f"max_cost_pct_of_risk must be >= 0, got {max_cost_pct_of_risk!r}")
+    # 0 is a live operator choice (block_high_cost off). Refusing it used to
+    # skip the night pin the same way charge_costs=False did on 27.08 00:00.
     if not isinstance(config, dict) or not config:
         raise ValueError("config must be a non-empty dict (SymbolConfig.to_dict)")
     path.parent.mkdir(parents=True, exist_ok=True)
