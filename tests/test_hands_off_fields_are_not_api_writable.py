@@ -129,6 +129,10 @@ def test_operator_system_dials_still_write():
     res = tc.post("/api/system", json={"max_margin_usage_pct": 55.0})
     assert res.status_code == 200, res.text
     assert store.system.max_margin_usage_pct == 55.0
+    res = tc.post("/api/system", json={"max_positions": 2, "max_lot": 0.5})
+    assert res.status_code == 200, res.text
+    assert store.system.max_positions == 2
+    assert store.system.max_lot == 0.5
 
 
 def test_autostart_mt5_is_writable():

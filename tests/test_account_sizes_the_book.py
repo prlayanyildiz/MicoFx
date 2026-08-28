@@ -1,12 +1,9 @@
-"""Account risk% sizes the book. Per-symbol lot/slot caps are gone.
+"""Account risk% sizes the book. Per-symbol leftover caps stay unread.
 
-Operator 27.08: max_lot, max_positions, fixed lot and the risk% dial leave
-the panel and the HTTP door. lot_for still reads stored risk_percent against
-balance. Leftover total slot cap is unread. Operator 28.08: same-side stack
-on one symbol is the unvalidated 13.08 book (four NAS 0.1). Live is one
-ticket per symbol, matching search max_open=1. Leftover max_positions stays
-unread so a DB 5/10 cannot return. Min-lot pin may use the 3x overshoot
-headroom when an account picture is present — not a second ticket.
+Operator 28.08: System tab holds max_positions (default 1) and max_lot
+(0 = off). Leftover symbol max_lot / max_positions (DB 5/10) stay unread
+so they cannot restack. Min-lot pin may use the 3x overshoot headroom
+when an account picture is present — not a second ticket.
 """
 from __future__ import annotations
 
@@ -28,8 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_JS = (ROOT / "micofx" / "web" / "static" / "app.js").read_text(encoding="utf-8")
 HTML = (ROOT / "micofx" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
 
-GONE = ("lot_mode", "fixed_lot", "max_lot", "max_positions", "symbol_daily_loss_pct",
-        "risk_percent")
+GONE = ("lot_mode", "fixed_lot", "symbol_daily_loss_pct", "risk_percent")
+# max_lot / max_positions live on the system tab (28.08), not the symbol card.
 
 
 class _LotClient:
@@ -91,6 +88,9 @@ def test_position_card_does_not_offer_sizing_dials():
     assert "Pozisyon Boyutu" not in APP_JS
     for k in GONE:
         assert f'k: "{k}"' not in APP_JS, f"{k} still on the symbol card"
+    sys_block = APP_JS[APP_JS.index("const SYS_FIELDS"): APP_JS.index("const SYS_FIELDS_ADVANCED")]
+    assert 'k: "max_lot"' in sys_block
+    assert 'k: "max_positions"' in sys_block
 
 
 def test_panel_and_html_do_not_offer_the_removed_dials():
@@ -189,6 +189,22 @@ def test_lot_for_skips_when_margin_ceiling_is_below_broker_min():
     assert "atlandi" in note
 
 
+def test_lot_for_honours_system_max_lot():
+    cfg = SymbolConfig(
+        symbol="XAUUSD", magic=1, risk_percent=1.0, max_lot=50.0,
+    )
+    store = _LotStore(cfg)
+    store.system.max_lot = 0.3
+    store.system.max_margin_usage_pct = 0.0
+    risk = RiskManager.__new__(RiskManager)
+    risk.store = store
+    risk.client = _LotClient()
+    # 10_000 * 1% / (1 * 10) = 10 lots; system tavan 0.3
+    lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=10_000.0)
+    assert lot == pytest.approx(0.3)
+    assert "lot tavan" in note
+
+
 def test_lot_for_uses_overshoot_headroom_when_account_is_present():
     """Min-lot pin with a live account uses the 3x skip bound as size.
 
@@ -230,7 +246,7 @@ def test_lot_for_without_a_stop_skips_instead_of_using_fixed_lot():
 
 
 def test_can_open_refuses_a_second_same_side_ticket():
-    """One idea, one ticket. Leftover max_positions=10 must not stack."""
+    """System default 1. Leftover symbol max_positions=10 must not stack."""
     cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=10)
     store = _LotStore(cfg)
     risk = RiskManager.__new__(RiskManager)
@@ -241,6 +257,23 @@ def test_can_open_refuses_a_second_same_side_ticket():
     blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
     assert not blocked.ok
     assert "sembol pozisyon limiti" in blocked.reason
+
+
+def test_can_open_honours_system_max_positions():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=1)
+    store = _LotStore(cfg)
+    store.system.max_positions = 2
+    risk = RiskManager.__new__(RiskManager)
+    risk.store = store
+    risk.client = _LotClient()
+    existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
+    account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 0.0}
+    allowed = risk.can_open(cfg, "buy", 0.1, existing, account)
+    assert allowed.ok, allowed.reason
+    existing.append({"ticket": 101, "symbol": "XAUUSD", "magic": 1, "side": "buy"})
+    blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
+    assert not blocked.ok
+    assert "(2)" in blocked.reason
 
 
 def test_can_open_ignores_leftover_total_slot_cap():

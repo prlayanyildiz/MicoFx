@@ -16,6 +16,8 @@ HTML = (ROOT / "micofx" / "web" / "templates" / "index.html").read_text(encoding
 
 KEEP_SYS = (
     "max_margin_usage_pct",
+    "max_positions",
+    "max_lot",
 )
 
 HANDS_OFF_SYS = (

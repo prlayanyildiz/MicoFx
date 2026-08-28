@@ -472,6 +472,17 @@ class RiskManager:
                 lot = auto
                 note += f" | marj tavan {auto:.3f}"
         lot = min(lot, ceiling)
+        try:
+            sys_lot = float(getattr(self.store.system, "max_lot", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            sys_lot = 0.0
+        if sys_lot > 0:
+            if sys_lot + 1e-12 < floor:
+                return 0.0, (f"lot sifir ({note}, lot tavan {sys_lot:g} "
+                             f"< min {floor:g}), islem atlandi")
+            if lot > sys_lot:
+                lot = sys_lot
+                note += f" | lot tavan {sys_lot:g}"
         return self.client.normalize_volume(cfg.symbol, lot), note
 
     def _risk_raw_lot(self, cfg: SymbolConfig, sl_distance: float, balance: float,
@@ -621,10 +632,17 @@ class RiskManager:
         if any(p["side"] != side for p in same_symbol):
             return Verdict(False, "ters yonde acik pozisyon var")
         if same_symbol:
-            # Search scores max_open=1. Leftover max_positions (5/10) stays
-            # unread so a DB remnant cannot restack the 13.08 book. Same
-            # idea, same direction, already open → this ticket is the hand.
-            return Verdict(False, "sembol pozisyon limiti (1)")
+            # Search scores max_open=1. Leftover symbol max_positions (5/10)
+            # stays unread so a DB remnant cannot restack. The live cap is
+            # SystemConfig.max_positions (panel, default 1).
+            # Live cap is SystemConfig.max_positions (sys_cfg.max_positions).
+            try:
+                cap = int(getattr(sys_cfg, "max_positions", 1) or 1)
+            except (TypeError, ValueError):
+                cap = 1
+            cap = max(1, cap)
+            if len(same_symbol) >= cap:
+                return Verdict(False, f"sembol pozisyon limiti ({cap})")
 
         # Leftover max_total_positions is unread. Another *name* may still
         # open until margin / STOPSUZ (and scalp/swing only when those

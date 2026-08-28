@@ -4,8 +4,8 @@ const FIELD_HELP = {
   "lot_mode": "Sabit lot mu, bakiye yuzdesi mi. Risk modunda lot SL mesafesine gore hesaplanir.",
   "fixed_lot": "Her giriste bu lot. Risk modunda kullanilmaz.",
   "risk_percent": "Kartta yok. Lot = kayitli yuzde / (SL mesafesi x pip). Degistirme HTTP 400.",
-  "max_lot": "Okunmaz. Lot tavanı kalan marj (pozisyon free_slots ile aynı bütçe) ve broker volume_max; leftover sayı bağlamaz. HTTP 400.",
-  "max_positions": "Okunmaz. Ayni sembolde yigilma eszamanli 1R / toplam / marj ile; HTTP 400.",
+  "max_lot": "Sistem tavanı. 0 = kapali (risk% + kalan marj + broker). Leftover sembol max_lot okunmaz; sembol POST 400.",
+  "max_positions": "Ayni sembol, ayni yon, en fazla bu kadar bilet. 1 = aramanin dogruladigi. Leftover sembol max_positions (5/10) okunmaz; sembol POST 400.",
   "symbol_daily_loss_pct": "Bu sembol bugun bakiyenin bu kadarini kaybedince, hesabin genel gunluk limiti dolmasa bile sadece bu sembolde yeni giris durur. 0 = kapali.",
 
   "strategy": "Sinyal ailesi. Degistirmek yeni giris kuralini degistirir; acik pozisyonun trail/SL'i eski aileyle yonetilmeye devam eder (apply acikken aile degisimi bekler).",

@@ -426,12 +426,13 @@ def stop_fill_price(is_buy: bool, sl: float, bar_open: float,
 
 
 def max_open_from_cfg(cfg) -> int:
-    """Search still scores one open ticket. Live matches that count.
+    """Search still scores one open ticket. Live default matches that count.
 
     Operator 27.08 dropped per-symbol ``max_positions``. Leftover DB values
     must not re-open a stacking search the holdout never validated. Live
-    ``can_open`` is one ticket per symbol (same as this); leftover 5/10
-    stay unread. Paper stays one-at-a-time so existing scores stay honest.
+    ``can_open`` reads ``SystemConfig.max_positions`` (panel, default 1);
+    leftover symbol 5/10 stay unread. Paper stays one-at-a-time so existing
+    scores stay honest.
     """
     return 1
 

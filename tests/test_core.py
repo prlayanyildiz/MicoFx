@@ -228,6 +228,8 @@ def test_simulate_has_no_time_stop():
 class _FakeSystem:
     lot_multiplier = 1.0
     size_by_edge = False
+    max_positions = 1
+    max_lot = 0.0
 
 
 class _FakeStore:

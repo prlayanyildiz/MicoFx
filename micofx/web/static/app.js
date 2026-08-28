@@ -1656,6 +1656,8 @@ async function saveAI(patch, flashNode) {
 
 const SYS_FIELDS = [
   { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
+  { k: "max_positions", label: "Sembol basi pozisyon", t: "int", min: 1, max: 20 },
+  { k: "max_lot", label: "Lot tavani (0=kapali)", t: "num", step: 0.01, min: 0, max: 100 },
 ];
 
 // Plumbing and settled valves left the panel 27.08. Values stay on

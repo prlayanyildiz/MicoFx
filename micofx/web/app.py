@@ -187,6 +187,8 @@ _INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "
 _SYSTEM_RISK_BOUNDS = {
     "lot_multiplier": (0.0, 50.0, False),
     "max_margin_usage_pct": (0.0, 100.0, True),   # 0 = uncapped (falls back to free margin), valid
+    "max_positions": (1, 20, True),
+    "max_lot": (0.0, 100.0, True),   # 0 = off
     "daily_loss_pct": (0.0, 100.0, True),   # 0 = disabled, valid
     "max_concurrent_risk_pct": (0.0, 100.0, True),  # 0 = disabled, valid
     "daily_profit_pct": (0.0, 100.0, True),  # 0 = disabled, valid
@@ -417,6 +419,8 @@ _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
 # returns them for the readout / pending_exit_patch kuyruk.
 _OPERATOR_SYSTEM_FIELDS = frozenset({
     "max_margin_usage_pct",
+    "max_positions",
+    "max_lot",
     "backup_dir", "backup_dir_secondary", "backup_keep",
     "mt5_terminal_path", "autostart_mt5",
 })

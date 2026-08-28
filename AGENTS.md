@@ -82,11 +82,12 @@ Fail-first: write the test, watch it fail, then implement.
   leverage, account lock, daily brake, live flatten-all.
 - HTTP writes match the panel. Symbol POST: sessions +
   `enabled` / `group` / `broker_symbol`. System POST: `max_margin_usage_pct`
-  / `mt5_terminal_path` / `autostart_mt5`.
+  / `max_positions` / `max_lot` / `mt5_terminal_path` / `autostart_mt5`.
   Opt POST: `lookback_days` /
   `refine_rounds` / `max_combos`. Family / TF / exits / magic / grid /
-  lot_mode / max_lot / max_positions / daily_loss_* / size_by_edge /
-  max_concurrent_risk_pct / `max_total_positions` / `risk_percent` are 400. `POST .../reset` is
+  lot_mode / leftover symbol `max_lot` / leftover symbol `max_positions` /
+  daily_loss_* / size_by_edge / max_concurrent_risk_pct /
+  `max_total_positions` / `risk_percent` are 400. `POST .../reset` is
   400. GET still returns readout fields.
 - `POST /api/opt/run` `strategies` is **one-off**. Empty inherits the
   saved list. Do not persist a subset into `opt_params`. `apply_best`
@@ -133,10 +134,10 @@ Fail-first: write the test, watch it fail, then implement.
   `force=True`. `execution.flush()` sits on the same side of `join`.
   Do not flush either blob before `_stop.set()` — the last in-flight
   cycle then hits a fresh window and drops its rows.
-- Leftover `max_positions` is unread (DB 5/10 must not return). Live is
-  one ticket per symbol, same as search `max_open=1`. Same-side stack is
-  gone. Leftover `max_concurrent_risk_pct` and `max_total_positions`
-  stay unread.
+- Leftover per-symbol `max_positions` / `max_lot` stay unread (DB 5/10
+  must not return). Live reads `SystemConfig.max_positions` (default 1)
+  and `SystemConfig.max_lot` (0 = off). Leftover `max_concurrent_risk_pct`
+  and `max_total_positions` stay unread. Search still scores `max_open=1`.
 - Do not add an adverse-fill entry gate on `fill_vs_signal_close_r`.
   Walk-forward is fill-next-open (zero variance). Claude 18:45: Q4
   looks cursed in-sample; threshold scan is a curve-fit; unverifiable.

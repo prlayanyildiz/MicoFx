@@ -161,9 +161,9 @@ class SymbolConfig:
     aroon_length: int = 14
 
     # Leftover DB keys. lot_for uses risk_percent against balance, then the
-    # remaining-margin ceiling (same budget as free_slots). can_open is one
-    # ticket per symbol (search max_open=1); leftover max_positions unread.
-    # HTTP 400.
+    # remaining-margin ceiling, then SystemConfig.max_lot (0 = off).
+    # can_open reads SystemConfig.max_positions (default 1). Leftover
+    # per-symbol max_lot / max_positions unread. HTTP 400.
     lot_mode: str = "risk"
     fixed_lot: float = 0.01
     risk_percent: float = 0.5        # % of balance at 1R (the live size knob)
@@ -643,6 +643,10 @@ class SystemConfig:
     lot_multiplier: float = 1.0       # scales every symbol's size at once
     size_by_edge: bool = False        # weight each symbol by holdout net R / max DD
     max_margin_usage_pct: float = 45.0
+    # Operator 28.08: system-tab caps. Leftover per-symbol max_lot /
+    # max_positions stay unread (DB 5/10 must not restack). 0 lot = off.
+    max_positions: int = 1           # same-side tickets per symbol
+    max_lot: float = 0.0             # 0 = off (risk% + remaining margin)
     daily_loss_pct: float = 3.0
     # When the loss guard trips, force-close what is still open instead of
     # only blocking new entries - otherwise the day's damage keeps floating
