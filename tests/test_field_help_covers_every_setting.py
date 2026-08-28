@@ -38,6 +38,7 @@ def test_every_setting_key_has_a_help_entry():
         "OPT_SETTING_FIELDS",
         "SYS_FIELDS", "SYS_FIELDS_ADVANCED",
         "BACKUP_FIELDS", "MT5_PATH_FIELDS",
+        "POSITION_SECTION",
     ):
         for k in _keys(_block(name)):
             if k not in help_keys:
@@ -46,7 +47,7 @@ def test_every_setting_key_has_a_help_entry():
         want = f"ai.{k}" if k in opt else k
         if want not in help_keys and k not in help_keys:
             missing.append(want)
-    for extra in ("use_sessions", "flat_before_close_min"):
+    for extra in ("use_sessions", "flat_before_close_min", "max_margin_pct"):
         if extra not in help_keys:
             missing.append(extra)
     assert missing == [], f"FIELD_HELP missing: {missing}"

@@ -102,15 +102,20 @@ def test_saving_opt_params_does_not_wipe_the_grid():
 
 def test_stop_overlays_are_not_on_the_symbol_card():
     """Operator 27.08: readout was noise. Hours stay. Search still writes exits."""
-    start = APP_JS.index("function buildSymbolCard")
+    start = APP_JS.index("const POSITION_SECTION")
     card = APP_JS[start:APP_JS.index("function applySymbolFilter")]
     assert "Stop ve Overlay" not in card
     assert "EXIT_SECTION" not in APP_JS
     assert "function buildReadout" not in APP_JS
     assert "sl_atr_mult" not in card
     assert "Ileri duzey / Strateji" not in card
-    assert "POSITION_SECTION" not in APP_JS
-    assert "Pozisyon Boyutu" not in card
+    assert "Pozisyon Boyutu" in card
+    assert 'k: "max_lot"' in card
+    assert 'k: "max_margin_pct"' in card
+    assert 'k: "risk_percent"' not in card
+    assert 'k: "lot_mode"' not in card
+    assert 'k: "fixed_lot"' not in card
+    assert 'k: "max_positions"' not in card
     assert "Islem Saatleri" in card
     assert "Varsayilana Don" not in card
 

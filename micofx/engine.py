@@ -153,6 +153,7 @@ _RISK_BLOCK_KEYS: tuple[tuple[str, str], ...] = (
     ("ters yonde acik pozisyon", "risk_ters_yon"),
     ("toplam pozisyon limiti", "risk_toplam_limit"),
     ("pozisyon limiti", "risk_kova_limiti"),      # scalp/swing bucket
+    ("sembol marj limiti", "risk_sembol_marj"),
     ("marj hesaplanamadi", "risk_marj_okunamadi"),
     ("serbest marj yetersiz", "risk_serbest_marj"),
     ("marj kullanimi limiti", "risk_marj_kullanimi"),
@@ -2567,7 +2568,7 @@ class Engine:
         if sys.block_high_cost and sys.max_cost_pct_of_risk > 0:
             lot_probe, _ = self.risk.lot_for(
                 cfg, sl_dist, account.get("balance", 0.0),
-                account=account, side=side)
+                account=account, side=side, positions=self._positions)
             if lot_probe > 0:
                 r_value = sl_dist * self.client.money_per_price_unit(cfg.symbol, lot_probe)
                 cost = cfg.commission_per_lot * lot_probe
@@ -2580,7 +2581,7 @@ class Engine:
 
         lot, note = self.risk.lot_for(
             cfg, sl_dist, account.get("balance", 0.0), ai_scale=scale,
-            account=account, side=side)
+            account=account, side=side, positions=self._positions)
         if sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
             logged = getattr(self, "_sl_floor_logged", None)
             if logged is None:

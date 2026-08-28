@@ -993,6 +993,32 @@ function buildDayPicker(cfg) {
   return wrap;
 }
 
+const POSITION_SECTION = {
+  title: "Pozisyon Boyutu",
+  fields: [
+    { k: "max_lot", t: "num", label: "Maks lot (0=kapali)", step: 0.01, min: 0, max: 100 },
+    { k: "max_margin_pct", t: "num", label: "Sembol marji % (0=kapali)", step: 0.1, min: 0, max: 100 },
+  ],
+};
+
+function buildField(cfg, spec) {
+  const input = el("input", {
+    type: "number",
+    step: spec.t === "int" ? 1 : (spec.step ?? 0.01),
+    min: spec.min,
+    max: spec.max,
+  });
+  input.dataset.key = spec.k;
+  input.value = cfg[spec.k];
+  input.addEventListener("change", () => {
+    const raw = input.value;
+    const value = spec.t === "int" ? parseInt(raw, 10) : parseFloat(raw);
+    if (!isFinite(value)) { input.value = cfg[spec.k]; return; }
+    saveSymbol(cfg.symbol, { [spec.k]: value }, input);
+  });
+  return titled(el("div", { class: "field" }, [el("label", { text: spec.label }), input]), spec.k);
+}
+
 function buildSymbolCard(cfg) {
   const card = el("div", { class: "scard", "data-symbol": cfg.symbol });
 
@@ -1017,6 +1043,11 @@ function buildSymbolCard(cfg) {
   card.appendChild(head);
 
   const body = el("div", { class: "scard-body" });
+
+  body.appendChild(el("div", { class: "subgrid" }, [
+    el("div", { class: "title", text: POSITION_SECTION.title }),
+    el("div", { class: "form-grid" }, POSITION_SECTION.fields.map((f) => buildField(cfg, f))),
+  ]));
 
   const useSessions = el("input", { type: "checkbox" });
   useSessions.checked = !!cfg.use_sessions;
@@ -1657,7 +1688,7 @@ async function saveAI(patch, flashNode) {
 const SYS_FIELDS = [
   { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
   { k: "max_positions", label: "Sembol basi pozisyon", t: "int", min: 1, max: 20 },
-  { k: "max_lot", label: "Lot tavani (0=kapali)", t: "num", step: 0.01, min: 0, max: 100 },
+  { k: "max_lot", label: "Kitap lot tavani (0=kapali)", t: "num", step: 0.01, min: 0, max: 100 },
 ];
 
 // Plumbing and settled valves left the panel 27.08. Values stay on

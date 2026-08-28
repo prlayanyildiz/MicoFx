@@ -213,6 +213,15 @@ def test_position_sizing_is_not_writable():
     assert store.symbols["XAUUSD"].risk_percent == before
 
 
+def test_symbol_lot_and_margin_caps_are_writable():
+    """Operator 28.08: per-symbol ceilings on the card. 0 = denetci + risk%."""
+    tc, store, _ = _client()
+    res = tc.post("/api/symbols/XAUUSD", json={"max_lot": 0.5, "max_margin_pct": 15.0})
+    assert res.status_code == 200, res.text
+    assert store.symbols["XAUUSD"].max_lot == 0.5
+    assert store.symbols["XAUUSD"].max_margin_pct == 15.0
+
+
 def test_enabled_still_writes():
     tc, store, _ = _client()
     res = tc.post("/api/symbols/XAUUSD", json={"enabled": False})

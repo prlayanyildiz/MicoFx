@@ -349,16 +349,36 @@ class RiskManager:
             return 1.0
         return max(self.EDGE_MIN, min(self.EDGE_MAX, (mine / reference) ** 0.5))
 
+    def _used_symbol_margin(self, cfg: SymbolConfig,
+                            positions: list[dict[str, Any]] | None) -> float:
+        """Open margin on this symbol's broker name. Bad rows count as zero."""
+        used = 0.0
+        broker = self.client.resolve(cfg.symbol)
+        for pos in positions or ():
+            if pos.get("symbol") != broker:
+                continue
+            try:
+                vol = float(pos.get("volume") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if vol <= 0:
+                continue
+            try:
+                used += float(self.client.margin_for(
+                    cfg.symbol, vol, str(pos.get("side") or "buy")) or 0.0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return used
+
     def _margin_lot_ceiling(self, cfg: SymbolConfig, account: dict[str, Any] | None,
                             side: str, floor: float,
-                            broker_ceiling: float) -> float | None:
+                            broker_ceiling: float,
+                            positions: list[dict[str, Any]] | None = None) -> float | None:
         """Lots that still fit remaining margin. None = no extra cap.
 
-        Same budget ``capacity`` uses for free_slots: leftover ``max_lot`` is
-        unread, so the kasa (equity × max_margin_usage_pct, minus used,
-        minus min_free_margin) is the live ceiling. One ticket per symbol;
-        this is size, not a second hand. A missing or all-zero account
-        picture must not size to zero (MT5 blip).
+        Book budget is equity × max_margin_usage_pct minus used. When
+        ``cfg.max_margin_pct`` > 0 this symbol also has its own slice
+        (equity × that % minus this symbol's open margin). 0 = off.
         """
         if not account:
             return None
@@ -377,6 +397,13 @@ class RiskManager:
         else:
             margin_budget = free
         budget = max(0.0, min(margin_budget, free - float(sys_cfg.min_free_margin or 0.0)))
+        try:
+            sym_pct = float(getattr(cfg, "max_margin_pct", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            sym_pct = 0.0
+        if equity > 0 and sym_pct > 0:
+            used_sym = self._used_symbol_margin(cfg, positions)
+            budget = min(budget, max(0.0, equity * sym_pct / 100.0 - used_sym))
         unit = floor if floor > 0 else 0.01
         try:
             need = float(self.client.margin_for(cfg.symbol, unit, side) or 0.0)
@@ -388,7 +415,8 @@ class RiskManager:
 
     def lot_for(self, cfg: SymbolConfig, sl_distance: float, balance: float,
                ai_scale: float = 1.0, account: dict[str, Any] | None = None,
-               side: str = "buy") -> tuple[float, str]:
+               side: str = "buy",
+               positions: list[dict[str, Any]] | None = None) -> tuple[float, str]:
         """Resolve the order volume, returning (lot, explanation).
 
         ``ai_scale`` (the supervisor's watch/hour/drawdown throttle) has to be
@@ -420,9 +448,8 @@ class RiskManager:
         multiplier *= edge
         multiplier *= max(0.0, float(ai_scale))
 
-        # Account risk% only. Leftover lot_mode/fixed_lot/max_lot on the row
-        # are unread: a constant lot cannot see the kasa, and a typed ceiling
-        # used to clip the percent the operator still sets.
+        # Account risk% × denetci (edge + ai_scale). max_lot / max_margin_pct
+        # are ceilings the operator (or leftover DB) set; 0 = off.
         if sl_distance <= 0:
             return 0.0, "lot sifir (stop yok), islem atlandi"
         raw, multiplier, note_edge_capped, money_per_unit = self._risk_raw_lot(
@@ -455,7 +482,8 @@ class RiskManager:
             note += f" | avantaj x{edge:.2f}"
         if ai_scale != 1.0:
             note += f" | AI x{ai_scale:.2f}"
-        auto = self._margin_lot_ceiling(cfg, account, side, floor, ceiling)
+        auto = self._margin_lot_ceiling(
+            cfg, account, side, floor, ceiling, positions=positions)
         if auto is not None:
             if auto + 1e-12 < floor:
                 return 0.0, (f"lot sifir ({note}, marj tavani {auto:g} "
@@ -483,6 +511,17 @@ class RiskManager:
             if lot > sys_lot:
                 lot = sys_lot
                 note += f" | lot tavan {sys_lot:g}"
+        try:
+            cfg_lot = float(getattr(cfg, "max_lot", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            cfg_lot = 0.0
+        if cfg_lot > 0:
+            if cfg_lot + 1e-12 < floor:
+                return 0.0, (f"lot sifir ({note}, lot tavan {cfg_lot:g} "
+                             f"< min {floor:g}), islem atlandi")
+            if lot > cfg_lot:
+                lot = cfg_lot
+                note += f" | lot tavan {cfg_lot:g}"
         return self.client.normalize_volume(cfg.symbol, lot), note
 
     def _risk_raw_lot(self, cfg: SymbolConfig, sl_distance: float, balance: float,
@@ -674,6 +713,15 @@ class RiskManager:
             projected = (used + need) / equity * 100.0
             if projected > sys_cfg.max_margin_usage_pct:
                 return Verdict(False, f"marj kullanimi limiti (%{projected:.1f} > %{sys_cfg.max_margin_usage_pct:g})")
+        try:
+            sym_pct = float(getattr(cfg, "max_margin_pct", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            sym_pct = 0.0
+        if equity > 0 and sym_pct > 0:
+            used_sym = self._used_symbol_margin(cfg, same_symbol)
+            projected_sym = (used_sym + need) / equity * 100.0
+            if projected_sym > sym_pct:
+                return Verdict(False, f"sembol marj limiti (%{projected_sym:.1f} > %{sym_pct:g})")
 
         # Leftover max_concurrent_risk_pct is unread. Lot is risk% of
         # balance; same-symbol already blocked above.
@@ -781,7 +829,8 @@ class RiskManager:
                 cfg.sl_atr_mult, cfg.symbol, autopsies)
             sl_dist = max(atr * sl_mult, self.client.min_stop_distance(cfg.symbol)) \
                 if atr > 0 else 0.0
-            lot, lot_note = self.lot_for(cfg, sl_dist, balance, account=account)
+            lot, lot_note = self.lot_for(cfg, sl_dist, balance, account=account,
+                                         positions=mine)
             if sl_dist <= 0:
                 lot_note = "risk (ATR bekleniyor)"
             elif sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:

@@ -167,6 +167,8 @@ _SYMBOL_RISK_BOUNDS = {
     # 0.0 for a non-positive value - which is exactly why nothing caught this:
     # the backtest looked fine while the live gates were off.
     "commission_per_lot": (0.0, 10000.0, True),
+    "max_lot": (0.0, 100.0, True),
+    "max_margin_pct": (0.0, 100.0, True),
 }
 
 # Indicator lengths. Separate from the table above because that one guards
@@ -427,6 +429,7 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",
     "enabled", "group", "broker_symbol",
+    "max_lot", "max_margin_pct",
 })
 _OPERATOR_OPT_FIELDS = frozenset({
     "lookback_days", "refine_rounds", "max_combos",

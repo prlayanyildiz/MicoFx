@@ -32,6 +32,7 @@ from micofx.engine import _risk_block_key
 @pytest.mark.parametrize("reason,key", [
     ("sembol pozisyon limiti (10)", "risk_sembol_limiti"),
     ("sembol pozisyon limiti (1)", "risk_sembol_limiti"),
+    ("sembol marj limiti (%12.0 > %10)", "risk_sembol_marj"),
     ("ters yonde acik pozisyon var", "risk_ters_yon"),
     ("toplam pozisyon limiti (100)", "risk_toplam_limit"),
     ("scalp pozisyon limiti (3)", "risk_kova_limiti"),
