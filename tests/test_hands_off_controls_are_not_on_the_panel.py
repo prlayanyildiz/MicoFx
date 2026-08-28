@@ -16,12 +16,12 @@ HTML = (ROOT / "micofx" / "web" / "templates" / "index.html").read_text(encoding
 
 KEEP_SYS = (
     "max_margin_usage_pct",
-    "max_positions",
-    "max_lot",
 )
 
 HANDS_OFF_SYS = (
     "max_total_positions",
+    "max_positions",
+    "max_lot",
     "lot_multiplier", "trade_all_hours", "day_end_flatten_min",
     "close_on_stop", "autostart_bot", "daily_profit_pct",
     "max_concurrent_risk_pct",
@@ -112,10 +112,10 @@ def test_stop_overlays_are_not_on_the_symbol_card():
     assert "Pozisyon Boyutu" in card
     assert 'k: "max_lot"' in card
     assert 'k: "max_margin_pct"' in card
+    assert 'k: "max_positions"' in card
     assert 'k: "risk_percent"' not in card
     assert 'k: "lot_mode"' not in card
     assert 'k: "fixed_lot"' not in card
-    assert 'k: "max_positions"' not in card
     assert "Islem Saatleri" in card
     assert "Varsayilana Don" not in card
 

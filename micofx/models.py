@@ -161,10 +161,9 @@ class SymbolConfig:
     aroon_length: int = 14
 
     # lot_for: risk_percent, then remaining-margin (book + this symbol's
-    # max_margin_pct), then min(cfg.max_lot, SystemConfig.max_lot) if > 0.
-    # 0 max_lot = off (denetci + risk% boyutlar). Leftover max_positions
-    # unread; live count is SystemConfig.max_positions. HTTP: max_lot and
-    # max_margin_pct writable on the symbol card; max_positions stays system.
+    # max_margin_pct), then cfg.max_lot if > 0. 0 max_lot = off (denetci +
+    # risk% boyutlar). Live count is cfg.max_positions (card). Search still
+    # scores max_open=1. SystemConfig.max_positions / max_lot are unread.
     lot_mode: str = "risk"
     fixed_lot: float = 0.01
     risk_percent: float = 0.5        # % of balance at 1R (the live size knob)
@@ -645,11 +644,10 @@ class SystemConfig:
     lot_multiplier: float = 1.0       # scales every symbol's size at once
     size_by_edge: bool = False        # weight each symbol by holdout net R / max DD
     max_margin_usage_pct: float = 45.0
-    # Operator 28.08: system-tab count + book-wide lot ceiling. Per-symbol
-    # max_lot / max_margin_pct live on the symbol card (0 = off). Leftover
-    # symbol max_positions (DB 5/10) stays unread so it cannot restack.
-    max_positions: int = 1           # same-side tickets per symbol
-    max_lot: float = 0.0             # 0 = off (risk% + remaining margin)
+    # Leftover system-tab count/lot (28.08) unread. Live caps are the
+    # symbol card: cfg.max_positions, cfg.max_lot, cfg.max_margin_pct.
+    max_positions: int = 1           # unread leftover; do not restack from here
+    max_lot: float = 0.0             # unread leftover; symbol card binds
     daily_loss_pct: float = 3.0
     # When the loss guard trips, force-close what is still open instead of
     # only blocking new entries - otherwise the day's damage keeps floating

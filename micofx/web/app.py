@@ -169,6 +169,7 @@ _SYMBOL_RISK_BOUNDS = {
     "commission_per_lot": (0.0, 10000.0, True),
     "max_lot": (0.0, 100.0, True),
     "max_margin_pct": (0.0, 100.0, True),
+    "max_positions": (1, 10, True),
 }
 
 # Indicator lengths. Separate from the table above because that one guards
@@ -421,15 +422,13 @@ _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
 # returns them for the readout / pending_exit_patch kuyruk.
 _OPERATOR_SYSTEM_FIELDS = frozenset({
     "max_margin_usage_pct",
-    "max_positions",
-    "max_lot",
     "backup_dir", "backup_dir_secondary", "backup_keep",
     "mt5_terminal_path", "autostart_mt5",
 })
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",
     "enabled", "group", "broker_symbol",
-    "max_lot", "max_margin_pct",
+    "max_lot", "max_margin_pct", "max_positions",
 })
 _OPERATOR_OPT_FIELDS = frozenset({
     "lookback_days", "refine_rounds", "max_combos",

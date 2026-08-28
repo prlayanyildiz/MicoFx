@@ -61,12 +61,12 @@ def test_the_cooldown_only_ever_pushes_the_resume_later():
 
 # ------------------------------------------------- what enforces it live
 
-def test_the_live_gate_does_not_count_per_symbol_slots():
-    """Leftover symbol max_positions stays unread; live reads SystemConfig."""
-    assert "if len(same_symbol) >= cfg.max_positions:" not in RISK
+def test_the_live_gate_reads_the_symbol_slot_cap():
+    """Card max_positions binds. Search still scores max_open=1."""
+    assert 'getattr(cfg, "max_positions"' in RISK
     assert "eszamanli risk limiti" not in RISK
     assert "sembol pozisyon limiti (" in RISK
-    assert "sys_cfg.max_positions" in RISK
+    assert "sys_cfg.max_positions" not in RISK
 
 
 def test_the_opposite_direction_block_is_still_there():

@@ -324,8 +324,8 @@ def test_lot_for_risk_mode_fails_closed_without_tick_value():
 
 # --------------------------------------------------------------------------- can_open / position counts
 
-def test_can_open_leftover_symbol_limit_does_not_read_the_db_cap():
-    """Leftover max_positions=1 is unread; live still refuses a second hand."""
+def test_can_open_symbol_limit_reads_the_card_cap():
+    """Card max_positions=1 refuses a second same-side ticket."""
     store = _FakeStore()
     store.system = _FakeSystem()
     cfg = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=1)

@@ -501,17 +501,6 @@ class RiskManager:
                 note += f" | marj tavan {auto:.3f}"
         lot = min(lot, ceiling)
         try:
-            sys_lot = float(getattr(self.store.system, "max_lot", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            sys_lot = 0.0
-        if sys_lot > 0:
-            if sys_lot + 1e-12 < floor:
-                return 0.0, (f"lot sifir ({note}, lot tavan {sys_lot:g} "
-                             f"< min {floor:g}), islem atlandi")
-            if lot > sys_lot:
-                lot = sys_lot
-                note += f" | lot tavan {sys_lot:g}"
-        try:
             cfg_lot = float(getattr(cfg, "max_lot", 0.0) or 0.0)
         except (TypeError, ValueError):
             cfg_lot = 0.0
@@ -671,12 +660,11 @@ class RiskManager:
         if any(p["side"] != side for p in same_symbol):
             return Verdict(False, "ters yonde acik pozisyon var")
         if same_symbol:
-            # Search scores max_open=1. Leftover symbol max_positions (5/10)
-            # stays unread so a DB remnant cannot restack. The live cap is
-            # SystemConfig.max_positions (panel, default 1).
-            # Live cap is SystemConfig.max_positions (sys_cfg.max_positions).
+            # Search still scores max_open=1. Live count is cfg.max_positions
+            # on the symbol card. Leftover DB 5/10 binds — operator must set 1
+            # or the 13.08 stack returns. SystemConfig.max_positions is unread.
             try:
-                cap = int(getattr(sys_cfg, "max_positions", 1) or 1)
+                cap = int(getattr(cfg, "max_positions", 1) or 1)
             except (TypeError, ValueError):
                 cap = 1
             cap = max(1, cap)

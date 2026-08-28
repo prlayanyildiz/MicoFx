@@ -129,10 +129,16 @@ def test_operator_system_dials_still_write():
     res = tc.post("/api/system", json={"max_margin_usage_pct": 55.0})
     assert res.status_code == 200, res.text
     assert store.system.max_margin_usage_pct == 55.0
+
+
+def test_system_lot_and_position_caps_are_not_writable():
+    tc, store, _ = _client()
+    before_pos = store.system.max_positions
+    before_lot = store.system.max_lot
     res = tc.post("/api/system", json={"max_positions": 2, "max_lot": 0.5})
-    assert res.status_code == 200, res.text
-    assert store.system.max_positions == 2
-    assert store.system.max_lot == 0.5
+    assert res.status_code == 400, res.text
+    assert store.system.max_positions == before_pos
+    assert store.system.max_lot == before_lot
 
 
 def test_autostart_mt5_is_writable():
@@ -216,10 +222,13 @@ def test_position_sizing_is_not_writable():
 def test_symbol_lot_and_margin_caps_are_writable():
     """Operator 28.08: per-symbol ceilings on the card. 0 = denetci + risk%."""
     tc, store, _ = _client()
-    res = tc.post("/api/symbols/XAUUSD", json={"max_lot": 0.5, "max_margin_pct": 15.0})
+    res = tc.post("/api/symbols/XAUUSD", json={
+        "max_lot": 0.5, "max_margin_pct": 15.0, "max_positions": 1,
+    })
     assert res.status_code == 200, res.text
     assert store.symbols["XAUUSD"].max_lot == 0.5
     assert store.symbols["XAUUSD"].max_margin_pct == 15.0
+    assert store.symbols["XAUUSD"].max_positions == 1
 
 
 def test_enabled_still_writes():

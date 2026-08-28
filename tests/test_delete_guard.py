@@ -497,13 +497,12 @@ def test_patch_refuses_max_positions_out_of_range():
     assert res.status_code == 400
 
 
-def test_patch_refuses_max_positions_even_inside_the_old_cap():
-    """Operator 27.08: the dial left HTTP. 10 used to be a live write."""
+def test_patch_accepts_max_positions_inside_the_card_cap():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
-    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 10})
-    assert res.status_code == 400
+    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 1})
+    assert res.status_code == 200, res.text
     assert store.symbols["XAUUSD"].max_positions == 1
 
 
