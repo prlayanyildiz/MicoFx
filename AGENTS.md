@@ -133,9 +133,10 @@ Fail-first: write the test, watch it fail, then implement.
   `force=True`. `execution.flush()` sits on the same side of `join`.
   Do not flush either blob before `_stop.set()` — the last in-flight
   cycle then hits a fresh window and drops its rows.
-- Leftover `max_positions`, `max_concurrent_risk_pct` and
-  `max_total_positions` are unread. Live stacks until margin / reverse.
-  Search still scores `max_open=1`.
+- Leftover `max_positions` is unread (DB 5/10 must not return). Live is
+  one ticket per symbol, same as search `max_open=1`. Same-side stack is
+  gone. Leftover `max_concurrent_risk_pct` and `max_total_positions`
+  stay unread.
 - Do not add an adverse-fill entry gate on `fill_vs_signal_close_r`.
   Walk-forward is fill-next-open (zero variance). Claude 18:45: Q4
   looks cursed in-sample; threshold scan is a curve-fit; unverifiable.

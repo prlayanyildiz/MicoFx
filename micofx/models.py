@@ -161,8 +161,9 @@ class SymbolConfig:
     aroon_length: int = 14
 
     # Leftover DB keys. lot_for uses risk_percent against balance, then the
-    # remaining-margin ceiling (same budget as free_slots). can_open stacks
-    # until margin / reverse / STOPSUZ. HTTP 400.
+    # remaining-margin ceiling (same budget as free_slots). can_open is one
+    # ticket per symbol (search max_open=1); leftover max_positions unread.
+    # HTTP 400.
     lot_mode: str = "risk"
     fixed_lot: float = 0.01
     risk_percent: float = 0.5        # % of balance at 1R (the live size knob)
@@ -633,7 +634,7 @@ class SystemConfig:
 
     # ---- account-level guards ----
     # Leftover ticket-count ceiling. Unread by can_open (27.08 evening).
-    # Kept so old DB rows load; stacking binds on margin / reverse / STOPSUZ.
+    # Kept so old DB rows load; live is one ticket per symbol, not this cap.
     max_total_positions: int = 60
     # Separate leftover sub-caps for scalp (burst, M5) vs swing. 0 disables
     # a sub-cap (live both 0 = off).

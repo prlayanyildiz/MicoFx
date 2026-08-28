@@ -62,9 +62,10 @@ def test_the_cooldown_only_ever_pushes_the_resume_later():
 # ------------------------------------------------- what enforces it live
 
 def test_the_live_gate_does_not_count_per_symbol_slots():
-    """Operator 27.08: leftover max_positions and concurrent 1R are unread."""
+    """Leftover max_positions stays unread; live is still one ticket per name."""
     assert "if len(same_symbol) >= cfg.max_positions:" not in RISK
     assert "eszamanli risk limiti" not in RISK
+    assert "sembol pozisyon limiti (1)" in RISK
 
 
 def test_the_opposite_direction_block_is_still_there():
@@ -74,6 +75,6 @@ def test_the_opposite_direction_block_is_still_there():
 
 
 def test_the_leftover_total_slot_cap_is_unread():
-    """Operator 27.08 evening: stacking until margin / reverse / STOPSUZ."""
+    """Book-wide leftover max_total_positions stays unread."""
     assert "len(mine) >= sys_cfg.max_total_positions" not in RISK
     assert "toplam pozisyon limiti" not in RISK

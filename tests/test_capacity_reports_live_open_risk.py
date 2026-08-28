@@ -33,6 +33,7 @@ class _Store:
         self.system.max_concurrent_risk_pct = 8.0
         self.symbols = {
             "XAUUSD": SymbolConfig(symbol="XAUUSD", magic=1, max_positions=10),
+            "GER40": SymbolConfig(symbol="GER40", magic=2, max_positions=10),
         }
 
     def get_setting(self, key, default=None):
@@ -110,7 +111,7 @@ def test_the_leftover_ceiling_is_still_in_the_payload():
 
 def test_leftover_cap_does_not_refuse_when_reported_risk_is_over_it():
     risk = RiskManager(_Store(), _Client())
-    cfg = risk.store.symbols["XAUUSD"]
+    cfg = risk.store.symbols["GER40"]
     book = [_pos(sl=1925.0)]
     reported = risk.capacity(book, ACCOUNT)["open_risk_pct"]
     assert reported == 7.5

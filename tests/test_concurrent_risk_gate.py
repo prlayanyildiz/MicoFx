@@ -1,8 +1,7 @@
 """Leftover max_concurrent_risk_pct must not refuse an entry.
 
 Operator 27.08: the 30% book-wide 1R ceiling is gone. Lot is risk% of
-balance; stacking stops on margin / total / reverse / a naked stop.
-A stored 8 or 30 must not still bind.
+balance; same-symbol is one ticket. A stored 8 or 30 must not still bind.
 """
 from __future__ import annotations
 
@@ -27,6 +26,7 @@ class _Store:
         self.system.max_concurrent_risk_pct = 8.0
         self.symbols = {
             "XAUUSD": SymbolConfig(symbol="XAUUSD", magic=1, max_positions=10),
+            "GER40": SymbolConfig(symbol="GER40", magic=2, max_positions=10),
         }
 
     def get_setting(self, key, default=None):
@@ -57,7 +57,7 @@ def _pos(sl: float, entry: float = 2000.0, volume: float = 1.0, side: str = "buy
 def test_leftover_eight_percent_does_not_refuse_a_fat_book():
     """1R remaining = 7.5% plus a 1% entry used to trip 8. Now it must pass."""
     risk = RiskManager(_Store(), _Client())
-    cfg = risk.store.symbols["XAUUSD"]
+    cfg = risk.store.symbols["GER40"]
     open_now = [_pos(sl=1925.0)]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
     allowed = risk.can_open(cfg, "buy", 1.0, open_now, account, sl_distance=10.0)
@@ -69,7 +69,7 @@ def test_leftover_thirty_percent_is_unread_too():
     store = _Store()
     store.system.max_concurrent_risk_pct = 30.0
     risk = RiskManager(store, _Client())
-    cfg = store.symbols["XAUUSD"]
+    cfg = store.symbols["GER40"]
     open_now = [_pos(sl=1925.0)]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
     allowed = risk.can_open(cfg, "buy", 1.0, open_now, account, sl_distance=400.0)

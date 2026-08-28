@@ -322,8 +322,8 @@ def test_lot_for_risk_mode_fails_closed_without_tick_value():
 
 # --------------------------------------------------------------------------- can_open / position counts
 
-def test_can_open_leftover_symbol_limit_does_not_block():
-    """max_positions leftover=1 must not refuse a second same-side ticket."""
+def test_can_open_leftover_symbol_limit_does_not_read_the_db_cap():
+    """Leftover max_positions=1 is unread; live still refuses a second hand."""
     store = _FakeStore()
     store.system = _FakeSystem()
     cfg = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=1)
@@ -338,8 +338,9 @@ def test_can_open_leftover_symbol_limit_does_not_block():
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
 
-    allowed = risk.can_open(cfg, "buy", 0.1, existing, account)
-    assert allowed.ok, allowed.reason
+    blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
+    assert not blocked.ok
+    assert "sembol pozisyon limiti" in blocked.reason
 
 
 def test_can_open_bucket_uses_primary_strategy_only():
@@ -350,7 +351,9 @@ def test_can_open_bucket_uses_primary_strategy_only():
     store = _FakeStore()
     store.system = _FakeSystem()
     primary = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=5)
-    store.symbols = {"XAUUSD": primary}
+    ger = _cfg(symbol="GER40", magic=2, strategy="burst", max_positions=5)
+    nas = _cfg(symbol="NAS100", magic=3, strategy="stoch_flip", max_positions=5)
+    store.symbols = {"XAUUSD": primary, "GER40": ger, "NAS100": nas}
     store.system.max_scalp_positions = 1
     store.system.max_swing_positions = 1
     store.system.max_total_positions = 10
@@ -361,11 +364,11 @@ def test_can_open_bucket_uses_primary_strategy_only():
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
 
-    scalp_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="burst", max_positions=5)
+    scalp_cfg = _cfg(symbol="GER40", magic=2, strategy="burst", max_positions=5)
     scalp = risk.can_open(scalp_cfg, "buy", 0.1, existing, account)
     assert scalp.ok  # leftover sits in the swing bucket now
 
-    swing_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=5)
+    swing_cfg = _cfg(symbol="NAS100", magic=3, strategy="stoch_flip", max_positions=5)
     swing = risk.can_open(swing_cfg, "buy", 0.1, existing, account)
     assert not swing.ok
     assert "swing" in swing.reason
@@ -374,7 +377,8 @@ def test_can_open_bucket_uses_primary_strategy_only():
 def test_can_open_allows_when_bucket_not_full():
     store = _FakeStore()
     primary = _cfg(symbol="XAUUSD", magic=1, strategy="stoch_flip", max_positions=5)
-    store.symbols = {"XAUUSD": primary}
+    ger = _cfg(symbol="GER40", magic=2, strategy="burst", max_positions=5)
+    store.symbols = {"XAUUSD": primary, "GER40": ger}
     store.system.max_scalp_positions = 2
     store.system.max_swing_positions = 5
     store.system.max_total_positions = 10
@@ -385,7 +389,7 @@ def test_can_open_allows_when_bucket_not_full():
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 1000.0, "margin_free": 1000.0, "margin": 0.0}
 
-    new_cfg = _cfg(symbol="XAUUSD", magic=1, strategy="burst", max_positions=5)
+    new_cfg = _cfg(symbol="GER40", magic=2, strategy="burst", max_positions=5)
     verdict = risk.can_open(new_cfg, "buy", 0.1, existing, account)
     assert verdict.ok
 

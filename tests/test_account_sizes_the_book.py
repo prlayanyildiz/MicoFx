@@ -2,8 +2,11 @@
 
 Operator 27.08: max_lot, max_positions, fixed lot and the risk% dial leave
 the panel and the HTTP door. lot_for still reads stored risk_percent against
-balance. can_open stacks same-direction tickets until margin / reverse /
-STOPSUZ bind. Leftover total slot cap is unread too.
+balance. Leftover total slot cap is unread. Operator 28.08: same-side stack
+on one symbol is the unvalidated 13.08 book (four NAS 0.1). Live is one
+ticket per symbol, matching search max_open=1. Leftover max_positions stays
+unread so a DB 5/10 cannot return. Min-lot pin may use the 3x overshoot
+headroom when an account picture is present — not a second ticket.
 """
 from __future__ import annotations
 
@@ -186,6 +189,29 @@ def test_lot_for_skips_when_margin_ceiling_is_below_broker_min():
     assert "atlandi" in note
 
 
+def test_lot_for_uses_overshoot_headroom_when_account_is_present():
+    """Min-lot pin with a live account uses the 3x skip bound as size.
+
+    Without account, 0.05 raw still floors to 0.1 (test_core / zero_guard).
+    Live NAS 28.08 was four 0.1 tickets of that pin; one ticket at 0.15 is
+    the headroom the skip already allowed, not a second hand.
+    """
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=0.5, max_lot=0.1)
+    store = _LotStore(cfg)
+    store.system.max_margin_usage_pct = 90.0
+    store.system.min_free_margin = 0.0
+    risk = RiskManager.__new__(RiskManager)
+    risk.store = store
+    risk.client = _LinearMarginClient()
+    # 100 * 0.5% / (1 * 10) = 0.05 raw; floor 0.1; 3x headroom 0.15
+    account = {"equity": 1000.0, "margin": 0.0, "margin_free": 1000.0}
+    lot, note = risk.lot_for(
+        cfg, sl_distance=1.0, balance=100.0, account=account)
+    assert lot == pytest.approx(0.15)
+    assert lot > 0.1
+    assert "taban" in note
+
+
 def test_lot_for_does_not_zero_size_when_account_picture_is_missing():
     cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=1.0, max_lot=0.2)
     lot, _ = _risk(cfg).lot_for(
@@ -203,27 +229,31 @@ def test_lot_for_without_a_stop_skips_instead_of_using_fixed_lot():
     assert "atlandi" in note
 
 
-def test_can_open_allows_a_second_same_side_ticket():
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=1)
+def test_can_open_refuses_a_second_same_side_ticket():
+    """One idea, one ticket. Leftover max_positions=10 must not stack."""
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=10)
     store = _LotStore(cfg)
     risk = RiskManager.__new__(RiskManager)
     risk.store = store
     risk.client = _LotClient()
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 0.0}
-    allowed = risk.can_open(cfg, "buy", 0.1, existing, account)
-    assert allowed.ok, allowed.reason
+    blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
+    assert not blocked.ok
+    assert "sembol pozisyon limiti" in blocked.reason
 
 
 def test_can_open_ignores_leftover_total_slot_cap():
-    """Operator: no 100-ticket ceiling; margin / reverse / STOPSUZ bind."""
+    """Book-wide leftover max_total_positions is unread; another *name* may open."""
     cfg = SymbolConfig(symbol="XAUUSD", magic=1)
+    other = SymbolConfig(symbol="GER40", magic=2)
     store = _LotStore(cfg)
+    store.symbols[other.symbol] = other
     store.system.max_total_positions = 1
     risk = RiskManager.__new__(RiskManager)
     risk.store = store
     risk.client = _LotClient()
-    existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
+    existing = [{"ticket": 100, "symbol": "GER40", "magic": 2, "side": "buy"}]
     account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 0.0}
     allowed = risk.can_open(cfg, "buy", 0.1, existing, account)
     assert allowed.ok, allowed.reason

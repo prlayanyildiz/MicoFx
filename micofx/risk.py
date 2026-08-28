@@ -356,9 +356,9 @@ class RiskManager:
 
         Same budget ``capacity`` uses for free_slots: leftover ``max_lot`` is
         unread, so the kasa (equity × max_margin_usage_pct, minus used,
-        minus min_free_margin) is the live ceiling - the way position count
-        already stacks until margin / reverse / STOPSUZ. A missing or
-        all-zero account picture must not size to zero (MT5 blip).
+        minus min_free_margin) is the live ceiling. One ticket per symbol;
+        this is size, not a second hand. A missing or all-zero account
+        picture must not size to zero (MT5 blip).
         """
         if not account:
             return None
@@ -460,6 +460,14 @@ class RiskManager:
             if auto + 1e-12 < floor:
                 return 0.0, (f"lot sifir ({note}, marj tavani {auto:g} "
                              f"< min {floor:g}), islem atlandi")
+            # Live book 28.08: four NAS 0.1 of the same pin. Spend the
+            # skip-bound headroom on THIS ticket (account picture required
+            # so a blip does not size up). Without account, keep the floor.
+            if raw < floor:
+                head = min(raw * self.MAX_MIN_LOT_OVERSHOOT, ceiling, auto)
+                if head > lot + 1e-12:
+                    lot = head
+                    note += f" | taban {floor:g}->{lot:.3f}"
             if lot > auto:
                 lot = auto
                 note += f" | marj tavan {auto:.3f}"
@@ -612,10 +620,15 @@ class RiskManager:
         same_symbol = [p for p in mine if p["symbol"] == self.client.resolve(cfg.symbol)]
         if any(p["side"] != side for p in same_symbol):
             return Verdict(False, "ters yonde acik pozisyon var")
+        if same_symbol:
+            # Search scores max_open=1. Leftover max_positions (5/10) stays
+            # unread so a DB remnant cannot restack the 13.08 book. Same
+            # idea, same direction, already open → this ticket is the hand.
+            return Verdict(False, "sembol pozisyon limiti (1)")
 
-        # Leftover max_total_positions is unread. Stacking binds on
-        # margin / reverse / STOPSUZ (and scalp/swing only when those
-        # leftover caps are > 0). Search still scores max_open=1.
+        # Leftover max_total_positions is unread. Another *name* may still
+        # open until margin / STOPSUZ (and scalp/swing only when those
+        # leftover caps are > 0).
 
         # Scalp and swing share margin but are a different bet shape -
         # many small M5 fills vs a few multi-hour holds - so a run of
@@ -645,7 +658,7 @@ class RiskManager:
                 return Verdict(False, f"marj kullanimi limiti (%{projected:.1f} > %{sys_cfg.max_margin_usage_pct:g})")
 
         # Leftover max_concurrent_risk_pct is unread. Lot is risk% of
-        # balance; stacking stops on margin / reverse / STOPSUZ.
+        # balance; same-symbol already blocked above.
 
         return Verdict(True)
 
