@@ -399,30 +399,8 @@ def parabolic_sar(high: np.ndarray, low: np.ndarray,
     return np.asarray(direction, dtype=np.int8)
 
 
-def aroon(high: np.ndarray, low: np.ndarray, length: int) -> np.ndarray:
-    """Aroon oscillator: 100 * (bars-since-highest-high - bars-since-lowest-low) / length.
 
-    Nothing else in this file reads *time since the last extreme* - every
-    other family measures a price level, a spread, or a deviation. Aroon
-    measures how recently a high/low was set, so it can read "this trend is
-    aging" (both sides drifting toward zero) or "brand new extreme just
-    printed" (one side pinned at +-100) in a way none of the price-based
-    reads can.
-    """
-    n = high.size
-    length = max(1, int(length))
-    osc = np.zeros(n, dtype=np.float64)
-    win = length + 1
-    if n < win:
-        return osc
-    h_win = sliding_window_view(high, win)
-    l_win = sliding_window_view(low, win)
-    up_idx = np.argmax(h_win, axis=1)     # 0 = extreme at window start (oldest), length = current bar
-    dn_idx = np.argmin(l_win, axis=1)
-    aroon_up = 100.0 * up_idx / length
-    aroon_dn = 100.0 * dn_idx / length
-    osc[win - 1:] = aroon_up - aroon_dn
-    return osc
+
 
 
 def adx(high: np.ndarray, low: np.ndarray, close: np.ndarray, length: int) -> np.ndarray:

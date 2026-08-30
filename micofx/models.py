@@ -31,6 +31,11 @@ from typing import Any
 # is a R/day number, not a spread number.
 TIMEFRAMES = ["M5", "M15", "M30"]
 READABLE_TIMEFRAMES = ["M5", "M15", "M30"]
+# Default search bag. M5 stays in TIMEFRAMES so a live row (SpotBrent
+# stoch_flip/M5, 28.08) remains legal and a one-off run can still name it.
+# Overnight 00:06 paid 8 families × M5 plus the 90k-bar fetch retry; operator
+# dropped that retry as unproductive.
+SEARCH_TIMEFRAMES = ["M15", "M30"]
 GROUPS = ["forex", "index", "commodity", "crypto", "stock"]
 
 
@@ -92,7 +97,7 @@ class SymbolConfig:
     timeframe: str = "M5"
     broker_symbol: str = ""          # override when the broker renames an instrument
     # mtf_pullback | burst | dual_t3 | t3_flip | stoch_flip
-    # | parabolic_flip | aroon_flip | ichimoku
+    # | parabolic_flip | ichimoku
     # (see models.STRATEGIES)
     # Default is the live majority: three of six symbols run stoch_flip, and
     # a seed has to carry a name the enum check will still accept.
@@ -157,13 +162,10 @@ class SymbolConfig:
     psar_af_step: float = 0.02
     psar_af_max: float = 0.2
 
-    # ---- Aroon oscillator zero-cross ----
-    aroon_length: int = 14
-
-    # lot_for: risk_percent, then remaining-margin (book + this symbol's
-    # max_margin_pct), then cfg.max_lot if > 0. 0 max_lot = off (denetci +
-    # risk% boyutlar). Live count is cfg.max_positions (card). Search still
-    # scores max_open=1. SystemConfig.max_positions / max_lot are unread.
+    # lot_for: remaining-margin share across vacant names, clipped by
+    # auto 1R (max stored risk_percent, 2%) × denetci. Leftover max_lot /
+    # max_margin_pct / max_positions unread. Live count is 1 ticket/name.
+    # Search still scores max_open=1. SystemConfig.max_positions / max_lot unread.
     lot_mode: str = "risk"
     fixed_lot: float = 0.01
     risk_percent: float = 0.5        # % of balance at 1R (the live size knob)
@@ -298,6 +300,10 @@ class SymbolConfig:
     # applied automatically (by the engine) the moment that magic is next
     # seen flat. Empty dict = nothing pending.
     pending_exit_patch: dict = field(default_factory=dict)
+    # Family/TF apply held the same way. Same-family refine already staged
+    # exits in pending_exit_patch; a family swap used to return an error and
+    # drop the winner (28.08 NAS100 burst/M30). Empty dict = nothing pending.
+    pending_primary_patch: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -349,6 +355,8 @@ class SymbolConfig:
         cfg.opt_summary = summary if isinstance(summary, dict) else {}
         pending = payload.get("pending_exit_patch")
         cfg.pending_exit_patch = pending if isinstance(pending, dict) else {}
+        primary = payload.get("pending_primary_patch")
+        cfg.pending_primary_patch = primary if isinstance(primary, dict) else {}
         # Explicit so JSON null and a missing key both stay None, and a stored
         # false does not collapse into that. _coerce skips None values, which
         # is the right default, but bool|None is a UnionType whose name is
@@ -526,8 +534,17 @@ OPT_FIELDS = [
     # than leaving it disabled at the group default.
     "max_spread_atr",
     "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
-    "psar_af_step", "psar_af_max", "aroon_length",
+    "psar_af_step", "psar_af_max",
 ]
+
+# Keys Optimizer.apply() may stage onto pending_primary_patch, and the only
+# keys Engine may copy onto the live row when that patch lands. Magic,
+# enabled, sessions and the rest stay off this list so a restored or
+# hand-edited blob cannot change identity through the queue.
+PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
+    "strategy", "timeframe", "opt_score", "opt_updated_at", "opt_summary",
+    "validated",
+}
 
 # Leftover names fail closed at compute() (no signal). Do not re-add
 # retired families: they were never applied live and each still cost a
@@ -538,9 +555,12 @@ OPT_FIELDS = [
 # 6x6x5 product multiplied their grids (t3_stoch to ~1.43e9 against a 2000
 # budget, coverage 0.0001), and none was live on a symbol.
 # ichimoku stayed (GER 208 trades, +27.9 R, PF 1.21).
+# aroon_flip 28.08 - slowest sweep (~800s), worst validated holdout (~21 R
+# median), 1/7 applied, never live on a symbol; its aroon() indicator and
+# aroon_length axis went with it (no other reader).
 STRATEGIES = ["mtf_pullback", "burst", "dual_t3",
               "t3_flip", "stoch_flip",
-              "parabolic_flip", "aroon_flip",
+              "parabolic_flip",
               "ichimoku"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
@@ -644,8 +664,9 @@ class SystemConfig:
     lot_multiplier: float = 1.0       # scales every symbol's size at once
     size_by_edge: bool = False        # weight each symbol by holdout net R / max DD
     max_margin_usage_pct: float = 45.0
-    # Leftover system-tab count/lot (28.08) unread. Live caps are the
-    # symbol card: cfg.max_positions, cfg.max_lot, cfg.max_margin_pct.
+    # Leftover system-tab count/lot unread. Live: 1 ticket/name, lot from
+    # remaining book margin × denetci. cfg.max_positions / max_lot /
+    # max_margin_pct leftover unread (do not restack 5/10).
     max_positions: int = 1           # unread leftover; do not restack from here
     max_lot: float = 0.0             # unread leftover; symbol card binds
     daily_loss_pct: float = 3.0

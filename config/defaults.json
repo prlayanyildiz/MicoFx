@@ -386,7 +386,6 @@
     "plateau_weight": 0.5,
     "refine_rounds": 5,
     "timeframes": [
-      "M5",
       "M15",
       "M30"
     ],
@@ -397,7 +396,6 @@
       "t3_flip",
       "stoch_flip",
       "parabolic_flip",
-      "aroon_flip",
       "ichimoku"
     ],
     "strategy_grids": {
@@ -573,6 +571,16 @@
           3,
           5
         ],
+        "htf_factor": [
+          0,
+          3,
+          6
+        ],
+        "adx_min": [
+          0.0,
+          15.0,
+          20.0
+        ],
         "sl_atr_mult": [
           1.0,
           1.5,
@@ -609,36 +617,15 @@
           0.2,
           0.3
         ],
-        "sl_atr_mult": [
-          1.0,
-          1.5,
-          2.0,
-          2.5,
-          3.0
+        "htf_factor": [
+          0,
+          3,
+          6
         ],
-        "trail_start_atr": [
-          0.3,
-          0.5,
-          0.8,
-          1.0,
-          1.4,
-          2.0
-        ],
-        "trail_step_atr": [
-          0.4,
-          0.6,
-          0.8,
-          1.2,
-          1.6,
-          2.2
-        ]
-      },
-      "aroon_flip": {
-        "aroon_length": [
-          9,
-          14,
-          21,
-          25
+        "adx_min": [
+          0.0,
+          15.0,
+          20.0
         ],
         "sl_atr_mult": [
           1.0,

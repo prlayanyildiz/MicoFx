@@ -26,3 +26,10 @@ def test_a_family_that_reads_htf_still_scales_required_bars():
     wide = Params(strategy="burst", htf_mode="t3", htf_factor=6)
     narrow = Params(strategy="burst", htf_mode="t3", htf_factor=1)
     assert required_bars(wide) > required_bars(narrow)
+
+
+def test_stoch_flip_scales_required_bars_with_htf():
+    assert "htf_factor" in opt_fields_read("stoch_flip")
+    wide = Params(strategy="stoch_flip", htf_mode="t3", htf_factor=6)
+    narrow = Params(strategy="stoch_flip", htf_mode="t3", htf_factor=1)
+    assert required_bars(wide) > required_bars(narrow)

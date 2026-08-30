@@ -184,7 +184,7 @@ _SYMBOL_RISK_BOUNDS = {
 # carry "0 disables" in models.py - and bounding those at 1 would refuse the
 # live US500 config. A length has no such reading: an average over no bars is
 # a mistake, not a disabled filter.
-_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "aroon_length", "adx_length", "atr_length", "trail_lookback"), (1, 10000, True))
+_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "adx_length", "atr_length", "trail_lookback"), (1, 10000, True))
 
 
 _SYSTEM_RISK_BOUNDS = {
@@ -409,12 +409,14 @@ def _exit_axes(body: dict[str, Any], names: Any = None):
 
 
 # Engine-internal bookkeeping: Optimizer.apply() writes pending_exit_patch
-# to defer exit/risk fields until a position is flat (see
+# to defer exit/risk fields until a position is flat, and
+# pending_primary_patch to defer a family/TF swap the same way (see
 # Engine._apply_pending_exits). pending_secondary_exit_patch is a leftover
 # key from the retired second leg - still rejected so an old client cannot
 # stage it. They carry no schema of their own, so a client PATCHing this
 # field directly could stage ANY symbol field to land later.
-_INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch")
+_INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch",
+                         "pending_primary_patch")
 
 # Panel-visible writes. Search apply() / Store still own the rest; this is
 # not _INTERNAL_ONLY_FIELDS (that tuple is pending-exit staging). Family,
@@ -428,10 +430,9 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",
     "enabled", "group", "broker_symbol",
-    "max_lot", "max_margin_pct", "max_positions",
 })
 _OPERATOR_OPT_FIELDS = frozenset({
-    "lookback_days", "refine_rounds", "max_combos",
+    "lookback_days", "refine_rounds", "max_combos", "timeframes",
 })
 _OPERATOR_AI_FIELDS = frozenset({"enabled"})
 
@@ -1347,7 +1348,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             "Henuz kapanis otopisi yok - sayac bu surumle basladi."
             if not n else
             f"{n} kapanis"
-            + (f"; masada birakilan toplam {left:.2f} R" if left is not None else "")
+            + (f"; kazananlarda masada birakilan {left:.2f} R"
+               if left is not None else "")
         )
         return {"ok": True, **data}
 
@@ -1727,9 +1729,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/opt/params")
     def set_opt_params(body: dict[str, Any]) -> dict[str, Any]:
-        # Panel only offers lookback / refine / max_combos. Grid, min_trades
-        # and the rest stay in the saved blob; apply() still reads them.
+        # Panel only offers lookback / refine / max_combos / timeframes. Grid,
+        # min_trades and the rest stay in the saved blob; apply() still reads them.
         _reject_hands_off_fields(body, _OPERATOR_OPT_FIELDS)
+        if "timeframes" in body:
+            raw = body["timeframes"]
+            if not isinstance(raw, list) or not raw:
+                raise HTTPException(400, "timeframes bos olamaz")
+            unknown = [str(t) for t in raw if str(t) not in TIMEFRAMES]
+            if unknown:
+                raise HTTPException(400, f"timeframes gecersiz: {', '.join(unknown)}")
+            body["timeframes"] = [str(t) for t in raw]
         # These parameters drive the walk-forward search that ultimately
         # writes live trading params via apply() - same NaN/Infinity class of
         # risk as the symbol-level fields. strategy_grids/grid nest their

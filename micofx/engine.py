@@ -12,6 +12,9 @@ from .execution import ExecutionMonitor
 from .exits import harvest_trail_step, overlay_stop
 from .logbus import LOG
 from .models import (
+    PRIMARY_LAND_KEYS,
+    STRATEGIES,
+    TIMEFRAMES,
     SymbolConfig,
     invalid_exit_param,
     is_scalp_strategy,
@@ -40,7 +43,7 @@ _CASH_FLOW_TTL = 30.0
 _TERMINAL_FLAGS_TTL = 5.0
 _PANEL_STATE_KEYS = (
     "symbol", "atr", "adx", "t3_rising", "htf", "k", "d", "signal",
-    "bars_ready", "note", "session", "spread_atr",
+    "bars_ready", "note", "entry_block", "session", "spread_atr",
 )
 
 # A cooldown is meant to stop the same setup re-firing on the next bar or two,
@@ -260,7 +263,8 @@ class SymbolState:
             "signal": self.signal,
             "signal_source": self.signal_source,
             "primary_signal": self.primary_signal,
-            "bars_ready": self.bars_ready, "note": self.note, "session": self.session,
+            "bars_ready": self.bars_ready, "note": self.note,
+            "entry_block": self.entry_block, "session": self.session,
             "spread": round(self.spread, 6), "spread_atr": round(self.spread_atr, 3),
             "last_signal_at": self.last_signal_at,
         }
@@ -3448,14 +3452,14 @@ class Engine:
             LOG.emit(detail, "TRADE", report["symbol"])
 
     def _apply_pending_exits(self) -> None:
-        """Land exit/risk params an optimizer apply() held back while a position was open.
+        """Land apply() patches that were held back while a position was open.
 
-        ``Optimizer.apply()`` stores the held-back fields in
-        ``cfg.pending_exit_patch`` instead of applying them immediately. This
-        is the other half of that promise: once the relevant position is no
-        longer open, write them for real. Runs every cycle - cheap
-        (in-memory dict lookups against ``self._positions``, already
-        refreshed this cycle) and self-correcting if a cycle is missed.
+        Same-family exit/risk lives in ``cfg.pending_exit_patch``. A family/TF
+        swap lives in ``cfg.pending_primary_patch`` (the winner used to be
+        dropped because apply() returned an error). Both land the moment this
+        magic is next seen flat. Runs every cycle - cheap (in-memory dict
+        lookups against ``self._positions``, already refreshed this cycle)
+        and self-correcting if a cycle is missed.
         Leftover ``pending_secondary_exit_patch`` is ignored (A3.3); the
         field stays on the model until A4.
         """
@@ -3482,6 +3486,12 @@ class Engine:
         # would silently overwrite that fresh one right back.
         with self.entry_lock:
             for cfg in list(self.store.symbols.values()):
+                if cfg.magic in open_magics:
+                    continue
+                if cfg.pending_primary_patch:
+                    self._land_pending_primary(cfg)
+                    symbols = self.store.symbols
+                    cfg = (symbols.get(cfg.symbol) if hasattr(symbols, "get") else None) or cfg
                 if cfg.pending_exit_patch and cfg.magic not in open_magics:
                     pending = dict(cfg.pending_exit_patch)
                     # Re-validate at the moment of landing, not only where the
@@ -3515,6 +3525,44 @@ class Engine:
                             LOG.emit(f"{cfg.symbol}: bekletilen cikis/risk parametreleri "
                                      f"({', '.join(sorted(pending))}) artik acik pozisyon yok, "
                                      f"uygulandi.", "OPT", cfg.symbol)
+
+    def _land_pending_primary(self, cfg: SymbolConfig) -> None:
+        """Copy a queued family/TF apply onto the live row, or drop it."""
+        pending = dict(cfg.pending_primary_patch or {})
+        land = {k: pending[k] for k in pending if k in PRIMARY_LAND_KEYS}
+        next_strat = land.get("strategy", cfg.strategy)
+        next_tf = land.get("timeframe", cfg.timeframe)
+        drop = {"pending_primary_patch": {}, "pending_exit_patch": {}}
+        if next_strat not in STRATEGIES or next_tf not in TIMEFRAMES:
+            self.store.update_symbol(cfg.symbol, drop, source="motor bekleyen-aile")
+            LOG.emit(f"{cfg.symbol}: bekletilen aile/TF gecersiz "
+                     f"({next_strat}/{next_tf}) - uygulanmadi, mevcut ayar korundu.",
+                     "WARN", cfg.symbol)
+            return
+        tf_allow = self.store.opt_params().get("strategy_timeframes") if hasattr(self.store, "opt_params") else None
+        allow = tf_allow if isinstance(tf_allow, dict) else None
+        if not strategy_allows_timeframe(next_strat, next_tf, allow):
+            self.store.update_symbol(cfg.symbol, drop, source="motor bekleyen-aile")
+            LOG.emit(f"{cfg.symbol}: bekletilen {next_strat}/{next_tf} eslesmesi yasak "
+                     f"- uygulanmadi, mevcut ayar korundu.",
+                     "WARN", cfg.symbol)
+            return
+        bad = invalid_exit_param(land)
+        if bad:
+            self.store.update_symbol(cfg.symbol, drop, source="motor bekleyen-aile")
+            LOG.emit(f"{cfg.symbol}: bekletilen aile/TF cikis parametresi gecersiz "
+                     f"({bad}) - uygulanmadi, mevcut ayar korundu.",
+                     "WARN", cfg.symbol)
+            return
+        updated = self.store.update_symbol(
+            cfg.symbol, {**land, **drop}, source="motor bekleyen-aile")
+        if updated is None:
+            return
+        LOG.emit(f"{cfg.symbol}: bekletilen {next_strat}/{next_tf} "
+                 f"artik acik pozisyon yok, uygulandi.", "OPT", cfg.symbol)
+        opt = getattr(getattr(self, "supervisor", None), "optimizer", None)
+        if opt is not None and hasattr(opt, "_recalibrate_spread_cap"):
+            opt._recalibrate_spread_cap(cfg.symbol, next_tf)
 
     def _close_tracked(self, pos: dict[str, Any], comment: str, leg: str,
                        volume: float | None = None, fill: dict[str, Any] | None = None) -> bool:

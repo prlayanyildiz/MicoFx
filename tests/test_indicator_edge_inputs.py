@@ -117,8 +117,11 @@ def test_the_public_surface_is_what_this_file_thinks_it_is():
     Twenty-three since ``wavetrend`` went with ``wavetrend_flip`` (27.08).
     Checked before lowering the bound: no caller left in ``micofx/`` - the
     only remaining mention is the retirement note in ``models.py``.
+
+    Twenty-two since ``aroon`` went with ``aroon_flip`` (28.08): its only
+    reader was ``IndicatorCache.aroon`` for that one family.
     """
-    assert len(PUBLIC) >= 23, PUBLIC
+    assert len(PUBLIC) >= 22, PUBLIC
     for expected in ("atr", "rsi", "adx", "wilder", "true_range", "supertrend"):
         assert expected in PUBLIC
 

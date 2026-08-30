@@ -429,8 +429,8 @@ def max_open_from_cfg(cfg) -> int:
     """Search still scores one open ticket. Live default matches that count.
 
     Operator 27.08 dropped per-symbol ``max_positions`` from search.
-    Live ``can_open`` reads ``cfg.max_positions`` (symbol card). Paper
-    stays one-at-a-time so existing scores stay honest.
+    Live ``can_open`` is 1 ticket/name (leftover cfg.max_positions unread).
+    Paper stays one-at-a-time so existing scores stay honest.
     """
     return 1
 

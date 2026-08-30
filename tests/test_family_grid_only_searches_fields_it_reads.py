@@ -1,13 +1,10 @@
 """A family must not search OPT axes its compute path never reads.
 
-Found in BO: five live flip symbols carried adx_min / min_body_ratio /
-htf_factor on the panel. Those families never call ``_regime()`` or
-``_trend_gate()``, so the values did nothing. The shared optimizer grid still
-offered ``adx_min`` to every family.
-
-The allow-list is derived by walking ``p.field`` in the family function and
-same-module callees. A hand-written table would drift the same way the dead
-panel fields did. Docstring words such as "no ADX" must not count.
+t3_flip and ichimoku still do not call ``_regime()`` / ``_trend_gate()``.
+The gated flips (stoch/parabolic/aroon) do, via ``_flip_gates``. The
+allow-list is derived by walking ``p.field`` in the family function and
+same-module callees. A hand-written table would drift. Docstring words
+such as "no ADX" must not count.
 """
 from __future__ import annotations
 
@@ -35,9 +32,10 @@ def test_t3_flip_does_not_read_adx_min():
 
 
 def test_a_family_that_calls_regime_does_read_adx_min():
-    # Measured 27.08: burst / dual_t3 / mtf_pullback are the three that call
-    # _regime. stoch_flip does not, so it cannot stand in here.
+    # Measured 28.08: burst / dual_t3 / mtf_pullback / the gated flips
+    # (stoch/parabolic/aroon via _flip_gates) all reach _regime.
     assert "adx_min" in opt_fields_read("burst")
+    assert "adx_min" in opt_fields_read("stoch_flip")
 
 
 def test_no_family_grid_axis_is_unread():

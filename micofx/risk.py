@@ -278,15 +278,15 @@ class RiskManager:
     # 1.80-2.2) - restored to the documented, intentional value.
     EDGE_MIN, EDGE_MAX = 0.6, 2.2
     # Broker minimum lot may force more risk than configured; beyond this
-    # multiple of the intended risk the trade is skipped instead of oversized.
-    # Tightened back from 10.0x: margin usage (system.max_margin_usage_pct) is
-    # a position-count/exposure check, not a per-trade one - it does not catch
-    # a single trade quietly running at, say, 8x its configured risk% because
-    # the broker's floor forced the lot up. 3.0x still tolerates ordinary
-    # broker-granularity rounding (the common case this guard has to let
-    # through) while refusing anything that no longer resembles the
-    # configured risk at all.
+    # multiple of the intended risk the trade is skipped instead of oversized
+    # when no account picture is present. With an account, remaining-margin
+    # share × auto 1R (max stored risk%, 2%) is the size — do not skip a
+    # micro raw that the kasa can actually carry.
     MAX_MIN_LOT_OVERSHOOT = 3.0
+    # Floor of the live 1R cap when the account picture is present. Stored
+    # risk% still wins if it is already higher. Shakeout SL × full-kasa lots
+    # without this bound would blow the account.
+    AUTO_R_PCT = 2.0
 
     def __init__(self, store: Store, client: MT5Client) -> None:
         self.store = store
@@ -349,36 +349,40 @@ class RiskManager:
             return 1.0
         return max(self.EDGE_MIN, min(self.EDGE_MAX, (mine / reference) ** 0.5))
 
-    def _used_symbol_margin(self, cfg: SymbolConfig,
-                            positions: list[dict[str, Any]] | None) -> float:
-        """Open margin on this symbol's broker name. Bad rows count as zero."""
-        used = 0.0
-        broker = self.client.resolve(cfg.symbol)
+    def _vacant_enabled_count(self, positions: list[dict[str, Any]] | None) -> int:
+        """Enabled names that do not already hold one of our tickets.
+
+        Remaining book margin is split across that set so the first signal
+        does not swallow the kasa. Occupied names are 1-ticket already.
+        """
+        magics = {c.magic for c in list(self.store.symbols.values())}
+        occupied: set[str] = set()
         for pos in positions or ():
-            if pos.get("symbol") != broker:
+            if pos.get("magic") not in magics:
                 continue
-            try:
-                vol = float(pos.get("volume") or 0.0)
-            except (TypeError, ValueError):
+            name = pos.get("symbol")
+            if name:
+                occupied.add(str(name))
+        n = 0
+        for cfg in list(self.store.symbols.values()):
+            if not getattr(cfg, "enabled", True):
                 continue
-            if vol <= 0:
+            broker = self.client.resolve(cfg.symbol) or cfg.symbol
+            if broker in occupied:
                 continue
-            try:
-                used += float(self.client.margin_for(
-                    cfg.symbol, vol, str(pos.get("side") or "buy")) or 0.0)
-            except (TypeError, ValueError, AttributeError):
-                continue
-        return used
+            n += 1
+        return max(1, n)
 
     def _margin_lot_ceiling(self, cfg: SymbolConfig, account: dict[str, Any] | None,
                             side: str, floor: float,
                             broker_ceiling: float,
-                            positions: list[dict[str, Any]] | None = None) -> float | None:
-        """Lots that still fit remaining margin. None = no extra cap.
+                            positions: list[dict[str, Any]] | None = None,
+                            ai_scale: float = 1.0) -> float | None:
+        """Lots that still fit this name's share of remaining margin.
 
-        Book budget is equity × max_margin_usage_pct minus used. When
-        ``cfg.max_margin_pct`` > 0 this symbol also has its own slice
-        (equity × that % minus this symbol's open margin). 0 = off.
+        Book budget is equity × max_margin_usage_pct minus used, split across
+        vacant enabled names, then × denetci ``ai_scale``. Leftover
+        ``cfg.max_margin_pct`` is unread (operator 28.08). None = no extra cap.
         """
         if not account:
             return None
@@ -397,13 +401,12 @@ class RiskManager:
         else:
             margin_budget = free
         budget = max(0.0, min(margin_budget, free - float(sys_cfg.min_free_margin or 0.0)))
+        n = self._vacant_enabled_count(positions)
         try:
-            sym_pct = float(getattr(cfg, "max_margin_pct", 0.0) or 0.0)
+            scale = max(0.0, float(ai_scale))
         except (TypeError, ValueError):
-            sym_pct = 0.0
-        if equity > 0 and sym_pct > 0:
-            used_sym = self._used_symbol_margin(cfg, positions)
-            budget = min(budget, max(0.0, equity * sym_pct / 100.0 - used_sym))
+            scale = 1.0
+        budget = budget / n * scale
         unit = floor if floor > 0 else 0.01
         try:
             need = float(self.client.margin_for(cfg.symbol, unit, side) or 0.0)
@@ -448,8 +451,8 @@ class RiskManager:
         multiplier *= edge
         multiplier *= max(0.0, float(ai_scale))
 
-        # Account risk% × denetci (edge + ai_scale). max_lot / max_margin_pct
-        # are ceilings the operator (or leftover DB) set; 0 = off.
+        # Account risk% × denetci (edge + ai_scale). Leftover max_lot /
+        # max_margin_pct are unread — remaining book margin × auto 1R size.
         if sl_distance <= 0:
             return 0.0, "lot sifir (stop yok), islem atlandi"
         raw, multiplier, note_edge_capped, money_per_unit = self._risk_raw_lot(
@@ -464,53 +467,44 @@ class RiskManager:
             # "risk nothing", and max(floor, 0) would answer that with the
             # broker's minimum lot rather than no trade.
             return 0.0, f"lot sifir ({note}), islem atlandi"
+        if edge != 1.0:
+            note += f" | avantaj x{edge:.2f}"
+        if ai_scale != 1.0:
+            note += f" | AI x{ai_scale:.2f}"
+
+        auto = self._margin_lot_ceiling(
+            cfg, account, side, floor, ceiling, positions=positions,
+            ai_scale=ai_scale)
+        if auto is not None:
+            try:
+                stored = float(getattr(cfg, "risk_percent", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                stored = 0.0
+            r_pct = max(stored, self.AUTO_R_PCT)
+            r_cap = (balance * r_pct / 100.0 * multiplier
+                     / (sl_distance * money_per_unit))
+            if auto + 1e-12 < floor:
+                return 0.0, (f"lot sifir ({note}, marj payi {auto:g} "
+                             f"< min {floor:g}), islem atlandi")
+            lot = min(auto, r_cap, ceiling)
+            if lot + 1e-12 < floor:
+                return 0.0, (f"lot sifir ({note}, 1R tavan {lot:g} "
+                             f"< min {floor:g}), islem atlandi")
+            if abs(lot - auto) <= abs(lot - r_cap) + 1e-12:
+                note += f" | marj pay {auto:.3f}"
+            if r_cap + 1e-12 < auto:
+                note += f" | 1R tavan {r_cap:.3f}"
+            return self.client.normalize_volume(cfg.symbol, lot), note
+
         if raw < floor:
-            # Rounding up to the broker's minimum lot silently inflates the
-            # real risk taken - a raw of 0.024 forced to a 0.1 floor trades
-            # at ~4x the intended risk, not the configured 0.5%. A small
-            # overshoot is an unavoidable broker-granularity rounding and
-            # still worth taking; past MAX_MIN_LOT_OVERSHOOT the position no
-            # longer represents the configured risk at all, so the trade is
-            # skipped rather than silently oversized.
+            # No account picture: do not silently size up. A small overshoot
+            # is broker granularity; past MAX_MIN_LOT_OVERSHOOT skip.
             if floor > raw * self.MAX_MIN_LOT_OVERSHOOT:
                 return 0.0, (f"min lot {floor:g} riski {floor / raw:.1f}x asiyor, "
                               f"islem atlandi ({note})")
             note += f" (min lot {floor:g} riski asiyor, {floor / raw:.1f}x)"
         lot = max(floor, raw)
-
-        if edge != 1.0:
-            note += f" | avantaj x{edge:.2f}"
-        if ai_scale != 1.0:
-            note += f" | AI x{ai_scale:.2f}"
-        auto = self._margin_lot_ceiling(
-            cfg, account, side, floor, ceiling, positions=positions)
-        if auto is not None:
-            if auto + 1e-12 < floor:
-                return 0.0, (f"lot sifir ({note}, marj tavani {auto:g} "
-                             f"< min {floor:g}), islem atlandi")
-            # Live book 28.08: four NAS 0.1 of the same pin. Spend the
-            # skip-bound headroom on THIS ticket (account picture required
-            # so a blip does not size up). Without account, keep the floor.
-            if raw < floor:
-                head = min(raw * self.MAX_MIN_LOT_OVERSHOOT, ceiling, auto)
-                if head > lot + 1e-12:
-                    lot = head
-                    note += f" | taban {floor:g}->{lot:.3f}"
-            if lot > auto:
-                lot = auto
-                note += f" | marj tavan {auto:.3f}"
         lot = min(lot, ceiling)
-        try:
-            cfg_lot = float(getattr(cfg, "max_lot", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            cfg_lot = 0.0
-        if cfg_lot > 0:
-            if cfg_lot + 1e-12 < floor:
-                return 0.0, (f"lot sifir ({note}, lot tavan {cfg_lot:g} "
-                             f"< min {floor:g}), islem atlandi")
-            if lot > cfg_lot:
-                lot = cfg_lot
-                note += f" | lot tavan {cfg_lot:g}"
         return self.client.normalize_volume(cfg.symbol, lot), note
 
     def _risk_raw_lot(self, cfg: SymbolConfig, sl_distance: float, balance: float,
@@ -660,14 +654,10 @@ class RiskManager:
         if any(p["side"] != side for p in same_symbol):
             return Verdict(False, "ters yonde acik pozisyon var")
         if same_symbol:
-            # Search still scores max_open=1. Live count is cfg.max_positions
-            # on the symbol card. Leftover DB 5/10 binds — operator must set 1
-            # or the 13.08 stack returns. SystemConfig.max_positions is unread.
-            try:
-                cap = int(getattr(cfg, "max_positions", 1) or 1)
-            except (TypeError, ValueError):
-                cap = 1
-            cap = max(1, cap)
+            # Search still scores max_open=1. Leftover DB max_positions 5/10
+            # is unread — the 13.08 stack. One ticket per name; lot_for spends
+            # the margin share on that ticket instead of restacking.
+            cap = 1
             if len(same_symbol) >= cap:
                 return Verdict(False, f"sembol pozisyon limiti ({cap})")
 
@@ -701,18 +691,8 @@ class RiskManager:
             projected = (used + need) / equity * 100.0
             if projected > sys_cfg.max_margin_usage_pct:
                 return Verdict(False, f"marj kullanimi limiti (%{projected:.1f} > %{sys_cfg.max_margin_usage_pct:g})")
-        try:
-            sym_pct = float(getattr(cfg, "max_margin_pct", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            sym_pct = 0.0
-        if equity > 0 and sym_pct > 0:
-            used_sym = self._used_symbol_margin(cfg, same_symbol)
-            projected_sym = (used_sym + need) / equity * 100.0
-            if projected_sym > sym_pct:
-                return Verdict(False, f"sembol marj limiti (%{projected_sym:.1f} > %{sym_pct:g})")
 
-        # Leftover max_concurrent_risk_pct is unread. Lot is risk% of
-        # balance; same-symbol already blocked above.
+        # Leftover max_concurrent_risk_pct and cfg.max_margin_pct are unread.
 
         return Verdict(True)
 
@@ -837,6 +817,7 @@ class RiskManager:
             expectancy_r = float(Supervisor.holdout_expectancy(cfg) or 0.0)
             # Long-run cost per trade in R, straight from the holdout slice.
             expectancy_cost = float(hold.get("cost_per_trade_r", 0.0) or 0.0)
+            slot_left = max(0, 1 - len(open_now)) if cfg.enabled else 0
             rows.append({
                 "symbol": cfg.symbol,
                 "broker_symbol": broker,
@@ -847,7 +828,7 @@ class RiskManager:
                 "risk_percent": cfg.risk_percent,
                 "margin_per_trade": round(margin, 2),
                 "open_positions": len(open_now),
-                "free_slots": by_margin if cfg.enabled else 0,
+                "free_slots": min(by_margin, slot_left) if slot_left else 0,
                 "open_profit": round(sum(p["profit"] + p["swap"] for p in open_now), 2),
                 "risk_per_trade": round(r_value, 2),
                 "risk_sizing": "risk %",

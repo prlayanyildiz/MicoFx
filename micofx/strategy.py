@@ -13,6 +13,19 @@ from . import indicators as ind
 from .logbus import LOG
 from .models import EXIT_RISK_FIELDS, OPT_FIELDS, SymbolConfig
 
+# Optional compute gates. 0 disables each. When a family starts reading them,
+# leftover panel values from a previous family must not bind unless the last
+# apply stamp named them (see Params.from_config).
+_UNSTAMPED_GATES = (
+    "htf_factor", "adx_min", "adx_max", "min_body_ratio", "atr_pct_min",
+    "cost_rank_max",
+)
+# These three just started reading HTF/ADX. Leftover numbers from a previous
+# family were never in their apply stamp (28.08 Brent/NAS). dual_t3/burst
+# already read the same dials; an omitted stamp key there is the live row
+# (GER40 adx_min=15), not a leftover to wipe.
+_GATED_FLIPS = frozenset({"stoch_flip", "parabolic_flip"})
+
 # mtf_pullback: a shallower dip is index noise, not a pullback. Search used
 # to offer 0.3; NAS100 live (27.08) paid 22 SL of 34 closes on that value.
 MIN_PULL_DEPTH_ATR = 0.5
@@ -61,9 +74,6 @@ class Params:
     psar_af_step: float = 0.02
     psar_af_max: float = 0.2
 
-    # ---- Aroon oscillator zero-cross ----
-    aroon_length: int = 14
-
     t3_length: int = 6
     t3_volume_factor: float = 0.7
     rsi_length: int = 9
@@ -97,6 +107,13 @@ class Params:
     @classmethod
     def from_config(cls, cfg: SymbolConfig, **overrides: Any) -> Params:
         base = {f: getattr(cfg, f) for f in cls.__dataclass_fields__ if hasattr(cfg, f)}
+        # A real apply stamp lists the OPT axes that search chose. Leftover
+        # htf/adx from a previous family must not start gating the new one
+        # (28.08 Brent stoch_flip still carried dual_t3's 15-25 ADX).
+        stamped = (getattr(cfg, "opt_summary", None) or {}).get("params")
+        if isinstance(stamped, dict) and stamped:
+            base.update(unstamped_gates_to_zero(
+                str(base.get("strategy") or ""), stamped))
         base.update({k: v for k, v in overrides.items() if k in cls.__dataclass_fields__})
         return cls(**base)
 
@@ -121,8 +138,7 @@ class Params:
                 self.st_period, self.st_mult,
                 self.cost_rank_max,
                 self.stoch_k_period, self.stoch_k_smooth, self.stoch_d_smooth,
-                self.psar_af_step, self.psar_af_max,
-                self.aroon_length)
+                self.psar_af_step, self.psar_af_max)
 
 
 class IndicatorCache:
@@ -155,7 +171,6 @@ class IndicatorCache:
         self._supertrend: dict[tuple, np.ndarray] = {}
         self._stoch_slow: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
         self._psar: dict[tuple, np.ndarray] = {}
-        self._aroon: dict[int, np.ndarray] = {}
         self._lists: tuple | None = None
         self._atr_lists: dict[int, list] = {}
         self.volume = volume if volume is not None else np.ones(close.size)
@@ -250,12 +265,6 @@ class IndicatorCache:
         if key not in self._psar:
             self._psar[key] = ind.parabolic_sar(self.high, self.low, *key)
         return self._psar[key]
-
-    def aroon(self, length: int) -> np.ndarray:
-        key = int(length)
-        if key not in self._aroon:
-            self._aroon[key] = ind.aroon(self.high, self.low, key)
-        return self._aroon[key]
 
     # ---- python-list views ------------------------------------------------
     # The backtest's trade-management loop is inherently sequential and reads a
@@ -452,6 +461,24 @@ def _resolve_conflicts(buy: np.ndarray, sell: np.ndarray) -> tuple[np.ndarray, n
     """Drop bars where both sides fired; they cannot both be traded."""
     both = buy & sell
     return buy & ~both, sell & ~both
+
+
+def _flip_gates(cache: IndicatorCache, p: Params, buy: np.ndarray, sell: np.ndarray):
+    """HTF T3 bias + ADX floor/ceiling on a transition-only flip.
+
+    Slow-stochastic / SAR / Aroon crosses are cheap in ranges. Public
+    trend-following templates keep the cross and add a higher-timeframe
+    agreement and an ADX floor (burst already had both). 0 on those
+    dials leaves the ungated flip, so a search can keep today's behaviour.
+    """
+    size = cache.close.size
+    need_adx = p.adx_min > 0 or p.adx_max > 0
+    adx_series = cache.adx(p.adx_period) if need_adx else np.zeros(size, dtype=np.float64)
+    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
+    regime = _regime(p, adx_series, size)
+    buy = buy & allow_long & regime
+    sell = sell & allow_short & regime
+    return buy, sell, htf_up, htf_down, adx_series
 
 
 def _mtf_pullback(cache: IndicatorCache, p: Params) -> Signals:
@@ -748,13 +775,15 @@ def _stoch_flip(cache: IndicatorCache, p: Params) -> Signals:
     Same discipline as the other flip families: the crossover bar is the
     whole signal, transition only, no zone read (classic <20/>80
     overbought/oversold is a different, separately justified strategy).
+    Optional ``htf_factor`` / ``adx_min`` (0 = off) are the public
+    trend-following pair: do not take a range-position cross against the
+    higher-timeframe T3 or in a dead ADX. Search has to earn them.
     """
     close = cache.close
     size = close.size
     k, d = cache.stoch_slow(p.stoch_k_period, p.stoch_k_smooth, p.stoch_d_smooth)
     atr_series = cache.atr(p.atr_period)
     zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
 
     above = k > d
     below = k < d
@@ -764,15 +793,16 @@ def _stoch_flip(cache: IndicatorCache, p: Params) -> Signals:
     was_below[0] = False
     buy = above & ~was_above
     sell = below & ~was_below
+    buy, sell, htf_up, htf_down, adx_series = _flip_gates(cache, p, buy, sell)
 
     warmup = min(size, max(p.stoch_k_period * 4, (p.stoch_k_smooth + p.stoch_d_smooth) * 8,
-                           p.atr_period * 3))
+                           p.atr_period * 3, p.adx_period * 3))
     buy[:warmup] = False
     sell[:warmup] = False
 
     buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=zeros, k=k, d=d, atr=atr_series, adx=zeros, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
+    return Signals(t3=zeros, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
+                   htf_up=htf_up, htf_down=htf_down)
 
 
 def _parabolic_flip(cache: IndicatorCache, p: Params) -> Signals:
@@ -782,63 +812,29 @@ def _parabolic_flip(cache: IndicatorCache, p: Params) -> Signals:
     a genuinely different band: SuperTrend's width is a fixed ATR multiple,
     SAR's is its own accelerating step toward the last extreme - it tightens
     the longer a trend runs, so it can flip on a shallower pullback late in a
-    move than an ATR band of fixed width would.
+    move than an ATR band of fixed width would. Optional HTF/ADX gates match
+    stoch_flip (0 = off).
     """
     close = cache.close
     size = close.size
     atr_series = cache.atr(p.atr_period)
     zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
 
     direction = cache.psar(p.psar_af_step, p.psar_af_max)
     prev = np.roll(direction, 1)
     prev[0] = direction[0]
     buy = (direction > 0) & (prev <= 0)
     sell = (direction < 0) & (prev >= 0)
+    buy, sell, htf_up, htf_down, adx_series = _flip_gates(cache, p, buy, sell)
 
-    warmup = min(size, max(30, p.atr_period * 3))
+    warmup = min(size, max(30, p.atr_period * 3, p.adx_period * 3))
     buy[:warmup] = False
     sell[:warmup] = False
 
     buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=direction.astype(np.float64), k=zeros, d=zeros, atr=atr_series, adx=zeros,
-                   buy=buy, sell=sell, htf_up=flat, htf_down=flat,
+    return Signals(t3=direction.astype(np.float64), k=zeros, d=zeros, atr=atr_series, adx=adx_series,
+                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down,
                    t3_kind="direction")
-
-
-def _aroon_flip(cache: IndicatorCache, p: Params) -> Signals:
-    """Aroon oscillator zero-cross - a seventh, independent flip read.
-
-    Every other family here reads a price level, a spread between two
-    series, or a deviation-normalised oscillator. Aroon reads none of that -
-    it is purely *how many bars since the last high/low extreme*, so it can
-    tell a trend that just printed a fresh extreme (pinned near +-100) apart
-    from one that has been drifting with no new extreme in a while (drifting
-    toward zero) even when price itself looks similar on both.
-    """
-    close = cache.close
-    size = close.size
-    osc = cache.aroon(p.aroon_length)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-
-    above = osc > 0
-    below = osc < 0
-    was_above = np.roll(above, 1)
-    was_below = np.roll(below, 1)
-    was_above[0] = False
-    was_below[0] = False
-    buy = above & ~was_above
-    sell = below & ~was_below
-
-    warmup = min(size, max(p.aroon_length * 3, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=zeros, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
 
 
 def _cross_over(fast: np.ndarray, slow: np.ndarray) -> np.ndarray:
@@ -884,7 +880,6 @@ _FAMILIES = {
     "t3_flip": _t3_flip,
     "stoch_flip": _stoch_flip,
     "parabolic_flip": _parabolic_flip,
-    "aroon_flip": _aroon_flip,
     "ichimoku": _ichimoku,
 }
 
@@ -926,6 +921,20 @@ def opt_fields_read(family: str) -> frozenset[str]:
     return frozenset(_p_fields_reachable(fn) & set(OPT_FIELDS))
 
 
+def unstamped_gates_to_zero(family: str, stamped: dict[str, Any]) -> dict[str, Any]:
+    """Gates a newly-gated flip reads that the apply stamp never named.
+
+    0 disables each. Search that earned a value puts it in ``stamped``.
+    dual_t3 leftover ADX on a stoch_flip card must not survive; the same
+    ADX sitting on a dual_t3 card is the live dial and must.
+    """
+    if family not in _GATED_FLIPS or not isinstance(stamped, dict):
+        return {}
+    read = opt_fields_read(family)
+    return {name: 0 for name in _UNSTAMPED_GATES
+            if name in read and name not in stamped}
+
+
 def searchable_axes(family: str, axes: dict[str, Any]) -> dict[str, Any]:
     """Drop OPT axes the family never reads. Engine axes stay."""
     allow = opt_fields_read(family) | ENGINE_OPT_FIELDS
@@ -952,5 +961,4 @@ def required_bars(p: Params) -> int:
                    # dual_t3's slow line is a cascade over t3_fast * mult.
                    int(p.t3_fast * max(1.2, p.t3_slow_mult)) * 20,
                    int(p.st_period) * 10 if p.st_mult > 0 else 0,
-                   (p.stoch_k_period + p.stoch_k_smooth + p.stoch_d_smooth) * 8,
-                   p.aroon_length * 8))
+                   (p.stoch_k_period + p.stoch_k_smooth + p.stoch_d_smooth) * 8))

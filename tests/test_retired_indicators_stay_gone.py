@@ -51,7 +51,7 @@ def test_never_applied_scan_waste_is_gone():
         assert field not in Params.__dataclass_fields__
     assert not hasattr(IndicatorCache, "macd")
     assert "ichimoku" in STRATEGIES
-    assert len(STRATEGIES) == 8
+    assert len(STRATEGIES) == 7
 
 
 def test_the_three_lottery_families_are_gone():

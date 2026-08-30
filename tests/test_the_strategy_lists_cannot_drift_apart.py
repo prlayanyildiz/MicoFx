@@ -74,6 +74,6 @@ def test_the_fallback_is_what_makes_this_matter():
 
 
 def test_a_known_family_routes_to_its_own_builder():
-    for name in ("aroon_flip", "burst", "mtf_pullback"):
+    for name in ("parabolic_flip", "burst", "mtf_pullback"):
         assert _FAMILIES[name] is not compute.__globals__["_stoch_flip"]
         assert Params(strategy=name).strategy == name

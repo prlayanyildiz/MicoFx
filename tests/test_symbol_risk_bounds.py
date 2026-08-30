@@ -90,11 +90,12 @@ def test_patch_symbol_rejects_max_lot_over_ceiling():
     assert store.symbols["XAUUSD"].max_lot != 101
 
 
-def test_patch_symbol_accepts_max_lot_inside_ceiling():
+def test_patch_symbol_refuses_max_lot_inside_ceiling():
     tc, store = _client()
+    before = store.symbols["XAUUSD"].max_lot
     res = tc.post("/api/symbols/XAUUSD", json={"max_lot": 20})
-    assert res.status_code == 200, res.text
-    assert store.symbols["XAUUSD"].max_lot == 20
+    assert res.status_code == 400, res.text
+    assert store.symbols["XAUUSD"].max_lot == before
 
 
 def test_patch_symbol_rejects_max_margin_pct_over_ceiling():

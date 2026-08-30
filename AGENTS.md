@@ -32,7 +32,9 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   Never silently enable `ensemble_enabled`. Apply gates are `_slice_ok`,
   `reject_reason` and `_beats_incumbent`. Calendar reopt is gone.
   AI auto-search is **quarantine only** (not decay, not weekly). Manual
-  `POST /api/opt/run` still starts a search.
+  `POST /api/opt/run` still starts a search. Family/TF apply while this
+  magic has a ticket queues `pending_primary_patch` (same door as
+  `pending_exit_patch`); engine lands it when flat. Do not drop the winner.
 - `EXIT_RISK_FIELDS` mid-trade → **409**. `breakeven_at_r`,
   `partial_at_r`, `harvest_at_r` and `harvest_step_atr` are
   deliberately **not** in that set.
@@ -50,9 +52,10 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Hands-off keys (system plumbing, cost toggles, AI knobs, strategy guts)
   return **400** on POST. Search `apply()` still writes `OPT_FIELDS`.
   Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
-- **8 families.** Do not re-add `alpha_trend` or `mavilim`. `st_trend`
-  and `macd_flip` retired 26.08 (never applied, not live). `ichimoku`
-  stays. Leftover DB names fail closed (no signal), they do not crash.
+- **7 families.** Do not re-add `alpha_trend` or `mavilim`. `st_trend`
+  and `macd_flip` retired 26.08, `aroon_flip` 28.08 (never applied, not
+  live). `ichimoku` stays. Leftover DB names fail closed (no signal),
+  they do not crash.
 - **No restart while positions are open.** `POST /api/app/restart` and
   `/api/app/shutdown` are **409** while this process's magics still have
   tickets (MT5 down still allowed so a wedged bind can recover).
@@ -81,16 +84,16 @@ Fail-first: write the test, watch it fail, then implement.
 - **Yellow** (ask): supervisor. **Red** (explicit):
   leverage, account lock, daily brake, live flatten-all.
 - HTTP writes match the panel. Symbol POST: sessions +
-  `enabled` / `group` / `broker_symbol` / `max_lot` / `max_margin_pct`
-  / `max_positions`.
+  `enabled` / `group` / `broker_symbol`.
   System POST: `max_margin_usage_pct`
   / `mt5_terminal_path` / `autostart_mt5`.
   Opt POST: `lookback_days` /
-  `refine_rounds` / `max_combos`. Family / TF / exits / magic / grid /
+  `refine_rounds` / `max_combos` / `timeframes`. Family / TF / exits / magic / grid /
   lot_mode /
   daily_loss_* / size_by_edge / max_concurrent_risk_pct /
   `max_total_positions` / `risk_percent` / system `max_lot` /
-  system `max_positions` are 400. `POST .../reset` is
+  system `max_positions` / symbol `max_lot` / `max_margin_pct` /
+  `max_positions` are 400. `POST .../reset` is
   400. GET still returns readout fields.
 - `POST /api/opt/run` `strategies` is **one-off**. Empty inherits the
   saved list. Do not persist a subset into `opt_params`. `apply_best`
@@ -126,7 +129,9 @@ Fail-first: write the test, watch it fail, then implement.
 
 - Next process loads HTTP-off exits (family/TF/magic/grid/reset 400).
   This PID still PATCHes them. GER40 `pending_exit_patch` still
-  apply()s on flat either way. Do not add `/exit-override` unasked.
+  apply()s on flat either way. Family/TF winners queue in
+  `pending_primary_patch` (this PID needs the new engine to land them).
+  Do not add `/exit-override` unasked.
 - Day cuts use `gmtime(naive broker epoch)` — "do not shift a second
   time", not "convert to UTC". A 00:00–03:00 local close is **today**.
   Hour buckets on autopsy `fill_time` are the same clock. Do not
@@ -137,10 +142,11 @@ Fail-first: write the test, watch it fail, then implement.
   `force=True`. `execution.flush()` sits on the same side of `join`.
   Do not flush either blob before `_stop.set()` — the last in-flight
   cycle then hits a fresh window and drops its rows.
-- Live count is `SymbolConfig.max_positions` (card, leftover DB 5/10
-  binds — set 1 or the 13.08 stack returns). Per-symbol `max_lot` and
-  `max_margin_pct` bind (0 = off; denetci + risk% size inside the cap).
-  System `max_positions` / `max_lot` unread. Leftover
+- Live count is **1 ticket per name** (leftover `max_positions` 5/10
+  unread — the 13.08 stack). Lot is remaining book margin split across
+  vacant enabled names, clipped by auto 1R `max(risk_percent, 2%)` ×
+  denetci. Leftover `max_lot` / `max_margin_pct` unread. System
+  `max_positions` / `max_lot` unread. Leftover
   `max_concurrent_risk_pct` and `max_total_positions` stay unread.
   Search still scores `max_open=1`.
 - Do not add an adverse-fill entry gate on `fill_vs_signal_close_r`.
@@ -189,5 +195,7 @@ Fail-first: write the test, watch it fail, then implement.
   + `reopt_min_age_hours`. Quarantine still queues via
   `_queue_reoptimization` (retry cooldown). Do not resurrect a
   weekly/decay auto-search.
-- `_MAX_SIGNAL_BAR_AGE_BARS = 2` × timeframe. US30 is the only M5; its
-  600 s `bar_bosluk` on overnight drought is normal.
+- `_MAX_SIGNAL_BAR_AGE_BARS = 2` × timeframe. Search default is M15/M30
+  (`SEARCH_TIMEFRAMES`); M5 stays legal to trade (SpotBrent stoch/M5) and
+  a one-off `POST /api/opt/run` can still name it. US30 live is M30; an
+  M5 name's 600 s `bar_bosluk` on overnight drought is normal.

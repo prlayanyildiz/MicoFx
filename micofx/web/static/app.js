@@ -360,6 +360,7 @@ async function loadAutopsies() {
       <td><span class="pill ${r.exit_reason === "trail" ? "on" : "off"}">${esc(r.exit_reason || "-")}</span></td>
       <td class="num dim">${r.held_min != null ? num(r.held_min, 1) : "-"}</td>
       <td class="num ${cls(r.r_realised)}">${r.r_realised != null ? signed(r.r_realised, 3) : "-"}</td>
+      <td class="num ${cls(r.profit)}">${r.profit != null && r.profit !== "" ? signed(r.profit) : "-"}</td>
       <td class="num dim">${r.mfe_r != null ? num(r.mfe_r, 3) : "-"}</td>
       <td class="num ${Number(r.r_realised) > 0 && Number(r.left_on_table_r) >= 1 ? "neg" : "dim"}">${
         Number(r.r_realised) > 0 && r.left_on_table_r != null ? num(r.left_on_table_r, 3) : "-"}</td>
@@ -370,7 +371,7 @@ async function loadAutopsies() {
         : '<span class="dim">-</span>'}</td>`;
     return tr;
   });
-  rowsInto($("#autopsy-table"), rows, "Henuz kapanis otopsisi yok", 8);
+  rowsInto($("#autopsy-table"), rows, "Henuz kapanis otopsisi yok", 9);
   if (note) {
     const n = Number(data.after_1h_n || 0);
     note.innerHTML = esc(data.note || "")
@@ -886,6 +887,9 @@ function renderLive() {
     const htf = !cfg.htf_factor ? '<span class="dim">kapali</span>'
       : st.htf > 0 ? '<span class="pos">yukari</span>'
       : st.htf < 0 ? '<span class="neg">asagi</span>' : '<span class="dim">-</span>';
+    const block = st.entry_block
+      ? `<span class="pill off">${esc(st.entry_block)}</span> `
+      : "";
     const tr = el("tr");
     tr.innerHTML = `
       <td class="sym">${esc(cfg.symbol)}</td>
@@ -907,7 +911,7 @@ function renderLive() {
       <td class="num ${st.spread_atr > cfg.max_spread_atr ? "neg" : "dim"}">${st.spread_atr ? num(st.spread_atr, 2) + "x" : "-"}</td>
       <td class="num ${capCls}" title="${esc(capTitle)}">${capCell}</td>
       <td>${cfg.enabled ? sig : '<span class="pill off">kapali</span>'}</td>
-      <td class="dim">${esc(st.note || "")}</td>`;
+      <td class="dim">${block}${esc(st.note || "")}</td>`;
     return tr;
   });
   rowsInto($("#live-table"), rows, "Sembol yok", 14);
@@ -925,12 +929,11 @@ const STRATEGY_LABEL = {
   // the card header and live-table title read this map.
   stoch_flip: "Stochastic Yon Donusu",
   parabolic_flip: "Parabolic SAR Yon Donusu",
-  aroon_flip: "Aroon Yon Donusu",
   ichimoku: "Ichimoku TK + bulut (gecikmeli, ileri bakissiz)",
 };
 
-// Card body is session hours only. Stored risk_percent still sizes
-// lots; the header live line prints it. Search writes exits.
+// Card body is session hours only. Lot is remaining book margin × denetci
+// (auto 1R cap). Search writes exits; leftover max_lot unread.
 
 function buildSessionEditor(cfg) {
   const wrap = el("div", { class: "sessions" });
@@ -993,33 +996,6 @@ function buildDayPicker(cfg) {
   return wrap;
 }
 
-const POSITION_SECTION = {
-  title: "Pozisyon Boyutu",
-  fields: [
-    { k: "max_lot", t: "num", label: "Maks lot (0=kapali)", step: 0.01, min: 0, max: 100 },
-    { k: "max_margin_pct", t: "num", label: "Sembol marji % (0=kapali)", step: 0.1, min: 0, max: 100 },
-    { k: "max_positions", t: "int", label: "Maks pozisyon", min: 1, max: 10 },
-  ],
-};
-
-function buildField(cfg, spec) {
-  const input = el("input", {
-    type: "number",
-    step: spec.t === "int" ? 1 : (spec.step ?? 0.01),
-    min: spec.min,
-    max: spec.max,
-  });
-  input.dataset.key = spec.k;
-  input.value = cfg[spec.k];
-  input.addEventListener("change", () => {
-    const raw = input.value;
-    const value = spec.t === "int" ? parseInt(raw, 10) : parseFloat(raw);
-    if (!isFinite(value)) { input.value = cfg[spec.k]; return; }
-    saveSymbol(cfg.symbol, { [spec.k]: value }, input);
-  });
-  return titled(el("div", { class: "field" }, [el("label", { text: spec.label }), input]), spec.k);
-}
-
 function buildSymbolCard(cfg) {
   const card = el("div", { class: "scard", "data-symbol": cfg.symbol });
 
@@ -1044,11 +1020,6 @@ function buildSymbolCard(cfg) {
   card.appendChild(head);
 
   const body = el("div", { class: "scard-body" });
-
-  body.appendChild(el("div", { class: "subgrid" }, [
-    el("div", { class: "title", text: POSITION_SECTION.title }),
-    el("div", { class: "form-grid" }, POSITION_SECTION.fields.map((f) => buildField(cfg, f))),
-  ]));
 
   const useSessions = el("input", { type: "checkbox" });
   useSessions.checked = !!cfg.use_sessions;
@@ -1130,6 +1101,10 @@ function updateSymbolCards() {
     const sig = st.signal
       ? `<span class="pill ${sideClass(st.signal)}">${st.signal === "buy" ? "AL" : "SAT"}</span>`
       : "";
+    const pendingFam = cfg.pending_primary_patch || {};
+    const pendingNote = pendingFam.strategy
+      ? `<span class="pill warn" title="pozisyon kapaninca ${esc(pendingFam.strategy)}/${esc(pendingFam.timeframe || "")} binecek">kuyrukta ${esc(pendingFam.strategy)}</span>`
+      : "";
     $(".scard-live", card).innerHTML = `
       <span><b>strateji</b> ${esc(STRATEGY_LABEL[cfg.strategy] || cfg.strategy)} <span class="dim">${esc(cfg.timeframe)}</span></span>
       <span><b>seans</b> ${sess.open ? '<span class="pos">acik</span>' : '<span class="dim">kapali</span>'} ${esc(cfg.session_text)}</span>
@@ -1140,7 +1115,7 @@ function updateSymbolCards() {
         cfg.validated === true ? '<span class="pill on">dogrulandi</span>'
           : cfg.validated === false ? '<span class="pill bad">dogrulanmadi</span>'
             : '<span class="dim" title="henuz yazilmadi">-</span>'
-      }</span>
+      } ${pendingNote}</span>
       ${sig}
       <span class="dim">${esc(st.note || "")}</span>`;
   });
@@ -1374,9 +1349,14 @@ function renderOptJob() {
     const inc = r.incumbent;
     const kept = !r.applied && inc && inc.net_r != null;
     const closedCand = !!r.closed_candidate;
+    const queued = !!r.queued;
     const incText = closedCand
       ? `Kapali sembol icin aday bulundu. Canli ayar yazilmadi; acma karari operatorde. `
         + `Soldaki rakamlar adayin backtest sonucudur.`
+      : queued
+      ? `Kuyrukta: ${esc(r.strategy || "-")}/${esc(r.timeframe || "-")} pozisyon kapaninca uygulanacak`
+        + (inc ? ` (canli hâlâ ${esc(inc.strategy || "-")}/${esc(inc.timeframe || "-")})` : "")
+        + `. Soldaki rakamlar adayin backtest sonucudur.`
       : kept
       ? `Uygulanmadi${r.keep_reason ? ": " + esc(r.keep_reason) : ""}. Canli ayar degismedi `
         + `(${esc(inc.strategy || "-")}/${esc(inc.timeframe || "-")}, test ${signed(inc.net_r, 1)}R`
@@ -1392,6 +1372,7 @@ function renderOptJob() {
       : "Test beklentisi, secim/dogrulamanin zayifinin " + num(ret * 100, 0)
         + "%'ini koruyor" + (ret < 0.25 ? " - dusuk, asiri uyum isareti olabilir" : "");
     const status = r.applied ? '<span class="pill on">uygulandi</span>'
+      : queued ? `<span class="pill warn" title="${incText}">kuyrukta</span>`
       : closedCand ? `<span class="pill warn" title="${incText}">kapali sembol icin aday bulundu</span>`
       : kept ? `<span class="pill warn" title="${incText}">mevcut ayar korundu</span>`
       : r.validated ? `<span class="pill warn" title="${incText}">dogrulandi, uygulanmadi</span>`

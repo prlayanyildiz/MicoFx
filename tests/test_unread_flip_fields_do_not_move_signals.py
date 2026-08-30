@@ -1,10 +1,9 @@
-"""Payload fields a flip family never reads must not move its signals.
+"""Payload fields a remaining ungated flip never reads must not move its signals.
 
-Found in BO: live flip rows carried ``htf_factor`` / ``adx_min`` (and
-``min_body_ratio``) because the panel stores the whole OPT blob. AUDIT-B
-showed the search already drops those axes. This test is the remaining
-claim: changing the leftover payload values must leave ``buy`` / ``sell``
-bit-identical. AST ``opt_fields_read`` can miss a dynamic read; this cannot.
+t3_flip and ichimoku still ignore leftover ``htf_factor`` / ``adx_min``.
+stoch/parabolic/aroon now read those gates; they live in
+``test_stoch_flip_respects_trend_and_adx``. AST ``opt_fields_read`` can
+miss a dynamic read; this bit-identical check cannot.
 """
 from __future__ import annotations
 
@@ -21,10 +20,6 @@ from micofx.strategy import IndicatorCache, Params, compute, opt_fields_read
 
 FLIP = (
     "t3_flip",
-    "parabolic_flip",
-    "stoch_flip",
-    "parabolic_flip",
-    "aroon_flip",
     "ichimoku",
 )
 
@@ -76,9 +71,9 @@ def test_poisoning_unread_fields_leaves_flip_signals_bit_identical(name):
 def test_a_family_that_reads_the_gates_does_move():
     """If this also stayed identical the fixture would not be able to catch a leak.
 
-    The control has to be a family that actually reads POISON's axes. Measured
-    27.08: burst / dual_t3 / mtf_pullback call ``_regime``; the flip families
-    do not, so none of them can stand in here.
+    The control has to be a family that actually reads POISON's axes.
+    dual_t3 calls ``_regime``; the remaining ungated flips (t3_flip,
+    ichimoku) do not.
     """
     cache = _cache()
     clean = compute(cache, _params("dual_t3"))

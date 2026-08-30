@@ -378,6 +378,15 @@ def test_patch_refuses_pending_exit_patch_written_directly():
     assert store.symbols["XAUUSD"].pending_exit_patch == {}
 
 
+def test_patch_refuses_pending_primary_patch_written_directly():
+    symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
+    tc, store = _client(symbols, [])
+
+    res = tc.post("/api/symbols/XAUUSD", json={"pending_primary_patch": {"strategy": "burst"}})
+    assert res.status_code == 400
+    assert store.symbols["XAUUSD"].pending_primary_patch == {}
+
+
 def test_patch_refuses_pending_secondary_exit_patch_written_directly():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
@@ -489,21 +498,22 @@ def test_patch_refuses_nan_risk_percent():
     assert res.status_code == 400
 
 
-def test_patch_refuses_max_positions_out_of_range():
+def test_patch_refuses_max_positions():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
-
+    before = store.symbols["XAUUSD"].max_positions
     res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 9999})
     assert res.status_code == 400
+    assert store.symbols["XAUUSD"].max_positions == before
 
 
-def test_patch_accepts_max_positions_inside_the_card_cap():
+def test_patch_refuses_max_positions_inside_the_old_card_cap():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
-
+    before = store.symbols["XAUUSD"].max_positions
     res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 1})
-    assert res.status_code == 200, res.text
-    assert store.symbols["XAUUSD"].max_positions == 1
+    assert res.status_code == 400, res.text
+    assert store.symbols["XAUUSD"].max_positions == before
 
 
 def test_patch_refuses_nan_in_top_level_exit_field():

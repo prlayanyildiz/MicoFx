@@ -7,13 +7,8 @@ numpy>=1.26.0
 # dev / test
 pytest>=8.0.0
 httpx>=0.28            # Starlette TestClient transport; 0.28 is what is installed
-# The static checks pyproject.toml already configures. They were configured but
-# never installed, so "python -m ruff" failed in a fresh venv and the checks got
-# skipped by whoever hit that first - which is the same as not having them.
-ruff>=0.6
-mypy>=1.11
-
-# Static checks (dev only - the bot does not import these).
+# Static checks (dev only - the bot does not import these). Must be installed or
+# "python -m ruff" fails in a fresh venv and the checks get silently skipped.
 # Run: python -m ruff check micofx/ tests/   -> must be clean
 #      python -m mypy                        -> 28 known, see pyproject.toml
 ruff>=0.16

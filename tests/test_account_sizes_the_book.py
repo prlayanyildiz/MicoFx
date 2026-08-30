@@ -1,9 +1,9 @@
-"""Account risk% × denetci sizes the book. Per-symbol caps live on the card.
+"""Margin share × denetci sizes the book. Leftover per-symbol knobs are unread.
 
-Operator 28.08: System tab no longer holds count/lot. A symbol may spend
-at most X% of equity as margin, open at most N tickets, and at most X lots.
-0 lot / 0 margin% = off (denetci + risk% size). Search still max_open=1.
-Leftover DB max_positions 5/10 binds — set 1 or the 13.08 stack returns.
+Operator 28.08: do not manage max_lot / max_margin_pct / max_positions on
+the card. One ticket per name (search max_open=1). Lot grows into remaining
+book margin split across vacant enabled names, clipped by an auto 1R cap
+(max stored risk%, 2%) × AI × edge. Leftover DB 5/10 must not restack.
 """
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_JS = (ROOT / "micofx" / "web" / "static" / "app.js").read_text(encoding="utf-8")
 HTML = (ROOT / "micofx" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
 
-GONE = ("lot_mode", "fixed_lot", "symbol_daily_loss_pct", "risk_percent")
-# max_lot / max_margin_pct / max_positions live on the symbol card.
+GONE = ("lot_mode", "fixed_lot", "symbol_daily_loss_pct", "risk_percent",
+        "max_lot", "max_margin_pct", "max_positions")
 
 
 class _LotClient:
@@ -83,15 +83,12 @@ def _risk(cfg: SymbolConfig) -> RiskManager:
     return rm
 
 
-def test_position_card_offers_ceilings_not_risk_percent():
-    assert "const POSITION_SECTION" in APP_JS
-    assert "Pozisyon Boyutu" in APP_JS
-    pos = APP_JS[APP_JS.index("const POSITION_SECTION"): APP_JS.index("function buildField")]
-    assert 'k: "max_lot"' in pos
-    assert 'k: "max_margin_pct"' in pos
-    assert 'k: "max_positions"' in pos
+def test_symbol_card_has_no_lot_or_count_dials():
+    assert "const POSITION_SECTION" not in APP_JS
+    assert "Pozisyon Boyutu" not in APP_JS
+    card = APP_JS[APP_JS.index("function buildSymbolCard"): APP_JS.index("function applySymbolFilter")]
     for k in GONE:
-        assert f'k: "{k}"' not in pos, f"{k} still on the symbol card"
+        assert f'k: "{k}"' not in card, f"{k} still on the symbol card"
     sys_block = APP_JS[APP_JS.index("const SYS_FIELDS"): APP_JS.index("const SYS_FIELDS_ADVANCED")]
     assert 'k: "max_lot"' not in sys_block
     assert 'k: "max_positions"' not in sys_block
@@ -124,15 +121,16 @@ def test_http_refuses_the_removed_symbol_dials():
         assert getattr(store.symbols["XAUUSD"], key) == getattr(before, key)
 
 
-def test_http_writes_symbol_lot_and_margin_caps():
+def test_http_refuses_symbol_lot_and_margin_caps():
     tc, store, _ = _hands_off_client()
+    before = store.symbols["XAUUSD"]
     res = tc.post("/api/symbols/XAUUSD", json={
         "max_lot": 0.4, "max_margin_pct": 12.0, "max_positions": 1,
     })
-    assert res.status_code == 200, res.text
-    assert store.symbols["XAUUSD"].max_lot == 0.4
-    assert store.symbols["XAUUSD"].max_margin_pct == 12.0
-    assert store.symbols["XAUUSD"].max_positions == 1
+    assert res.status_code == 400, res.text
+    assert store.symbols["XAUUSD"].max_lot == before.max_lot
+    assert store.symbols["XAUUSD"].max_margin_pct == before.max_margin_pct
+    assert store.symbols["XAUUSD"].max_positions == before.max_positions
 
 
 def test_http_refuses_symbol_daily_loss():
@@ -156,13 +154,13 @@ def test_lot_for_uses_risk_percent_even_when_the_row_says_fixed():
     assert "risk" in note
 
 
-def test_lot_for_honours_symbol_max_lot():
+def test_lot_for_ignores_leftover_symbol_max_lot():
     cfg = SymbolConfig(
         symbol="XAUUSD", magic=1, lot_mode="risk", risk_percent=1.0, max_lot=0.2,
     )
     lot, note = _risk(cfg).lot_for(cfg, sl_distance=1.0, balance=10_000.0)
-    assert lot == pytest.approx(0.2)
-    assert "lot tavan" in note
+    assert lot == pytest.approx(10.0)
+    assert "lot tavan" not in note
 
 
 def test_lot_for_caps_to_remaining_margin_like_positions():
@@ -186,8 +184,59 @@ def test_lot_for_caps_to_remaining_margin_like_positions():
     assert "marj" in note
 
 
-def test_lot_for_caps_to_symbol_margin_pct():
-    """15% of $1000 at $100/lot = 1.5 lots, below the book 90% / risk% 10."""
+def test_lot_for_splits_remaining_margin_across_vacant_names():
+    """Six micros of one pin is the 13.08 stack. Split the kasa, one ticket each."""
+    xau = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=1.0)
+    ger = SymbolConfig(symbol="GER40", magic=2, risk_percent=1.0)
+    nas = SymbolConfig(symbol="NAS100", magic=3, risk_percent=1.0)
+    store = _LotStore(xau)
+    store.symbols = {c.symbol: c for c in (xau, ger, nas)}
+    store.system.max_margin_usage_pct = 90.0
+    store.system.min_free_margin = 0.0
+    risk = RiskManager.__new__(RiskManager)
+    risk.store = store
+    risk.client = _LinearMarginClient()
+    account = {"equity": 1000.0, "margin": 0.0, "margin_free": 1000.0}
+    lot, note = risk.lot_for(
+        xau, sl_distance=1.0, balance=10_000.0, account=account)
+    # 900 remaining / 3 names / $100 per lot = 3.0. 1R cap is 20.
+    assert lot == pytest.approx(3.0)
+    assert "marj" in note
+
+
+def test_lot_for_ai_scale_throttles_the_margin_share():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=1.0)
+    store = _LotStore(cfg)
+    store.system.max_margin_usage_pct = 90.0
+    store.system.min_free_margin = 0.0
+    risk = RiskManager.__new__(RiskManager)
+    risk.store = store
+    risk.client = _LinearMarginClient()
+    account = {"equity": 1000.0, "margin": 0.0, "margin_free": 1000.0}
+    lot, note = risk.lot_for(
+        cfg, sl_distance=1.0, balance=10_000.0, account=account, ai_scale=0.5)
+    # Share 9.0 × 0.5 = 4.5; 1R cap 2% × 0.5 of 10k = 10 lots.
+    assert lot == pytest.approx(4.5)
+    assert "AI" in note
+
+
+def test_lot_for_ignores_leftover_max_lot_when_sizing_from_margin():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=1.0, max_lot=0.2)
+    store = _LotStore(cfg)
+    store.system.max_margin_usage_pct = 90.0
+    store.system.min_free_margin = 0.0
+    risk = RiskManager.__new__(RiskManager)
+    risk.store = store
+    risk.client = _LinearMarginClient()
+    account = {"equity": 1000.0, "margin": 0.0, "margin_free": 1000.0}
+    lot, note = risk.lot_for(
+        cfg, sl_distance=1.0, balance=10_000.0, account=account)
+    assert lot == pytest.approx(9.0)
+    assert "lot tavan" not in note
+
+
+def test_lot_for_ignores_leftover_symbol_margin_pct():
+    """Leftover 15% must not pin a micro slice. Book 90% of $1000 = 9.0 lots."""
     cfg = SymbolConfig(
         symbol="XAUUSD", magic=1, risk_percent=1.0, max_lot=0.0,
         max_margin_pct=15.0,
@@ -201,11 +250,12 @@ def test_lot_for_caps_to_symbol_margin_pct():
     account = {"equity": 1000.0, "margin": 0.0, "margin_free": 1000.0}
     lot, note = risk.lot_for(
         cfg, sl_distance=1.0, balance=10_000.0, account=account)
-    assert lot == pytest.approx(1.5)
+    assert lot == pytest.approx(9.0)
     assert "marj" in note
 
 
-def test_lot_for_symbol_margin_pct_subtracts_open_on_this_name():
+def test_lot_for_symbol_margin_pct_does_not_slice_this_name():
+    """Leftover max_margin_pct unread. Book remaining 850 → 8.5 lots."""
     cfg = SymbolConfig(
         symbol="XAUUSD", magic=1, risk_percent=1.0, max_lot=0.0,
         max_margin_pct=15.0,
@@ -222,8 +272,7 @@ def test_lot_for_symbol_margin_pct_subtracts_open_on_this_name():
     lot, note = risk.lot_for(
         cfg, sl_distance=1.0, balance=10_000.0, account=account,
         positions=open_here)
-    # 15% of 1000 = 150; 0.5 lot already uses 50 → 100 left → 1.0 lot
-    assert lot == pytest.approx(1.0)
+    assert lot == pytest.approx(8.5)
     assert "marj" in note
 
 
@@ -259,12 +308,11 @@ def test_lot_for_ignores_system_max_lot():
     assert "lot tavan" not in note
 
 
-def test_lot_for_uses_overshoot_headroom_when_account_is_present():
-    """Min-lot pin with a live account uses the 3x skip bound as size.
+def test_lot_for_sizes_up_to_auto_1r_when_account_is_present():
+    """Min-lot pin with a live account sizes up to the auto 1R cap, not 3x raw.
 
-    Without account, 0.05 raw still floors to 0.1 (test_core / zero_guard).
-    Live NAS 28.08 was four 0.1 tickets of that pin; one ticket at 0.15 is
-    the headroom the skip already allowed, not a second hand.
+    0.5% of $100 = 0.05 raw; floor 0.1. Auto 1R is max(0.5, 2)% → 0.2 lots.
+    Remaining margin is 9 lots, so 1R wins. Do not skip, do not stay at 0.1.
     """
     cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=0.5, max_lot=0.0)
     store = _LotStore(cfg)
@@ -273,13 +321,12 @@ def test_lot_for_uses_overshoot_headroom_when_account_is_present():
     risk = RiskManager.__new__(RiskManager)
     risk.store = store
     risk.client = _LinearMarginClient()
-    # 100 * 0.5% / (1 * 10) = 0.05 raw; floor 0.1; 3x headroom 0.15
     account = {"equity": 1000.0, "margin": 0.0, "margin_free": 1000.0}
     lot, note = risk.lot_for(
         cfg, sl_distance=1.0, balance=100.0, account=account)
-    assert lot == pytest.approx(0.15)
+    assert lot == pytest.approx(0.2)
     assert lot > 0.1
-    assert "taban" in note
+    assert "1R" in note or "marj" in note
 
 
 def test_lot_for_does_not_zero_size_when_account_picture_is_missing():
@@ -300,7 +347,7 @@ def test_lot_for_without_a_stop_skips_instead_of_using_fixed_lot():
 
 
 def test_can_open_refuses_a_second_same_side_ticket():
-    """Card default 1. A second same-side ticket is refused."""
+    """One ticket per name. Leftover max_positions is unread."""
     cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=1)
     store = _LotStore(cfg)
     risk = RiskManager.__new__(RiskManager)
@@ -313,8 +360,9 @@ def test_can_open_refuses_a_second_same_side_ticket():
     assert "sembol pozisyon limiti" in blocked.reason
 
 
-def test_can_open_honours_symbol_max_positions():
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=2)
+def test_can_open_ignores_leftover_symbol_max_positions():
+    """DB leftover 5/10 must not restack. Search scored max_open=1."""
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=10)
     store = _LotStore(cfg)
     store.system.max_positions = 1
     risk = RiskManager.__new__(RiskManager)
@@ -322,28 +370,24 @@ def test_can_open_honours_symbol_max_positions():
     risk.client = _LotClient()
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
     account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 0.0}
-    allowed = risk.can_open(cfg, "buy", 0.1, existing, account)
-    assert allowed.ok, allowed.reason
-    existing.append({"ticket": 101, "symbol": "XAUUSD", "magic": 1, "side": "buy"})
     blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
     assert not blocked.ok
-    assert "(2)" in blocked.reason
+    assert "sembol pozisyon limiti" in blocked.reason
 
 
-def test_can_open_refuses_when_symbol_margin_pct_is_spent():
+def test_can_open_ignores_leftover_symbol_margin_pct():
     cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_margin_pct=5.0, max_positions=2)
     store = _LotStore(cfg)
     store.system.max_margin_usage_pct = 90.0
     risk = RiskManager.__new__(RiskManager)
     risk.store = store
     risk.client = _LinearMarginClient()
-    # 0.5 lot already uses $50 = 5% of $1000; another 0.1 ($10) would be 6%.
     existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy",
                  "volume": 0.5, "sl": 1900.0, "price_open": 2000.0}]
     account = {"equity": 1000.0, "margin_free": 950.0, "margin": 50.0}
     blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
     assert not blocked.ok
-    assert "sembol marj limiti" in blocked.reason
+    assert "sembol pozisyon limiti" in blocked.reason
 
 
 def test_can_open_ignores_leftover_total_slot_cap():
@@ -387,10 +431,11 @@ def test_bulk_also_refuses_the_removed_dials():
     tc, store = _client({"XAUUSD": cfg}, [])
     res = tc.post("/api/symbols-bulk", json={"patch": {"lot_mode": "fixed"}})
     assert res.status_code == 400
+    before = store.symbols["XAUUSD"]
     res = tc.post("/api/symbols-bulk", json={
         "patch": {"max_lot": 0.3, "max_margin_pct": 10.0, "max_positions": 1},
     })
-    assert res.status_code == 200, res.text
-    assert store.symbols["XAUUSD"].max_lot == 0.3
-    assert store.symbols["XAUUSD"].max_margin_pct == 10.0
-    assert store.symbols["XAUUSD"].max_positions == 1
+    assert res.status_code == 400, res.text
+    assert store.symbols["XAUUSD"].max_lot == before.max_lot
+    assert store.symbols["XAUUSD"].max_margin_pct == before.max_margin_pct
+    assert store.symbols["XAUUSD"].max_positions == before.max_positions

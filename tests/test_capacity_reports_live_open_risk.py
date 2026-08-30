@@ -120,13 +120,14 @@ def test_leftover_cap_does_not_refuse_when_reported_risk_is_over_it():
 
 
 def test_leftover_total_slot_cap_does_not_clip_free_slots():
-    """Operator: acilabilir is marj, not leftover max_total_positions=100."""
+    """Occupied name is 1-ticket. Vacant GER40 still has a slot; leftover total=1 unread."""
     risk = RiskManager(_Store(), _Client())
     risk.store.system.max_total_positions = 1
     risk.store.symbols["XAUUSD"].enabled = True
     cap = risk.capacity([_pos(sl=1925.0)], ACCOUNT)
-    row = cap["rows"][0]
-    assert row["free_slots"] > 0
+    by_sym = {r["symbol"]: r for r in cap["rows"]}
+    assert by_sym["XAUUSD"]["free_slots"] == 0
+    assert by_sym["GER40"]["free_slots"] > 0
     assert cap["global_free_slots"] > 0
 
 

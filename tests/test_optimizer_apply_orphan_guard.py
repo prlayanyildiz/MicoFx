@@ -86,7 +86,7 @@ def test_apply_holds_back_exit_fields_when_orphan_scan_pending_and_no_visible_po
     assert store.updated_with["t3_length"] == 10
 
 
-def test_apply_refuses_family_swap_when_orphan_scan_pending():
+def test_apply_queues_family_swap_when_orphan_scan_pending():
     cfg = _cfg()
     store = _Store(cfg, orphan_scan={"XAUUSD": {"magic": 1, "known": [], "since": 0.0}})
     client = _Client(positions=[])
@@ -95,8 +95,10 @@ def test_apply_refuses_family_swap_when_orphan_scan_pending():
     result = opt.apply("XAUUSD", {"sl_atr_mult": 2.0}, score=1.0, detail=STAMP,
                        strategy="burst", timeframe="M5")
 
-    assert result["ok"] is False
-    assert cfg.strategy == "stoch_flip"  # unchanged
+    assert result["ok"] is True
+    assert result.get("deferred") is True
+    assert cfg.strategy == "stoch_flip"  # unchanged until flat
+    assert store.updated_with["pending_primary_patch"]["strategy"] == "burst"
 
 
 def test_apply_unaffected_by_orphan_scan_for_other_symbol():

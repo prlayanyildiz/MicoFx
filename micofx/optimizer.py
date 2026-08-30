@@ -20,6 +20,8 @@ from .logbus import LOG
 from .models import (
     EXIT_RISK_FIELDS,
     OPT_FIELDS,
+    PRIMARY_LAND_KEYS,
+    SEARCH_TIMEFRAMES,
     STRATEGIES,
     STRATEGY_TIMEFRAMES,
     SWING_GRID_OVERLAY,
@@ -33,7 +35,7 @@ from .models import (
 from .mt5client import Bars, MT5Client, timeframe_seconds
 from .spread_calibration import calibrate
 from .store import Store
-from .strategy import searchable_axes
+from .strategy import searchable_axes, unstamped_gates_to_zero
 
 APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
 
@@ -540,8 +542,9 @@ class Optimizer:
         max_combos = int(params.get("max_combos", 2500))
         min_positive = float(params.get("min_positive_ratio", 0.6))
         plateau = float(params.get("plateau_weight", 0.4))
-        timeframes = [t for t in (tf_override or params.get("timeframes") or ["M5"]) if t in TIMEFRAMES] \
-            or ["M5"]
+        timeframes = [t for t in (tf_override or params.get("timeframes") or SEARCH_TIMEFRAMES)
+                      if t in TIMEFRAMES] \
+            or list(SEARCH_TIMEFRAMES)
         refine_rounds = int(params.get("refine_rounds", 2))
         shared = {k: v for k, v in (params.get("grid") or {}).items() if isinstance(v, list) and v}
         families = [s for s in (fam_override or params.get("strategies") or ["stoch_flip"])
@@ -1140,6 +1143,14 @@ class Optimizer:
             {"timeframe": a["timeframe"], "strategy": a.get("strategy", "?"),
              "ok": bool(a.get("ok")), "validated": bool(a.get("validated")),
              "score": a["best"]["score"] if a.get("ok") else None,
+             "val_net_r": ((a.get("best") or {}).get("validation") or {}).get("net_r")
+             if a.get("ok") else None,
+             "hold_net_r": ((a.get("best") or {}).get("holdout") or {}).get("net_r")
+             if a.get("ok") else None,
+             "hold_pf": ((a.get("best") or {}).get("holdout") or {}).get("profit_factor")
+             if a.get("ok") else None,
+             "hold_n": ((a.get("best") or {}).get("holdout") or {}).get("trades")
+             if a.get("ok") else None,
              "error": a.get("error", "")}
             for a in attempts
         ]
@@ -1251,8 +1262,19 @@ class Optimizer:
                         "combo_seed": report.get("combo_seed"),
                         "combos": report.get("combos")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
-            applied = bool(apply_result.get("ok"))
-            if not applied:
+            applied = bool(apply_result.get("ok")) and not apply_result.get("deferred")
+            if apply_result.get("deferred"):
+                # Winner is stored on the symbol as pending_primary_patch;
+                # live family/TF stay until this magic is next seen flat.
+                report["keep_reason"] = (
+                    "strateji/TF pozisyon kapaninca uygulanacak")
+                report["queued"] = True
+                LOG.emit(
+                    f"{cfg.symbol}: {report['strategy']}/{report['timeframe']} "
+                    f"dogrulandi, acik pozisyon var - kuyruga alindi "
+                    f"(kapaninca uygulanacak).",
+                    "OPT", cfg.symbol)
+            elif not applied:
                 # apply() itself refused (e.g. the TF-lock check) - the run
                 # otherwise looked like a normal validated win, so make sure
                 # that doesn't get reported as "uygulandi" with the live
@@ -1268,6 +1290,8 @@ class Optimizer:
                 # 21:17 run moved FRA40 from M30 to M5 and its cap went from
                 # cutting 1.5% of bars to cutting 57.9% without anything being
                 # written. Re-read here, off the timeframe that is now live.
+                # Deferred family/TF must not do this yet - the live bar is
+                # still the old one; Engine lands the cap with the patch.
                 self._recalibrate_spread_cap(cfg.symbol, report["timeframe"])
             # Secondary pick/store was removed 14.08 (operator): a runner-up
             # is no longer written. Existing secondary_* rows stay inert until
@@ -1304,6 +1328,9 @@ class Optimizer:
         sel = best["selection"]
         if applied:
             tail = " -> uygulandi"
+        elif report.get("queued"):
+            tail = (f" -> kuyrukta "
+                    f"({report.get('keep_reason') or 'pozisyon kapaninca'})")
         else:
             # Say *why* nothing was written, and say that the live config is
             # untouched - a red backtest number next to a symbol otherwise reads
@@ -1933,6 +1960,7 @@ class Optimizer:
             or (timeframe in TIMEFRAMES and timeframe != cfg.timeframe)
         )
         applied_params = {k: v for k, v in params.items() if k in OPT_FIELDS}
+        applied_params.update(unstamped_gates_to_zero(next_strat, applied_params))
         # Last gate before this reaches a live symbol. The API checks the same
         # bounds on its own request bodies, but auto-apply (Optimizer.start
         # with apply_best) lands here straight off a search result without
@@ -2110,17 +2138,25 @@ class Optimizer:
             # on top of it by Engine._apply_pending_exits the next time this
             # magic is seen flat - silently reverting the newer values.
             patch["pending_exit_patch"] = {}
+            patch["pending_primary_patch"] = {}
             if open_here or pending_scan:
                 scan_note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
                 if primary_changed:
-                    # Swapping the family out from under it mid-trade hands that
-                    # same position's ongoing trail/breakeven math to a
-                    # different, unrelated strategy's params entirely - wait for
-                    # flat rather than let that happen.
-                    return {"ok": False,
-                            "error": f"{symbol}: {len(open_here)} acik pozisyon var{scan_note}, "
-                                     f"strateji/TF degisikligi pozisyon kapanana kadar bekliyor "
-                                     f"(parametre iyilestirmesi degil, aile degisikligi)"}
+                    # Same promise as pending_exit_patch, for family/TF: do
+                    # not trail an open ticket under a different family's
+                    # ATR, and do not drop the winner (28.08 NAS100 burst).
+                    queued = {k: v for k, v in patch.items() if k in PRIMARY_LAND_KEYS}
+                    updated = self.store.update_symbol(
+                        symbol,
+                        {"pending_exit_patch": {}, "pending_primary_patch": queued},
+                        source="opt apply")
+                    LOG.emit(
+                        f"{symbol}: {len(open_here)} acik pozisyon var{scan_note}, "
+                        f"{next_strat}/{next_tf} kuyruga alindi "
+                        f"(pozisyon kapaninca uygulanacak).",
+                        "OPT", symbol)
+                    return {"ok": True, "deferred": True, "symbol": symbol,
+                            "config": updated.to_dict() if updated else None}
                 # Same family/timeframe: entry-signal params (t3_length, adx_min,
                 # etc.) are safe to land immediately - they only shape the NEXT
                 # entry. Exit/risk params (the hard stop and the trail) are

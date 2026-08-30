@@ -66,7 +66,7 @@ def test_every_living_family_still_computes_without_those_helpers():
     assert sorted(STRATEGIES) == sorted(
         ["mtf_pullback", "burst", "dual_t3",
          "t3_flip", "stoch_flip",
-         "parabolic_flip", "aroon_flip",
+         "parabolic_flip",
          "ichimoku"])
     for family in STRATEGIES:
         sig = compute(cache, Params(strategy=family))

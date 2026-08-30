@@ -111,7 +111,7 @@ def test_live_book_families_are_still_searchable():
     for name in LIVE_NOW:
         assert name in STRATEGIES
         assert name in _FAMILIES
-    assert len(STRATEGIES) == 8
+    assert len(STRATEGIES) == 7
     assert set(STRATEGIES) == set(_FAMILIES)
 
 

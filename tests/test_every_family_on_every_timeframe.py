@@ -112,7 +112,9 @@ def test_the_registry_is_the_whole_book():
     # SEARCH COST, not a bad holdout - none owned its exit axes, so the
     # shared 6x6x5 product multiplied their grids (t3_stoch to ~1.43e9
     # against a 2000 budget, coverage 0.0001) and none was live.
-    assert len(FAMILIES) == 8, f"aile sayisi degisti: {FAMILIES}"
+    # 8 -> 7 on 28.08: aroon_flip. Slowest sweep, worst validated holdout,
+    # 1/7 applied, never live; its aroon() indicator went with it.
+    assert len(FAMILIES) == 7, f"aile sayisi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

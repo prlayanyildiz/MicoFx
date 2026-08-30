@@ -38,7 +38,6 @@ def test_every_setting_key_has_a_help_entry():
         "OPT_SETTING_FIELDS",
         "SYS_FIELDS", "SYS_FIELDS_ADVANCED",
         "BACKUP_FIELDS", "MT5_PATH_FIELDS",
-        "POSITION_SECTION",
     ):
         for k in _keys(_block(name)):
             if k not in help_keys:
