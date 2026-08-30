@@ -3511,3 +3511,1088 @@ Live bot at `C:\Users\Administrator\MicoFx`. Constraints:
 - Yellow/red gates stay operator-only. Holdout capture is not a score input.
 - Autopsy gotchas: `open_original_sl` must be tracked, profit-empty rows exist, `gmtime` broker calendar used.
 ```
+
+---
+
+# 31.08 01:15 — full A-Z optimization audit
+
+Read-only pass. Nothing was PATCHed, no search started, no flatten, no
+capture, no restart. Evidence is live `/api/state` at 01:15, a full
+`pytest tests/ -q` run, `ruff check`, and a line-by-line read of
+`engine.py` (4534), `optimizer.py`, `backtest.py`, `strategy.py`,
+`indicators.py`, `risk.py`, `supervisor.py`, `mt5client.py`,
+`execution.py`, `sessions.py`, `web/app.py`, `store.py`, `models.py`,
+`static/app.js`, `config/defaults.json`, `run.py`, `gece_restart.py`.
+Grid sizes below were computed with the venv interpreter against the
+shipped `defaults.json`, not estimated. HEAD `cf2dcc5`.
+
+## 1) Optimization summary
+
+Health: the trading core is correct where it matters most — fill-next-open
+is honest, no lookahead in `supertrend`/`parabolic_sar`/`ichimoku`, the
+forming candle never signals, clocks are `gmtime` everywhere they should
+be, and there is no SQL injection or hardcoded secret. What is broken is
+**coverage and throughput**: the search judges six of seven families on a
+0.08–2.6% fixed random slice of their own grid, the live book is spending
+most of its wall clock refusing its own signals, and roughly a fifth of
+the settings surface is write-only.
+
+Top 3 by ROI:
+
+1. **Grid coverage collapse.** `dual_t3` has 2,488,320 grid points and a
+   2,000 combo budget. Every "best" this book has ever applied for six
+   families came out of a `default_rng(7)` lottery ticket.
+2. **The bar-age gate is one bar tighter than documented, and it is what
+   is blocking the live book right now.** 7 of 9 symbols sat on
+   `entry_block = "bar_bosluk"` at 01:15.
+3. **`r_cap` is not the 2% ceiling it is described as.** `edge_scale`
+   (max 2.2) is inside the multiplier that scales the cap, so a proven
+   symbol's automatic 1R ceiling is ~4.4% of balance.
+
+Biggest risk if nothing changes: the book keeps re-applying parameters
+selected from a fraction of a percent of the search space while the live
+engine refuses the signals those parameters were fitted to produce. The
+walk-forward number and the live number will keep diverging and neither
+will explain the other.
+
+Live snapshot 31.08 01:15 (`/api/state`, session cookie):
+balance 1656.15, 0 positions, trading off, MT5 connected,
+`mt5_terminal_path = C:\Program Files\MetaTrader 5` (correct — the exe
+exists). Entry blocks: `bar_bosluk` ×7 (BRENTOIL-PERP, GOLD-PERP, XAUUSD,
+JPN225, NAS100, US30, BTCUSD), `spread` ×1 (SpotBrent, `spread_atr`
+0.184), `seans_disi` ×1 (GER40, opens in 117 min). Zero symbols were in a
+state where a signal could have been taken.
+
+Test/lint state: `pytest tests/ -q` → **3 failed, 2610 passed, 1 xfailed,
+88.60 s**. `ruff check micofx/ tests/ run.py backup.py gece_restart.py` →
+clean.
+
+## 2) Findings (prioritized)
+
+### F1 — Six of seven families search 0.08–2.6% of their own grid
+
+* **Category** Algorithm
+* **Severity** Critical
+* **Impact** Parameter quality, walk-forward/live agreement, every R the book earns
+* **Evidence** Computed grid products from `config/defaults.json` at the
+  searched timeframes (M15/M30) against `max_combos: 2000`
+  (`defaults.json:714`):
+
+  | family | grid points | coverage |
+  |---|---|---|
+  | dual_t3 | 2,488,320 | 0.080% |
+  | burst | 1,492,992 | 0.134% |
+  | mtf_pullback | 559,872 | 0.357% |
+  | stoch_flip | 259,200 | 0.772% |
+  | t3_flip | 144,000 | 1.389% |
+  | parabolic_flip | 77,760 | 2.572% |
+  | ichimoku | 720 | 100% (exhaustive) |
+
+  Truncation is a uniform random draw, not a stratified or Latin-hypercube
+  sample, `backtest.py:980-987`:
+
+```980:987:micofx/backtest.py
+    rng = np.random.default_rng(seed)
+    seen: set[tuple[int, ...]] = set()
+    attempts = 0
+    while len(seen) < max_combos and attempts < max_combos * 40:
+        attempts += 1
+        seen.add(tuple(int(rng.integers(0, s)) for s in sizes))
+    return keys, sorted(seen)
+```
+
+  Seed is `combo_seed`, default 7 (`optimizer.py:190`, `818-820`), so the
+  same 2,000 of 2,488,320 points are drawn on every run of every symbol.
+* **Why it's inefficient** The refine rounds walk ±1 per axis from the top
+  12 seeds (`backtest.py:1416-1430`), which cannot bridge a 10-axis space
+  sampled at 0.08%. `_plateau_scores` neighbours (`backtest.py:1043-1051`)
+  therefore exist almost only because refine manufactured them, and when
+  `grounded` comes back empty the code falls back to `list(blended)`
+  (`backtest.py:1464`) — the plateau requirement silently disappears
+  instead of failing loudly.
+* **Recommended fix** Three independent levers, in ROI order: (a) give
+  `dual_t3` and `burst` a per-family budget — `strategy_max_combos` is
+  already read by `family_max_combos` (`optimizer.py:54-72`) but has **no
+  entry in defaults.json**, so it is a switch that exists and is wired to
+  nothing; (b) replace the uniform draw with a Sobol/LHS sample over the
+  same budget, which cuts the variance of the coverage without costing a
+  single extra simulation; (c) cut axes that cannot pay — `st_period`'s 2
+  values are inert on the `st_mult: 0.0` third of dual_t3's grid
+  (`strategy.py:651`), so ~25% of those 2.49M points are exact duplicates
+  under distinct grid indices and are being spent as if they were
+  candidates.
+* **Tradeoffs / Risks** (a) costs wall clock linearly. (b) is free. (c)
+  changes the grid, so past `opt_runs` stamps are not comparable.
+* **Expected impact** (c) alone recovers ~25% of dual_t3's effective
+  budget at zero cost. (b) is the largest quality-per-second win available
+  in this repo.
+* **Removal Safety** Needs Verification (grid change invalidates stamps)
+* **Reuse Scope** service-wide
+
+### F2 — The bar-age gate measures from bar open, so the real slack is one bar
+
+* **Category** Algorithm / Reliability
+* **Severity** Critical
+* **Impact** Signals taken vs signals refused — directly, trades per day
+* **Evidence** `engine.py:2163-2177` compares against `state.last_bar`:
+
+```2163:2165:micofx/engine.py
+        tf_sec = timeframe_seconds(cfg.timeframe)
+        if (state.last_bar > 0
+                and (server_now - state.last_bar) > _MAX_SIGNAL_BAR_AGE_BARS * tf_sec):
+```
+
+  and `state.last_bar = bars.last_closed_time` (`engine.py:2403`) is the
+  **open** stamp of the last closed bar. `_MAX_SIGNAL_BAR_AGE_BARS = 2`
+  is documented at `engine.py:58-59` as "the bar that follows it, plus one
+  extra bar of poll slack". Arithmetically the signal dies `1 × tf_sec`
+  after its bar *closed*, not `2 × tf_sec`.
+* **Why it's inefficient** One of the two bars of the budget is consumed
+  by the bar's own duration before the poll loop gets a single chance at
+  it. Live at 01:15 this was the single most common refusal: 7 of 9
+  symbols, including NAS100 and US30 which explicitly showed
+  `"sinyal bari gecmis (bosluk)"`.
+* **Recommended fix** Measure from bar close: compare
+  `server_now - (state.last_bar + tf_sec)`, or set the constant to 3 and
+  document that one bar is spent on the bar itself. The first is the
+  honest fix; the second preserves the current arithmetic while making the
+  comment true.
+* **Tradeoffs / Risks** Widening the window admits older signals. The
+  Friday-close-to-Monday-open case the comment at `engine.py:2166-2168`
+  guards is unaffected — that gap is measured in days, not one bar.
+* **Expected impact** Doubles the acceptance window. On a book showing 7/9
+  symbols blocked on exactly this gate, this is the highest-yield single
+  line in the tree.
+* **Removal Safety** Needs Verification (cover with a fail-first test on
+  an M30 signal at `close + 90 min`)
+* **Reuse Scope** local file
+
+### F3 — `r_cap` is scaled by the edge multiplier, so the "auto 2%" 1R ceiling is ~4.4%
+
+* **Category** Reliability / Risk
+* **Severity** Critical
+* **Impact** Actual per-trade risk vs stated per-trade risk
+* **Evidence** `risk.py:483-486`:
+
+```483:486:micofx/risk.py
+        r_pct = max(stored, self.AUTO_R_PCT)
+        r_cap = (balance * r_pct / 100.0 * multiplier
+                 / (sl_distance * money_per_unit))
+```
+
+  `multiplier` was already built as `lot_multiplier * edge_scale *
+  ai_scale` at `risk.py:449-452`, and `EDGE_MAX = 2.2` (`risk.py:279`).
+* **Why it's inefficient** The cap is supposed to be the backstop that the
+  edge push is measured *against*. Multiplying the backstop by the same
+  push it is bounding makes it not a backstop. AGENTS describes this as
+  "auto 1R `max(risk_percent, 2%)`"; the code delivers up to 4.4%.
+* **Recommended fix** Build `r_cap` from `lot_multiplier` only (or from
+  1.0), and apply `edge_scale`/`ai_scale` to the raw lot before the cap,
+  not inside it.
+* **Tradeoffs / Risks** Live lots on proven symbols shrink. That is the
+  point, but it is a real change in position size on a 1656 USD account
+  and should be landed while flat.
+* **Expected impact** Caps worst-case single-trade risk at the documented
+  2% instead of 4.4%.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F4 — Lot budget is diluted by names that cannot trade
+
+* **Category** Algorithm / Cost
+* **Severity** High
+* **Impact** Lot size on every live entry
+* **Evidence** `_vacant_enabled_count` (`risk.py:366-374`) counts every
+  `enabled` symbol without one of our tickets and the budget is split
+  `budget / n` (`risk.py:409`). It never consults the supervisor, and a
+  quarantined symbol carries `risk_scale = 0.0` (`supervisor.py:980`).
+* **Why it's inefficient** A quarantined name reserves a full share of
+  book margin it is forbidden to spend. With 9 enabled names and 2
+  quarantined, every real entry is sized at 7/9 of its intended lot.
+* **Recommended fix** Exclude symbols whose supervisor verdict is
+  `quarantine` from the vacancy count.
+* **Tradeoffs / Risks** Lots grow on the surviving names; interacts with
+  F3 (fix F3 first or the two compound).
+* **Expected impact** Proportional: `enabled / (enabled - quarantined)`.
+  At 2 of 9 quarantined that is +28.6% lot per entry.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F5 — Whole-history spread median leaks backwards into every in-sample window
+
+* **Category** Algorithm (correctness)
+* **Severity** High
+* **Impact** Search honesty; the cost the walk-forward charges
+* **Evidence** `backtest.py:275-279`:
+
+```275:279:micofx/backtest.py
+    pts = np.asarray(spread, dtype=np.float64)
+    quoted = pts[pts > 0]
+    if quoted.size == 0:
+        return pts
+    return np.where(pts > 0, pts, float(np.median(quoted)))
+```
+
+  Built once at `backtest.py:1211`, **before** the window split at
+  `backtest.py:1147-1149`. On GER40 M30 this imputation touches 24% of
+  bars (the function's own docstring number).
+* **Why it's inefficient** An in-sample bar's trading cost depends on
+  spreads quoted in the validation and holdout segments. It is a mild
+  leak — a median, not a signal — but it is the exact class of thing the
+  fill-next-open discipline exists to prevent, and it silently makes the
+  holdout slightly less independent.
+* **Recommended fix** Compute the imputation median per window, from the
+  selection segments only, and reuse that scalar for validation/holdout.
+* **Tradeoffs / Risks** Scores shift. All stored `opt_runs` scores become
+  non-comparable to new ones.
+* **Expected impact** Removes the last identified backwards dependency in
+  the search.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F6 — The shared `grid` block in defaults.json is dead at every searched timeframe
+
+* **Category** Dead Code / Algorithm
+* **Severity** High
+* **Impact** Four exit axes are not searched at all
+* **Evidence** `defaults.json:388-391` searches only `["M15","M30"]`;
+  `uses_swing_exits` is True at ≥900 s (`models.py:646-647`); the store's
+  shared grid equals the factory grid so `overlay_axes_operator_owns`
+  returns empty (`optimizer.py:630-636`), and `SWING_GRID_OVERLAY`
+  overwrites all four axes for any family that does not name them itself
+  (`optimizer.py:661-672`). Net: `sl_atr_mult` 0.5/0.7/0.9
+  (`defaults.json:682-684`), `trail_start_atr` 0.4/0.7 (`690`,`693`),
+  `trail_step_atr` 0.25 (`699`) and `max_spread_atr` 0.05/0.18
+  (`708`,`711`) are never evaluated. What actually runs is
+  `models.py:600-603`.
+* **Why it's inefficient** ~30 lines of config that an operator can edit,
+  that the panel shows, and that changes nothing. It is a trap, not just
+  waste.
+* **Recommended fix** Either delete the shadowed axes from the shared grid
+  block, or make `SWING_GRID_OVERLAY` merge rather than overwrite.
+* **Tradeoffs / Risks** Merging changes grid size for six families.
+* **Expected impact** Correctness of operator intent; no runtime cost.
+* **Removal Safety** Likely Safe (delete); Needs Verification (merge)
+* **Reuse Scope** service-wide
+
+### F7 — Five OPT_FIELDS axes have no grid anywhere
+
+* **Category** Dead Code / Algorithm
+* **Severity** High
+* **Impact** `structural` trail mode has never been evaluated
+* **Evidence** `models.py:521-538` vs `defaults.json:401-713`:
+  `adx_max` (read by every gated family via `strategy.py:425-426`),
+  `min_body_ratio` (`strategy.py:528-531`), `trail_mode` and
+  `trail_lookback` (`backtest.py:541-542`, `609`), `min_atr_ratio`
+  (`backtest.py:836-838`). Additionally `rsi_length`, `stoch_length`,
+  `smooth_k`, `smooth_d` are never searched **and** never gate a family —
+  `_common` computes StochRSI purely for the panel readout
+  (`strategy.py:414`, `357`).
+* **Why it's inefficient** Because `trail_mode` never varies, `structural`
+  is permanently False and the entire structure/hybrid trail path
+  (`swing_lows`/`swing_highs`, `backtest.py:543-544`) is code the search
+  has never exercised. `adx_max` is a live gate on six families with a
+  value nobody tuned.
+* **Recommended fix** Add grids for `adx_max` and `min_body_ratio` (cheap,
+  small axes). Leave `trail_mode` out until the structural path has a
+  fail-first test — searching it today would also expose the per-combo
+  `swing_lows` rebuild (F13).
+* **Tradeoffs / Risks** Adding axes multiplies an already-undersampled
+  grid; pair with F1(a) or the coverage gets worse.
+* **Expected impact** Medium; `adx_max` is a real regime lever currently
+  frozen.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** service-wide
+
+### F8 — `simulate()` rebuilds a full-length Python list per combo per window
+
+* **Category** CPU / Memory
+* **Severity** High
+* **Impact** Search wall clock
+* **Evidence** `backtest.py:514-515`:
+
+```514:515:micofx/backtest.py
+    else:
+        trigger_pad = np.asarray(trigger_pad, dtype=np.float64).tolist()
+```
+
+  `walk_forward` already built `trigger_pad` as a list once
+  (`backtest.py:387`, `1211-1212`); `simulate` re-wraps it in an array and
+  re-lists it on every call.
+* **Why it's inefficient** At ~90k bars × 4 windows × 2000 combos × 6
+  rounds this is on the order of 4×10^12 boxed float allocations across a
+  full sweep. It is pure overhead — the value is identical every time.
+* **Recommended fix** `if not isinstance(trigger_pad, list): trigger_pad =
+  np.asarray(...).tolist()`. One line.
+* **Tradeoffs / Risks** None; the caller already owns the list.
+* **Expected impact** Large and free. This is the single best
+  effort-to-payoff change in the file.
+* **Removal Safety** Safe
+* **Reuse Scope** local file
+
+### F9 — `_stop_bar`, `_note_risk_capacity` and the TP branch are fully dead
+
+* **Category** Dead Code
+* **Severity** Medium
+* **Impact** Maintenance surface, misleading docstrings
+* **Evidence**
+  - `_stop_bar`: declared `engine.py:431`, pruned `engine.py:3114`,
+    written `engine.py:3315`, **read nowhere**. The docstrings at
+    `engine.py:425-431` and `2030` still describe it as the per-bar trail
+    throttle, which `engine.py:3306-3313` explicitly replaced with
+    "Always re-run overlay_stop on this closed bar."
+  - `_note_risk_capacity` (`engine.py:4405-4407`) is
+    `"""Leftover max_concurrent_risk_pct is unread..."""` followed by
+    `return`, called unconditionally every cycle at `engine.py:844`. Its
+    state field `_risk_capacity_noted` (`engine.py:487`) is never assigned
+    or read.
+  - `tp_dist = 0.0` at `engine.py:2568` and never reassigned, so
+    `engine.py:2614`'s `else` is unreachable, and with it
+    `_autopsy_exit_reason`'s `DEAL_REASON_TP` arm (`engine.py:1740-1741`)
+    and `execution.reap`'s `"target"` leg (`execution.py:505`, `515`).
+    `mt5client.open_market` still carries a full stop-widening ladder for
+    that `tp` (`mt5client.py:1227-1228`, `1300-1306`, `1460-1466`).
+  - `_tally_entry`'s `source` parameter (`engine.py:1318`) is never read —
+    `engine.py:1349` hardcodes `leg = "primary"` — yet all five call sites
+    pass it, and the per-leg nesting of `_entry_blocks` and `_filled_bars`
+    can only ever hold one key because `_merge_signals` is two-valued
+    (`engine.py:2448`).
+* **Recommended fix** Delete `_stop_bar` + its prune + the two stale
+  docstring paragraphs; delete `_note_risk_capacity` and its call site;
+  collapse `tp` out of the engine→client entry path.
+* **Tradeoffs / Risks** The `tp` removal touches `mt5client.open_market`'s
+  signature and the invalid-stops retry; do it last and cover with the
+  existing ambiguous-send tests.
+* **Expected impact** Low runtime, high clarity. `_stop_bar`'s docstring
+  actively misinforms about how the trail throttles.
+* **Removal Safety** Safe (`_stop_bar`, `_note_risk_capacity`);
+  Needs Verification (`tp`)
+* **Reuse Scope** module
+
+### F10 — ~150 lines of symbol-patch guards are unreachable over HTTP
+
+* **Category** Dead Code
+* **Severity** Medium
+* **Impact** Maintenance; and one real guard is gone with them
+* **Evidence** `_reject_hands_off_fields(patch, _OPERATOR_SYMBOL_FIELDS)`
+  runs first at `app.py:879`, and the allowlist is only:
+
+```430:433:micofx/web/app.py
+_OPERATOR_SYMBOL_FIELDS = frozenset({
+    "use_sessions", "sessions", "trade_days", "flat_before_close_min",
+    "enabled", "group", "broker_symbol",
+})
+```
+
+  So `magic`, `strategy`, `timeframe` and every `EXIT_RISK_FIELDS` key
+  400 before anything downstream runs. Unreachable as a result:
+  `magic_changing` / `primary_changing` / `exit_fields_changing` and the
+  whole `if guarded:` body including the 409s at `app.py:926`, `930`,
+  `943`, `953` and the `strategy_allows_timeframe` 400 at `965`;
+  `_magic_blocked_by_orphan_state` (`app.py:800-853`); the bulk
+  `needs_tf_check`/`rejected` machinery (`app.py:1399-1481`) and the JS
+  that renders it (`app.js:120-128`); `_validate_risk_bounds` at
+  `app.py:882-883` and `1388-1394`, which match no writable key.
+* **Why it's inefficient** The `engine.entry_lock` acquisition at
+  `app.py:918` and `1437` is also unreachable, so the requests no longer
+  block on the trading cycle — but the guard that made those writes safe
+  is gone too. If any of these fields is ever re-opened, the protection
+  reads as present and is not.
+* **Recommended fix** Delete the unreachable branches and leave a single
+  comment at `_OPERATOR_SYMBOL_FIELDS` recording that re-opening a field
+  means re-adding its guard.
+* **Tradeoffs / Risks** None while the allowlist stands.
+* **Expected impact** Removes ~150 lines and one false sense of safety.
+* **Removal Safety** Likely Safe
+* **Reuse Scope** module
+
+### F11 — `_INDICATOR_PERIOD_BOUNDS` names two fields that do not exist
+
+* **Category** Reliability
+* **Severity** Medium
+* **Impact** The ADX/ATR period bound the file was written to enforce is not enforced
+* **Evidence** `app.py:187` keys on `"adx_length"` and `"atr_length"`,
+  but `SymbolConfig` has `adx_period` (`models.py:268`) and `atr_period`
+  (`models.py:243`). The grid-axis check at `app.py:1768-1771` therefore
+  never bounds them.
+* **Recommended fix** Rename the two keys. `tests/test_indicator_periods_are_bounded.py`
+  exists and passes today, which means it is asserting on the wrong names too.
+* **Tradeoffs / Risks** None.
+* **Expected impact** Closes a silent hole in grid validation.
+* **Removal Safety** Safe
+* **Reuse Scope** local file
+
+### F12 — `GET /` hands out a full-privilege session with no authentication
+
+* **Category** Security / Reliability
+* **Severity** High
+* **Impact** Anyone who can reach port 8900 gets write access
+* **Evidence** The middleware skips `/` entirely (`app.py:601-603`) and
+  `index()` sets the cookie carrying the raw API token:
+
+```657:660:micofx/web/app.py
+        resp = HTMLResponse(html)
+        resp.set_cookie(
+            SESSION_COOKIE, api_token,
+            httponly=True, samesite="strict", path="/",
+        )
+```
+
+  No `secure`, no `max_age`, no rotation; the token is process-lifetime
+  (`app.py:592-596`). Separately, the Origin allowlist is derived from the
+  **client-supplied** `Host` header (`app.py:611-615`), and `sec-fetch-site`
+  is only checked for the literal `"cross-site"`.
+* **Why it's inefficient** The docstring at `app.py:583-590` defends
+  against cross-origin browsers, which it does. It does not defend against
+  anything that can open a TCP connection to the port. This audit obtained
+  a working session in one unauthenticated GET.
+* **Recommended fix** Bind to 127.0.0.1 only (verify `run.py`'s uvicorn
+  host), and pin the Origin allowlist to a configured host rather than the
+  request's own `Host`.
+* **Tradeoffs / Risks** If the operator reaches the panel from another
+  machine on the LAN, binding to loopback breaks that access.
+* **Expected impact** Removes the only path to unauthenticated writes.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** service-wide
+
+### F13 — `mt5_terminal_path` is an unvalidated, panel-writable executable path
+
+* **Category** Security
+* **Severity** High
+* **Impact** Authenticated POST → arbitrary local process launch
+* **Evidence** It is in `_OPERATOR_SYSTEM_FIELDS` (`app.py:428`) and the
+  handler stores it with no validation at all (`app.py:1600-1607` just
+  saves and reconnects) — in direct contrast to `backup_dir`, which gets
+  careful path and UNC checks at `app.py:1572-1597`. Then
+  `_exe_from_path` appends `terminal64.exe` (`mt5client.py:246`) and
+  `ensure_terminal_process` runs
+  `subprocess.Popen([str(exe)], cwd=str(exe.parent), ...)`
+  (`mt5client.py:270-291`), with `autostart_mt5` defaulting to True
+  (`models.py:772`).
+* **Why it's inefficient** Combined with F12 the chain is: one
+  unauthenticated GET, one POST, one launched process.
+* **Recommended fix** Require the basename to be `terminal64.exe`, require
+  the file to exist, and reject UNC — the same three checks `backup_dir`
+  already performs. (This was already flagged Low at `OPTIMIZATIONS.md:879`
+  and is still open; F12 is what raises it to High.)
+* **Tradeoffs / Risks** A directory-only path is currently accepted and
+  works (live carries `C:\Program Files\MetaTrader 5`); keep that form
+  legal.
+* **Expected impact** Closes the launch primitive.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F14 — `max_combos` / `refine_rounds` accept any finite number
+
+* **Category** Cost / Reliability / Security
+* **Severity** High
+* **Impact** A single POST can wedge the live trading process
+* **Evidence** Both are allowlisted at `app.py:434-437`, and
+  `set_opt_params` validates only `timeframes`, finiteness and grid axes
+  (`app.py:1731-1772`). `max_combos = 1e9` with `refine_rounds = 1e9` is
+  accepted and persisted. Each refine round is charged a full
+  `max_combos` sweep (`optimizer.py:95-96`). Same class:
+  `flat_before_close_min` (writable at `app.py:431`, no entry in
+  `_SYMBOL_RISK_BOUNDS`, UI-only `max: 240` at `app.js:1029` — `10**9`
+  permanently blocks entries on that symbol) and `backup_keep`
+  (`app.py:427`, UI-only bounds at `app.js:1688`).
+* **Recommended fix** Add all four to the existing bounds tables. The
+  mechanism is already there and already tested.
+* **Tradeoffs / Risks** None; AGENTS already names 2000 as the intended cap.
+* **Expected impact** Turns a process-wedging input into a 400.
+* **Removal Safety** Safe
+* **Reuse Scope** module
+
+### F15 — Cycle-start position read is fail-open where `_reload_positions` is fail-closed
+
+* **Category** Reliability
+* **Severity** High
+* **Impact** A transient `positions_get` failure empties the book the panel and the exit patcher read
+* **Evidence** `engine.py:857` assigns `self._positions = self.client.positions()`
+  **before** the connectivity check at `858-864`. `_reload_positions`
+  exists precisely to avoid this — its docstring at `engine.py:793-808`
+  says "On failure keep the previous snapshot and return False". After the
+  bail-out, `self._positions` is left as an unreliable `[]`, and that same
+  field feeds `_panel_positions` (`engine.py:4102-4103`) and the
+  `open_magics` set `_apply_pending_exits` derives (`engine.py:3467-3469`).
+* **Why it's inefficient** `pending_primary_patch` / `pending_exit_patch`
+  land "when flat". An empty book from a failed read looks exactly like
+  flat.
+* **Recommended fix** Route line 857 through `_reload_positions()`.
+* **Tradeoffs / Risks** None — it is the same call with the correct
+  failure semantics.
+* **Expected impact** Removes a path where a network blip can land a
+  parameter patch under an open ticket.
+* **Removal Safety** Safe
+* **Reuse Scope** local file
+
+### F16 — `entry_lock` is held across `time.sleep` and broker round trips
+
+* **Category** Concurrency
+* **Severity** Medium
+* **Impact** Panel write latency; `/api/state` stalls
+* **Evidence** `engine.py:2649-2782` holds the lock across `open_market`
+  (`2656`), up to three `_reload_positions()` round trips with
+  `time.sleep(0.2)` between them (`2718-2725`), and `_close_orphan_tickets`
+  (`2760`). `_scan_orphan_candidates` takes the same lock (`engine.py:3019`)
+  then sends `close_position` per ticket plus `positions()` inside it.
+  `manage_positions` documents exactly why this is wrong and keeps only
+  the prune inside (`engine.py:3123-3125`: "holding the entry lock across
+  those would stall every web write"). Additionally up to five
+  `store.set_setting` calls run under the lock at `engine.py:3127-3148`
+  and `store.update_symbol` at `3487-3527`.
+* **Recommended fix** Narrow to the state mutation; do the sleeps and the
+  broker calls outside, re-acquiring to commit.
+* **Tradeoffs / Risks** The lock exists to keep two entries off one
+  symbol; narrowing it needs the ticket-claim to stay inside.
+* **Expected impact** Sub-second panel writes during an entry burst.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F17 — `order_send` runs under the global MT5 lock with no timeout
+
+* **Category** Concurrency / Reliability
+* **Severity** Medium
+* **Impact** Every 3 s `/api/state` tick queues behind each broker round trip
+* **Evidence** The comment at `mt5client.py:1271-1277` argues against
+  exactly this ("the whole app would stall behind each entry") and the next
+  two lines do it:
+
+```1277:1278:micofx/mt5client.py
+        with self._lock:
+            result = mt5.order_send(request)
+```
+
+  Same at `1307-1308`, `1326-1328`, `1647-1648`, `1739-1740`, `1751-1753`.
+  The only timeout anywhere in the file is on `tasklist`
+  (`mt5client.py:262`).
+* **Recommended fix** Leave the lock (removing it is worse), but delete or
+  correct the comment, which currently describes behaviour the code does
+  not have.
+* **Tradeoffs / Risks** Actually releasing the lock reintroduces the race
+  the comment describes. Do not.
+* **Expected impact** Documentation truth, not throughput.
+* **Removal Safety** Safe (comment only)
+* **Reuse Scope** local file
+
+### F18 — `modify_position` reads "no change" as failure and retries every poll
+
+* **Category** Reliability / Network
+* **Severity** Medium
+* **Impact** A wasted broker round trip per poll per position, all bar long
+* **Evidence** `mt5client.py:1638-1658` is a single `order_send` with no
+  widening ladder, and `TRADE_RETCODE_NO_CHANGES` returns `False`
+  (`mt5client.py:1655-1657`). `_update_stop` then returns `False`
+  (`engine.py:3819`) and retries.
+* **Recommended fix** Treat `NO_CHANGES` as success — the stop is already
+  where the caller wants it.
+* **Tradeoffs / Risks** None.
+* **Expected impact** Removes a per-poll broker call per open position on
+  every bar where the trail does not move, which is most of them.
+* **Removal Safety** Safe
+* **Reuse Scope** local file
+
+### F19 — `normalize_volume` clamps up to `volume_min` after the risk cap
+
+* **Category** Reliability / Risk
+* **Severity** Medium
+* **Impact** Realized risk can exceed `r_cap`
+* **Evidence** `mt5client.py:985-986`:
+
+```985:986:micofx/mt5client.py
+        vol = math.floor(float(volume) / step + 1e-9) * step
+        vol = max(i["volume_min"], min(i["volume_max"], vol))
+```
+
+  The `< floor` guards at `risk.py:486-492` inspect the *pre-normalise*
+  value. Related: the min-lot overshoot skip at `risk.py:499-508`
+  (`MAX_MIN_LOT_OVERSHOOT = 3.0`, `risk.py:285`) is unreachable in
+  production, because `lot_for` returns inside the `auto is not None`
+  branch at `risk.py:489-497` and live always has an account snapshot.
+* **Recommended fix** Return the overshoot ratio from `normalize_volume`
+  (or re-check after it) so the caller can refuse rather than silently
+  round up.
+* **Tradeoffs / Risks** Some small-balance symbols stop trading entirely.
+  On a 1656 USD account that is the correct outcome but it is a visible
+  behaviour change.
+* **Expected impact** Closes the last path where realized risk exceeds
+  the cap.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F20 — `min_stop_distance` folds the freeze level into the stop floor
+
+* **Category** Algorithm / Risk
+* **Severity** Medium
+* **Impact** Wider stops → smaller lots on every entry
+* **Evidence** `mt5client.py:996-999`:
+
+```996:999:micofx/mt5client.py
+        broker = max(i["stops_level"], i["freeze_level"]) * point
+        return max(broker, spread * 1.5, point * 10)
+```
+
+  `trade_freeze_level` is a no-modify window near market, not a minimum
+  stop distance. It widens `sl_dist = max(atr * sl_mult, min_stop)`
+  (`engine.py:2563`). Cached for `_INFO_TTL = 120 s` (`mt5client.py:96`),
+  so an intraday widening of `stops_level` is read stale for two minutes.
+* **Recommended fix** Use `stops_level` for the stop floor and keep
+  `freeze_level` for the modify-eligibility check where it belongs.
+* **Tradeoffs / Risks** Tighter stops mean more stop-outs on brokers where
+  the freeze zone genuinely is wide. Measure per symbol first.
+* **Expected impact** Directly larger lots for the same R.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F21 — A symbol below `min_bars` gets no stop management at all
+
+* **Category** Reliability
+* **Severity** Medium
+* **Impact** An open ticket with no trail or breakeven
+* **Evidence** `_refresh_signals` returns early on `len(bars) < min_bars`
+  without setting `state.last_bar` (`engine.py:2357-2360`), and
+  `manage_positions` only calls `_update_stop` under `if last_bar:`
+  (`engine.py:3305-3315`). With `last_bar == 0` the trail, breakeven,
+  partial and harvest overlays all skip; only the broker stop protects the
+  position.
+* **Recommended fix** Manage stops off the last known bar even when the
+  fresh fetch is short, or log an explicit WARN when a ticket is open on a
+  symbol that failed `bars_ready`.
+* **Tradeoffs / Risks** None for the WARN.
+* **Expected impact** Closes a silent unmanaged-position window after a
+  history gap.
+* **Removal Safety** Safe (WARN); Needs Verification (manage)
+* **Reuse Scope** local file
+
+### F22 — Window boundaries manufacture fake "time" exits that count as trades
+
+* **Category** Algorithm (correctness)
+* **Severity** Medium
+* **Impact** Trade counts and win rate in every segment
+* **Evidence** The replay loop is `for j in range(j0, n)` with `n` the
+  window end (`backtest.py:483`, `865`), and anything still open is booked
+  at that bar's close as `reason = "time"` (`backtest.py:939-941`). Every
+  selection/validation/holdout window ends with one artificial close whose
+  R is a boundary artifact, and it counts toward `MIN_TEST_TRADES` and
+  `min_trades`. Compounding it, break-even trades are counted as wins
+  (`backtest.py:586-588`), so a 0 R boundary exit inflates `win_rate`.
+* **Recommended fix** Drop the trailing open trade from the segment's
+  statistics, or count it separately.
+* **Tradeoffs / Risks** Reduces trade counts slightly; some candidates
+  will newly fail `min_trades`.
+* **Expected impact** With `segments: 5` this is up to 5 artifact trades
+  per candidate per run.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F23 — `positive_ratio` is a two-valued step function
+
+* **Category** Algorithm
+* **Severity** Medium
+* **Impact** Candidate ranking
+* **Evidence** With `segments: 5` (`defaults.json:382`) selection is
+  `windows[:-2]` = 3 windows (`backtest.py:1149`), so `positive` ∈
+  {0, 0.333, 0.667, 1.0}, and the rank key squares it:
+
+```1393:1393:micofx/backtest.py
+                        raw[idx] = round(mean_score * positive * positive, 4)
+```
+
+  Against `min_positive_ratio: 0.6` only 0.667 and 1.0 survive, so the
+  multiplier is **either 0.444 or 1.0** — nothing in between exists. A
+  candidate that loses one of three segments is discounted 56% in one
+  discontinuous step.
+* **Recommended fix** Either raise `segments` so the ratio has resolution,
+  or replace the squared ratio with a continuous consistency penalty.
+* **Tradeoffs / Risks** Raising `segments` costs wall clock linearly.
+* **Expected impact** Removes a cliff that currently dominates the
+  ranking of otherwise-similar candidates.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F24 — Successive-halving prescreen is a recency filter
+
+* **Category** Algorithm
+* **Severity** Medium
+* **Impact** Candidates are eliminated before `min_positive_ratio` sees them
+* **Evidence** `prescreen` scores only `selection[-1]` and kills anything
+  ≤ 0 outright (`backtest.py:1310`, `1360-1368`). A set that pays on
+  segments 1 and 2 but not the most recent is never evaluated, even though
+  2/3 clears `min_positive_ratio: 0.6`.
+* **Recommended fix** Prescreen on the mean of two segments, or keep the
+  cheap screen but raise the kill threshold's sample.
+* **Tradeoffs / Risks** More survivors means more full evaluations —
+  directly more wall clock.
+* **Expected impact** The prescreen and the consistency gate currently
+  disagree about what "consistent" means; this makes them agree.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F25 — Pooled drawdown is a max-of-segments, not an equity curve
+
+* **Category** Algorithm
+* **Severity** Medium
+* **Impact** Score understates real drawdown
+* **Evidence** `backtest.py:1070-1071`:
+
+```1070:1071:micofx/backtest.py
+        total.max_dd_r = max(total.max_dd_r, r.max_dd_r)
+        total.longest_loss_streak = max(total.longest_loss_streak, r.longest_loss_streak)
+```
+
+  and `Result.score` divides by `net_r + max_dd_r` (`backtest.py:111`).
+  Also `PF_NO_LOSSES = 99.0` (`backtest.py:42`) lets a 12-trade holdout
+  slice with zero losers sail through `MIN_OOS_PF` (`backtest.py:1084-1088`)
+  on a fabricated ratio.
+* **Recommended fix** Concatenate segment R series and compute one
+  drawdown; cap `PF_NO_LOSSES` at the gate value plus epsilon rather than
+  99.
+* **Tradeoffs / Risks** Scores drop across the board; stamps become
+  non-comparable.
+* **Expected impact** The selection score becomes a number that survives
+  contact with a real equity curve.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+### F26 — Three supervisor rules and two knobs are dead at shipped defaults
+
+* **Category** Dead Code
+* **Severity** Medium
+* **Impact** The panel shows enforcement that does not happen
+* **Evidence** `config/defaults.json` carries **no** `supervisor` block, so
+  `supervisor.py:21-93` are the live values, including
+  `hard_block_only_quarantine = True`. That gates off: the `blocked_hours`
+  hard block (`supervisor.py:342-344`), the `prefer_strong_on_dd`
+  weak/unproven refusal (`370-375`), and the `judged_pf < 1.0` drawdown
+  refusal (`383-387`). `_bad_hours` is still recomputed and persisted
+  every review (`565`, `988-1005`) purely for the `hours_enforced` display
+  (`1080`), which makes `bad_hour_pf` a dead knob — the live path
+  `_hour_risk_scales` hardcodes `pf < 1.0` and a 0.3 floor (`962-964`) and
+  never reads it. `_bad_hours` also still contains the un-fixed copy of
+  the profit-factor arithmetic `_pf`'s docstring warns about
+  (`1001-1002`: dollars compared against a ratio), masked only because the
+  same branch requires `sum(values) < 0`.
+  Separately, `edge_decay` needs 50 closes in a 14-day window with both
+  halves ≥ 25 (`753-764`) — at this book's frequency it effectively never
+  fires. And `edge_health` requires `v.trades >= 25` **and**
+  `expected_r > 0` (`971-974`), so it reads 0.0 for every recently
+  re-applied symbol and the "saglik %" suffix silently vanishes.
+* **Recommended fix** Delete the three gated branches and `bad_hour_pf`,
+  or flip `hard_block_only_quarantine` deliberately. Do not leave the
+  panel claiming `hours_enforced`.
+* **Tradeoffs / Risks** Flipping the flag changes live gating — red.
+* **Expected impact** Removes the gap between what the AI tab displays and
+  what the supervisor does.
+* **Removal Safety** Likely Safe (delete); Needs Verification (flip)
+* **Reuse Scope** module
+
+### F27 — Four endpoints are never called by the panel
+
+* **Category** Dead Code / Cost
+* **Severity** Low
+* **Impact** One of them costs a forced MT5 round trip
+* **Evidence** Verified by grepping every `"/api/…"` in `app.js`:
+  - `GET /api/schema` (`app.py:669-687`) — its own docstring claims "The
+    panel fetches this once on load" (`app.py:678`). It does not;
+    `opt_fields` / `engine_opt_fields` / `strategy_opt_fields` appear
+    nowhere in `app.js`.
+  - `GET /api/system` (`app.py:1551-1553`) — panel reads `STATE.system`.
+  - `GET /api/positions` (`app.py:1671-1688`) — panel reads `STATE.positions`.
+  - `GET /api/symbols/lot-mode-check` (`app.py:1367-1373`) — and it calls
+    `engine.refresh_account(force=True)`, a forced MT5 round trip, for a
+    view nobody renders.
+  `POST /api/holdout/capture` is night-restart only, which is correct.
+  Tombstones that exist only to 400 (`/api/symbols/{s}/reset` at
+  `app.py:1361-1365`, `/api/opt/params/reset` at `1774-1778`) are
+  intentional — but the latter's comment says "JS is gated on
+  `#btn-opt-reset`" and that id does not exist in `index.html` at all.
+* **Recommended fix** Keep `/api/positions` and `/api/system` (external
+  review loops read them, per their comments); delete `/api/schema` and
+  `/api/symbols/lot-mode-check`, or wire the latter's `force=True` down to
+  a cached read.
+* **Removal Safety** Likely Safe
+* **Reuse Scope** module
+
+### F28 — Panel repaints whole tables on every 3 s poll
+
+* **Category** Frontend
+* **Severity** Low
+* **Impact** Browser CPU while the panel is open
+* **Evidence** `viewPulse()` (`app.js:2217-2234`) string-joins every
+  position and every symbol state on every poll just to decide whether to
+  repaint — and the pulse changes whenever `acc.profit` or any `st.atr`
+  ticks, i.e. essentially every poll while the market moves. On a
+  difference the panel rebuilds via `innerHTML` per row:
+  `renderCapacity` 13 cols × N (`app.js:675-696`), `renderPositions`
+  (`767-818`, with `SYMBOLS.find()` **twice per row** → O(rows×symbols)),
+  `renderLive` 14 cols × N (`856-918`), `renderExecution`, `renderDayTable`,
+  and `rowsInto` clears `tbody.innerHTML` each time (`174-183`). Only the
+  AI and portfolio tables have signature guards. `pruneLogView` calls
+  `getBoundingClientRect()` per removed node — a forced layout inside the
+  removal loop (`app.js:2150-2160`) — over up to 1200 nodes, and
+  `pollLogs` requests all nine levels at `limit=400` every 3 s while the
+  Log tab is open (`2198-2199`).
+* **Recommended fix** Give Panel/Tani tables the same signature guard the
+  AI table already has; hoist the `SYMBOLS.find()` into a map; batch the
+  log prune outside the measure loop.
+* **Removal Safety** Safe
+* **Reuse Scope** local file
+
+### F29 — SQLite write amplification on symbol saves
+
+* **Category** DB
+* **Severity** Low
+* **Impact** Panel write latency; adding a symbol costs ~2N commits
+* **Evidence** `sort_symbols_by_group()` does one `save_symbol()` per
+  symbol — each its own `SELECT position`, upsert and `commit()` — then
+  re-reads the whole table (`store.py:473-482`); it is called from
+  `add_symbol` (`465`) and `seed_symbols` (`562`). `save_symbol` rebuilds
+  the whole dict per write (`store.py:278`:
+  `self.symbols = {**self.symbols, cfg.symbol: cfg}`) while the panel
+  debounces only 350 ms per key (`app.js:1137-1152`). The only index is
+  `idx_opt_symbol ON opt_runs(symbol, created_at DESC)` (`store.py:31`),
+  so `opt_history(symbol=None)` — exactly what the panel calls
+  (`app.js:1431`) — is a full scan plus sort (`store.py:772-777`).
+  `_recent_deal_magics()` fetches **30 days of broker deals** on every
+  `POST /api/symbols` and every soft seed (`app.py:794-798`).
+* **Recommended fix** One transaction for the sort; add an index on
+  `opt_runs(created_at DESC)`.
+* **Removal Safety** Safe
+* **Reuse Scope** module
+
+### F30 — Dead / unread config surface (consolidated inventory)
+
+* **Category** Dead Code
+* **Severity** Low
+* **Impact** Operator trust: these render, accept writes, and change nothing
+* **Evidence**
+  - `SymbolConfig`: `fixed_lot` (`models.py:170`, no sizing path reads it),
+    `lot_mode` (`169`, read only by `risk.lot_mode_diagnostics` which is
+    served by the dead endpoint in F27), `max_lot` (`172`),
+    `max_margin_pct` (`173`, see `risk.py:385`), `max_positions` (`174`),
+    `partial_close_frac` (`256` — live uses `SCALE_OUT_FRAC`,
+    `models.py:478`).
+  - `SystemConfig`: `daily_loss_flatten` (`models.py:677`, no reader in
+    `micofx/` at all — `field_help.js:96` already says so),
+    `max_total_positions` (`659`), `max_concurrent_risk_pct` (`680`),
+    `max_positions` (`670`), `max_lot` (`671`).
+  - `max_scalp_positions` / `max_swing_positions` default to 0
+    (`models.py:662-663`) and are **absent from defaults.json**, so the
+    scalp/swing bucket cap at `risk.py:671-679` never fires — a whole
+    branch with no live effect.
+  - `can_open` accepts `sl_distance` and discards it (`risk.py:639-640`)
+    while callers compute and pass it (`engine.py:2605-2606`).
+  - `stoch_extreme` (`strategy.py:83`) is read by no family yet sits in
+    the signal cache key (`strategy.py:131`); `IndicatorCache.volume`
+    (`strategy.py:176`) is written by three callers and read by none;
+    `Result.trade_cost_rs` is appended per trade (`backtest.py:580`) and
+    merged (`1074`) with no reader.
+  - Unreachable code paths: `max_open > 1` (~120 lines,
+    `backtest.py:680-802` — `max_open_from_cfg` unconditionally returns 1
+    at `428-435`), `reverse_on_signal` (`backtest.py:885-932`, its own
+    docstring says search never passes it), and three of four
+    `SELECTION_METRICS` (`backtest.py:51`, `176-189` — `defaults.json:385`
+    ships `"score"` and `rank_for_selection` short-circuits at `201-202`).
+  - `MT5Client.broker_utc_offset_hours` (`mt5client.py:817`) and
+    `last_session_close_minute` (`858`) are called nowhere; the latter
+    returns `None` unconditionally because `mt5.symbol_info_session_trade`
+    has no Python binding (`878-879`).
+  - JS: `SYS_FIELDS_ADVANCED = []` (`app.js:1676`) never iterated;
+    `AI_SETTING_FIELDS` (20 entries, `1491-1510`) read by nothing;
+    the `enum` branch of `renderOptForm` (`1178-1185`) unreachable because
+    `OPT_SETTING_FIELDS` has no enum entry; `$$("[data-grid-key]")`
+    (`1269-1273`) matches nothing in `index.html`; `#day-note`
+    (`index.html:51`) is never written.
+  - `index()` produces a double query string —
+    `/static/app.js?v=<mtime>?v=27c` — because the template already carries
+    `?v=27c` (`index.html:517-518`) and `app.py:652-656` prepends another.
+* **Recommended fix** Delete in three batches: JS dead first (zero risk),
+  then unreachable backtest paths, then the unread model fields (each of
+  those needs a store-migration check).
+* **Removal Safety** Safe (JS, `trade_cost_rs`, `volume`, `stoch_extreme`
+  cache key); Likely Safe (`max_open>1`, `reverse_on_signal`, unreachable
+  metrics); Needs Verification (model fields — they persist)
+* **Reuse Scope** service-wide
+
+### F31 — Documentation drift is failing its own test
+
+* **Category** Reliability
+* **Severity** Low
+* **Impact** 1 of the 3 red tests
+* **Evidence** `tests/test_docs_match_the_code.py::test_the_family_count_matches_the_code`
+  asserts every `N families` / `N aile` in README, MASTER_PROMPT, AGENTS
+  and this file equals `len(STRATEGIES)` = 7. `OPTIMIZATIONS.md:10` says
+  "saved 8 families" and the AGENTS-mirror block near the tail says
+  "8 families".
+* **Recommended fix** Line 10 is a historical record of a 27.08 POST — the
+  test already honours an `(arsiv)` marker on the line, which is the
+  correct escape. The tail block is not historical and should read 7.
+* **Removal Safety** Safe
+* **Reuse Scope** local file
+
+### F32 — `test_spread_scale_applied.py` produces zero candidates
+
+* **Category** Reliability
+* **Severity** Medium
+* **Impact** 2 of the 3 red tests; the spread-cost guarantee is unguarded
+* **Evidence** Both tests fail with
+  `"tutarli kazanan parametre bulunamadi (0 kombinasyon segmentler arasi tutarsizdi)"`
+  against a 3-combo fixture whose baseline is 58 trades / 30 wins /
+  51.7% win rate, with `rejected_inconsistent: 0`. Zero rejected **and**
+  zero survivors means the fixture is being eliminated before the
+  consistency check — consistent with F24 (prescreen kills on the last
+  segment alone) and F23 (only 0.667 and 1.0 survive
+  `min_positive_ratio`).
+* **Recommended fix** Diagnose against F23/F24 before touching the test.
+  If the prescreen is the cause, the test is correctly reporting a real
+  behaviour change in the search, not a stale fixture.
+* **Removal Safety** Needs Verification
+* **Reuse Scope** module
+
+## 3) Quick wins (do first)
+
+Ordered by impact ÷ effort. Every one is a small, local, testable change.
+
+1. **F8** — one-line guard on `trigger_pad`. Largest search speedup in the
+   repo, zero risk.
+2. **F18** — treat `NO_CHANGES` as success. Removes a per-poll broker call
+   per open position.
+3. **F14** — put `max_combos`, `refine_rounds`, `flat_before_close_min`,
+   `backup_keep` in the existing bounds tables.
+4. **F15** — route `engine.py:857` through `_reload_positions()`.
+5. **F11** — rename `adx_length`/`atr_length` to `adx_period`/`atr_period`.
+6. **F2** — measure bar age from bar close. One expression; fail-first test
+   on an M30 signal at close + 90 min.
+7. **F9 (partial)** — delete `_stop_bar` and `_note_risk_capacity` plus the
+   two stale docstrings.
+8. **F6** — delete the four shadowed axes from the shared `grid` block.
+9. **F31** — mark `OPTIMIZATIONS.md:10` `(arsiv)`, fix the tail block to 7.
+10. **F13** — three path checks on `mt5_terminal_path`, copied from
+    `backup_dir`.
+
+Also, unrelated to code: [config/defaults.json](config/defaults.json):21
+still ships `C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe`,
+which does not exist on this machine. Live is correct
+(`C:\Program Files\MetaTrader 5`), but a clean install cannot connect.
+
+## 4) Deeper optimizations (do next)
+
+* **F1** — per-family combo budgets plus a Sobol/LHS sample. This is the
+  one change that moves every future applied parameter set.
+* **F3 + F4 + F19 + F20** — the sizing chain. Land them together and while
+  flat: F3 shrinks lots, F4 and F20 grow them, F19 refuses the residue.
+  Landing any one alone changes live position size in a direction the
+  others were compensating for.
+* **F5 + F22 + F23 + F24 + F25** — search-honesty batch. All five change
+  scores, so all five invalidate stored stamps; do them in one pass and
+  re-baseline the book once, not five times.
+* **F16** — narrow `entry_lock` to the state mutation.
+* **F10 + F26 + F30** — the dead-code sweep, in the three batches named in
+  F30.
+* **F12** — session/Origin hardening. Needs an operator decision about LAN
+  access first.
+
+## 5) Validation plan
+
+Fail-first, per AGENTS. For each change: write the test, watch it fail,
+implement, then:
+
+```
+C:\MicoFX-venv\Scripts\python.exe -m pytest tests/<touched>.py -q --tb=short
+C:\MicoFX-venv\Scripts\python.exe -m ruff check micofx/ tests/<touched>.py
+```
+
+Baseline to beat, captured 31.08 01:12: **3 failed, 2610 passed,
+1 xfailed, 88.60 s**; `ruff` clean. Any change that moves the pass count
+down, or the failure list to anything other than a subset of
+{`test_docs_match_the_code`, `test_spread_scale_applied` ×2}, is a
+regression.
+
+Per-finding verification:
+
+* **F8** — time one `walk_forward` on a fixed symbol/TF/family with a
+  pinned `combo_seed` before and after; the returned best combo must be
+  **identical** and the wall clock lower. That equality is the whole test.
+* **F2** — fail-first: an M30 state whose `last_bar` closed 90 minutes ago
+  must still be accepted; one at 150 minutes must not. Then watch
+  `entry_block` counts in `/api/analysis/entry-blocks` over one full
+  session and compare `bar_bosluk` against tonight's 7-of-9.
+* **F3/F4/F19/F20** — assert on `lot_for` directly with a synthetic
+  account: for a symbol at `edge_scale = 2.2`, realized risk must be
+  ≤ 2% of balance. Then compare `capacity` rows before/after on the live
+  book with trading off.
+* **F18** — assert `modify_position` returns True on a mocked
+  `NO_CHANGES` retcode, and that `_update_stop` does not retry.
+* **F15** — mock `positions()` to raise mid-cycle and assert
+  `self._positions` still holds the previous snapshot and no pending patch
+  lands.
+* **F14** — POST `max_combos = 10**9` must be 400.
+* **F1/F5/F22/F23/F24/F25** — these change scores by design, so the test is
+  a *paired* comparison, not an absolute: run the same symbol/TF/family
+  before and after on the same history and record `net_r`, `max_dd_r`,
+  `trades`, `win_rate`, and holdout PF for both. Accept only if holdout PF
+  does not fall. Then hold the old and new parameter sets side by side on
+  the same holdout slice.
+* **F12/F13** — `curl` the panel from a second machine on the LAN and
+  confirm refusal; POST an `mt5_terminal_path` of `C:\Windows\System32\calc.exe`
+  and confirm 400.
+
+Metrics to compare before/after, book-wide: entries per day, `bar_bosluk`
+and `spread` block counts, mean lot per entry, realized R per trade,
+holdout PF, and search wall clock per family.
+
+## 6) Optimized code
+
+Only the changes that are unambiguous and local enough to state exactly.
+
+**F8** — `backtest.py:514-515`. Skip the round trip when the caller already
+passed a list:
+
+```python
+    elif not isinstance(trigger_pad, list):
+        trigger_pad = np.asarray(trigger_pad, dtype=np.float64).tolist()
+```
+
+**F18** — `mt5client.py:1655-1657`. The stop is already where we want it:
+
+```python
+    if result.retcode == mt5.TRADE_RETCODE_NO_CHANGES:
+        return True
+```
+
+**F15** — `engine.py:857`. Use the fail-closed helper that already exists:
+
+```python
+    if not self._reload_positions():
+        # keep the previous snapshot; the connectivity check below bails
+        ...
+```
+
+**F11** — `app.py:187`. Two renames:
+
+```python
+_INDICATOR_PERIOD_BOUNDS = dict.fromkeys((
+    "t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length",
+    "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
+    "adx_period", "atr_period", "trail_lookback",
+), (1, 10000, True))
+```
+
+**F2** — `engine.py:2164`. Measure from the bar's close, not its open:
+
+```python
+        bar_close = state.last_bar + tf_sec
+        if (state.last_bar > 0
+                and (server_now - bar_close) > _MAX_SIGNAL_BAR_AGE_BARS * tf_sec):
+```
+
+**F3** — `risk.py:483-486`. Build the cap from the operator multiplier only,
+and apply the edge/AI push to the raw lot instead:
+
+```python
+        r_pct = max(stored, self.AUTO_R_PCT)
+        r_cap = (balance * r_pct / 100.0 * lot_multiplier
+                 / (sl_distance * money_per_unit))
+```
+
+Nothing above was applied. This file is notes.
