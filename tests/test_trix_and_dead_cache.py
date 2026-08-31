@@ -67,7 +67,8 @@ def test_every_living_family_still_computes_without_those_helpers():
         ["mtf_pullback", "burst", "dual_t3",
          "t3_flip", "stoch_flip",
          "parabolic_flip",
-         "ichimoku"])
+         "ichimoku",
+         "channel_break"])
     for family in STRATEGIES:
         sig = compute(cache, Params(strategy=family))
         assert sig.buy.size == n and sig.sell.size == n

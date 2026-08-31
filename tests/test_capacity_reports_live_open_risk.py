@@ -102,21 +102,23 @@ def test_a_trail_to_entry_drops_out_of_the_reported_number_too():
     assert risk.capacity([_pos(sl=2000.0)], ACCOUNT)["open_risk_pct"] == 0.0
 
 
-def test_the_leftover_ceiling_is_still_in_the_payload():
-    """GET honesty. The number is unread by can_open."""
+def test_the_ceiling_is_in_the_payload():
+    """GET honesty: the panel reads the same number can_open enforces."""
     risk = RiskManager(_Store(), _Client())
     cap = risk.capacity([_pos(sl=1925.0)], ACCOUNT)
     assert cap["max_concurrent_risk_pct"] == 8.0
 
 
-def test_leftover_cap_does_not_refuse_when_reported_risk_is_over_it():
+def test_the_gate_refuses_once_reported_risk_is_over_the_cap():
+    """Operator re-armed the ceiling 31.08; the reported bar and the gate agree."""
     risk = RiskManager(_Store(), _Client())
     cfg = risk.store.symbols["GER40"]
     book = [_pos(sl=1925.0)]
     reported = risk.capacity(book, ACCOUNT)["open_risk_pct"]
     assert reported == 7.5
-    allowed = risk.can_open(cfg, "buy", 1.0, book, ACCOUNT, sl_distance=400.0)
-    assert allowed.ok, allowed.reason
+    blocked = risk.can_open(cfg, "buy", 1.0, book, ACCOUNT, sl_distance=400.0)
+    assert not blocked.ok
+    assert "eszamanli" in blocked.reason
 
 
 def test_leftover_total_slot_cap_does_not_clip_free_slots():

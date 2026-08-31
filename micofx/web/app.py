@@ -452,6 +452,8 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",
     "enabled", "group", "broker_symbol",
+    # One-way: _validate_one_way_overlay refuses any value but 0. See there.
+    "partial_at_r",
 })
 _OPERATOR_OPT_FIELDS = frozenset({
     "lookback_days", "refine_rounds", "max_combos", "timeframes",
@@ -565,6 +567,27 @@ def _reject_hands_off_fields(patch: dict[str, Any], allowed: frozenset[str]) -> 
     found = sorted(k for k in patch if k not in allowed)
     if found:
         raise HTTPException(400, f"{', '.join(found)} panelden yazilamaz")
+
+
+def _validate_one_way_overlay(patch: dict[str, Any]) -> None:
+    """``partial_at_r`` may only be written to 0.
+
+    Hands-off gave this field an on-ramp and no off-ramp: hand-set to 1.5 on
+    five symbols 25.08 through a PATCH route since removed, then sealed. No
+    other writer reaches it - not in OPT_FIELDS so apply() skips it, not in
+    EXIT_RISK_FIELDS so it never queues in pending_exit_patch. That is a latch,
+    not a guard, and F44 measures the latched value as a loser on every
+    captured window.
+
+    Off is the only safe direction to take mid-trade: the partial then simply
+    never fires. On is the 25.08 hazard - a position already past the rung
+    sheds a third the instant the value lands - so it stays shut.
+    """
+    value = patch.get("partial_at_r")
+    if value is not None and float(value) != 0.0:
+        raise HTTPException(
+            400, "partial_at_r yalnizca kapatilabilir (0) - acmak icin "
+                 "arama/uygulama yolu kullanilmali")
 
 
 def _coerce_symbol_patch(raw: dict[str, Any]) -> dict[str, Any]:
@@ -905,6 +928,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             body.model_dump(exclude_unset=True))  # type: ignore[attr-defined]
         _reject_internal_fields(patch)
         _reject_hands_off_fields(patch, _OPERATOR_SYMBOL_FIELDS)
+        _validate_one_way_overlay(patch)
         _reject_non_finite_values(patch)
         _validate_enum_fields(patch)
         _validate_risk_bounds(patch)
@@ -1414,6 +1438,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         body.patch = _coerce_symbol_patch(body.patch)
         _reject_internal_fields(body.patch)
         _reject_hands_off_fields(body.patch, _OPERATOR_SYMBOL_FIELDS)
+        _validate_one_way_overlay(body.patch)
         _reject_non_finite_values(body.patch)
         _validate_enum_fields(body.patch)
         _validate_risk_bounds(body.patch)

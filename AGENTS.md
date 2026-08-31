@@ -19,11 +19,15 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Exit model is hard ATR stop + ATR trail. Do not bring back
   `tp_atr_mult`, `partial_tp_r` ladders, `max_bars_in_trade`,
   `stale_exit_ratio`, `breakeven_atr`. Overlays (0 = off):
-  `breakeven_at_r` (live 1.5, not 0.5 — BE-2 GER40 −32 R), one-shot
-  `partial_at_r` (ticket lot × 1/3, broker min/step), and
-  `harvest_at_r` / `harvest_step_atr` (tighten trail_step once paid;
-  live off book-wide — paper net R 26.08). None is an
-  `OPT_FIELDS` axis.
+ `breakeven_at_r` (live 1.5, not 0.5 — BE-2 GER40 −32 R), one-shot
+ `partial_at_r` (ticket lot × 1/3, broker min/step; costed loser at every
+ rung, F44 — POST accepts **0 only**, no writer can turn it back on), and
+ `harvest_at_r` / `harvest_step_atr` (tighten trail_step once paid;
+ live off book-wide — costed across 10 windows 31.08 (F41): off
+ +86.4 R, every setting far worse (−129 to −498 R). It lifts win rate
+ and trade count while crushing payoff, i.e. it cuts winners and
+ re-enters. A give-back chart makes switching this on look obvious;
+ do not). None is an `OPT_FIELDS` axis.
 - `exits.overlay_stop` is the closed-bar trail/BE level. Live still owns
   broker clamp + modify. Change the helper or both callers. Cover
   identity tests.
@@ -52,7 +56,23 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Hands-off keys (system plumbing, cost toggles, AI knobs, strategy guts)
   return **400** on POST. Search `apply()` still writes `OPT_FIELDS`.
   Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
-- **7 families.** Do not re-add `alpha_trend` or `mavilim`. `st_trend`
+- **8 families.** `channel_break` added 31.08: close beyond the prior
+ `chan_lookback` bars' high/low, the one signal shape the book lacked
+ (`burst` is range *expansion* and says so). Added on measurement, not
+ taste - F40: favourable MFE/MAE asymmetry in the out-of-sample half of
+ all ten captured windows, rising smoothly with lookback (1.034 at 10
+ bars, 1.078 at 100), so the grid runs to 150. The old `donchian` was
+ removed 12.08 for never being *searchable*, not for losing; this one is
+ in `strategies`. It is **not** a book-wide upgrade - blind-selection
+ holdout lands 14.2 R *behind* the incumbents overall. It wins on the
+ four windows whose incumbent is `stoch_flip` (the edgeless family) and
+ loses on every window whose incumbent already earns. Treat it as a
+ `stoch_flip` replacement candidate, not a default. Selecting its
+ lookback by net R is noisy; the asymmetry curve is what is structural.
+ **Contested (F46):** on +10-bar forward-return t-stat it is the *worst*
+ family book-wide (mean -0.40) and significantly negative on SpotBrent
+ (-2.98). Two metrics disagree, so F40 is not settled - do not promote
+ it over `stoch_flip` on F40 alone. Do not re-add `alpha_trend` or `mavilim`. `st_trend`
   and `macd_flip` retired 26.08, `aroon_flip` 28.08 (never applied, not
   live). `ichimoku` stays. Leftover DB names fail closed (no signal),
   they do not crash.
@@ -85,7 +105,8 @@ Fail-first: write the test, watch it fail, then implement.
   leverage, account lock, daily brake, live flatten-all.
 - HTTP writes match the panel. Symbol POST: sessions +
   `enabled` / `group` / `broker_symbol`.
-  System POST: `max_margin_usage_pct`
+  `partial_at_r` (0 only, F44).
+ System POST: `max_margin_usage_pct`
   / `mt5_terminal_path` / `autostart_mt5`.
   Opt POST: `lookback_days` /
   `refine_rounds` / `max_combos` / `timeframes`. Family / TF / exits / magic / grid /
@@ -146,9 +167,13 @@ Fail-first: write the test, watch it fail, then implement.
   unread — the 13.08 stack). Lot is remaining book margin split across
   vacant enabled names, clipped by auto 1R `max(risk_percent, 2%)` ×
   denetci. Leftover `max_lot` / `max_margin_pct` unread. System
-  `max_positions` / `max_lot` unread. Leftover
-  `max_concurrent_risk_pct` and `max_total_positions` stay unread.
-  Search still scores `max_open=1`.
+ `max_positions` / `max_lot` unread. Leftover `max_total_positions`
+ stays unread. `max_concurrent_risk_pct` **binds again** (operator
+ 31.08): `remaining_position_risk` summed over open tickets plus this
+ fill must stay under it; 0 = off; a trailed stop frees budget. Re-armed
+ *before* any size increase because `lot_for` is `min(margin share, auto
+ 1R cap)` and that 2% cap is the only thing holding the book off the 90%
+ margin allowance. Search still scores `max_open=1`.
 - Do not add an adverse-fill entry gate on `fill_vs_signal_close_r`.
   Walk-forward is fill-next-open (zero variance). Claude 18:45: Q4
   looks cursed in-sample; threshold scan is a curve-fit; unverifiable.

@@ -11,7 +11,7 @@ import numpy as np
 from . import indicators as ind
 from .exits import harvest_trail_step, overlay_stop
 from .models import SCALE_OUT_FRAC, SymbolConfig, trail_min_step
-from .sessions import WEEKEND_OPEN_GROUPS
+from .sessions import MAX_SIGNAL_BAR_AGE_BARS, WEEKEND_OPEN_GROUPS
 from .strategy import IndicatorCache, Params, compute
 
 _DAY = 24 * 60
@@ -541,6 +541,21 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     min_stop_at = (min_stop if isinstance(min_stop, np.ndarray)
                    else np.full(open_.size, float(min_stop), dtype=np.float64))
 
+    # Live refuses a signal whose bar closed more than MAX_SIGNAL_BAR_AGE_BARS
+    # timeframes ago (engine's "bar_bosluk"). Bar arrays are dense - Friday
+    # 22:45 is followed directly by Monday 03:15 - so filling at i+1 walked
+    # straight over every weekend and every overnight session hole and booked
+    # trades live has never been able to take. tradable/session_mask does not
+    # cover it: it asks whether the fill *bar* is inside a window, and Monday's
+    # open is. Measured as a boolean on the fill bar so both entry paths below
+    # share one O(n) pass instead of doing the arithmetic per combo per entry.
+    tf_sec = float(getattr(cache, "tf_seconds", 0) or 0)
+    times = np.asarray(getattr(cache, "times", None), dtype=np.float64)
+    stale_fill = np.zeros(open_.size, dtype=bool)
+    if tf_sec > 0 and times.size == open_.size:
+        budget = (1.0 + MAX_SIGNAL_BAR_AGE_BARS) * tf_sec
+        stale_fill[1:] = np.diff(times) > budget
+
     # Structure trail: precompute once so the loop below stays O(1) per bar.
     # swing_lows/highs are causal (rolling window excludes the current bar).
     struct_lookback = max(3, int(p.trail_lookback))
@@ -732,6 +747,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if tradable is not None and not tradable[j0]:
                     ptr += 1
                     continue
+                if stale_fill[j0]:
+                    ptr += 1
+                    continue
                 atr_entry = atr[i]
                 if not math.isfinite(atr_entry) or atr_entry <= 0:
                     ptr += 1
@@ -813,6 +831,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         if j0 >= n - 1:
             break
         if tradable is not None and not tradable[j0]:
+            ptr += 1
+            continue
+        if stale_fill[j0]:
             ptr += 1
             continue
 

@@ -62,8 +62,11 @@ def test_the_cooldown_only_ever_pushes_the_resume_later():
 # ------------------------------------------------- what enforces it live
 
 def test_the_live_gate_reads_the_symbol_slot_cap():
-    """One ticket per name. Leftover cfg.max_positions is unread."""
-    assert "eszamanli risk limiti" not in RISK
+    """One ticket per name. Leftover cfg.max_positions is unread.
+
+    The book-wide 1R ceiling used to be asserted absent here; the operator
+    re-armed it 31.08 and it is covered by test_concurrent_risk_gate.
+    """
     assert "sembol pozisyon limiti (" in RISK
     assert "sys_cfg.max_positions" not in RISK
     # Binding leftover 5/10 is the 13.08 stack.

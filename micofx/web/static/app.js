@@ -930,6 +930,7 @@ const STRATEGY_LABEL = {
   stoch_flip: "Stochastic Yon Donusu",
   parabolic_flip: "Parabolic SAR Yon Donusu",
   ichimoku: "Ichimoku TK + bulut (gecikmeli, ileri bakissiz)",
+  channel_break: "N barlik kanal kirilimi (Donchian)",
 };
 
 // Card body is session hours only. Lot is remaining book margin × denetci

@@ -42,6 +42,9 @@ const FIELD_HELP = {
   "brst_range_z": "Menzil, bu z-skoru asinca patlama sayilir. Buyutmek daha seyrek sinyal.",
   "brst_close_pct": "Kapanisin barin ucuna bu kadar yakin olmasi gerekir (0.5-0.99).",
 
+  "chan_lookback": "channel_break kanalinin uzunlugu (bar). Kapanis, KENDISINDEN ONCEKI bu kadar barin en yuksegini asarsa alis, en dusugunu kirarsa satis. Uzun pencere daha seyrek ama olculen asimetrisi daha yuksek.",
+  "chan_buffer_atr": "Kirilimin seviyeyi en az bu kadar ATR gecmesi gerekir. 0 = kapali. Seviyenin kilinda gezinen kirilimlari eler.",
+
   "t3_fast": "dual_t3 hizli T3 uzunlugu.",
   "t3_slow_mult": "Yavas T3 = hizli x bu.",
   "t3_fast_vf": "Hizli T3'un kendi hacim faktoru. 0 = yavas ile ayni.",
@@ -91,7 +94,7 @@ const FIELD_HELP = {
   "lot_multiplier": "Butun lotlara carpilan global carpan. 2 = her sey iki kat.",
   "size_by_edge": "Aciksa lot, holdout net R / holdout maxDD oranina gore (karekok medyan, 0.6-2.2). Pencere uzunlugu orana girmez.",
   "daily_loss_pct": "Gunluk gerceklesen zarar bakiyenin bu yuzdesini asinca yeni giris durur. 0 = kapali.",
-  "max_concurrent_risk_pct": "Anahtar artik okunmaz. Lot risk%'e gore; tavan marj / ters yon / STOPSUZ. Leftover 8 veya 30 baglamaz.",
+  "max_concurrent_risk_pct": "Acik pozisyonlarin guncel stoplarina gore kalan 1R toplami bu yuzdeyi asacaksa yeni giris durur. 0 = kapali. Trail ile stop girise cekilince o pozisyon butceyi birakir.",
   "daily_loss_flatten": "Gunluk zarar limiti asilinca acik pozisyonlar da kapanir. Anahtar artik okunmaz; flatten her zaman acik.",
   "daily_profit_pct": "Gunluk kar bakiyenin bu yuzdesine ulasinca yeni giris durur. 0 = kapali.",
   "trade_all_hours": "Sembol seans ve islem gunlerini yoksayar. Hafta sonu / fiyat yok kurali durur. Arama seans saatlerinde olculdu; acmak o rakamlari gecersiz kilar.",

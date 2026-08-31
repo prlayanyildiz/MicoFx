@@ -51,7 +51,10 @@ def test_never_applied_scan_waste_is_gone():
         assert field not in Params.__dataclass_fields__
     assert not hasattr(IndicatorCache, "macd")
     assert "ichimoku" in STRATEGIES
-    assert len(STRATEGIES) == 7
+    # 8 since 31.08: channel_break, added on an out-of-sample measurement.
+    # The old donchian went in the 12.08 cull for never being searchable,
+    # which is not a verdict on the shape - this one is in ``strategies``.
+    assert len(STRATEGIES) == 8
 
 
 def test_the_three_lottery_families_are_gone():

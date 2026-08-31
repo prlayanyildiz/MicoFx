@@ -669,8 +669,6 @@ class RiskManager:
     def can_open(self, cfg: SymbolConfig, side: str, lot: float,
                  positions: list[dict[str, Any]], account: dict[str, Any],
                  sl_distance: float = 0.0) -> Verdict:
-        # Callers still pass sl_distance; leftover concurrent 1R unread.
-        _ = sl_distance
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
         mine = [p for p in positions if p["magic"] in magics]
@@ -725,7 +723,29 @@ class RiskManager:
             if projected > sys_cfg.max_margin_usage_pct:
                 return Verdict(False, f"marj kullanimi limiti (%{projected:.1f} > %{sys_cfg.max_margin_usage_pct:g})")
 
-        # Leftover max_concurrent_risk_pct and cfg.max_margin_pct are unread.
+        # Book-wide 1R ceiling, re-armed by the operator 31.08. It was switched
+        # off 27.08 as unreachable: lot was risk% of balance, so the whole book
+        # summed to ~17% of equity and a stored 8 or 30 could never bind. What
+        # changed is why it exists - lot_for resolves to min(margin share, auto
+        # 1R cap), the 2% cap binds first, and it is the only thing standing
+        # between the book and the 90% margin allowance. Raising it to use that
+        # margin removes exactly what made this ceiling unreachable, so the
+        # ceiling goes back in first. Inert at today's sizing.
+        #
+        # Naked positions already returned above, so no inf reaches this sum.
+        # A trailed stop measures to the *current* SL and frees budget. When
+        # sl_distance is unknown the new fill cannot be priced, but what is
+        # already open still counts - an unmeasurable entry must not read as
+        # free room on top of a book that is over the line.
+        # cfg.max_margin_pct stays unread.
+        cap_pct = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
+        if cap_pct > 0 and equity > 0:
+            book_risk = sum(self.remaining_position_risk(p) for p in mine)
+            book_risk += self.risk_dollars(cfg.symbol, lot, sl_distance)
+            projected = book_risk / equity * 100.0
+            if projected > cap_pct:
+                return Verdict(False, f"eszamanli risk limiti "
+                                      f"(%{projected:.1f} > %{cap_pct:g})")
 
         return Verdict(True)
 

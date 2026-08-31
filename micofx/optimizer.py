@@ -71,6 +71,86 @@ def family_max_combos(opt_blob: dict[str, Any] | None, family: str,
     return n if n > 0 else fallback
 
 
+def longest_first(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Submission order for the sweep pool: most expensive first.
+
+    Every sweep is independent, so the pool's wall clock is a scheduling
+    problem, and the atom is a whole (symbol, timeframe, family) sweep - far
+    too coarse to pack evenly. A single-symbol search is ~24 units on 14 cores
+    and the units differ by orders of magnitude: shipped grids run 1080
+    (ichimoku) to 2,073,600 (dual_t3), and coverage_budget hands the bigger
+    grids a bigger sampled budget on top.
+
+    Submission order used to be the deterministic timeframe x family order,
+    which is uncorrelated with cost, so a long sweep could be queued last and
+    then run alone while everything else was finished. Measured on the 31.08
+    US30 run: 3 of 14 workers busy for the final ten minutes of 62.
+
+    Longest-processing-time-first is the standard heuristic for exactly this
+    (makespan within 4/3 of optimal) and costs nothing here - no worker
+    protocol change, and results are untouched because _finish_symbol re-sorts
+    attempts by ``order`` before picking a winner. Ties fall back to ``order``
+    so two equal-cost sweeps cannot swap between runs. A job with no hint
+    sorts last rather than raising; it still runs.
+
+    Returns a new list - the caller keeps the deterministic queue that the
+    single-process fallback iterates.
+    """
+    return sorted(jobs,
+                  key=lambda j: (-int(j.get("cost_hint") or 0),
+                                 int(j.get("order") or 0)))
+
+
+def coverage_budget(grid_totals: dict[str, int], max_combos: int) -> dict[str, int]:
+    """Split one flat per-family cap by how much space each family actually has.
+
+    A flat ``max_combos`` is only fair when every family's grid is the same
+    size, and they are not: shipped 31.08, ichimoku is 180 combos and
+    stoch_flip is 64,800. At a 2000 cap the coarse pass covers ichimoku,
+    mtf_pullback and burst *exhaustively* and covers stoch_flip at 3.1%. The
+    optimizer then ranks those families head to head to pick a symbol's
+    winner, so the small-grid family presents its true optimum while the
+    big-grid family presents the best of a random 3% draw - a bias toward
+    small grids that has nothing to do with which idea trades better, plus
+    big-grid winners that move with ``combo_seed``.
+
+    Budget handed to a family beyond its own grid size buys nothing; there is
+    no unexplored combo left to spend it on. So: give every family
+    ``min(grid, cap)``, then hand the surplus the small grids could not use to
+    the families still short, in proportion to how much space they have.
+
+    Two deliberate properties:
+
+    * the **total does not grow** - this is paid for out of waste, not out of
+      wall clock, so worker count and run time are unchanged;
+    * **no family goes below** ``min(grid, cap)`` - a search tuned against
+      today's behaviour cannot regress.
+
+    It narrows the gap rather than closing it. Equalising coverage outright
+    would mean either trimming the bloated grids or spending more time, and
+    both are decisions with their own trade-offs.
+    """
+    totals = {str(k): max(0, int(v)) for k, v in (grid_totals or {}).items()}
+    if not totals:
+        return {}
+    cap = max(0, int(max_combos))
+    out = {fam: min(total, cap) for fam, total in totals.items()}
+
+    surplus = sum(cap - out[fam] for fam in totals)
+    short = {fam: totals[fam] - out[fam] for fam in totals if totals[fam] > out[fam]}
+    room = sum(short.values())
+    if surplus <= 0 or room <= 0:
+        return out
+
+    # Proportional to unexplored space, so the family furthest from covering
+    # its grid gets the largest share. Floor division keeps the total under
+    # the pool; the remainder is left unspent rather than handed to whichever
+    # family happens to sort first.
+    for fam, gap in short.items():
+        out[fam] = min(totals[fam], out[fam] + surplus * gap // room)
+    return out
+
+
 def run_combo_budget(
     opt_blob: dict[str, Any] | None,
     families: list[str],
@@ -79,6 +159,7 @@ def run_combo_budget(
     refine_rounds: int,
     n_symbols: int,
     allow: dict[str, list[str]] | None = None,
+    alloc: dict[str, int] | None = None,
 ) -> tuple[int, dict[str, int]]:
     """Panel combo_total must match walk_forward spend, including family caps.
 
@@ -92,8 +173,13 @@ def run_combo_budget(
     per_sweep: dict[str, int] = {}
     total = 0
     for fam in families:
+        # ``alloc`` is coverage_budget's grid-sized default. The operator's
+        # explicit strategy_max_combos still overrides it, and this must stay
+        # the same expression _plan_symbol spends by or the panel total drifts
+        # from the real work again.
         cost = backtest.sweep_budget(
-            family_max_combos(opt_blob, fam, max_combos), refine_rounds)
+            family_max_combos(opt_blob, fam,
+                              (alloc or {}).get(fam, max_combos)), refine_rounds)
         per_sweep[fam] = cost
         n_tf = sum(1 for tf in timeframes
                    if strategy_allows_timeframe(fam, tf, table))
@@ -582,7 +668,8 @@ class Optimizer:
                  f"zaman dilimleri {'/'.join(timeframes)} | stratejiler {'/'.join(families)} | "
                  f"cikis: sert ATR stop + ATR takip ({len(variants)} tarama/zaman dilimi) | "
                  f"{tf_lock_status(tf_allow)} | "
-                 f"max {max_combos} kombinasyon | "
+                 f"aile basi max {max_combos} kombinasyon (izgara boyutuna gore "
+                 f"paylastirilir) | "
                  f"{_worker_count(self.store.system.opt_max_workers)} paralel surec", "OPT")
 
         self._run_all(targets, lookback_days, bar_cap, variants, min_trades, segments,
@@ -745,7 +832,8 @@ class Optimizer:
                      min_trades: int, segments: int, max_combos: int, min_positive: float,
                      plateau: float, timeframes: list[str],
                      refine_rounds: int,
-                     tf_allow: dict[str, list[str]] | None = None) -> dict[str, Any]:
+                     tf_allow: dict[str, list[str]] | None = None,
+                     alloc: dict[str, int] | None = None) -> dict[str, Any]:
         """Fetch this symbol's bars and build its sweep jobs.
 
         Runs in the parent thread so every MT5 call stays behind the client's
@@ -908,8 +996,16 @@ class Optimizer:
                     "spread_scale": spread_scale,
                     "charge_costs": charge_costs,
                     "grid": grid, "min_trades": min_trades, "segments": segments,
-                    "max_combos": family_max_combos(opt_blob, family, max_combos),
+                    "max_combos": family_max_combos(
+                        opt_blob, family, (alloc or {}).get(family, max_combos)),
                     "min_positive": min_positive,
+                    # Scheduling only (longest_first). A sweep costs roughly
+                    # "combos evaluated x bars walked", and both vary by orders
+                    # of magnitude across families and timeframes. Never read
+                    # by the worker or by scoring.
+                    "cost_hint": int(family_max_combos(
+                        opt_blob, family,
+                        (alloc or {}).get(family, max_combos)) * len(bars)),
                     "plateau": plateau, "commission": commission, "min_stop": min_stop,
                     "refine_rounds": refine_rounds, "all_hours": all_hours,
                     "day_end_flatten_min": day_end_flatten_min,
@@ -954,9 +1050,19 @@ class Optimizer:
             except Exception:
                 opt_blob = {}
         families = [v["strategy"] for v in variants]
+        # Sized off the *base* family grid rather than the per-timeframe exit
+        # grid, because progress accounting and the sweeps themselves have to
+        # agree on one number and only the base is known to both.
+        grid_totals: dict[str, int] = {}
+        for v in variants:
+            total = 1
+            for values in (v.get("grid") or {}).values():
+                total *= max(1, len(values))
+            grid_totals[v["strategy"]] = total
+        alloc = coverage_budget(grid_totals, max_combos)
         combo_total, sweep_cost = run_combo_budget(
             opt_blob, families, timeframes, max_combos, refine_rounds,
-            len(targets), allow)
+            len(targets), allow, alloc)
         self._set(combo_total=combo_total)
         combo_done = 0
         finished = 0
@@ -994,7 +1100,7 @@ class Optimizer:
                 return []
             plan = self._plan_symbol(cfg, lookback_days, bar_cap, variants, min_trades,
                                      segments, max_combos, min_positive, plateau,
-                                     timeframes, refine_rounds, allow)
+                                     timeframes, refine_rounds, allow, alloc)
             plans[symbol] = plan
             plan["outstanding"] = len(plan["jobs"])
             if not plan["jobs"]:
@@ -1113,7 +1219,8 @@ class Optimizer:
                                    "error": f"{type(exc).__name__}: {exc}"})
                 return not self._cancel.is_set()
 
-            for job in queued:
+            # Longest sweep first so the tail is short ones, not the reverse.
+            for job in longest_first(queued):
                 if self._cancel.is_set():
                     self._abandon_search_pool(pool, inflight)
                     abandoned = True

@@ -114,7 +114,11 @@ def test_the_registry_is_the_whole_book():
     # against a 2000 budget, coverage 0.0001) and none was live.
     # 8 -> 7 on 28.08: aroon_flip. Slowest sweep, worst validated holdout,
     # 1/7 applied, never live; its aroon() indicator went with it.
-    assert len(FAMILIES) == 7, f"aile sayisi degisti: {FAMILIES}"
+    # 7 -> 8 on 31.08: channel_break. The first family added on a measured
+    # effect rather than a plausible one - favourable MFE/MAE asymmetry in
+    # the out-of-sample half of all ten captured windows, growing with
+    # lookback rather than spiking at one value (F40).
+    assert len(FAMILIES) == 8, f"aile sayisi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

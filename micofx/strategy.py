@@ -47,6 +47,10 @@ class Params:
     brst_range_z: float = 1.5
     brst_close_pct: float = 0.7
 
+    # ---- N-bar channel break (channel_break) ----
+    chan_lookback: int = 50
+    chan_buffer_atr: float = 0.0
+
     # ---- fast/slow T3 pair (dual_t3; named for the ribbon family, gone) ----
     t3_fast: int = 5                 # fast T3 length
     t3_slow_mult: float = 3.0        # slow T3 length = fast * this
@@ -133,6 +137,7 @@ class Params:
                 self.atr_pct_min,
                 self.pull_fast, self.pull_depth_atr, self.pull_max_bars,
                 self.brst_lookback, self.brst_range_z, self.brst_close_pct,
+                self.chan_lookback, self.chan_buffer_atr,
                 self.t3_fast, self.t3_slow_mult, self.t3_fast_vf,
                 self.t3_accel_min,
                 self.st_period, self.st_mult,
@@ -873,6 +878,66 @@ def _ichimoku(cache: IndicatorCache, p: Params) -> Signals:
                    buy=buy, sell=sell, htf_up=flat, htf_down=flat)
 
 
+def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
+    """Close beyond the highest high (or lowest low) of the prior N bars.
+
+    The one signal shape the book did not have. ``burst`` is range *expansion* -
+    this bar's own high-low against its trailing distribution - and says so in
+    its own docstring: "a level-based breakout keys off a price the market has
+    already printed - a session's opening range, an N-bar channel", which it
+    deliberately is not. ``ichimoku`` is the nearest thing, since tenkan/kijun
+    are N-bar midpoints, and it measured best of the seven on MFE/MAE asymmetry
+    while running on no live symbol.
+
+    Measured out-of-sample on every captured window before this was written
+    (F40): the asymmetry a stop-and-trail system monetises rises smoothly with
+    ``chan_lookback`` (median 1.034 at 10 bars, 1.078 at 100) instead of
+    spiking at one value. That shape is why the axis exists and why its grid
+    runs past burst's ceiling of 40 - the effect lives where the old grid could
+    not reach.
+
+    The channel excludes the signal bar. Comparing a close to a high the same
+    bar just set would fire on any bar that closed near its own top, which is
+    ``burst``'s question, not this one.
+    """
+    close = cache.close
+    size = close.size
+    t3, k, d, atr_series, adx_series = _common(cache, p)
+    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
+    regime = _regime(p, adx_series, size)
+
+    window = max(2, int(p.chan_lookback))
+    _, hi = ind.rolling_min_max(cache.high, window)
+    lo, _ = ind.rolling_min_max(cache.low, window)
+    # Shift so bar i is compared against the window ending at i-1.
+    prev_hi = np.roll(hi, 1)
+    prev_lo = np.roll(lo, 1)
+    prev_hi[0] = np.inf
+    prev_lo[0] = -np.inf
+
+    # A break that only just clears the level is mostly noise around it. The
+    # pad is in ATR so it scales with the instrument instead of its price.
+    pad = max(0.0, float(p.chan_buffer_atr)) * atr_series
+    ok = regime
+    if p.atr_pct_min > 0:
+        ok = ok & (cache.atr_rank(p.atr_period) >= p.atr_pct_min)
+
+    buy = ok & allow_long & (close > prev_hi + pad)
+    sell = ok & allow_short & (close < prev_lo - pad)
+
+    warmup = min(size, max(window + 1, p.atr_period * 3))
+    buy[:warmup] = False
+    sell[:warmup] = False
+
+    # A trend sits outside its own channel for many bars in a row; without this
+    # the family would re-signal every one of them.
+    buy = ind.first_of_run(buy)
+    sell = ind.first_of_run(sell)
+    buy, sell = _resolve_conflicts(buy, sell)
+    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series,
+                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down)
+
+
 _FAMILIES = {
     "mtf_pullback": _mtf_pullback,
     "burst": _burst,
@@ -881,6 +946,7 @@ _FAMILIES = {
     "stoch_flip": _stoch_flip,
     "parabolic_flip": _parabolic_flip,
     "ichimoku": _ichimoku,
+    "channel_break": _channel_break,
 }
 
 # Exit / live-entry axes the family function never names. The search and the
@@ -958,6 +1024,8 @@ def required_bars(p: Params) -> int:
                    p.pull_fast * 10,
                    # burst ranks cost against a 240-bar window.
                    p.brst_lookback * 6 + 260,
+                   # channel_break needs the full channel before its first read.
+                   int(p.chan_lookback) + 2,
                    # dual_t3's slow line is a cascade over t3_fast * mult.
                    int(p.t3_fast * max(1.2, p.t3_slow_mult)) * 20,
                    int(p.st_period) * 10 if p.st_mult > 0 else 0,

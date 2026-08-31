@@ -3506,7 +3506,7 @@ Live bot at `C:\Users\Administrator\MicoFx`. Constraints:
 - No LLM in engine. Exit model: hard ATR stop + ATR trail (no partial tp ladders).
 - `overlay_stop` identity shared live/backtest. Forming candle never signals.
 - `OPT_FIELDS` apply only; `EXIT_RISK_FIELDS` mid-trade yields 409.
-- 7 families; no restart with opens.
+- 7 families (arsiv) - 8 since 31.08; no restart with opens.
 - Fail-first with pytest/ruff. Persist via Store only.
 - Yellow/red gates stay operator-only. Holdout capture is not a score input.
 - Autopsy gotchas: `open_original_sl` must be tracked, profit-empty rows exist, `gmtime` broker calendar used.
@@ -4792,3 +4792,995 @@ own peak), `STOPSUZ`, `RISK` (day halted / MT5 down / cycle error). It caught
 the give-back twice on 31.08 - 09:17 at −45% and 10:19 at −50% off a +46.54
 peak - which is the event that had been passing silently: the panel shows the
 current number, never that a peak existed.
+
+## 31.08 (2) - strateji aileleri: arama canlinin reddettigi isi olcuyordu
+
+Operator sorusu: "her sembol bir strateji ile kazanabilir; ailelerimiz buna
+uygun mu, hatali ise degistir." Iki bulgu olculdu ve landed edildi, iki iddia
+olculunce geri cekildi.
+
+### F33 - simulate takvim boslugunun uzerinden dolduruyordu (landed)
+
+Canli motorda bir barin sinyali, kapanisindan `MAX_SIGNAL_BAR_AGE_BARS = 2`
+periyot sonra oluyor (`entry_block = "bar_bosluk"`). `simulate` bu kapiyi hic
+tasimiyordu: her sinyali `j0 = i + 1` de dolduruyordu. MT5 bar dizileri
+sikisiktir - Cuma 22:45 in bir sonraki bari dogrudan Pazartesi 03:15 - yani
+arama her hafta sonunu ve her gecelik seans boslugunu isleme ceviriyordu.
+`session_mask`/`tradable` bunu yakalamaz: o, dolum *barinin* seans icinde olup
+olmadigini sorar ve Pazartesi acilisi seans icindedir.
+
+Kapi `engine` den `sessions` e tasindi (tek tanim, iki cagiran). `engine`
+eski ozel adlari yeniden disa veriyor. `simulate` fill barinda O(n) bir
+`stale_fill` maskesi kuruyor; iki dolum yolu da ayni maskeye bakiyor.
+
+Olcum (GER40 takvimi, M15, 400 gun, 22.594 bar, 285 takvim deligi):
+sinyallerin **%1,24** u bu tur dolumdu - `dual_t3` %0,97, `stoch_flip` %1,04,
+`mtf_pullback` %1,31, `t3_flip` %1,36, `ichimoku` %1,40, `parabolic_flip`
+%1,42. Sayica kucuk; agirligi bunlarin boslukli acilista gerceklesen, en
+kalin kuyruklu dolumlar olmasindan geliyor. Skoru sismekten cok
+gurultulendiriyordu.
+
+Kapak: `tests/test_the_search_cannot_fill_across_a_gap_live_refuses.py` -
+hafta sonu, gecelik seans, canli kapiyla ayni sinir, ve bosluktan *sonraki*
+barin hala normal sinyal bari oldugu.
+
+### F34 - aile karsilastirmasi adil bir yaris degildi (landed)
+
+Izgara boyutlari cok esitsiz, `max_combos` ise hepsinde 2000:
+
+| aile | izgara | onceki kapsam | yeni kapsam |
+|---|---|---|---|
+| ichimoku | 180 | %100 | %100 |
+| mtf_pullback | 648 | %100 | %100 |
+| burst | 1.728 | %100 | %100 |
+| dual_t3 | 2.880 | %69,4 | %70,3 |
+| parabolic_flip | 19.440 | %10,3 | %13,0 |
+| t3_flip | 36.000 | %5,6 | %8,4 |
+| stoch_flip | 64.800 | %3,1 | %6,0 |
+
+Optimizer sembol basina kazanani bu ailelerin skorlarini yan yana koyarak
+seciyor. Kucuk izgarali aile *gercek* en iyisini sunuyor, `stoch_flip`
+rastgele bir %3 lük cekilisin en iyisini; beklenen ornek-en-iyisi gercek
+en iyinin belirgin altinda. Yani onyargi hangi fikrin daha iyi trade
+ettigiyle degil, kimin izgarasinin kucuk oldugu ile ilgiliydi - ve buyuk
+izgarali kazananlar `combo_seed` ile degisiyordu.
+
+`coverage_budget()` (optimizer.py): once herkese `min(izgara, cap)`, sonra
+kucuk izgaralarin kullanamadigi artigi hala eksigi olanlara kalan alanla
+orantili dagit. Iki kasitli ozellik: **toplam buyumuyor** (14.000 -> 13.998,
+ayni duvar saati, ayni worker sayisi) ve **hicbir aile duz cap in altina
+dusmuyor** (bugune gore ayarlanmis bir arama gerileyemez). Operatorun acik
+`strategy_max_combos` tablosu hala ustte.
+
+Bu farki daraltiyor, kapatmiyor. Tam esitlemek ya sisirilmis izgaralari
+budamayi ya da daha fazla zaman harcamayi gerektirir; ikisi de kendi
+takaslari olan kararlar.
+
+Kapak: `tests/test_the_search_budget_follows_the_grid_size.py`.
+
+### Geri cekilen iddialar
+
+- **"Izgaralarin dortte biri kopya."** Olculdu, tutmadi: tam degerlendirilen
+  yapilandirma kimligiyle (sinyal seti + cikis eksenleri) `dual_t3` %7,2.
+  `burst` in %27 si sabit spread li test tezgahindan gelen bir yapaylik -
+  `cost_rank_max` duz bir maliyet serisinde ayrim yapamaz.
+- **"stoch_flip izgarasinda hic sinyal uretmiyor."** Olcum hatasiydi:
+  `combos_from_grid` deger degil **indeks** dondurur, indeks dogrudan
+  `Params` e yazilinca `stoch_k_period=0` olur. Izgaradaki her gercek deger
+  536-1654 sinyal veriyor. Aile saglam.
+
+### Dokunulmayan
+
+`adx_max` hala `OPT_FIELDS` icinde, 7 aileden (arsiv) 5 i okuyor, **hicbir izgarada
+yok** - yani kalici olarak varsayilaninda donmus. Bu turda eklenmedi: onu
+okuyan aileler (`stoch_flip`, `parabolic_flip`) zaten en kotu kapsanan
+izgaralar, ve butce adil hale gelmeden yeni eksen eklemek onu ayni ornekleme
+sorununun icine atardi. Kapsam oturunca olculebilir bir soru.
+
+Ayni sekilde donmus ama daha az onemli: `htf_mode` ve `adx_period` hic
+`OPT_FIELDS` te degil. `rsi_length` / `stoch_length` / `smooth_k` /
+`smooth_d` yalnizca panelin StochRSI serisini besliyor, sinyal uretmiyor -
+izgarada olmamalari dogru.
+
+**Not:** F33 bu kod degisikliginden onceki aramalari etkilemez; calisan
+arama eski `backtest.py` ile baslamisti.
+
+### F34 DUZELTME (ayni gun) - yukaridaki kapsam tablosu yanlisti
+
+Yukaridaki tabloyu `optimizer.strategy_grids[fam]` uzerinden kurmustum. O,
+ailenin **yalnizca kendi** eksenleri. Sweep'in gercekten ornekledigi izgara
+`searchable_axes(fam, {**shared, **own})` - paylasilan risk izgarasi
+(sl_atr_mult 6 x trail_start_atr 6 x trail_step_atr 5 x max_spread_atr 6 =
+1.080) ailenin beyan ettigi her seyi carpiyor. Canli bloktan okunan gercek
+degerler:
+
+| aile | gercek izgara | kapsam (cap 2000) |
+|---|---|---|
+| ichimoku | 1.080 | %100 |
+| parabolic_flip | 8.640 | %23,2 |
+| stoch_flip | 28.800 | %6,97 |
+| t3_flip | 144.000 | %1,41 |
+| mtf_pullback | 622.080 | %0,34 |
+| burst | 1.244.160 | %0,18 |
+| dual_t3 | 2.073.600 | %0,12 |
+
+Yani siralamanin tamami tersineydi: `dual_t3` / `burst` / `mtf_pullback` en
+**kotu** kapsananlar, en iyiler degil. Yayilim 190 kat.
+
+`coverage_budget()` implementasyonu dogru - `_run_all` tahsisi zaten
+`variant["grid"]` uzerinden, yani birlesik izgaradan hesapliyor. Yanlis olan
+yalnizca cevrimdisi olcum betigi ve buraya yazilan tabloydu. Ama etkisi
+kucuk: cap'in altinda sadece `ichimoku` var, dolayisiyla yeniden dagitilan
+~920 kombinasyon. Gercek israfi kaldiriyor ve dogru sekilde, ama 190 katlik
+yayilimi kapatmiyor - onun icin izgaralarin kendisinin kuculmesi gerekir.
+
+### F35 - hicbir aile silinmemeli (olculdu)
+
+206 arama kaydinin kazananlari. Son 60 arama, yalnizca canli 7 aile (arsiv):
+
+| aile | kazandi | kazanan TF dagilimi (tum gecmis) |
+|---|---|---|
+| burst | 19 | M15x14 M5x12 M30x9 |
+| stoch_flip | 12 | M15x16 M30x14 M5x4 |
+| dual_t3 | 7 | M15x7 M5x6 M30x2 |
+| mtf_pullback | 4 | M5x9 M15x5 M30x2 |
+| parabolic_flip | 2 | M5x4 M15x1 |
+| t3_flip | 1 | M15x7 M5x7 M30x4 |
+| ichimoku | 1 | M30x1 |
+
+Yediisi de son donemde kazaniyor. Hicbiri olu agirlik degil, silinmemeli.
+`t3_flip` / `parabolic_flip` / `ichimoku` su an canli hicbir sembolde degil
+ama arama onlari secebiliyor - secenegi kaldirmak icin sebep yok.
+
+**Onemli karsi-sinyal:** en kotu kapsanan aileler (`burst` %0,18,
+`dual_t3` %0,12) en cok kazananlar. Saf kapsam-onyargisi hikayesinin
+ongordugunun tersi. Yani izgara boyutu kimin kazandigini belirleyen baskin
+etken **degil**. F34 hala ilkeli ve bedava, ama sonuclari acikladigi iddiasi
+geri cekiliyor.
+
+### Siradaki tek yuksek kaldiracli hamle (yapilmadi, operator karari)
+
+`max_spread_atr` paylasilan izgarada 6 degerle duruyor ve **her** ailenin
+izgarasini 6 ile carpiyor. Bu bir alfa ekseni degil, bir maliyet/islem
+yapilabilirlik kapisi. 6 -> 2 degere inmek her ailenin izgarasini 3 kat
+kuculturdu (dual_t3 2.073.600 -> 691.200, kapsam %0,12 -> %0,35) neredeyse
+sifir bilgi kaybiyla.
+
+### 31.08 - operator hatasi: tests/conftest.py uzerine yazildi
+
+Aile denetimi sirasinda `tests/conftest.py`'nin var olmadigi varsayildi ve
+uzerine yeni bir dosya yazildi. Dosya vardi. Icinde uc sey vardi:
+
+1. `TestClient` alt sinifi (oturum basligi) - kaybolunca 347 test kirildi.
+2. `_survive_unreadable_symlinks()` - pytest'in `cleanup_dead_symlinks`
+   cagrisini yutan yama. Bu makinede sembolik bag *degerlendirmesi* politika
+   ile kapali (WinError 1463), dolayisiyla tamamen yesil bir suite
+   `pytest_sessionfinish`'te patlayip non-zero donuyor. Kaybolunca tam olarak
+   bu yasandi ve saatlerce "cozulmeye" calisildi - zaten cozulmustu.
+3. `no_real_log_file` - **her test icin** `LOG._write_file`'i susturan autouse
+   fixture. AGENTS'taki "testler `logs/micofx.log`'a yazmamali" kuralini
+   uygulayan sey buydu.
+
+Sonuc: 12:51:18 - 13:07:54 arasinda calisan suite kosumlari canli loga
+**27.107 satir** test ciktisi yazdi (`[FUZZ]`, `[TEST]`, `[MYPAIR]`, ayrica
+canli sembol adlariyla sahte TRADE satirlari). 13:05:44'te dosya 4096 KB
+sinirini asti ve rotasyon **en eski 2048 KB'i dusurdu** - yani o pencereden
+onceki gercek islem gecmisi gitti. Geri getirilemez; gece yedegindeki
+arsivlerde olabilir.
+
+`git checkout -- tests/conftest.py` ile dosya geri alindi, suite yeniden
+2729 passed / exit 0. 13:07:54'ten sonra yeni kirlenme yok. Log dosyasina
+elle dokunulmadi: canli surec onu acik tutuyor ve desteklenen bir temizleme
+kapisi yok (`POST /api/logs/clear` kasitli olarak kaldirilmis). Cop artik
+dosyanin en eski icerigi oldugu icin bir sonraki rotasyon onu dusurecek.
+
+**Ders:** var olmadigi dusunulen bir dosyaya yazmadan once oku. Ve tam
+suite'i `Select-Object -Last N` ile degil, ozet satirini gorerek dogrula -
+kuyruk `[100%]` gosterirken yukarida 347 `F` vardi.
+
+### F36 - geri verme olculdu (289 otopsi, 31.08)
+
+Temel: 289 kapanmis islem, net **-40,7 R**, kazanma %33,6, ortalama
+-0,141 R. **288 islem tepesinin altinda kapandi**, tepeye gore geri verilen
+medyan **1,17 R**. Yani geri verme anekdot degil, kitabin varsayilan
+davranisi.
+
+Karsi-olgusal tarama. Bir T esigi icin MFE'si T'ye ulasan islemin sonucu T
+olur (MFE'nin tanimi fiyatin oraya degmesidir, dolayisiyla T'de bekleyen bir
+emir dolardi); T'ye ulasmayan islem gercek sonucunu korur. Bu, "MFE'nin
+tamamini yakala" iddiasi **degil** - AGENTS mfe_r'nin bar-ici tepe oldugunu
+ve hasat edilemeyecegini soyluyor; fiyatin icinden gectigi sabit bir seviye
+farkli ve savunulabilir bir iddia.
+
+| T | harvest net | fark |
+|---|---|---|
+| 0,5 | -32,1 | +8,6 |
+| 0,8 | -28,4 | +12,3 |
+| **1,0** | **-28,4** | **+12,4** |
+| 1,2 | -41,0 | -0,2 |
+| 1,5 | -30,0 | +10,8 |
+| 2,5 | -32,9 | +7,8 |
+
+Sembol basina en iyi T: JPN225 1,0 (+16,4 R, n=69), NAS100 2,5 (+11,3 R,
+n=51), GER40 0,5 (+3,1 R, n=40), US30 4,0 (+1,6 R, n=86).
+
+**Elle ayarlanmasi onerilmez.** T yuzeyi monoton degil: 1,0 iyi, 1,2 kotu,
+1,5 yine iyi. 289 islemde bu, esigin tanimlanabilir olmadiginin isareti -
+sirali komsu degerlerin isaret degistirmesi gurultunun imzasidir. Kazanc
+buyuklugu gercek, tam degeri degil.
+
+**Breakeven kolonu kasitli olarak raporlanmiyor.** Tarama BE@0,5 icin
+-40,7 -> +9,1 (+49,8 R) veriyor ve bu, modelin tam da yaniltici oldugu
+yerdir: `max(got, 0)` kazananlarin girise geri cekilip BE stopuna carpip
+sonra donme ihtimalini yok sayiyor, yani BE'nin kazananlari oldurme
+mekanizmasini hic modellemiyor. AGENTS zaten kayitli: `breakeven_at_r`
+canli **1,5**, 0,5 degil - "BE-2 GER40 -32 R". Yani bu tam olarak denenmis
+ve canlida kaybettirmis fikir. Tarama basligina uyulmadi.
+
+`harvest_at_r` / `harvest_step_atr` `OPT_FIELDS` ekseni degil, yani arama
+bunu kendisi bulamaz; operator ayaridir. Dogru siradaki adim bir sayiyi elle
+yazmak degil, esigi olculebilir kilmak.
+
+## F37 - kayip payoff tarafinda, giris tarafinda degil (olculdu, 31.08)
+
+Tersine muhendislik: canli 289 otopsiyi uygulanan damgalarla yan yana koydum
+(`cursor/reverse_live_vs_stamp.py`, `reverse_payoff.py`).
+
+**Giris tarafi saglam.** Canli kazanma orani %33,6; damgalarin ongordugu ~%35.
+Ortalama kayip 0,85 R, yani stoplar modelden kotu degil. Fill kaymasi medyan
++0,004..+0,040 R - ihmal edilebilir.
+
+**Ayrisan tek sey payoff.** Canli 1,48; damgalarin ima ettigi ~2,1. Kazananlar
+yaklasik %30 kisa kesiliyor. Kitap R/islem -0,141; payoff acigi kapansa
+**+61 R**.
+
+| sembol | canli payoff | damga payoff | acik | partial_at_r |
+|---|---|---|---|---|
+| XAUUSD | 2,28 | 2,29 | -0,01 | **0** |
+| US30 | 1,70 | 2,09 | -0,39 | 1,5 |
+| SpotBrent | 1,54 | 1,85 | -0,31 | 1,5 |
+| JPN225 | 1,61 | 2,46 | -0,85 | 1,5 |
+| GER40 | 1,13 | 2,19 | -1,06 | 1,5 |
+| NAS100 | 0,84 | 2,14 | -1,30 | 1,5 |
+
+Ic kontrol: payoff'u damgasiyla ortusen tek sembol (XAUUSD) canlida net kar
+eden tek sembol - ve `partial_at_r`'si kapali tek etkin sembol. Model yanlis
+degil, uygulanisi kazananlari buduyor.
+
+**Cikis kovalari.** stop 155 islem **-145,0 R** (ort MFE sadece 0,44 - bu
+islemler zaten hic lehe gitmemis), trail 86 islem +75,4, flatten 43 islem
+**+26,6** (%74 kazanan). Seans/gun-sonu flatten'i *kar ediyor*; "zorla kapatma
+zarar ettiriyor" hipotezimi olctum ve **curuttum**.
+
+### partial_at_r A/B (holdout snapshot, offline)
+
+`partial_at_r` bir `OPT_FIELDS` ekseni degil, dolayisiyla damganin params
+sozlugunde hic yok - params diff'i onu goremez. `Params.from_config` canli
+satirdan kopyaladigi icin *bugunun* konfigi simule edilince modellenir, ama
+overlay acilmadan once kazanilmis bir damga onsuz skorlanmistir.
+
+Kontrollu deney (`reverse_partial_ab.py`, `reverse_partial_paired.py`): ayni
+holdout snapshot, ayni konfig, tek degisken rung. Rung girisleri
+degistirmedigi icin iki kosu islem-islem eslesiyor.
+
+| sembol | n | fark (kapali-acik) | ilk yari | ikinci yari | ayni yon |
+|---|---|---|---|---|---|
+| **JPN225** | 1405 | **+26,94** | +13,74 | +13,21 | evet |
+| GER40 | 391 | +7,22 | +4,88 | +2,34 | evet |
+| US30 | 1664 | +4,43 | +3,71 | +0,72 | evet |
+| NAS100 | 1739 | -13,88 | +9,96 | -23,84 | **HAYIR** |
+| SpotBrent | 128 | -0,84 | -0,85 | +0,00 | HAYIR |
+
+Mekanizma her sembolde tutarli: rung acikken kazanma orani **her zaman**
+yukseliyor, payoff **her zaman** dusuyor. Dokunulan islemlerde medyan negatif
+(-0,19..-0,33) ama ortalama pozitif ve sadece ~%37'si kapatmadan yana - yani
+scale-out sik sik az kazandiriyor, nadiren buyuk kosani budayarak cok
+kaybettiriyor. Payoff sikismasinin kaynagi bu.
+
+**NAS100 yarilar arasi isaret degistiriyor** - oradaki "partial faydali"
+sonucu tek pencerelik gurultu, uygulanmadi. Sadece JPN225 iki yarida
+neredeyse esit, yani tek savunulabilir aday o.
+
+**Uygulanmadi - kapi kasitli kapali.** `POST /api/symbols/JPN225`
+`{"partial_at_r":0}` -> **400 "partial_at_r panelden yazilamaz"**. Tek
+alternatif `data/micofx.db`'ye ikinci bir yazici acmak olurdu; AGENTS bunu
+yasakliyor. Guard gorevini yapiyor, etrafindan dolasilmadi. Operator karari.
+
+### Yan bulgu: damgalar taze veriyi tutmuyor
+
+Bugunun canli konfigi, bugunun holdout barlarinda US30 icin **-79,7 R / 1664
+islem** (-0,048 R/islem). Ayni sembolun damga holdout'u +224,2 R / 2703 islem
+(+0,083). Canli gerceklesme -0,024. Yani **taze replay canliyi damgadan cok
+daha iyi ongoruyor**. Damgalar iyimser tarafta; apply gate'leri bunu
+yakalamiyor. Bu, F37'nin payoff acigindan ayri ve daha genis bir konu.
+
+## F38 - marj kullanilmiyor cunku bagli olan marj degil (olculdu, 31.08)
+
+Operator: "acilabilir pozisyon ve lot buyuklugu marji kullanabilsin."
+
+**Olcum.** equity 1648,21 / kullanilan marj 47,49 -> **%2,88**, izin
+**%90**. Dagitilabilir butce 1435,90. Sikayet dogru.
+
+**Bagli olan marj degil.** Canli hesap goruntusu varken `lot_for`
+(risk.py:522) `min(auto, r_cap, ceiling)` cozuyor; `auto` marj payi,
+`r_cap` otomatik 1R tavani (`max(risk_percent, %2) x bakiye`). Dokuz
+sembol birden atese girse marj %40,8 olurdu ama risk %17,2'de tikaniyor -
+yani **`r_cap` bagliyor**. Marj bolusumunu (`butce / bostaki ad sayisi`)
+gevsetmek tek basina hicbir sey acmaz. Yan bulgu: `risk_percent`'ten
+hesaplanan `raw` bu dalda hic kullanilmiyor, sadece nota yaziliyor.
+
+**Olcekleme bekletildi.** F37 kitabin canli beklentisini negatif olctu
+(-0,141 R/islem, payoff 1,48 / gereken ~2,1). Boyut negatif beklentiyi de
+carpar: 2,2x, mevcut -40,7 R'yi ~-90 R yapardi. Operator karari: once
+payoff acigi kapansin.
+
+### Kitap geneli 1R tavani geri takildi
+
+`max_concurrent_risk_pct` 27.08'de **ulasilamaz** oldugu icin kapatilmisti
+(lot risk%'ti, kitap ~%17'de kaliyordu). Marji kullanmak icin `r_cap`
+yukseltmek, tavani ulasilamaz kilan seyi tam olarak ortadan kaldirir - o
+yuzden tavan, olceklemeden **once** geri takildi. Su anki boyutta atil
+(%17,2 < canli 30).
+
+`can_open` artik acik ticketlarin `remaining_position_risk` toplamina bu
+fill'i ekleyip equity yuzdesiyle karsilastiriyor. STOPSUZ zaten ustte
+reddedildigi icin toplama `inf` sizamaz; girise cekilmis trail butceyi
+birakir; `sl_distance` bilinmiyorsa yeni fill fiyatlanamaz ama **acik
+kitap yine sayilir**.
+
+Ters yone donen 27.08 testleri guncellendi:
+`test_concurrent_risk_gate` (artik bagliyor),
+`test_capacity_reports_live_open_risk`,
+`test_the_book_holds_what_the_walk_forward_validated` (kaynak-tarama
+asserti kaldirildi). Yeni: `test_the_book_wide_risk_ceiling_binds_again`.
+2735 test gecti, ruff temiz.
+
+**Sembol basina ticket 1 kaldi** - arama `max_open=1` skorluyor.
+
+## F39 - sinyal tarafi olculdu: sembol, aileden daha belirleyici (31.08)
+
+Operator: "sorun tf degil stratejiler". Simdiye kadar giris tarafini hep
+*modele gore* olctum (canli WR damgayi tutuyor). Mutlak edge hic sinanmamisti.
+
+**Test 1 - ileri getiri** (`cursor/reverse_entry_edge.py`). Cikis modeli tamamen
+cikarildi: sinyal -> sonraki acilistan doldur -> +1/5/10/20 barda ATR cinsinden
+hareket, yone gore isaretli. Taban: ayni barlarin aile kendi long/short oraniyla
+karilmis hali (yazi-tura girisin bedava aldigi getiri).
+
+`stoch_flip` canli parametreleriyle **kesin sifir**: US30/JPN225/NAS100/SpotBrent
+uzerinde her ufukta t = -0,55..+0,51, sinyal sayisi 22k-37k. Bu ince ornek degil,
+**guvenli bir null**. Kitabin en buyuk parcasi (US30, 86 canli islem) bu ailede.
+
+**Test 2 - varsayilan parametrelerle matris** (`reverse_family_edge_matrix.py`).
+49 hucrede sadece 5 anlamli sonuc - rastlanti beklentisine yakin. Yani Test 1'de
+ayarli parametrelerin guclu cikmasi buyuk olcude ayni pencereye uydurmadir.
+
+**Test 3 - kuyruk asimetrisi** (`reverse_tail_asymmetry.py`). Ortalama getiri
+breakout ailesini haksiz cezalandirir: stop sol kuyrugu keser, trail sag kuyrugu
+birakir - sistemin cikis modeli tam da bunu paraya cevirir. +20 barda MFE/MAE
+orani, ayni tabana bolunmus:
+
+| sembol | en iyi aile | oran | canli R/islem |
+|---|---|---|---|
+| XAUUSD | ichimoku 1,173x | **1,06-1,17 hepsinde** | +0,230 |
+| BTCUSD | burst 1,158x | **1,08-1,16 hepsinde** | +0,227 (taze) |
+| GER40 | parabolic 1,075x | 1,05-1,08 | -0,188 |
+| JPN225 | ichimoku 1,135x | 1,02-1,14 | -0,269 |
+| SpotBrent | ichimoku 1,040x | ~1,00 | +0,117 |
+| **NAS100** | dual_t3 1,011x | **hicbiri 1,01 ustu degil** | -0,333 |
+| **US30** | ichimoku 1,036x | **hicbiri 1,01 ustu degil** | -0,024 |
+
+**Asil bulgu satirlarda, sutunlarda degil.** US30 ve NAS100'de *hicbir aile*
+asimetri uretmiyor; XAUUSD ve BTCUSD'de *neredeyse her aile* uretiyor. Ve bu,
+canli P&L ile birebir ortusuyor. Yani enstruman secimi, aile seciminden daha
+belirleyici.
+
+Aile siralamasi (tabana gore ort): ichimoku 1,071x (6/7 sembol) - **ve hicbir
+canli sembolde kullanilmiyor**; parabolic_flip 1,041x; burst 1,036x;
+mtf_pullback 1,031x; stoch_flip 1,026x; t3_flip 1,010x; **dual_t3 1,003x
+(0/7)** - GER40 canlida bunu kullaniyor.
+
+**Neden damgalar iyimserdi (F37 yan bulgusu simdi aciklandi).** Sifir-edge bir
+sinyal uzerinde 489k kombinasyonluk arama yine de bir "kazanan" dondurur -
+sadece gurultuye uydurur. US30 damgasi +224 R, ayni konfigin taze barlardaki
+replayi -79,7 R. F35'in "her aile kazanan uretti" sonucu da bu yuzden supheli:
+o olcut "hangi aile aramayi kazandi" idi, ki tam olarak asiri uydurma metrigi.
+
+**Duzeltme.** 31.08'de "sorun aile seciminde degil, cikista" demistim. Eksikti:
+cikis payoff'u sikistiriyor (F37 gecerli), ama altta sinyal edge'i de zaten
+cok ince - ve US30/NAS100'de yok. Operator hakliydi.
+
+**Uyarilar.** Asimetri farklari kucuk (%2-8) ve maliyet haric; varsayilan
+parametreler; sembol basina tek pencere. Kesin huku degil, yon gostergesi.
+
+---
+
+## F40 - kitapta olmayan sinyal sekli: kanal kirilimi (olculdu + kuruldu, 31.08)
+
+**Soru.** Operator: "sorun TF degil, stratejiler. sifirdan daha iyi
+kurabiliriz, kendi gostergemizi de olusturabilirsiniz." F39 stoch_flip'in
+giris edge'i olmadigini gostermisti; bu tur onun devami - once *neyin*
+ongordugunu bul, sonra yaz.
+
+**Yontem (F39 hatasini tekrarlamamak icin).** Aile degil, *primitif* taradim:
+her aday, fiyat hakkinda en fazla iki ayari olan tek bir hipotez. Her pencere
+%60 train / %40 test bolundu ve bir primitif ancak **iki yarida da ayni
+isaretle** tuttuysa sayildi. Iki metrik: ileri getiri (surukleniyor mu) ve
+MFE/MAE asimetrisi (stop+trail'in paraya cevirdigi sekil), her ikisi de
+primitifin kendi long/short oraninda karistirilmis bir tabana karsi.
+
+**Olculen (10 pencere, ornek disi yari).**
+
+| primitif | test asim. medyan | iki yarida tutan |
+|---|---|---|
+| **kanal kirilimi (50 bar)** | **1,051** | **5/10 - test yarisinda 10/10 pozitif** |
+| momentum (z>1) | 1,043 | 3/10 |
+| kanal kirilimi (20 bar) | 1,052 | 2/10 |
+| clv / streak fade | 1,012 / 0,971 | 0/10 |
+| **ortalamaya donus (z2/z3)** | **0,943 / 0,947** | **0/10** |
+
+Ortalamaya donus *rastgele giristen kotu* - "endeksler intraday mean-revert
+eder" hipotezi olculup reddedildi. Dogru yon tersi.
+
+**Lookback yapisal, sansli parametre degil.** Kritik kontrol: 50 kazandi diye
+50 secmek F39'un tarif ettigi asiri uydurmanin ta kendisi olurdu. Eksen
+tarandi ve egri duzgun cikti - 10 barda 1,034, 20'de 1,052, 40'ta 1,062,
+100'de 1,078, 150'de 1,076. Tek noktada sivrilme yok; etki pencere uzadikca
+buyuyor. BTCUSD'de monoton 1,060 -> 1,268.
+
+**Boslugun kendisi.** Bu sekil o gunku 7 ailenin (arsiv) **hicbirinde** yoktu. `burst` menzil
+*genislemesi* (barin kendi high-low'u) ve kendi docstring'i farki yaziyor:
+"a level-based breakout keys off a price the market has already printed - an
+N-bar channel", ki o degil. En yakin sey `ichimoku` (tenkan/kijun N barlik
+orta noktalar) - ve F39'da o 7 ailenin (arsiv) en iyisi cikip hicbir canli sembolde
+kullanilmiyordu. Eski `donchian` 12.08'de **kaldirildi**, ama para kaybettigi
+icin degil: optimizer'in `strategies` listesinde olmadigi icin hic aranamadi.
+Yani sekil hakkinda bir hukum hic verilmemisti.
+
+**Kurulan.** `channel_break`: kapanis, kendisinden onceki `chan_lookback`
+barin en yuksegini asarsa alis / en dusugunu kirarsa satis. Kanal sinyal
+barini **disarida birakir** (kendi settigi zirveyle karsilastirmak burst'un
+sorusu olurdu). `chan_buffer_atr` seviyenin kilinda gezinenleri eler;
+`first_of_run` trendin her barinda tekrar sinyal uretmesini onler. Izgara
+lookback'i 150'ye kadar goturur - `burst`'un 40 tavani olcumun yasadigi yere
+ulasamiyordu.
+
+**Holdout (tam maliyetli, ayni barlar/cikislar, tek degisken aile).**
+
+| pencere | mevcut | channel_break | fark |
+|---|---|---|---|
+| US30_M30 | stoch_flip -79,7 R | +31,1 R (lb20) | **+110,8** |
+| US30_M5 | stoch_flip -86,1 R | -7,6 R (lb150) | **+78,5** |
+| GER40_M30 | stoch_flip -35,6 R | +20,2 R (lb150) | **+55,7** |
+| NAS100_M30 | stoch_flip +8,7 R | +23,8 R (lb150) | +15,0 |
+| BTCUSD_M30 | burst +72,1 R | +60,2 R | -11,9 |
+| XAUUSD_M15 | burst +54,6 R | +38,8 R | -15,8 |
+| GER40_M15 | dual_t3 +48,9 R | +4,8 R | -44,2 |
+| JPN225_M15 | stoch_flip +96,8 R | +30,6 R | -66,2 |
+
+**Evrensel bir kazanan degil - ve olmamasi dogru.** Tam olarak kanamanin
+oldugu yerde geciyor: gectigi dort pencerenin dordunde de mevcut aile
+`stoch_flip`, yani F39'da giris edge'i olmadigini olctugum aile. Saglikli
+ailelere (burst, dual_t3) dokunmuyor. Bagimsiz dogrulama: payoff orani
+neredeyse her pencerede lookback ile artiyor (BTCUSD 3,68 -> 4,34), ki
+asimetri bulgusunun tam olarak ongordugu sey.
+
+**Uyarilar.** Holdout'ta en iyi lookback pencere *icinden* secildi - bu ustten
+bir tahmin; gercek arama ayni secimi walk-forward ile ornek disi yapar.
+Asimetri farklari kucuk (%3-8). Aile arama listesinde, yani bundan sonrasini
+per-sembol arama karara baglar; hicbir sembole elle atanmadi.
+
+**Durum.** `STRATEGIES` 7 -> 8, `defaults.json` izgarasi, panel etiketi ve
+alan yardimi, 10 fail-first test. Tam suit 2772 gecti, ruff temiz. Canli
+surec eski `defaults.json`'u yuklu tasiyor; restart 4 acik pozisyon nedeniyle
+409 - gozcu kitap duzlesince indirecek ve aile o an aranabilir olacak.
+
+### F40 ek - kor secim testi: iddianin duzeltilmesi (31.08)
+
+Yukaridaki holdout tablosunda en iyi lookback pencere *icinden* secilmisti ve
+bunu "ustten tahmin" diye isaretlemistim. Testi yaptim: secim ilk %60'ta
+korlemesine yapildi, fatura son %40'ta odendi. Mevcut aile de ayni son %40'ta
+olculdu.
+
+| pencere | kor secim | test net R | mevcut | fark | en iyi olabilecek |
+|---|---|---|---|---|---|
+| **NAS100_M30** | lb20 b0,25 | +9,67 | -16,52 | **+26,19** | +9,67 |
+| **US30_M5** | lb20 | -3,23 | -47,55 | **+44,32** | +32,37 |
+| **GER40_M30** | lb150 | -6,27 | -18,13 | **+11,86** | -6,11 |
+| **US30_M30** | lb150 b0,25 | -19,38 | -22,17 | **+2,78** | +9,49 |
+| SpotBrent_M15 | lb100 | -4,22 | -3,48 | -0,75 | +4,66 |
+| XAUUSD_M15 | lb20 b0,25 | -5,59 | +8,48 | -14,07 | +12,00 |
+| GER40_M15 | lb100 | +9,48 | +26,73 | -17,25 | +9,48 |
+| JPN225_M15 | lb150 | +9,14 | +41,55 | -32,40 | +41,64 |
+| BTCUSD_M30 | lb100 b0,25 | +14,28 | +49,19 | -34,91 | +32,12 |
+| **TOPLAM** | | **+3,88** | **+18,10** | **-14,22** | |
+
+**Duzeltme.** `channel_break` kitap capinda bir yukseltme **degil** - kor
+secimle toplamda mevcut ailelerin 14,2 R gerisinde. Onceki tablonun
+"5 pencerede geciyor" ifadesi hindsight'la sisirilmisti.
+
+**Ayakta kalan sey.** Desen aynen duruyor ve daha da keskin: gectigi dort
+pencerenin **dordunde de** mevcut aile `stoch_flip` - F39'da giris edge'i
+olmadigini olctugum aile. Kaybettigi dort pencerenin dordunde de mevcut aile
+para kazaniyor (burst, dual_t3). Yani bu bir aile *degisimi* onerisi degil,
+`stoch_flip` icin bir *yedek* onerisi.
+
+**Asil bulgu: zayif halka secim metrigi, sinyal degil.** Asimetri egrisi
+yapisaldi (10 pencerede duzgun, monoton). Ama net R ile lookback secmek
+gurultulu: JPN225'te kor secim +9,1 iken ayni yarida en iyi +41,6, US30_M5'te
+-3,2 iken +32,4. Sinyalin kendisi saglam, onu *paraya ceviren ayari secmek*
+guvenilmez. Bu, F39'un "489k kombinasyon gurultuye uyar" bulgusunun ayni
+madalyonun oteki yuzu - ve gercek aramanin 5 segmentli walk-forward + refine
+turlari, buradaki kaba 2-parcali bolmeden daha saglam secim yapar.
+
+**Sonuc.** Aile arama listesinde kalir; beklenti kitap capinda kazanc degil,
+`stoch_flip` calisan sembollerde (US30, NAS100, GER40/M30) yedek. Hicbir
+sembole elle atanmadi.
+
+---
+
+## F41 - geri verme gercek, ama hasat etmek daha pahali (olculdu, 31.08)
+
+**Tetik.** Gozcu 17:01'de canli yakaladi: acik kitap +64,03'e cikip bir saat
+icinde +23,33'e dondu - tepeden %64. Ayni sekil 08:30 olayinda da var
+(+139,80 -> +36,69). Bunun bariz cozumu "kar bir kere odendiyse trail'i sik"
+(harvest_at_r / harvest_step_atr).
+
+**Test.** 10 pencere, tam maliyetli replay, canli konfigler, tek degisken
+overlay. `simulate` her iki alani da modelliyor, yani bu kagit uzerinde degil
+maliyetli bir olcum.
+
+| harvest | toplam net R | fark |
+|---|---|---|
+| **kapali** | **+86,38** | - |
+| 1,5R / 0,4 | -128,99 | -215,37 |
+| 2,0R / 0,5 | -129,39 | -215,77 |
+| 1,0R / 0,4 | -434,29 | -520,67 |
+| 1,0R / 0,25 | -497,64 | -584,02 |
+
+**Her ayar, her buyuklukte kaybettirdi.** Erken armanan (1,0R) en kotusu.
+
+**Mekanizma sutunlarda gorunuyor.** US30_M30, harvest 1,0R/0,4: islem sayisi
+1664 -> 2240, kazanma orani %32,5 -> %35,9 **yukseldi**, ama payoff 1,93 ->
+1,55 ezildi. Yani sikilan trail kazananlari erken kesiyor ve bosalan yere
+yeniden giris uretiyor. Daha sik kazanip daha az kazanmak, bu kitapta net
+zarar.
+
+**Sonuc.** Gozcunun gordugu geri verme *gercek* ama kazananlarin kosmasina
+izin vermenin **fiyati**, ve payoff sutunu bu fiyatin odenmeye degdigini
+soyluyor. AGENTS'in "harvest live off book-wide" notu artik kagit sonucuna
+degil 10 pencerelik maliyetli olcume dayaniyor. `harvest_at_r` /
+`harvest_step_atr` kapali kalir; geri verme grafigine bakip bunu acmak
+cazip ve yanlis.
+
+**Not.** Bu, F37'nin `partial_at_r` bulgusuyla ayni yonde: kazananin ustunu
+tirtiklayan her mekanizma bu kitapta payoff'u tasidigi degerden fazla
+yiyor. Cikis tarafinda aranacak sey "kari erken kilitlemek" degil.
+
+---
+
+## F42 - aileleri tek stratejide birlestirmek: olculdu, yapilmamali (31.08)
+
+**Soru (operator).** 8 aile var; mantigi tek stratejide toplayabilir miyiz?
+
+**Sekil olarak zaten 4.** trend yonu (dual_t3, t3_flip, parabolic_flip,
+ichimoku), trend+geri cekilme (mtf_pullback), osilator (stoch_flip),
+patlama/seviye (burst, channel_break).
+
+**Ortusme, sans tabanina karsi.** mtf_pullback barlarin %17,6 sinda atesliyor;
++-2 bar toleransla zaman cizgisinin yarisini kapliyor, yani iki aile hicbir
+iliski olmadan da ~%25 ortusur. Bir seriyi rastgele kaydirip (yogunluk ayni,
+iliski yok) taban olctum:
+
+| cift | gozlenen | sans | fazla |
+|---|---|---|---|
+| mtf_pullback / stoch_flip | %53,0 | %24,3 | +%28,7 |
+| burst / channel_break | %35,8 | %7,7 | +%28,1 |
+| burst / parabolic_flip | %34,4 | %8,1 | +%26,3 |
+| dual_t3 / t3_flip | %33,0 | %16,3 | +%16,7 |
+| mtf_pullback / t3_flip | %36,7 | %25,3 | +%11,4 |
+
+Gercek iliski **var** (her cift sansin %11-29 ustunde) ama **kopya yok** - en
+yuksek ham ortusme %53 ve o da en yogun aileyle. burst/channel_break yakinligi
+beklenen: kanal kirilimi cogu zaman bir genisleme barinda olur.
+
+**Neden yine de birlestirilmemeli.** Bu kitabin darbogazi sinyal cesitliligi
+degil, **secim**. F40 ek: tek bir ekseni korlemesine secmek bile en iyi secimin
+14,2 R gerisinde kaldi. F39: sifir-edge bir sinyal uzerindeki 64.800
+kombinasyonluk grid yine de kazanan dondurdu (damga +224 R, taze replay
+-79,7 R). Sekiz aileyi tek parametreli gostergede toplamak eksen sayisini
+carpar, yani gurultuye uydurma yollarini cogaltir. Bugunku ayrim bir
+**duzenleyici**: arama sinirsiz tek hipotez yerine sekiz kisitli hipotez
+arasindan seciyor.
+
+**Dogru sadelesme ters yonde.** Birlestirmek degil, olculebilir sekilde olu
+olani cikarmak: stoch_flip (F39: giris edge i yok) su an US30, JPN225 ve
+SpotBrent te canli.
+
+---
+
+## F43 - "en iyi strateji" aramasi: karmasiklik cevap degil (olculdu, 31.08)
+
+**Gorev.** Operator: sinirsiz yetki, web/X/github arastir, en iyi stratejiyi
+kur. Literatur tarandi, uc somut iddia test edildi, ucu de tutmadi.
+
+**Literaturun kirilim tarifi.** Kaynaklar (retail icerik, dogrulanamayan
+sayilarla) sunda birlesiyor: ADX > 20-25 filtresi, hacim teyidi (20-ort
+ustu), ve "kanal genisligi < 1 ATR ise girme, sikismadir". Sonuncusu klasik
+squeeze mantiginin **tersi** - daralmis aralikdan kirilim en iyi kurulum
+sayilir. Ikisi ayni anda dogru olamaz.
+
+**Olcum: hicbiri ayirt etmiyor.** channel_break lb=50 sinyalleri her kosula
+gore dorttebirlere bolundu, asimetri train/test ayri olculdu (10 pencere):
+
+| dilim | kanal genisligi | hacim/20-ort | seviyeyi asma |
+|---|---|---|---|
+| Q1 | 1,017 / 1,052 | 1,006 / 1,072 | 0,980 / 1,063 |
+| Q2 | 0,960 / 1,074 | 0,959 / **1,114** | 1,012 / 1,102 |
+| Q3 | 0,980 / 1,028 | 1,009 / 1,046 | 0,990 / 1,037 |
+| Q4 | 1,024 / 1,094 | 1,024 / 1,040 | 1,017 / 1,039 |
+
+Hicbirinde monoton siralama yok ve train'deki sira test'te bozuluyor (hacim
+Q2 train'in en kotusu, test'in en iyisi). Dilimler arasi fark, iki donem
+arasi farktan kucuk - gorulen sey kosul degil **rejim**. ADX zaten eksen
+olarak gridde; hacim ve genislik **eklenmedi**, cunku eklemek gurultuye
+uydurmanin iki yolu daha demekti.
+
+**Sonuc 1: v1'in sadeligi dogruymus.** Kirilim filtrelenerek iyilesmiyor.
+
+**Olcum 2: ekseni aramak mi, sabitlemek mi?** Kor secim (train'de sec, test'te
+ode) vs her pencerede sabit lookback, hepsi ayni test yarisinda:
+
+| | kor arama | sabit 20 | sabit 40 | sabit 60 | sabit 100 | sabit 150 |
+|---|---|---|---|---|---|---|
+| toplam test R | +3,88 | +17,66 | -3,25 | **-63,39** | +15,61 | +17,13 |
+
+**Buradaki tuzak.** "En iyi sabit 20" demek sonucu gordukten sonra secmek
+olurdu - F40 ek'te duzelttigim hatanin aynisi. Dogru okuma: net R bu
+pencerelerde lookback'i **ayirt edemeyecek kadar gurultulu**. Bitisik ayarlar
++17,66 ile -63,39 arasinda savruluyor.
+
+**Ayirt eden sey plato.** lb20'nin +17,66'si hemen yaninda ucurum olan yalniz
+bir tepe (lb40 = -3,25). lb100 (+15,61) ve lb150 (+17,13) yan yana duran bir
+plato. Ve F40'in asimetri egrisi - bagimsiz, daha yuksek sinyalli istatistik -
+zaten uzun tarafi gosteriyordu (10 barda 1,034, 100'de 1,078). Iki bagimsiz
+olcum ayni yeri isaret ediyor.
+
+**Zaten dogru mekanizma var.** `opt_params.plateau_weight = 0.7`: arama tepeyi
+degil platoyu odullendiriyor, ve 5 segmentli walk-forward buradaki kaba
+2-parcali bolmeden saglam. Yani eksen sabitlenmiyor, grid oldugu gibi kaliyor
+([20,40,60,100,150]) - net R'ye bakip 20'yi veya 60'i budamak, tam da bu
+notun uyardigi hata olurdu.
+
+**Genel sonuc.** Bu turda denenen her *ekleme* (harvest F41, aile birlestirme
+F42, kirilim filtreleri F43) olcumde kaybettirdi; kazanan tek sey bir
+**eksigi kapatmak** oldu (F40, kitapta hic olmayan sinyal sekli). Bu kitapta
+"daha iyi strateji" karmasiklik eklemek degil, edge'i olmayani cikarmak:
+`stoch_flip` hala US30, JPN225 ve SpotBrent'te canli.
+
+## F44 - kademeli kar alma: mumkun ile karli ayni sey degil (olculdu + kapi acildi, 31.08)
+
+Operator sorusu: "poz buyuk olsa kademeli kar alsak". Altinda dogru bir sezgi
+var ama iki ayri iddiayi birlestiriyor ve ikisi ayni cevabi vermiyor.
+
+**Birinci iddia dogru.** Kademeli cikis kucuk lotta zaten *mumkun degil*:
+`partial_at_r` biletin ucte birini kapatir, broker min/adimina yuvarlanarak,
+ve kalan min lotun altina duserse hic kapatmaz. 0.01 lotta bolunecek bir sey
+yoktur. Boyut bu kapiyi acar.
+
+**Ikinci iddia olculdu ve yanlis cikti.** R matematigi olcege duyarsiz:
+0.3 lotun ucte biri ile 0.1 lotun ucte biri ayni R'dir. Yani boyut, kademeli
+cikisin *isaretini* degistirmez, sadece uygulanabilirligini. Isaret icin
+maliyetli holdout, ayni barlar ayni cikislar tek degisken basamak
+(`cursor/partial_scan.py`, `charged_holdout`, tum yakalanmis pencereler):
+
+| basamak | toplam net R | fark |
+|---|---|---|
+| kapali | **+133.31** | - |
+| 1.0R | +30.07 | -103.24 |
+| 1.5R | +68.17 | -65.15 |
+| 2.0R | +74.94 | -58.37 |
+| 3.0R | +70.35 | -62.97 |
+
+Her basamak kaybettirdi, en erkeni en cok. Mekanizma sutunlarda gorunuyor ve
+F41'deki harvest ile birebir ayni: US30_M30'da kazanma orani %30.7 -> %33.5
+*yukseliyor*, payoff 2.10 -> 1.82 eziliyor. Daha sik kazanip daha az kazanmak.
+Bu sistemin cikis modeli sert ATR stop + ATR trail; kar dagilimi az sayida uzun
+kazanana yaslanir ve kademeli cikis tam olarak o kuyrugu kirpar.
+
+XAUUSD tek istisna gibi duruyor (+54.62 -> +55.82, 1R'de) ama fark 1.2 R ve
+ayni pencerede payoff 2.95 -> 2.11 duserek geliyor; yon degil gurultu.
+
+### Asil bulgu: alan bir mandaldi, koruma degil
+
+Olcumden daha onemlisi bunu uygularken cikti. `partial_at_r` canlida bes
+sembolde 1.5'ti (SpotBrent, GER40, JPN225, NAS100, US30) ve **kapatilamiyordu**:
+
+- `OPT_FIELDS` icinde degil, `Optimizer.apply()` ona hic dokunmuyor.
+- `EXIT_RISK_FIELDS` icinde degil, `pending_exit_patch` kuyruguna girmiyor.
+- Sembol POST kapisinda hands-off, 400 donuyor.
+- Degeri yazan PATCH rotasi (25.08) o gunden beri kaldirilmis.
+
+Yani alan acilabiliyor, kapatilamiyor. Bu hands-off degil, mandal. Kapali
+olan iki sembol - XAUUSD ve BTCUSD - kitabin para kazanan iki sembolu olmasi
+da F37'de gorulen desenin daha genis veriyle tekrari.
+
+Kapi tek yonlu acildi (`_validate_one_way_overlay`): `partial_at_r` yalnizca
+0 yazilabilir. Kapatmak islem ortasinda monoton guvenli - parca hic tetiklenmez.
+Acmak 25.08 tehlikesinin ta kendisi: basamagi coktan gecmis bir pozisyon deger
+inince aninda ucte birini birakir. O yon kapali kaldi. Kardes overlay'ler
+(`harvest_at_r`, `harvest_step_atr`, `breakeven_at_r`) kapali; acilan sadece
+mandal. Iki kapi da (tekil POST + `symbols-bulk`) ayni kurali cagiriyor.
+
+## F45 - opt hizi: siranin degil, is parcasinin sorunu (olculdu, 31.08)
+
+31.08 US30 aramasi 62 dakika surdu ve hicbir aday kapidan gecmedi. Isci
+kullanimi olculdu: 62 dakikanin son on dakikasinda **14 isciden yalnizca 3'u**
+CPU yakiyordu (20 saniyede 60 cekirdek-saniye, 11 isci tamamen bos). Takilma
+yoktu - kuyruk bosalmisti.
+
+Sebep dagitimda degil, granularitede. Is parcasi bir *sweep* = (sembol, TF,
+aile). Tek sembollu arama 3 TF x 8 aile = 24 parca, 14 cekirdek. Parcalar
+mertebe farkiyla esitsiz: izgaralar 1080 (ichimoku) ile 2.073.600 (dual_t3)
+arasinda, ustune `coverage_budget` buyuk izgaraya daha buyuk butce veriyor.
+
+Gonderim sirasi maliyetle ilgisiz sabit TF x aile sirasiydi, yani uzun bir
+sweep kuyrugun sonuna dusebiliyordu. `longest_first` (LPT) eklendi. Ama
+**tek sembolde hicbir sey kazandirmadi** ve bunu boyle yazmak gerekiyor:
+
+| sembol | sweep | eski | longest_first | hizlanma | doluluk |
+|---|---|---|---|---|---|
+| 1 | 24 | 257.333.760 | 257.333.760 | 1.00x | %70 -> %70 |
+| 2 | 48 | 423.738.720 | 370.285.200 | 1.14x | %85 -> %97.3 |
+| 3 | 72 | 593.192.160 | 556.207.440 | 1.07x | %91.1 -> %97.2 |
+| 9 | 216 | 1.678.433.520 | 1.633.144.320 | 1.03x | %96.6 -> %99.3 |
+
+Tek sembolde makespan **tek bir sweep'in suresine cakili**: en pahali is
+(dual_t3 M5) tek basina tabani belirliyor, hicbir siralama bunu yenemez. LPT
+kitap geneli aramada gercek ama mutevazi bir kazanc (2 sembolde doluluk
+%85 -> %97) ve bedava; o yuzden kaldi. Gozlenen sorunu ise **cozmuyor**.
+
+Tek sembolun tabanini indirmenin iki yolu var ve ikisi de ayri bir karar:
+
+1. **En pahali bes sweep'in besi de M5.** M5 gunde 288 bar yuruyor, M30 48 -
+   6 kat. 62 dakikanin buyuk kismi oraya gitti. Kayitli `timeframes` listesi
+   `['M5','M15','M30']`; `SEARCH_TIMEFRAMES` varsayilani M15/M30. M5'i aramadan
+   cikarmak tabani ~3 kat indirir ama M5'te islem yapilabilirligi arama
+   disina atar - operatorun ayrica ilgilendigi bir eksen, sessizce alinacak
+   bir karar degil.
+2. **Sweep'i bolmek**: kaba tarama dilimlere ayrilip isçilere dagitilabilir.
+   Granulariteyi gercekten duzeltecek olan bu, ama refine turlari kaba
+   sonuca bagli oldugu icin isci protokolu ve sonuc birlestirme degisir.
+
+Simdilik olculen sey kayit altinda; ikisi de yapilmadi.
+
+## F46 - giris kenari kitap genelinde olculemiyor (olculdu, 31.08)
+
+Operator: "sorunumuz TF degil, stratejilerimizdeki hatalar". Olcum bunu
+dogruluyor ama yonunu degistiriyor.
+
+8 aile x 7 sembol, +10 bar ileri getiri t-istatistigi
+(`cursor/reverse_family_edge_matrix.py`):
+
+| sembol | mtf_pull | burst | dual_t3 | t3_flip | stoch_flip | parabolic | ichimoku | channel_break |
+|---|---|---|---|---|---|---|---|---|
+| US30 | -1.52 | -1.55 | -0.39 | -0.03 | **-1.98** | -1.04 | 0.66 | -1.31 |
+| JPN225 | 0.05 | 0.78 | 0.93 | 0.82 | -0.37 | 0.38 | 1.92 | -0.32 |
+| NAS100 | 0.28 | 0.35 | -0.67 | 0.07 | -0.20 | -0.66 | 0.92 | 0.75 |
+| GER40 | **2.74\*** | 0.73 | -0.03 | 0.39 | 1.87 | 1.67 | -0.34 | 0.02 |
+| XAUUSD | **2.33\*** | 0.96 | 0.47 | -0.93 | **2.97\*** | 0.92 | **2.39\*** | 0.46 |
+| SpotBrent | 0.77 | 0.22 | -0.28 | 1.02 | 0.29 | 0.15 | -0.01 | **-2.98\*** |
+| BTCUSD | -0.30 | **2.10\*** | -0.00 | -0.66 | 1.43 | 1.35 | 0.91 | 0.62 |
+
+**56 hucre, 6 anlamli.** 56 testte |t|>=2 esiginden sans eseri ~2.8 hucre
+gecer. Yani bulunan sey gurultu tabanindan zar zor ayirt edilebiliyor. Dogru
+okuma "yanlis aileyi sectik" degil, **kitap genelinde olculebilir bir giris
+kenari yok**.
+
+Uc sonuc:
+
+1. **US30'da tum aileler negatif**, `stoch_flip` -1.98. 31.08 aramasi 62 dakika
+   ve 513.504 kombinasyon sonunda "hicbir aday kapidan gecmedi" dedi - kapilar
+   bozuk degil, orada bulunacak sey yoktu.
+2. **`channel_break` bu metrikte en kotu aile** (ort -0.40, sonuncu) ve
+   SpotBrent'te -2.98 ile anlamli *negatif*. F40 MFE/MAE asimetrisini olcup
+   olumlu bulmustu; ileri getiri tersini soyluyor. Iki metrik celisiyor, yani
+   F40'in iddiasi zayifliyor - savunulacak degil, duzeltilecek bir sey. Aile
+   `stoch_flip` yerine gecmeye aday olarak konmustu; bu tabloda o iddianin
+   dayanagi yok.
+3. **Anlamli hucreler ailede degil enstrumanda kumeleniyor**: XAUUSD'de uc ayri
+   aile, GER40'ta mtf_pullback, BTCUSD'de burst. Endeks CFD'lerinde
+   (US30/NAS100/JPN225) hicbiri. F39'un sonucu yeni aile dahil edildiginde de
+   ayakta.
+
+### Nereye bakmali
+
+Girisler her yerde yaziya-tura yakinsa sistemin parasi giristen gelmiyor
+demektir. Ayni gunun iki olcumu bunu destekliyor: cikis tarafindaki
+mudahaleler devasa (F41 harvest -129 ila -498 R, F44 kademeli kar -103 R),
+giris tarafindaki farklar ise gurultu seviyesinde. Kaldirac cikis modeli ve
+pozisyon boyutlandirmasinda; "daha iyi aile ara" hatti bu tabloya gore dusuk
+beklentili.
+
+## F47 - scalping yanlis yon: bilgi yavas tarafta (olculdu, 31.08)
+
+Operator: "8 ailenin verimini tart, verimsizse kendimiz yazalim; scalping icin
+hangi gosterge daha iyiyse ona gecelim."
+
+Birim olarak R veya ATR degil **spread** kullanildi: "ortalama sinyal kac
+spread kazandiriyor". Girise 1 spread odendigi icin 1.0 basabas demektir.
+Ufuk suepuru, 8 aile x 10 pencere (`cursor/scalp_floor.py`):
+
+| aile | h=1 | h=3 | h=5 | h=10 | h=20 |
+|---|---|---|---|---|---|
+| mtf_pullback | +0.06 | +0.10 | +0.18 | +0.56 | **+1.06** |
+| burst | +0.40 | +0.57 | +0.63 | +0.78 | **+1.32** |
+| dual_t3 | +0.10 | +0.28 | +0.24 | -0.26 | +0.03 |
+| t3_flip | +0.13 | +0.34 | +0.26 | +0.20 | +0.60 |
+| stoch_flip | +0.01 | +0.14 | +0.18 | +0.46 | +0.81 |
+| parabolic_flip | +0.22 | +0.25 | +0.35 | +0.45 | +0.93 |
+| ichimoku | +0.01 | +0.34 | +0.89 | +0.77 | **+1.22** |
+| channel_break | +0.15 | +0.09 | +0.06 | +0.14 | **+1.24** |
+
+**Scalping ufkunda (h=1..5) sekiz ailenin sekizi de maliyetin altinda.** En
+iyisi burst, h=1'de 0.40: 1 spread odeyip 0.40 spread kazaniyorsun. Kendi
+gostergemizi yazmak bu tabloyu yon olarak degistirmez, cunku sorun secilen
+gosterge degil - sinyalin sordugu ufuk.
+
+### Hareket yok degil, YON yok
+
+Ayni pencerelerde medyan mutlak hareket / spread (yonden bagimsiz):
+
+| pencere | h=1 | h=5 | h=20 |
+|---|---|---|---|
+| SpotBrent_M5 | 2.00 | 5.00 | 11.00 |
+| JPN225_M15 | 2.68 | 6.46 | 14.58 |
+| BTCUSD_M30 | 2.93 | 6.38 | 13.86 |
+| US30_M30 | 6.34 | 15.31 | 36.67 |
+| GER40_M30 | 7.30 | 17.59 | 40.00 |
+| XAUUSD_M15 | 10.84 | 24.89 | 54.13 |
+
+Tek barda bile piyasa spread'in 2 ila 11 kati hareket ediyor. Yani "enstruman
+scalping icin fazla dar" **yanlis**; yer var. Eksik olan yonu bilebilmek.
+Maliyet tabani baglayici degil, tahmin gucu baglayici.
+
+### Asil bulgu: egri monoton yukseliyor
+
+Neredeyse her ailede kenar ufukla birlikte buyuyor ve **1.0'i ilk kez h=20'de
+geciyor** (burst 1.32, channel_break 1.24, ichimoku 1.22, mtf_pullback 1.06).
+Bu ailelerin tasidigi bilgi yavas. Scalping tam olarak ters yon: kisaldikca
+sinyal maliyetin daha da altina duesuyor.
+
+Sonuc: "scalping icin daha iyi gosterge" hatti olculu bir kayip bahsi. Kendi
+gostergemizi yazacaksak hedef ufuk 20+ bar olmali, 1-5 degil. h=20'deki
+paylarin 1.0'in hemen ustunde oldugunu da not etmek gerekir - genis bir marj
+degil, ve bu rakamlar stop/trail'siz ham sinyal ortalamalaridir.
+
+## F48 - olcum aparati bozuk: train/test rejim asimetrisi (olculdu, 31.08)
+
+F47'nin isaret ettigi yavas ufuk arastirildi (`cursor/slow_discover.py`):
+12 aday ilkel (zaman serisi momentumu, fiyat-ortalama mesafesi, ortalama
+egimi, Kaufman verimliligi) x 4 geriye bakis x 3 ufuk, 10 pencere, %60/40
+train/test, birim spread. Kitapta duz momentum yoktu; literaturdeki en
+dayanikli bulgu olmasina ragmen 8 ailenin hepsi gosterge turevliydi.
+
+### Birinci tur: kontrol grubu adaylari sildi
+
+Kontrolsuz olcumde **`KONTROL_hep_al` her ufukta her adayi yendi**: h=60'ta
++8.39 spread, 10/10 pencere pozitif; en iyi aday +4.95. Yani pencerelerin test
+yarisi yukselen bir rejim ve net uzun kalan her kural surukleme topluyor.
+
+Bu tek basina F47'yi de vuruyor: h=20'de "hep al" +2.74 iken maliyeti gectigi
+soylenen dort ailenin en iyisi (burst) 1.32'ydi - hepsi taban cizgisinin
+**altinda**. "Yavas ufukta bilgi var" sonucu, surukleme kontrol edilmeden
+kurulmustu.
+
+### Ikinci tur: surukleme arindirildi, asil sorun ortaya cikti
+
+Her dilimin kendi ortalama ileri hareketi cikarilarak tekrarlandi (`demean`).
+Kontroller beklendigi gibi 0.00'a oturdu, yani arindirma calisiyor. Adaylardan
+bazilari rastgeleyi (+0.66) ve 1.0 esigini gecti: h=60'ta `mom20` +2.38 (8/10),
+`ma_dist20` +1.89 (8/10), `mom200` +2.00 (7/10).
+
+Ama **18 adayin 15'inde train negatif, test pozitif**:
+
+| aday (h=60) | train | test |
+|---|---|---|
+| ma_dist50 | -0.82 | +2.91 |
+| mom20 | -0.51 | +2.38 |
+| mom50 | -1.01 | +2.40 |
+| ma_dist200 | -1.24 | +2.29 |
+| mom200 | -1.49 | +2.00 |
+
+Gercek bir kenar iki yarida da pozitif olurdu. Isaretin yarilar arasinda
+sistematik olarak donmesi adaya ozgu degil - **bolunmenin kendisine ait**. Test
+yarisi train yarisindan daha egilimli, o yuzden butun trend takipcisi kurallar
+orada iyi gorunuyor. Secim skille degil, rejim farkiyla yapiliyor.
+
+### Sonuc: once aparati duzelt
+
+Bu 10 pencere ustunde tek bir %60/40 bolunmesi, kenar ile rejimi ayirt
+edemiyor. Bu kanit uzerine yeni bir aile kurmak, olctugu seyi bilmeyen bir
+olcume yaslanmak olur.
+
+**F40 ayni yontemi kullaniyordu.** `channel_break`, "on captured window'un
+out-of-sample yarisinda asimetri yukseliyor" gerekcesiyle eklenmisti - ayni
+bolunme, ayni "test yarisi iyi gorunuyor" mantigi. F46 zaten ileri getiri
+t-istatistiginde onu kitabin en kotu ailesi olarak olcmustu; F48 gerekcenin
+neden bu kadar kolay boyle bir sey uretebildigini acikliyor.
+
+Yapilmadi ve yapilmamali: bu bulgular uzerine yeni aile yazmak. Yapilmasi
+gereken, sinyal arastirmasindan once olcum aparatini duzeltmek - tek bolunme
+yerine coklu kat (walk-forward fold), rejim dengesi kontrol edilmis pencereler,
+ve her taramada surukleme kontrolu zorunlu.
+
+## F49 - kayiplarin tersine muhendisligi: maliyet kapisi izgaraya sigmiyor (olculdu, 31.08)
+
+298 canli kapanis, net **-41.4 R**. Kazanma %33.9, payoff 1.47. Bu kazanma
+oraninda basabas icin payoff 1.95 gerekir; acik payoff tarafinda, F37 ile ayni
+teshis.
+
+| kirilim | n | net R |
+|---|---|---|
+| stop (`sl`) | 159 | **-149.0** |
+| trail | 90 | +77.6 |
+| flatten | 44 | +27.7 |
+| manuel | 5 | +2.3 |
+
+### Baskin ve eyleme donuk bulgu: giristeki spread/ATR
+
+Kitap genelinde monoton:
+
+| spread/ATR | n | net R | ort |
+|---|---|---|---|
+| 0.00-0.02 | 110 | **+20.1** | +0.18 |
+| 0.02-0.05 | 66 | -15.2 | -0.23 |
+| 0.05-0.10 | 93 | -34.4 | -0.37 |
+| 0.10-0.20 | 29 | -11.9 | -0.41 |
+
+Sembol etkisinin golgesi olabilirdi (JPN225/NAS100 hem pahali hem zararli), o
+yuzden **her sembol kendi medyanindan** bolundu (`cursor/cost_confound.py`):
+
+| sembol | n | medyan | ucuz yari | pahali yari | fark |
+|---|---|---|---|---|---|
+| XAUUSD | 21 | 0.013 | +8.3 R (+0.83) | -5.2 R (-0.47) | +1.30 |
+| JPN225 | 59 | 0.069 | -0.3 R (-0.01) | -17.4 R (-0.58) | +0.57 |
+| NAS100 | 42 | 0.017 | -4.4 R (-0.21) | -13.2 R (-0.63) | +0.42 |
+| US30 | 73 | 0.072 | -5.0 R (-0.14) | -19.9 R (-0.54) | +0.40 |
+| GER40 | 29 | 0.031 | -5.6 R (-0.40) | -0.4 R (-0.03) | -0.38 |
+| **toplam** | 224 | | **-7.0 R (-0.06)** | **-56.1 R (-0.49)** | +0.43 |
+
+5 sembolun 4'unde ucuz yari kazaniyor, fark +0.43 R/islem. Sayim tek basina
+formal anlamlilik vermez (4/5 sansla %19), ama spread bir **maliyettir**:
+etkisi mekanik olarak ters yonludur, egri uydurmasi degil. Ucuz yari zaten
+basabasa yakin (-7.0 R), pahali yari kitabin kaybinin tamamindan fazlasi.
+
+**Bu kar ettirmez, kanamayi durdurur.** Ucuz yariya inmek islem sayisini
+yariya bolerken -56 R'yi siler ve geriye ~-7 R birakir.
+
+### Neden duzelmemis: izgaranin tabani yanlis yerde
+
+`max_spread_atr` bir `OPT_FIELDS` ekseni ve izgarasi
+`[0.05, 0.08, 0.12, 0.18, 0.25, 0.4]` - **en dar secenek 0.05**. Sembollerin
+kendi medyanlari 0.013-0.072. Yani XAUUSD (0.013), NAS100 (0.017) ve GER40
+(0.031) icin izgaranin en siki degeri bile medyanlarinin ustunde; arama
+maliyet kapisini paranin oldugu yere kadar **kisamiyor, oraya erisemiyor**.
+
+Canli degerler zaten 0.08-0.25 ve pratikte hic baglamiyor. F40'takiyle ayni
+sekil: etki, izgaranin uzanamadigi yerde yasiyor. Fark su ki bu sefer eksen
+zaten var, sadece tabani yanlis.
+
+Yapilmadi: izgara `POST /api/opt/params` uzerinden hands-off (400), yani
+`0.01/0.02/0.03` basamaklarini eklemek ayri bir karar ve kapi acmayi gerektirir.
+
+### Ana hikaye olmayanlar (kovalanmamali)
+
+* **Geri verme degil.** 1R+ gorup zararla kapanan 34 islem, toplam -22.2 R -
+  kaybedenlerin %17'si. F41 zaten hasat etmenin daha pahali oldugunu olctu.
+* **Dolum kalitesi degil.** Sinyal kapanisina gore ortalama **+0.037 R**;
+  %6'si -0.1R'den kotu. Burada kovalanacak bir sey yok.
+* **Kaybedenler hizli oluyor**: medyan 38 dk / 6 bar, kazananlar 144 dk /
+  13.4 bar. Stop, giristeki gurultuye gore yakin duruyor olabilir - ama bu
+  ayri bir olcum, burada iddia edilmiyor.
+* Saat 16:00 en kotu dilim (-14.0 R, n=25). Sembol/rejim karisimi kontrol
+  edilmeden eyleme donusturulmemeli (F48).

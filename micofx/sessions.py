@@ -14,6 +14,36 @@ _DAY = 24 * 60
 # see ``weekend_closed``.
 WEEKEND_OPEN_GROUPS = {"crypto"}
 
+# A closed bar is only an entry candidate while we are still inside the bar
+# that follows it, plus one extra bar of poll slack. After a restart the last
+# closed stamp can be Friday's: SymbolState is empty, so _refresh_signals
+# treats that stamp as a new bar, and the session-close chain-clear never ran
+# in this process (there was nothing in memory to clear). Measured 24.08:
+# GER40 BUY 363660277, Friday 22:30 UTC bar, Monday 03:15 UTC fill, -1R in
+# 12 minutes. The process that stays up across the weekend is already
+# protected - this only covers the restart-into-a-gap case.
+#
+# Lives here rather than in ``engine`` because the walk-forward has to refuse
+# the same fills: bar arrays from MT5 are dense, so the bar after Friday's
+# close *is* Monday's open and ``simulate`` filled straight across it.
+MAX_SIGNAL_BAR_AGE_BARS = 2
+
+
+def signal_bar_expired(last_bar: float, server_now: float, tf_sec: float) -> bool:
+    """True when the closed bar at ``last_bar`` is too old to still act on.
+
+    ``last_bar`` is ``bars.last_closed_time`` - the bar's **open** stamp. The
+    budget above is written in bars *after that bar closes*, so the close is
+    what the age is measured from. Comparing against the open stamp instead
+    spent one of the two bars on the signal bar's own duration before the poll
+    loop got a single look at it, which made the real window one bar wide.
+    Measured live 31.08 01:15 under the old arithmetic: seven of nine symbols
+    were sitting on ``bar_bosluk`` simultaneously.
+    """
+    if last_bar <= 0 or tf_sec <= 0:
+        return False
+    return (server_now - (last_bar + tf_sec)) > MAX_SIGNAL_BAR_AGE_BARS * tf_sec
+
 
 @dataclass
 class SessionState:

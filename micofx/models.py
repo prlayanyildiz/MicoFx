@@ -113,6 +113,12 @@ class SymbolConfig:
     brst_range_z: float = 1.5        # bar range must exceed mean + z * sd of that window
     brst_close_pct: float = 0.7      # close must sit this far into its own bar's extreme
 
+    # ---- N-bar channel break (channel_break) ----
+    # The axis that carries the effect: measured asymmetry rises smoothly with
+    # this window (F40), so the grid reaches well past burst's 40.
+    chan_lookback: int = 50          # channel is the N bars BEFORE the signal bar
+    chan_buffer_atr: float = 0.0     # 0 = off; break must clear the level by this much ATR
+
     # ---- fast/slow T3 pair (dual_t3) ----
     # Named for t3_ribbon, the family these were added for; that family was
     # removed on 12.08 and dual_t3 still reads all three. T3 is a low-lag
@@ -526,6 +532,7 @@ OPT_FIELDS = [
     "min_body_ratio", "atr_pct_min",
     "pull_fast", "pull_depth_atr", "pull_max_bars",
     "brst_lookback", "brst_range_z", "brst_close_pct",
+    "chan_lookback", "chan_buffer_atr",
     "t3_fast", "t3_slow_mult", "t3_fast_vf", "t3_accel_min",
     "st_period", "st_mult",
     "cost_rank_max",
@@ -561,7 +568,8 @@ PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
 STRATEGIES = ["mtf_pullback", "burst", "dual_t3",
               "t3_flip", "stoch_flip",
               "parabolic_flip",
-              "ichimoku"]
+              "ichimoku",
+              "channel_break"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
 # Longer TFs turn them into slow mean-reversion with the wrong cost geometry.
