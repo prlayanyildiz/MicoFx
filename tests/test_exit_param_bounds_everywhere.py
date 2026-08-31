@@ -97,7 +97,10 @@ def test_opt_params_refuses_a_poisoned_shared_grid_axis():
     tc, store = _params_client()
     res = tc.post("/api/opt/params", json={"grid": {"trail_start_atr": [0.0, 0.5]}})
     assert res.status_code == 400
-    assert "grid" in res.json()["detail"]
+    # Narrowed 01.09: the refusal now names the axis, because the cost axes of
+    # this same grid became writable (F49) and the message has to say which
+    # half of the door was shut.
+    assert "trail_start_atr" in res.json()["detail"]
     assert store.saved is None
 
 

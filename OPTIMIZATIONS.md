@@ -5784,3 +5784,55 @@ Yapilmadi: izgara `POST /api/opt/params` uzerinden hands-off (400), yani
   ayri bir olcum, burada iddia edilmiyor.
 * Saat 16:00 en kotu dilim (-14.0 R, n=25). Sembol/rejim karisimi kontrol
   edilmeden eyleme donusturulmemeli (F48).
+
+## F50 - maliyet kapisi tek yone mandalliydi (olculdu + kapi acildi, 01.09)
+
+F49 canli zararin giris `spread/ATR` tarafinda toplandigini olcmustu (ucuz
+yari -7.0 R, pahali yari -56.1 R, 5 sembolun 4'unde ayni yon). Spread bir
+*maliyet* oldugu icin bu yon mekanik, uydurulmus bir oruntu degil.
+
+Duzeltmenin neden yapilamadigi, duzeltmenin kendisinden daha onemli cikti.
+`max_spread_atr` uzerinde **iki ayri mandal** vardi ve ikisi de ayni yone,
+gevsemeye bakiyordu:
+
+1. **Izgara tabani.** Eksenin canli degerleri `[0.05 … 0.4]`, sembol
+   medyanlari ise 0.013-0.072. XAUUSD (0.013), NAS100 (0.017) ve GER40
+   (0.031) icin aramanin secebilecegi **en dar** deger bile medyanin
+   ustundeydi - yani arama kapiyi hic daraltamiyordu, sadece ne kadar
+   gevsetecegini seciyordu. `config/defaults.json`'u duzeltmek de yetmiyor:
+   `Store.opt_params` eksen basina `{**shipped, **stored}` birlestiriyor,
+   saklanan kopya kazaniyor, bir kez kaydedilmis eksen degerlerini sonsuza
+   kadar tutuyor.
+2. **Kalibrasyon.** `spread_calibration.cap_from_bands` tasarim geregi tek
+   yonlu: "yalnizca genisletmek icin guvenilen bir okuma canli kapiyi
+   daraltmasin". Nitelik kazanan bir bant mevcut cap'in altinda kalirsa
+   `daraltilmadi` deyip geri donuyor.
+
+Ikisi birlikte bir cirit: kapi zamanla yalnizca gevseyebiliyordu, F49'un
+zarari olctugu yone dogru. Bu `partial_at_r` ile ayni sekil - inis rampasi
+olmayan bir bilis rampasi.
+
+**Yapilan.** `POST /api/opt/params` yalnizca *maliyet* eksenlerine
+(`max_spread_atr`, `cost_rank_max`) acildi; izgaranin geri kalani ve
+`strategy_grids` kapali kaldi. Iki incelik teste baglandi:
+
+* Yazma **birlestiriyor**. `Store.save_opt_params` butun degeri atiyor
+  (`base[key] = value`), yani tek eksenlik bir gonderim tum paylasilan
+  izgarayi silip diger uc ekseni sessizce yok ederdi.
+* Deger dogrulamasi burada yapiliyor. Bu eksenler giris kapisi oldugu icin
+  `invalid_exit_param` onlari hic gormuyor; negatif ya da sonsuz bir tavan
+  dogrudan sweep'e girerdi.
+
+Canli eksen `[0.01, 0.02, 0.03, 0.05, 0.08, 0.15]` yapildi - **ayni deger
+sayisi**, yani izgara maliyeti degismedi, ama artik para bolgesine uzaniyor.
+Gonderilen varsayilan da 4 degerle `[0.01, 0.02, 0.05, 0.10]` oldu.
+
+**Acik kalan.** Kalibrasyon mandali (2) hala yerinde. Onu cevirmek, "kapi bu
+sembolde yanlis olan sey degil" gerekcesini bozar; F49 tam tersini olcuyor
+ama bunu tek basina yeterli saymiyorum - kalibrasyonun daraltma yonu ayri ve
+kendi olcumuyle acilmali. Simdilik arama daraltabiliyor, kalibrasyon
+gevsetebiliyor; en azindan iki yon de temsil ediliyor.
+
+**Not.** Bu bir kazanc iddiasi degil, bir *erisim* duzeltmesi. Aramanin daha
+dar bir tavani secip secmeyecegini bir sonraki kosu soyleyecek; F49'un ic
+orneklem olcumu secilmesi gerektigini soyluyor, kanit bu kadar.

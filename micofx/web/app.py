@@ -457,7 +457,17 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
 })
 _OPERATOR_OPT_FIELDS = frozenset({
     "lookback_days", "refine_rounds", "max_combos", "timeframes",
+    # Cost axes only - see _validate_cost_axis_grid. The rest of the grid,
+    # and all of strategy_grids, stay hands-off.
+    "grid",
 })
+# The search cannot fix what its own grid cannot reach. F49 measured the live
+# loss concentrating in entry spread/ATR (cheap half -7.0 R, expensive half
+# -56.1 R, 4 of 5 symbols agreeing) while ``max_spread_atr``'s shipped floor
+# was 0.05 and the per-symbol medians were 0.013-0.072. Editing defaults.json
+# does not reach a live book either: Store.opt_params merges {**shipped,
+# **stored} per axis, so a stored axis keeps its values forever.
+_OPERATOR_GRID_AXES = frozenset({"max_spread_atr", "cost_rank_max"})
 _OPERATOR_AI_FIELDS = frozenset({"enabled"})
 
 
@@ -567,6 +577,45 @@ def _reject_hands_off_fields(patch: dict[str, Any], allowed: frozenset[str]) -> 
     found = sorted(k for k in patch if k not in allowed)
     if found:
         raise HTTPException(400, f"{', '.join(found)} panelden yazilamaz")
+
+
+def _cost_axis_grid(body: dict[str, Any], current: dict[str, Any]) -> None:
+    """Let the operator retune cost axes, and nothing else, in the shared grid.
+
+    Refuses the whole body if any other axis is present, so one bad key cannot
+    smuggle a good half through.
+
+    The merge is the part that matters. ``Store.save_opt_params`` assigns whole
+    values (``base[key] = value``), so a one-axis post would replace the entire
+    shared grid and silently delete every other axis with it - the search would
+    then run on a grid nobody chose. Fold the submission onto the stored grid
+    here, where the stored copy is still readable.
+    """
+    grid = body.get("grid")
+    if grid is None:
+        return
+    if not isinstance(grid, dict):
+        raise HTTPException(400, "grid gecersiz - eksen->degerler bekleniyor")
+    bad = sorted(k for k in grid if k not in _OPERATOR_GRID_AXES)
+    if bad:
+        raise HTTPException(
+            400, f"{', '.join(bad)} izgara ekseni panelden yazilamaz - "
+                 f"yalnizca {', '.join(sorted(_OPERATOR_GRID_AXES))}")
+    # These axes sit outside invalid_exit_param (they are entry-cost gates, not
+    # exit params), so nothing downstream would catch a poisoned value: the
+    # optimizer would take a negative or NaN ceiling straight into a sweep.
+    for axis, values in grid.items():
+        if not isinstance(values, list) or not values:
+            raise HTTPException(400, f"{axis} bos olamaz - deger listesi bekleniyor")
+        for raw in values:
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise HTTPException(400, f"{axis} sayisal olmali")
+            if not math.isfinite(float(raw)) or float(raw) < 0:
+                raise HTTPException(
+                    400, f"{axis} degerleri sonlu ve negatif olmamali ({raw})")
+
+    stored = current.get("grid")
+    body["grid"] = {**stored, **grid} if isinstance(stored, dict) else dict(grid)
 
 
 def _validate_one_way_overlay(patch: dict[str, Any]) -> None:
@@ -1812,9 +1861,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/opt/params")
     def set_opt_params(body: dict[str, Any]) -> dict[str, Any]:
-        # Panel only offers lookback / refine / max_combos / timeframes. Grid,
-        # min_trades and the rest stay in the saved blob; apply() still reads them.
+        # Panel only offers lookback / refine / max_combos / timeframes, plus
+        # the cost axes of the shared grid (F49). min_trades and the rest stay
+        # in the saved blob; apply() still reads them.
         _reject_hands_off_fields(body, _OPERATOR_OPT_FIELDS)
+        _cost_axis_grid(body, store.opt_params())
         if "timeframes" in body:
             raw = body["timeframes"]
             if not isinstance(raw, list) or not raw:

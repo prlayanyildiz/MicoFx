@@ -43,7 +43,13 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   `partial_at_r`, `harvest_at_r` and `harvest_step_atr` are
   deliberately **not** in that set.
 - Watch mode never opens. Wrong `broker_symbol` → unavailable, no fuzzy
-  fallback.
+ fallback.
+- `spread_calibration.cap_from_bands` is **one-way: it widens, never
+ narrows** — a qualifying band below the live cap returns `daraltilmadi`.
+ With the old 0.05 grid floor that made the cost gate a ratchet toward
+ loose, which is where F49 measured the loss. The grid side is fixed
+ (F50); this side is still one-way on purpose. Do not flip it without
+ its own measurement.
 - Session / day-end / daily-loss flatten are settled (owner 09.08).
 - `trail_start_atr <= trail_step_atr` is legal; do not ban it.
 - Do not holdout-capture with positions open. `POST /api/holdout/capture`
@@ -100,7 +106,10 @@ Fail-first: write the test, watch it fail, then implement.
 - All MT5 through `MT5Client` + `RLock`. Web handlers never import
   `MetaTrader5`.
 - New search axis: add to `OPT_FIELDS` **and** pay the grid cost, or
-  `Store.opt_params()` drops it.
+ `Store.opt_params()` drops it. Editing a shipped grid axis in
+ `config/defaults.json` does **not** reach a live book: the merge is
+ `{**shipped, **stored}` per axis, so a stored axis keeps its values.
+ Only a brand-new axis back-fills.
 - **Yellow** (ask): supervisor. **Red** (explicit):
   leverage, account lock, daily brake, live flatten-all.
 - HTTP writes match the panel. Symbol POST: sessions +
@@ -108,8 +117,11 @@ Fail-first: write the test, watch it fail, then implement.
   `partial_at_r` (0 only, F44).
  System POST: `max_margin_usage_pct`
   / `mt5_terminal_path` / `autostart_mt5`.
-  Opt POST: `lookback_days` /
-  `refine_rounds` / `max_combos` / `timeframes`. Family / TF / exits / magic / grid /
+ Opt POST: `lookback_days` /
+ `refine_rounds` / `max_combos` / `timeframes`, plus the shared grid's
+ **cost axes only** (`max_spread_atr`, `cost_rank_max`, F50 — the write
+ merges onto the stored grid; a whole-value assign would delete the other
+ axes). Family / TF / exits / magic / rest-of-grid /
   lot_mode /
   daily_loss_* / size_by_edge / max_concurrent_risk_pct /
   `max_total_positions` / `risk_percent` / system `max_lot` /

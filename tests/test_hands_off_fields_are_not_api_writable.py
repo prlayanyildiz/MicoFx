@@ -272,10 +272,16 @@ def test_harvest_overlay_is_not_writable():
 
 
 def test_opt_grid_is_not_writable():
+    """Narrowed 01.09: cost axes are writable (F49), every other axis is not.
+
+    See tests/test_the_cost_axis_can_reach_its_own_floor.py for why the door
+    opened at all - the search could not tighten a gate its own grid floor had
+    put out of reach.
+    """
     tc, store, _ = _client()
     res = tc.post("/api/opt/params", json={"grid": {"sl_atr_mult": [1.0, 2.0]}})
     assert res.status_code == 400
-    assert "grid" in res.json()["detail"]
+    assert "sl_atr_mult" in res.json()["detail"]
     assert store.saved_opt is None
 
 
