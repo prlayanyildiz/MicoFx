@@ -4676,3 +4676,119 @@ Charged cost is now exactly linear across scale 1/2/3 (0.0015 / 0.0030 /
 0.0045), which is the property under test.
 
 Applied, not notes. This section is the closed ledger.
+
+---
+
+## 31.08 10:52 — why the book gives profit back, and where opt wall-clock goes
+
+Operator asked why the system loses, why it hands profit back, a hard stress
+pass, and continuous watching. Measured against 289 closed autopsies and the
+live config, live PID still on pre-31.08 code (5 tickets, restart 409).
+
+### It is a payoff problem, not a hit-rate problem
+
+289 trades: hit rate **34%**, average win **+1.26 R**, average loss
+**−0.85 R**, reward/risk **1.48**. Break-even at that hit rate needs **1.98**.
+The 0.50 shortfall is −0.141 R per trade, **−40.73 R** in total.
+
+### The give-back sits in one setting
+
+Peak retention on `exit_reason = trail`, against each symbol's trail arm point
+(`trail_start_atr / sl_atr_mult`, i.e. the trail's arm expressed in R):
+
+| symbol | family | trail arms (R) | mean MFE → kept | net R |
+|---|---|---|---|---|
+| JPN225 | stoch_flip | 0.50 | 1.79 → **19%** | −18.59 |
+| NAS100 | stoch_flip | 0.50 | 1.99 → **19%** | −16.98 |
+| US30 | stoch_flip | 1.40 | 3.10 → 44% | −2.08 |
+| XAUUSD | burst | 2.00 | 3.85 → **72%** | +5.52 |
+
+JPN225 + NAS100 are **−35.57 R, 87% of the book's entire loss**, and they are
+the only two symbols with a 0.50 arm. NAS100's average winner (+0.73 R) is
+*smaller* than its average loser (−0.86 R). The comparison is clean because
+US30 is the same family with the same `trail_step` (1.6) and 86 trades - the
+largest sample in the book - differing only in the arm point. An early trail
+on a mean-reverting index does not protect profit, it converts a runner into
+a scratch. `models.py:230` already noted the 0.5/1.6 pair giving back 0.10 R
+on a replay; this is the same finding at 51 live trades.
+
+### Breakeven cannot fire on the trades that need it
+
+Live `breakeven_at_r` is 1.5 on six of nine symbols. The MFE distribution of
+the **189 losing** trades: median 0.31 R, p75 0.75 R, **p90 1.10 R**. The
+threshold sits above the 90th percentile of what a losing trade ever reaches,
+so it is structurally unable to arm on one. Only 9 of 289 trades (6.70 R) were
+ever within its reach.
+
+**This is not an argument for lowering it.** BE at 0.5 is already on the
+ledger as costing GER40 −32 R (BE-2). The evidence points at
+`trail_start_atr`, not at BE. Recorded here so the next reader does not
+re-derive "BE is doing nothing" and reach for the wrong lever.
+
+Two honesty caveats: `mfe_r` is an intrabar peak while overlays evaluate on
+closed bars, so every "would have been saved" figure is an upper bound; and
+`left_on_table_r` (110 R) includes losers and is not cash sitting in the till.
+
+### Hard stress pass — clean
+
+* **Per-file isolation:** all **312** test files each in their own process,
+  **0 failures**, 649 s. No state leaks between files, and no test that only
+  passes because an earlier file ran.
+* **Adversarial input:** 48 new tests over the paths 31.08 touched - nan/inf/
+  negative/1e12 stop distances and balances, corrupt account snapshots, a
+  supervisor hook that raises, a broker clock running backwards. Nothing
+  throws; a lot is always either 0 with a reason or finite inside
+  `[volume_min, volume_max]`; the 1R cap holds across the whole edge range.
+  `tests/test_the_sizing_chain_survives_hostile_input.py`.
+* **Suite:** 2713 passed, 1 xfailed, ruff clean.
+* `pytest-randomly` is **not installed** and nothing was added to the live
+  trading venv to shuffle test order. Per-file isolation covers the same
+  defect class.
+
+### Opt wall-clock: the budget arithmetic, not the code
+
+A two-symbol manual run reported `combo_total = 979,200`. That number is
+exactly reproducible from `sweep_budget = max_combos × (1 + refine_rounds)`:
+
+| item | arithmetic | share |
+|---|---|---|
+| `stoch_flip` | 2 symbols × 3 TF × (28,800 × 4) = 691,200 | **70.6%** |
+| the other six families | 2 × 3 × 6 × (2,000 × 4) = 288,000 | 29.4% |
+
+Three multipliers, all configuration:
+
+1. `strategy_max_combos.stoch_flip = 28800` is the *exact* product of that
+   family's grid (`5×4×2` entry × `5×6×6` exit × `4` spread), so the global
+   2000 cap does no sampling there at all - the grid is exhaustive.
+2. `refine_rounds = 3` multiplies everything by four. Refine rounds are not
+   cheap extra passes; each gets its own full budget.
+3. A POST that leaves `strategies` / `timeframes` empty inherits the saved
+   seven families × three timeframes.
+
+The third is the only waste, and it is operator habit rather than a setting:
+this run wanted one family at one timeframe per symbol. Scoped
+(`strategies: ["stoch_flip"]`, each symbol at its own TF) the same trail
+question costs `2 × 115,200 = 230,400` - **23.5% of what was spent, 4.2x
+faster, same grid, same answer**.
+
+**Deliberately not changed:** `refine_rounds` and the `stoch_flip` cap.
+Cutting either buys wall-clock by lowering search quality, which is the wrong
+trade on a book running −0.141 R per trade; and `stoch_flip` is the family on
+four of nine live symbols including both big losers, so it is the one that
+most deserves an exhaustive grid.
+
+The parallel machinery itself is already right and is not the wall: 12 cores,
+10 worker processes (one core left for the live poll loop, one for the OS),
+bars shared as mmap-able `.npy` per `(symbol, TF)` rather than pickled per
+family, BLAS threads pinned. A profile of the inner `simulate` loop is the
+only remaining place a *free* win could live; it is deferred until the search
+finishes rather than run against ten busy cores.
+
+### Watching
+
+`cursor/watch_flat.py` (gitignored, read-only, 60 s) latches four alarms:
+`FLAT` (the restart window), `GERI` (open book has handed back >= 40% of its
+own peak), `STOPSUZ`, `RISK` (day halted / MT5 down / cycle error). It caught
+the give-back twice on 31.08 - 09:17 at −45% and 10:19 at −50% off a +46.54
+peak - which is the event that had been passing silently: the panel shows the
+current number, never that a peak existed.
