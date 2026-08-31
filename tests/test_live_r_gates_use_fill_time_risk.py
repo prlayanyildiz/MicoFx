@@ -125,7 +125,6 @@ def _resume_engine():
     eng._sec_tickets = set()
     eng._orphan_tickets = set()
     eng._scale_out_done = set()
-    eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     eng.states = {}

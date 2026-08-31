@@ -66,6 +66,22 @@ _COOLDOWN_BARS_SWING = 1
 _MAX_SIGNAL_BAR_AGE_BARS = 2
 
 
+def signal_bar_expired(last_bar: float, server_now: float, tf_sec: float) -> bool:
+    """True when the closed bar at ``last_bar`` is too old to still act on.
+
+    ``last_bar`` is ``bars.last_closed_time`` - the bar's **open** stamp. The
+    budget above is written in bars *after that bar closes*, so the close is
+    what the age is measured from. Comparing against the open stamp instead
+    spent one of the two bars on the signal bar's own duration before the poll
+    loop got a single look at it, which made the real window one bar wide.
+    Measured live 31.08 01:15 under the old arithmetic: seven of nine symbols
+    were sitting on ``bar_bosluk`` simultaneously.
+    """
+    if last_bar <= 0 or tf_sec <= 0:
+        return False
+    return (server_now - (last_bar + tf_sec)) > _MAX_SIGNAL_BAR_AGE_BARS * tf_sec
+
+
 def _round_or_none(value: float | None, digits: int) -> float | None:
     """round() that carries a "not measured" through instead of raising."""
     return None if value is None else round(value, digits)
@@ -356,6 +372,10 @@ class Engine:
         self.client = client
         self.risk = RiskManager(store, client)
         self.supervisor = Supervisor(store, client)
+        # Lot budget is the remaining book margin split across vacant enabled
+        # names. A quarantined name cannot open, so leaving it in that split
+        # sized every real entry down by the number of suspended symbols.
+        self.risk.supervisor_blocked = self.supervisor.is_suspended
         # Requested-vs-filled bookkeeping. Purely diagnostic: it never gates a
         # trade, it makes the one cost the backtest cannot model visible.
         self.execution = ExecutionMonitor(store)
@@ -421,14 +441,13 @@ class Engine:
         # the first rung fired would forget "rungs" was ever 1 *and* re-derive
         # "orig" from the position's now-reduced live volume, so the next rung's
         # fraction would be computed against the wrong base entirely.
-        # ticket -> last bar-close time the trailing/partial-ladder logic was run
-        # against. MASTER_PROMPT §6 requires "trail / BE advance on bar closes
-        # only, not intrabar wick trails" - the walk-forward only ever re-checks
-        # the trail once per simulated bar, so evaluating it every ~2s poll cycle
-        # instead let the live stop tighten far more often than the backtest
-        # that validated it ever did. Not persisted: worst case after a restart
-        # is one extra evaluation on the first cycle, not a correctness issue.
-        self._stop_bar: dict[int, int] = {}
+        # ``_stop_bar`` - a ticket -> last-managed-bar throttle - lived here
+        # until 31.08. It stopped being read when manage_positions moved to
+        # "always re-run overlay_stop on this closed bar" (the level does not
+        # move until last_bar does, so a repeat is a no-op at min_step), and
+        # what remained was a dict that was written, pruned and never asked.
+        # Bar-close discipline is still enforced, by _update_stop's own
+        # reference-bar check.
         # Tickets seen open under a magic no longer in the book. The API
         # refuses to delete a symbol or move its magic while a position is
         # open (web/app.py's 409s), so this set is meant to stay empty - but
@@ -483,13 +502,12 @@ class Engine:
         # cleared on the next success, so a signal firing every two seconds
         # does not become a log of its own.
         self._flush_warned: set[str] = set()
-        # Last (nominal book risk, cap) pair reported by _note_risk_capacity.
-        self._risk_capacity_noted: tuple[float, float] | None = None
         # Tickets whose weekend force-close failed at least once - kept sticky
         # across the Sat/Sun -> Monday boundary so a broker that rejected the
         # close all weekend doesn't just quietly resume normal trailing the
         # instant weekend_closed() flips False, without ever actually landing
-        # that close. Not persisted, same tradeoff as _stop_bar: worst case
+        # that close. Not persisted, same tradeoff the removed stop-bar
+        # throttle carried: worst case
         # after a restart during the very rare failed-all-weekend window is
         # one fewer retry, not a correctness issue - the next weekend still
         # catches it fresh. Persisted (unlike the comment above originally
@@ -841,7 +859,6 @@ class Engine:
         server_now = getter() if callable(getter) else None
         self._note_stale_decision_clock(server_now)
         self._note_session_clock(self.client.server_now())
-        self._note_risk_capacity()
         login = int(account.get("login") or 0)
         balance = float(account.get("balance", 0.0) or 0.0)
         if server_now is not None:
@@ -854,7 +871,14 @@ class Engine:
         # guard.check() below, so the breaker never sees a deposit as profit.
         self._refresh_cash_flow()
 
-        self._positions = self.client.positions()
+        # Through _reload_positions, not a bare assignment: on a failed
+        # positions_get that helper keeps the previous snapshot instead of
+        # leaving an unreliable empty list behind. The bail below covers this
+        # cycle, but _positions is also what _panel_positions serves and what
+        # _apply_pending_exits derives open_magics from - and those patches
+        # land "when flat". A blip that empties the book looks exactly like
+        # flat.
+        self._reload_positions()
         if not self.client.connected:
             # positions() itself flips this False when mt5.positions_get()
             # fails mid-cycle (disconnect after the ensure() check above
@@ -2027,10 +2051,9 @@ class Engine:
         A position can still be open under this magic (the user paused a
         symbol, not stopped-and-flattened it) - full skip (old behaviour)
         stops state.last_bar/atr from ever advancing again, and
-        manage_positions()'s per-bar throttle (self._stop_bar vs last_bar)
-        then never fires _update_stop for that ticket again: trail/BE/
-        partial-TP freezes silently for good, with only the broker's own
-        static stop left protecting it. allow_entry=False guarantees
+        manage_positions() then never fires _update_stop for that ticket
+        again: trail/BE/partial-TP freezes silently for good, with only the
+        broker's own static stop left protecting it. allow_entry=False guarantees
         _evaluate() can never arm a NEW entry here (same gate every other
         allow_entry=False path already relies on - bot stopped, daily guard
         tripped, netting - none of which clear the signal chain either,
@@ -2161,8 +2184,7 @@ class Engine:
         # happen in.
         self._sample_spread_ratio(cfg, state, tick)
         tf_sec = timeframe_seconds(cfg.timeframe)
-        if (state.last_bar > 0
-                and (server_now - state.last_bar) > _MAX_SIGNAL_BAR_AGE_BARS * tf_sec):
+        if signal_bar_expired(state.last_bar, server_now, tf_sec):
             # Friday's last closed M30 arriving at Monday session open after a
             # restart. Session-close clearing does not cover this: last_bar
             # was 0, so the still-last-closed Friday stamp looked fresh.
@@ -3111,7 +3133,6 @@ class Engine:
             return
         by_magic = {c.magic: c for c in list(self.store.symbols.values())}
         live = {p["ticket"] for p in self._positions}
-        self._stop_bar = {t: v for t, v in self._stop_bar.items() if t in live}
         self._unmanaged_seen &= live
         self._stopless_seen &= live
         # The prune is held under entry_lock because the seed-overwrite and
@@ -3311,8 +3332,15 @@ class Engine:
                     # the next candle, which is the opposite of "overlays apply
                     # to open tickets". False still means "ask again this bar"
                     # because the live quote, not the close, blocked placement.
-                    if self._update_stop(cfg, pos, atr, bars):
-                        self._stop_bar[ticket] = last_bar
+                    self._update_stop(cfg, pos, atr, bars)
+                else:
+                    # last_bar 0 means _refresh_signals never got past its
+                    # min_bars floor for this symbol, so trail, breakeven,
+                    # partial and harvest all skip and the ticket runs on its
+                    # broker stop alone. Reachable after a restart into a
+                    # history gap. Silence made an unmanaged position look
+                    # like a managed one.
+                    self._note_unmanaged_ticket(cfg, pos)
                 self._maybe_scale_out(cfg, pos, atr, bars)
 
     # ------------------------------------------------------ execution quality
@@ -4402,9 +4430,26 @@ class Engine:
             "session_clock_warning": sessions.session_clock_warning(skew),
         }
 
-    def _note_risk_capacity(self) -> None:
-        """Leftover max_concurrent_risk_pct is unread. Do not warn about it."""
-        return
+    def _note_unmanaged_ticket(self, cfg: SymbolConfig, pos: dict[str, Any]) -> None:
+        """One WARN when an open ticket is getting no closed-bar management.
+
+        ``_update_stop`` (trail, breakeven, harvest) only runs under a non-zero
+        ``last_bar``, and ``_refresh_signals`` returns before setting one when
+        the symbol is under its ``min_bars`` floor. The ticket then rides its
+        broker stop alone with nothing in the log saying so. Latched on the
+        same per-ticket set the unmapped-magic case uses, which
+        ``manage_positions`` already prunes against the live book, so a
+        recovered symbol re-arms the warning instead of muting it forever.
+        """
+        ticket = int(pos["ticket"])
+        if ticket in self._unmanaged_seen:
+            return
+        self._unmanaged_seen.add(ticket)
+        state = self.states.get(cfg.symbol)
+        have = getattr(state, "bars_ready", 0) if state else 0
+        LOG.emit(f"#{ticket} yeterli bar yok ({have}) - trail/BE/harvest bu "
+                 f"pozisyon icin calismiyor, yalnizca brokerin stopu gecerli.",
+                 "WARN", cfg.symbol)
 
     def _probe_book_ticks(self) -> None:
         """Read every book symbol so a recovered feed can unstick the clock.

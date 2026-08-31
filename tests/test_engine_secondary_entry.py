@@ -405,7 +405,6 @@ def test_manage_positions_retries_orphan_ticket_close_and_skips_normal_managemen
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
-    eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     # Position 401 is a previously-unresolved secondary ticket, still open.
@@ -439,7 +438,6 @@ def test_manage_positions_orphan_retry_done_partial_keeps_tracking():
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
-    eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     pos = {"ticket": 402, "magic": 1, "side": "buy", "volume": 0.2,
@@ -478,7 +476,6 @@ def test_force_flat_pending_sticky_after_session_window(monkeypatch):
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
-    eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     eng._orphan_tickets = set()
@@ -557,7 +554,6 @@ def test_manage_positions_trails_leftover_ticket_on_primary_atr():
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
-    eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     eng._orphan_tickets = set()
@@ -582,7 +578,9 @@ def test_manage_positions_trails_leftover_ticket_on_primary_atr():
 
     assert len(calls) == 1
     assert calls[0][2] == 0.002  # primary ATR
-    assert eng._stop_bar[601] == 12345
+    # The bars handed to _update_stop are the primary's, carrying the same
+    # last_bar the removed _stop_bar throttle used to record.
+    assert state.last_bar == 12345
 
 
 def test_symbol_daily_halt_includes_commission_in_floating_side():
@@ -796,7 +794,6 @@ def test_manage_positions_warns_once_for_position_under_unknown_magic(monkeypatc
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
-    eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     eng._orphan_tickets = set()
@@ -906,7 +903,6 @@ def test_a_position_without_a_stop_is_reported_not_silently_trailed(monkeypatch)
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
-    eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     eng._orphan_tickets = set()

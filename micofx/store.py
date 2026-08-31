@@ -29,6 +29,10 @@ CREATE TABLE IF NOT EXISTS opt_runs (
     payload    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_opt_symbol ON opt_runs(symbol, created_at DESC);
+-- The panel's own history call passes no symbol (/api/opt/history?limit=80),
+-- and the composite above cannot serve an unfiltered ORDER BY created_at:
+-- that query was a full table scan plus a sort on every visit to the tab.
+CREATE INDEX IF NOT EXISTS idx_opt_created ON opt_runs(created_at DESC);
 """
 
 

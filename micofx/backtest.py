@@ -511,7 +511,12 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     if trigger_pad is None:
         trigger_pad = (imputed_spread_pts(np.asarray(spread_pts, dtype=np.float64))
                        * float(point)).tolist()
-    else:
+    elif not isinstance(trigger_pad, list):
+        # walk_forward already builds this as a list once and hands the same
+        # object to every combo. Re-wrapping it in an array and re-listing it
+        # here cost a full-length rebuild per combo per window - at 90k bars,
+        # 2000 combos and six rounds that is billions of boxed floats for a
+        # value that never changes.
         trigger_pad = np.asarray(trigger_pad, dtype=np.float64).tolist()
     # Falls back to the old flat approximation when the caller doesn't know the
     # symbol's real broker floor (``mt5client.min_stop_distance`` - stops_level,

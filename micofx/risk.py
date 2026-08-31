@@ -287,11 +287,25 @@ class RiskManager:
     # risk% still wins if it is already higher. Shakeout SL × full-kasa lots
     # without this bound would blow the account.
     AUTO_R_PCT = 2.0
+    # Set by the engine to the supervisor's "this name cannot open" predicate.
+    # A class attribute rather than an __init__ field so an instance built
+    # without running __init__ still answers it.
+    supervisor_blocked: Any = None
 
     def __init__(self, store: Store, client: MT5Client) -> None:
         self.store = store
         self.client = client
         self.daily = DailyGuard(store)
+
+    def _cannot_open(self, symbol: str) -> bool:
+        """True when the supervisor has suspended this name outright."""
+        hook = self.supervisor_blocked
+        if not callable(hook):
+            return False
+        try:
+            return bool(hook(symbol))
+        except Exception:
+            return False
 
     # ------------------------------------------------------------- lot sizing
 
@@ -369,6 +383,12 @@ class RiskManager:
                 continue
             broker = self.client.resolve(cfg.symbol) or cfg.symbol
             if broker in occupied:
+                continue
+            # A quarantined name carries risk_scale 0.0 and cannot open, but
+            # it used to keep a full share of the remaining book margin
+            # reserved anyway - so every entry that *could* happen was sized
+            # at (vacant - suspended) / vacant of its intended lot.
+            if self._cannot_open(cfg.symbol):
                 continue
             n += 1
         return max(1, n)
@@ -481,7 +501,20 @@ class RiskManager:
             except (TypeError, ValueError):
                 stored = 0.0
             r_pct = max(stored, self.AUTO_R_PCT)
-            r_cap = (balance * r_pct / 100.0 * multiplier
+            # Deliberately NOT ``multiplier``: that already carries edge_scale
+            # (up to EDGE_MAX 2.2), so scaling the ceiling by the same push it
+            # exists to bound made the "auto 1R" cap ~4.4% of balance instead
+            # of 2%. The operator's lot_multiplier stays in - it is the dial
+            # that sets the book's overall size - and ai_scale stays in only
+            # as a throttle, clamped at 1.0 so the supervisor can tighten the
+            # ceiling but never lift it.
+            try:
+                throttle = min(1.0, max(0.0, float(ai_scale)))
+            except (TypeError, ValueError):
+                throttle = 1.0
+            cap_multiplier = max(0.1, float(self.store.system.lot_multiplier or 1.0))
+            cap_multiplier *= throttle
+            r_cap = (balance * r_pct / 100.0 * cap_multiplier
                      / (sl_distance * money_per_unit))
             if auto + 1e-12 < floor:
                 return 0.0, (f"lot sifir ({note}, marj payi {auto:g} "

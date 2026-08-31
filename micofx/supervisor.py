@@ -308,6 +308,19 @@ class Supervisor:
         with self._lock:
             return self._gate_locked(cfg, server_now)
 
+    def is_suspended(self, symbol: str) -> bool:
+        """True when this name is quarantined and therefore cannot open.
+
+        Same state test ``_gate_locked`` refuses on, without needing a config
+        or a clock - the sizing path only wants to know whether to keep a
+        share of the book's margin reserved for this name.
+        """
+        if not self.enabled:
+            return False
+        with self._lock:
+            verdict = self.verdicts.get(symbol)
+        return verdict is not None and verdict.state == "quarantine"
+
     def _gate_locked(self, cfg: SymbolConfig, server_now: float) -> tuple[bool, str, float]:
         verdict = self.verdicts.get(cfg.symbol)
         now = time.time()

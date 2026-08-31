@@ -993,7 +993,15 @@ class MT5Client:
         if not i:
             return 0.0
         point = i["point"] or 0.00001
-        broker = max(i["stops_level"], i["freeze_level"]) * point
+        # stops_level is the minimum distance a stop may sit from price.
+        # freeze_level is a no-modify window around the market and says
+        # nothing about placement - folding it in here widened sl_dist, and
+        # the lot is risk divided by that distance, so every entry on a
+        # symbol with a wide freeze zone was sized down for no reason. Kept
+        # only as a fallback for brokers that report stops_level as 0 while
+        # still refusing a stop at market.
+        level = i["stops_level"] or i["freeze_level"]
+        broker = level * point
         tick = self.tick(symbol)
         spread = tick["spread"] if tick else 0.0
         return max(broker, spread * 1.5, point * 10)
@@ -1653,7 +1661,16 @@ class MT5Client:
             return True
         no_changes = getattr(mt5, "TRADE_RETCODE_NO_CHANGES", 10025)
         if result is not None and result.retcode == no_changes:
-            return False
+            # The broker is saying the stop is already where we asked for it,
+            # which is the caller's success condition. Returning False here
+            # made _update_stop treat a settled trail as a refused one and
+            # resend the identical request on every poll for the rest of the
+            # bar - one round trip per open position per poll, all of it on
+            # the lock every /api/state read queues behind.
+            seen = getattr(self, "_sltp_fail_seen", None)
+            if seen:
+                seen.pop(int(ticket), None)
+            return True
         self._emit_sltp_fail(int(ticket), symbol, *self._sltp_fail_parts(result, request))
         return False
 

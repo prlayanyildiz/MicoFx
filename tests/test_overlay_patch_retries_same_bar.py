@@ -81,7 +81,6 @@ def _manage_engine(cfg, pos, close: float):
     state.bars = _Bars(close)
     eng.states = {cfg.symbol: state}
     eng._positions = [pos]
-    eng._stop_bar = {}
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
     eng._orphan_tickets = set()
@@ -106,7 +105,6 @@ def test_a_be_patch_locks_on_the_close_already_in_hand():
 
     eng.manage_positions(server_now=None)
     assert client.modifies == []
-    assert eng._stop_bar.get(pos["ticket"]) == BAR_OPEN
 
     cfg.breakeven_at_r = 1.0
     eng.manage_positions(server_now=None)

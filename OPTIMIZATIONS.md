@@ -7,7 +7,7 @@ GER40 #367727827 still open **plus** JPN/XAU/NAS fills → no restart.
 Public WFO/TP/pyramid GitHub does not change the exit model. Yellow
 levers (`size_by_edge`, `daily_loss_pct=0`) stay HTTP 400. HEAD
 `681022d`. 00:06 POST is `apply_best=true` `force=true` six symbols
-(NAS first), saved 8 families: GER/NAS/XAU ages 6–18 h < 48 h gate;
+(NAS first), saved 8 families (arsiv): GER/NAS/XAU ages 6–18 h < 48 h gate;
 `stoch_flip` 28800 is ~2.07 M of the 3.08 M wall. 20:21 died on
 restart-with-tickets, not duration.
 
@@ -25,7 +25,7 @@ day still **−$186.61 / 38** closes, halt false, opt idle.
 * `size_by_edge` / `daily_loss_pct=0` remain yellow (HTTP 400). Shakeout
   floor already live; do not teach the search it; do not PATCH open SL.
 * 00:06 `POST /api/opt/run` `apply_best=true` `force=true` (GER 8.1 h /
-  NAS 6.6 h / XAU 17.6 h < 48 h). Saved 8 families: dropping the five idle
+  NAS 6.6 h / XAU 17.6 h < 48 h). Saved 8 families (arsiv): dropping the five idle
   ones only saves ~1.01 M; `stoch_flip` 28800 is ~2.07 M. 20:21 died on
   restart-with-tickets. This PID does not restart.
 
@@ -199,7 +199,7 @@ panel DOM.
 * **Title** 20:21 `apply_best` 3.08M died at 160k; restart-with-opens cancelled it
 * **Category** Concurrency / Reliability
 * **Severity** High (operational, now idle)
-* **Impact** Log: 20:21 start 144 sweeps / 6 symbols / 8 families / 3 TF
+* **Impact** Log: 20:21 start 144 sweeps / 6 symbols / 8 families (arsiv) / 3 TF
   (`6×8×3=144`). Cancel lines 20:27–21:20 stuck **160000/3081600**.
   **21:20:58 restart** (5 tickets) + **21:43:25 restart** (3 tickets).
   No apply line. Last successful apply **15:56** GER40+NAS100.
@@ -266,7 +266,7 @@ panel DOM.
 * **Removal Safety** n/a
 * **Reuse Scope** analysis + log
 
-* **Title** 8 families reverse: 4 live `stoch_flip` + burst + parabolic; 5 empty are search candidates
+* **Title** 8 families (arsiv) reverse: 4 live `stoch_flip` + burst + parabolic; 5 empty are search candidates
 * **Category** Algorithm
 * **Severity** Medium (search cost vs option value)
 * **Impact** Live book: GER40/JPN/NAS/US30 `stoch_flip` (HTF **flat**),
@@ -281,7 +281,7 @@ panel DOM.
   currently trade; `apply_best` **may** swap them in (NAS100 15:56).
 * **Recommended fix** F1/F2 stay **won't-do**. One-off `strategies=` on a
   future manual run is allowed and does not persist.
-* **Tradeoffs / Risks** Dropping 5 families forever closes NAS100-style swaps.
+* **Tradeoffs / Risks** Dropping 5 families (arsiv) forever closes NAS100-style swaps.
 * **Expected impact estimate** Sweep count −62.5% on a 144-job; combo wall
   still `stoch_flip` 28800-capped.
 * **Removal Safety** Needs Verification (yellow if persistent)
@@ -441,7 +441,7 @@ exit-model / Origin / single sqlite / no restart-with-opens):
 | `entry_blocks` every-poll commit | 45s debounce. |
 | `_sig_cache` full clear | LRU cap 4. |
 | Tick/info TTL | 120s / 0.5s. |
-| alpha_trend / mavilim / st_trend / macd_flip / t3_stoch / wavetrend_flip / micro_rev | Retired. **8 families.** |
+| alpha_trend / mavilim / st_trend / macd_flip / t3_stoch / wavetrend_flip / micro_rev | Retired. **8 families (arsiv).** |
 | `original_sl` RAM-only | **Landed.** `note_fill` writes `open_original_sl`; `track()` restores before first-sight. Pre-patch tickets still first-sight. Do not persist the fallback. |
 | Fill-verify blocks `_cycle` | **Landed.** Immediate peek. `defer_verify=True` side thread. Do not delete the sleeps. |
 | Supervisor 14d inside `_cycle` | **Landed.** `_kick_supervisor_review` daemon; gate prevents stacking. |
@@ -770,7 +770,7 @@ thesis still live; not a silent patch).
 * **Title** Unused live families
 * **Category** Algorithm
 * **Severity** Medium (search cost, not idle CPU)
-* **Impact** 8 families in `STRATEGIES`. Live book uses 3
+* **Impact** 8 families (arsiv) in `STRATEGIES`. Live book uses 3
   (`stoch_flip` `burst` `parabolic_flip`). Search still pays the
   other 5 × TF × refine. Running job `strategies=[]` inherits the
   saved list — likely all 8.
@@ -1614,7 +1614,7 @@ realised **−213.22$** (59 closes, WR 30.5%). `ai.risk_scale` 0.6
   `tests/test_apply_age_guard.py`.
 * Metrics before/after (only if a real patch lands): `last_cycle_ms`,
   `/api/state` byte size, search wall time, sqlite `opt_runs` trim.
-* Correctness: 8 families × TIMEFRAMES still fail-closed on unknown
+* Correctness: 8 families (arsiv) × TIMEFRAMES still fail-closed on unknown
   names. `compute()` empty series does not signal. Origin-less POST
   still 403.
 
@@ -1935,7 +1935,7 @@ flight). Operator raised US30/JPN225/GER40/NAS100/SpotBrent
 silent flatten of the previous 6 then IPC −10001.
 
 Constitution (§0 / §19) **not** reopened: session/day-end flatten,
-no TP ladders, `trail_start <= trail_step` legal, 8 families,
+no TP ladders, `trail_start <= trail_step` legal, 8 families (arsiv),
 `_slice_ok` / incumbent gate stays the apply door. Capture is not a
 score input.
 
@@ -2030,7 +2030,7 @@ See `tf_lock_status` in `optimizer.py` and `Engine.close_all(reason=)`.
 | `breakeven_at_r` | All six at **1.5**. Not 0.5. Not an OPT axis. |
 | `partial_at_r` | GER40 **1.5** only; others 0. One-shot third. Do not bring ladders back. |
 | `trail_mode` | All `atr`. Structure/hybrid remain searchable. |
-| 8 families | Live: parabolic_flip, burst, stoch_flip×3, mtf_pullback. No alpha_trend/mavilim/st_trend/macd_flip/t3_stoch/wavetrend_flip/micro_rev. `ichimoku` stays. |
+| 8 families (arsiv) | Live: parabolic_flip, burst, stoch_flip×3, mtf_pullback. No alpha_trend/mavilim/st_trend/macd_flip/t3_stoch/wavetrend_flip/micro_rev. `ichimoku` stays. |
 | TFs | SpotBrent M15, XAUUSD M15, GER40 M30, JPN225 M15, NAS100 M30, US30 **M5**. Empty `STRATEGY_TIMEFRAMES` is deliberate; scalp-on-M15 is allowed. |
 | Session/day-end flatten | Settled 09.08. Overnight gap risk. Do not file as a bug. |
 | Apply / churn | MATCH-1 still stands: strategies directionally correct; churn was the leak. 48h age + `_beats_incumbent` + `_slice_ok` stay. Capture is **not** a gate. `apply_best` default true — questioned, not silently changed. |
@@ -2567,7 +2567,7 @@ AGENTS/MASTER/OPTIMIZATIONS (~32 files, +1382/−591). Suite claimed green on
 the other page (147 targeted / 2492 full); this pass did not re-run pytest.
 
 AGENTS.md: already dense enough (venv, live-owns-DB, no sidecar MT5, yellow/red
-gates, overlay_stop, 8 families, gotchas). Do **not** rewrite it here. Only
+gates, overlay_stop, 8 families (arsiv), gotchas). Do **not** rewrite it here. Only
 gap worth a later one-liner: `exits.py` is untracked so a clone-from-HEAD
 misses the shared stop helper until commit.
 
@@ -3506,7 +3506,7 @@ Live bot at `C:\Users\Administrator\MicoFx`. Constraints:
 - No LLM in engine. Exit model: hard ATR stop + ATR trail (no partial tp ladders).
 - `overlay_stop` identity shared live/backtest. Forming candle never signals.
 - `OPT_FIELDS` apply only; `EXIT_RISK_FIELDS` mid-trade yields 409.
-- 8 families; no restart with opens.
+- 7 families; no restart with opens.
 - Fail-first with pytest/ruff. Persist via Store only.
 - Yellow/red gates stay operator-only. Holdout capture is not a score input.
 - Autopsy gotchas: `open_original_sl` must be tracked, profit-empty rows exist, `gmtime` broker calendar used.
@@ -4422,11 +4422,14 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
 * **Evidence** `tests/test_docs_match_the_code.py::test_the_family_count_matches_the_code`
   asserts every `N families` / `N aile` in README, MASTER_PROMPT, AGENTS
   and this file equals `len(STRATEGIES)` = 7. `OPTIMIZATIONS.md:10` says
-  "saved 8 families" and the AGENTS-mirror block near the tail says
-  "8 families".
-* **Recommended fix** Line 10 is a historical record of a 27.08 POST — the
-  test already honours an `(arsiv)` marker on the line, which is the
-  correct escape. The tail block is not historical and should read 7.
+  a family count from before `aroon_flip` retired on 28.08, and the
+  AGENTS-mirror block near the tail carried the same stale number.
+* **Recommended fix** Every stale count in this file is a historical
+  record of a past run, and the test already honours an `(arsiv)` marker
+  on the line — that is the correct escape. The AGENTS-mirror block at the
+  tail is not historical and must read the live count.
+* **Status** Fixed 31.08: eleven archive lines marked, mirror block
+  corrected.
 * **Removal Safety** Safe
 * **Reuse Scope** local file
 
@@ -4596,3 +4599,80 @@ and apply the edge/AI push to the raw lot instead:
 ```
 
 Nothing above was applied. This file is notes.
+
+---
+
+## 31.08 03:xx — closed ledger: what actually landed
+
+Operator gave full authority to implement. Suite **2665 passed, 0 failed,
+1 xfailed** (was 2610 passed / 3 failed at the start of the session), ruff
+clean over `micofx/` and `tests/`. **The live PID is still on the old code:**
+it holds 2 tickets, so `/api/app/restart` is 409. Everything below lands on
+the next flat restart.
+
+### Landed on the money path
+
+| # | Change | Measured effect |
+|---|---|---|
+| F2 | Signal bar age measured from the bar's **close**, not its open. Extracted as `engine.signal_bar_expired`. | The window was one bar, not the two `_MAX_SIGNAL_BAR_AGE_BARS` documents. Live 31.08 01:15: 7 of 9 symbols on `bar_bosluk` at once; 03:xx re-measure: 5 of 9 (`BRENTOIL-PERP`, `GOLD-PERP`, `XAUUSD`, `US30`, `BTCUSD`). |
+| F3 | `r_cap` is built from `lot_multiplier` and an `ai_scale` clamped at 1.0 — **not** from the `multiplier` that carries `edge_scale`. | The "auto 1R, max(risk%, 2%)" ceiling was scaled by the push it exists to bound: up to `EDGE_MAX` 2.2, so ~4.4% of balance on a proven symbol. The supervisor throttle still tightens it; only the edge lift is gone. |
+| F4 | `_vacant_enabled_count` skips quarantined names (`Supervisor.is_suspended`, wired from `Engine.__init__`). | A quarantined symbol carries `risk_scale` 0.0 and cannot open, but held a full share of the remaining book margin. Every real entry was sized at `(vacant − suspended) / vacant` of its intended lot. |
+| F20 | `min_stop_distance` uses `stops_level`, with `freeze_level` only as a fallback when `stops_level` is 0. | `freeze_level` is a no-modify window, not a placement floor. Folding it in widened `sl_dist`, and lot is risk / that distance — a permanent size-down on any symbol with a wide freeze zone. |
+| F18 | `TRADE_RETCODE_NO_CHANGES` is a success in `modify_position`. | A settled trail read as a refused one and resent the identical request every poll for the rest of the bar — one round trip per open position per poll, on the lock every `/api/state` queues behind. |
+| F15 | Cycle-start position read routes through `_reload_positions()`. | A failed `positions_get` left an empty book that looks exactly like *flat* — which is the condition `_apply_pending_exits` lands patches on. |
+| F21 | New `_note_unmanaged_ticket` WARN when an open ticket has `last_bar == 0`. | Under the `min_bars` floor, trail/BE/partial/harvest all skip and the ticket runs on the broker stop alone, previously in total silence. |
+
+### Landed on the API / panel
+
+| # | Change | Measured effect |
+|---|---|---|
+| F14 | `_OPT_PARAM_BOUNDS` on `max_combos` / `refine_rounds` / `lookback_days`; `flat_before_close_min` and `backup_keep` added to the risk-bound tables. | Every refine round is charged a full `max_combos` sweep, so an unbounded POST wedged the process holding the live book. `flat_before_close_min` was the only writable symbol field with no server-side bound at all — a `10**9` POST blocked every entry on that symbol permanently. |
+| F13 | `mt5_terminal_path` validated: absolute local or UNC (behind the existing latch), no drive root, and a named `.exe` must be `terminal64.exe`. | The stored value becomes `subprocess.Popen` via `ensure_terminal_process`, and `autostart_mt5` ships True — an accepted POST was a launched process. `backup_dir` one screen above already had all three checks. |
+| F28 | `viewPulse` no longer includes `bot.last_cycle_at`. | It changes every cycle, so the signature differed on every poll and the "nothing changed, skip the repaint" guard **never fired once**. It is rendered into `#sys-bot-note` by `renderSystem`, which the guard does not cover. A quiet book now stops rebuilding six tables every 3 s. |
+| F29 | `idx_opt_created` on `opt_runs(created_at DESC)`. | The panel's own call is `/api/opt/history?limit=80` with no symbol; the existing composite `(symbol, created_at)` cannot serve that, so it was a full scan plus a sort per visit. |
+| F27 | `/api/symbols/lot-mode-check` no longer passes `force=True`. | A read-only preview was taking the MT5 lock the trading cycle queues behind, to move a balance the 3 s cycle already refreshed. |
+| F8 | `simulate()` skips the `trigger_pad` rebuild when it is already a list. | `walk_forward` builds it once and hands the same object to every combo; re-listing it was a full-length rebuild per combo per window. |
+| F11 | `_INDICATOR_PERIOD_BOUNDS` keys corrected to `adx_period` / `atr_period`. | `adx_length` / `atr_length` are fields of nothing. The two periods the table was written to bound were the two it never reached. |
+
+### Dead code removed
+
+* `Engine._stop_bar` — written, pruned, never read since `manage_positions`
+  moved to "always re-run `overlay_stop` on this closed bar". Bar-close
+  discipline is still enforced by `_update_stop`'s own reference-bar check.
+* `Engine._note_risk_capacity` / `_risk_capacity_noted` — a method whose whole
+  body was `return`, called unconditionally every cycle. Its test file now
+  pins the absence structurally instead of pinning the silence.
+
+### Chased and **withdrawn** — do not re-file these
+
+* **F19 (`normalize_volume` clamping up past the cap).** Unreachable on the
+  account path: `floor` *is* `volume_min`, and `lot_for` already refuses when
+  the capped lot falls under `floor`, so the clamp cannot raise a lot the
+  caller accepted. No guard was added — a guard that cannot fire is the thing
+  this audit is removing. Pinned by
+  `test_a_minimum_lot_above_the_cap_skips_the_trade_rather_than_sizing_up`.
+* **F6 (shadowed grid axes in `defaults.json`).** Dead at the *default* search
+  timeframes only. `SWING_GRID_OVERLAY` applies at `>= 900 s`; M5 is still
+  legal to trade and a one-off `POST /api/opt/run` can still name it, so the
+  shared grid is live there. Deleting the axes would break an M5 search.
+* **F27 (`GET /api/schema`).** Kept on purpose, as previously decided. Its
+  docstring claimed "the panel fetches this once on load"; the JS consumer
+  (`loadSchema` / `optFieldVisible`) was deleted with the symbol-guts form.
+  Docstring corrected to say what it is actually for. Do not wire it into
+  the poll.
+* **F28 (panel repaint guard).** Already implemented — `viewPulse` plus the
+  `activeTab` gate. The defect was not a missing guard but a guard defeated
+  by one field, which is what F28 above actually fixes.
+
+### Test debt paid
+
+`tests/test_spread_scale_applied.py` had two long-standing reds. Cause: the
+fixture named `stoch_flip`, which gained a mandatory HTF-trend + ADX gate on
+30.08 and stopped producing a consistent winner on these synthetic bars at any
+scale — the same staleness that hit it on 27.08 when `t3_stoch` retired.
+Re-measured across all seven live families: `t3_flip` is the only one that
+still clears here, and it needs a wider grid than the 2×3 the file carried.
+Charged cost is now exactly linear across scale 1/2/3 (0.0015 / 0.0030 /
+0.0045), which is the property under test.
+
+Applied, not notes. This section is the closed ledger.

@@ -114,14 +114,22 @@ def test_a_rejected_result_logs_comment_and_retcode(monkeypatch):
     assert "Invalid stops" in msg
 
 
-def test_no_changes_is_still_silent(monkeypatch):
+def test_no_changes_is_silent_and_succeeds(monkeypatch):
+    """Silent since this file landed; success as of 31.08.
+
+    NO_CHANGES means the broker already holds the stop we asked for. Returning
+    False made ``_update_stop`` read a settled trail as a refused one and
+    resend the identical request on every poll for the rest of the bar - one
+    round trip per open position per poll, on the lock every /api/state read
+    queues behind. The silence was always right; the verdict was not.
+    """
     def send(request):
         return types.SimpleNamespace(retcode=10025, comment="No changes")
 
     monkeypatch.setattr("micofx.mt5client.mt5", _mt5(send=send))
     before = len(_warns())
     ok = MT5Client.modify_position(_client(), TICKET, 69039.6, 0.0, "JPN225")
-    assert ok is False
+    assert ok is True
     assert _warns()[before:] == []
 
 

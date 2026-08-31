@@ -170,6 +170,11 @@ _SYMBOL_RISK_BOUNDS = {
     "max_lot": (0.0, 100.0, True),
     "max_margin_pct": (0.0, 100.0, True),
     "max_positions": (1, 10, True),
+    # Panel-writable and, until 31.08, the only writable symbol field with no
+    # bound here at all - the ``max: 240`` on the card is UI-only, so a POST
+    # carrying 10**9 was accepted and blocked every entry on that symbol for
+    # good. Zero disables the wind-down; a day is the ceiling.
+    "flat_before_close_min": (0.0, 1440.0, True),
 }
 
 # Indicator lengths. Separate from the table above because that one guards
@@ -184,7 +189,22 @@ _SYMBOL_RISK_BOUNDS = {
 # carry "0 disables" in models.py - and bounding those at 1 would refuse the
 # live US500 config. A length has no such reading: an average over no bars is
 # a mistake, not a disabled filter.
-_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "adx_length", "atr_length", "trail_lookback"), (1, 10000, True))
+# ``adx_length`` / ``atr_length`` sat here until 31.08 and are not fields of
+# anything - SymbolConfig carries ``adx_period`` and ``atr_period``. The two
+# periods this table was written to bound were the two it never reached.
+_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "adx_period", "atr_period", "trail_lookback"), (1, 10000, True))
+
+# The search budget drives the walk-forward that ultimately writes live
+# trading params. Every refine round is charged a full ``max_combos`` sweep
+# (optimizer.sweep_budget), so an unbounded pair here is a POST that wedges
+# the process holding the live book. AGENTS names 2000 as the intended cap;
+# the ceiling below leaves headroom for a deliberate wide run without
+# admitting 1e9.
+_OPT_PARAM_BOUNDS = {
+    "max_combos": (1, 100000, True),
+    "refine_rounds": (1, 20, True),
+    "lookback_days": (1, 3650, True),
+}
 
 
 _SYSTEM_RISK_BOUNDS = {
@@ -196,6 +216,8 @@ _SYSTEM_RISK_BOUNDS = {
     "max_concurrent_risk_pct": (0.0, 100.0, True),  # 0 = disabled, valid
     "daily_profit_pct": (0.0, 100.0, True),  # 0 = disabled, valid
     "max_total_positions": (1, 200, True),
+    # Panel-writable with UI-only bounds; backup.py prunes to this count.
+    "backup_keep": (1, 365, True),
 }
 
 
@@ -674,8 +696,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         polls every ~3s. They are built from module
         constants - OPT_FIELDS and _FAMILIES cannot change while the process is
         up - so 2155 bytes and twelve sorted() calls were repeating for a
-        payload that never differed. The panel fetches this once on load, the
-        same way it already loads the gates and autopsy tables.
+        payload that never differed.
+
+        Nothing in the panel calls this: the JS consumer (loadSchema /
+        optFieldVisible) was deleted with the symbol-guts form. It is kept
+        deliberately, as the machine-readable answer to "which axes does this
+        family read", which the axis tests and the review loops assert
+        against - not as an endpoint waiting for a caller. Do not wire it back
+        into the poll.
         """
         return {
             "ok": True,
@@ -1366,7 +1394,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.get("/api/symbols/lot-mode-check")
     def lot_mode_check() -> dict[str, Any]:
-        account = engine.refresh_account(force=True)
+        # Not force=True: this is a read-only preview and the forced refresh
+        # took the MT5 lock that /api/state and the trading cycle queue behind,
+        # to move a balance figure that the 3s cycle has already refreshed.
+        account = engine.refresh_account()
         rows = engine.risk.lot_mode_diagnostics(
             float(account.get("balance", 0.0)),
             getattr(engine, "_trade_autopsies", None))
@@ -1595,6 +1626,33 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     raise HTTPException(
                         400, f"{field} UNC ({path!r}) - backup_dir_allow_unc kapali "
                              f"(agdaki bir paylasima proje + veritabani kopyalanacak)")
+        # Same threat shape as backup_dir one screen up, and until 31.08 this
+        # one had no check at all: the value is handed to _exe_from_path and
+        # then to subprocess.Popen by ensure_terminal_process, with
+        # autostart_mt5 shipping True. An accepted POST is a launched process.
+        if "mt5_terminal_path" in patch:
+            raw = str(patch["mt5_terminal_path"] or "").strip()
+            if raw:
+                is_unc = raw.startswith("\\\\") or raw.startswith("//")
+                absolute = (len(raw) >= 4 and raw[1] == ":"
+                            and raw[2] in "\\/") or is_unc
+                if not absolute:
+                    raise HTTPException(
+                        400, f"mt5_terminal_path gecersiz: {raw!r} - tam bir yol "
+                             f"olmali (orn. C:\\Program Files\\MetaTrader 5)")
+                if is_unc and not store.system.backup_dir_allow_unc:
+                    raise HTTPException(
+                        400, f"mt5_terminal_path UNC ({raw!r}) - agdaki bir "
+                             f"paylasimdan terminal calistirilmaz")
+                # A directory is legal and is what the live book carries;
+                # _exe_from_path appends the name. Naming a file is legal only
+                # when it is the terminal - not MetaEditor, not anything else.
+                tail = raw.replace("/", "\\").rstrip("\\").rsplit("\\", 1)[-1]
+                if tail.lower().endswith(".exe") and tail.lower() != "terminal64.exe":
+                    raise HTTPException(
+                        400, f"mt5_terminal_path gecersiz: {tail!r} - yalnizca "
+                             f"terminal64.exe veya kurulum klasoru yazilabilir")
+            patch["mt5_terminal_path"] = raw
         updated = store.update_system(patch, source="panel sistem")
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}
         if "mt5_terminal_path" in patch:
@@ -1746,6 +1804,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # numeric axes inside {strategy: {param: [values...]}}, so this needs
         # the recursive check, not the flat top-level-only one.
         _reject_non_finite_deep(body)
+        _validate_risk_bounds(body, _OPT_PARAM_BOUNDS)
         metric = body.get("selection_metric")
         if metric is not None and metric not in (
                 "score", "money_per_day", "gap_freq", "costed_e"):

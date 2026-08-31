@@ -51,19 +51,26 @@ class _Bars:
         return self.close.size
 
 
-GRID = {"t3_length": [5, 8], "sl_atr_mult": [2.0, 3.0, 4.0]}
+GRID = {"t3_length": [4, 5, 6, 8, 10, 14],
+        "sl_atr_mult": [1.5, 2.0, 2.5, 3.0, 4.0]}
 
 # The family is named rather than inherited: this fixture relied on the
-# dataclass default, which moved on 27.08 when t3_stoch retired. Measured
-# against these bars: stoch_flip on a 2-4 ATR stop is the surviving family
-# whose edge still clears at scale 1.0 AND 2.0, which is what the comparison
-# needs - a config that only wins unscaled cannot show the gap. Charged cost
-# rises 0.0013 -> 0.0025 -> 0.0038 across scale 1/2/3. The file measures how
+# dataclass default, which moved on 27.08 when t3_stoch retired, and was
+# pointed at stoch_flip - which then gained a mandatory HTF-trend + ADX gate
+# on 30.08 and stopped producing a consistent winner on these synthetic bars
+# at any scale. Re-measured 31.08 across all seven live families: t3_flip is
+# the only one that still clears here, and it needs the wider grid above -
+# the two-by-three grid this file used to carry left it with too few
+# candidates to survive the consistency check. It is the only ungated family
+# left, which is why it is the one that survives a random-walk fixture.
+#
+# Charged cost now rises 0.0015 -> 0.0030 -> 0.0045 across scale 1/2/3 -
+# exactly linear, which is the property under test. The file measures how
 # spread_scale moves that cost, not which family wins.
 def _run(**kw):
-    args = {"cfg": SymbolConfig(symbol="FRA40", magic=1, strategy="stoch_flip"), "bars": _Bars(),
+    args = {"cfg": SymbolConfig(symbol="FRA40", magic=1, strategy="t3_flip"), "bars": _Bars(),
                 "point": 1e-4, "tf_seconds": 300, "grid": GRID, "min_trades": 10,
-                "segments": 4, "max_combos": 12, "min_positive_ratio": 0.0}
+                "segments": 4, "max_combos": 48, "min_positive_ratio": 0.0}
     args.update(kw)
     return bt.walk_forward(**args)
 

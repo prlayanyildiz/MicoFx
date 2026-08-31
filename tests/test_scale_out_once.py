@@ -412,7 +412,6 @@ def test_closed_tickets_drop_out_of_scale_out_done():
     eng._force_flat_pending = set()
     eng._sec_tickets = set()
     eng._orphan_tickets = set()
-    eng._stop_bar = {}
     eng._unmanaged_seen = set()
     eng._stopless_seen = set()
     eng.states = {}

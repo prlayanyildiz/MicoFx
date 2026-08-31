@@ -2227,7 +2227,14 @@ function viewPulse(s) {
   const mt5 = s.mt5 || {};
   const hv = s.harvest || {};
   const opt = s.opt || {};
-  return [bot.last_cycle_at, bot.running, mt5.connected, acc.equity, acc.profit,
+  // Deliberately NOT bot.last_cycle_at / cycle / last_cycle_ms: those change
+  // on every single cycle, so including one made this signature differ on
+  // every poll and the "nothing changed, skip the repaint" guard below never
+  // fired once. They are rendered by renderSystem into #sys-bot-note, which
+  // is not one of the views this guard covers. With them out, a quiet book
+  // (market closed, no open position) stops rebuilding the positions,
+  // capacity, harvest, day, execution and live tables every 3s.
+  return [bot.running, mt5.connected, acc.equity, acc.profit,
           day.realised, day.halted, pos, notes, s.ai && s.ai.last_review,
           hv.left_on_table_r, (hv.partial_on || []).join(","),
           opt.state, opt.busy, opt.combo_done, opt.done, opt.current].join("\0");
