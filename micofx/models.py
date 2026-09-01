@@ -96,12 +96,9 @@ class SymbolConfig:
     enabled: bool = True
     timeframe: str = "M5"
     broker_symbol: str = ""          # override when the broker renames an instrument
-    # mtf_pullback | burst | dual_t3 | t3_flip | stoch_flip
-    # | parabolic_flip | ichimoku
+    # mtf_pullback | burst | ichimoku | channel_break (see models.STRATEGIES)
     # (see models.STRATEGIES)
-    # Default is the live majority: three of six symbols run stoch_flip, and
-    # a seed has to carry a name the enum check will still accept.
-    strategy: str = "stoch_flip"
+    strategy: str = "ichimoku"
 
     # ---- higher-timeframe trend pullback ----
     pull_fast: int = 8               # fast EMA the pullback must reach
@@ -565,11 +562,12 @@ PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
 # aroon_flip 28.08 - slowest sweep (~800s), worst validated holdout (~21 R
 # median), 1/7 applied, never live on a symbol; its aroon() indicator and
 # aroon_length axis went with it (no other reader).
-STRATEGIES = ["mtf_pullback", "burst", "dual_t3",
-              "t3_flip", "stoch_flip",
-              "parabolic_flip",
-              "ichimoku",
-              "channel_break"]
+# stoch_flip / dual_t3 / t3_flip retired 01.09: F39 null entry edge on
+# stoch_flip; dual_t3 0/7 asymmetry; t3_flip marginal. Leftover DB names
+# fail closed via compute(), they do not crash.
+# parabolic_flip retired 01.09: flip class, 0/7 symbol wins in 300-run matrix;
+# same SAR-flip shape as retired stoch_flip. Leftover names fail closed.
+STRATEGIES = ["mtf_pullback", "burst", "ichimoku", "channel_break"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
 # Longer TFs turn them into slow mean-reversion with the wrong cost geometry.

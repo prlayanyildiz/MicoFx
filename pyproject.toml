@@ -40,7 +40,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Tests carry long prose docstrings and deliberately odd fixtures.
-"tests/*" = ["B011", "ARG002", "E402", "E702", "E741"]
+"tests/**" = ["B011", "ARG002", "E402", "E702", "E741"]
 # Three "unused" parameters here are unused ON PURPOSE and guarded by tests:
 # _tally_entry(source=), _evaluate(account=) and _merge_signals(cfg=) still
 # accept what the retired secondary leg used to pass, and several tests assert

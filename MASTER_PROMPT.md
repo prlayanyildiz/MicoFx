@@ -164,7 +164,7 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
     mt5client.py    locked MT5 bridge
     sessions.py     broker-time windows
     indicators.py   T3, StochRSI, ATR, ADX, SuperTrend, helpers
-    strategy.py     Params, IndicatorCache, 8 families → Signals
+    strategy.py     Params, IndicatorCache, 4 families → Signals
     backtest.py     bar replay + walk_forward
     optimizer.py    background TF×strategy search + apply gates
     risk.py         DailyGuard + lot_for + can_open + edge_scale
@@ -255,7 +255,11 @@ Bars where both `buy` and `sell` are True must be **dropped** (neither side). Do
 
 ## 7. Strategy families (shared)
 
-`STRATEGIES = ["mtf_pullback", "burst", "dual_t3", "t3_flip", "stoch_flip", "parabolic_flip", "ichimoku", "channel_break"]` — 8 aile.
+`STRATEGIES = ["mtf_pullback", "burst", "ichimoku", "channel_break"]` — **4 canli aile**.
+
+`stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` **emekli** (01.09): F39 sifir
+ileri edge; canli kitap kaniyordu; WF skoru gurultuye uyuyor. DB'de kalan isimler
+fail-closed.
 
 `channel_break` 31.08 eklendi: kapanis, kendisinden onceki `chan_lookback`
 barin en yuksegini asarsa alis, en dusugunu kirarsa satis; `chan_buffer_atr`
@@ -294,7 +298,7 @@ of the trailing `brst_lookback` distribution, closing inside the top/bottom
 `brst_close_pct` of its own bar. Anchored to no level at all — unlike `orb` (session) and
 `donchian` (N-bar channel) — so it is available at any hour.
 
-### `dual_t3` (minimal core: two T3 lines + ATR, nothing else)
+### `dual_t3` (emekli 01.09 — minimal core: two T3 lines + ATR, nothing else)
 Fast T3 crossing slow T3 **is** the entry — cross up long, cross down short. This family
 deliberately computes **no** StochRSI, RSI, ADX, HTF trend, Bollinger/Keltner, order-flow
 proxy, body-ratio or ATR-percentile series at all (not "disabled" — never built), and uses

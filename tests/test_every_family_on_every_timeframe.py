@@ -118,7 +118,10 @@ def test_the_registry_is_the_whole_book():
     # effect rather than a plausible one - favourable MFE/MAE asymmetry in
     # the out-of-sample half of all ten captured windows, growing with
     # lookback rather than spiking at one value (F40).
-    assert len(FAMILIES) == 8, f"aile sayisi degisti: {FAMILIES}"
+    # 8 -> 4 on 01.09: stoch_flip, dual_t3, t3_flip, parabolic_flip retired
+    # (F39 null forward edge; live book ~-40R on stoch). Leftover DB names
+    # fail closed.
+    assert len(FAMILIES) == 4, f"aile sayisi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

@@ -5361,7 +5361,7 @@ yiyor. Cikis tarafinda aranacak sey "kari erken kilitlemek" degil.
 
 ## F42 - aileleri tek stratejide birlestirmek: olculdu, yapilmamali (31.08)
 
-**Soru (operator).** 8 aile var; mantigi tek stratejide toplayabilir miyiz?
+**Soru (operator).** 8 aile (arsiv) vardi; mantigi tek stratejide toplayabilir miyiz?
 
 **Sekil olarak zaten 4.** trend yonu (dual_t3, t3_flip, parabolic_flip,
 ichimoku), trend+geri cekilme (mtf_pullback), osilator (stoch_flip),
@@ -5520,7 +5520,7 @@ CPU yakiyordu (20 saniyede 60 cekirdek-saniye, 11 isci tamamen bos). Takilma
 yoktu - kuyruk bosalmisti.
 
 Sebep dagitimda degil, granularitede. Is parcasi bir *sweep* = (sembol, TF,
-aile). Tek sembollu arama 3 TF x 8 aile = 24 parca, 14 cekirdek. Parcalar
+aile (arsiv)). Tek sembollu arama 3 TF x 8 aile (arsiv) = 24 parca, 14 cekirdek. Parcalar
 mertebe farkiyla esitsiz: izgaralar 1080 (ichimoku) ile 2.073.600 (dual_t3)
 arasinda, ustune `coverage_budget` buyuk izgaraya daha buyuk butce veriyor.
 
@@ -5559,7 +5559,7 @@ Simdilik olculen sey kayit altinda; ikisi de yapilmadi.
 Operator: "sorunumuz TF degil, stratejilerimizdeki hatalar". Olcum bunu
 dogruluyor ama yonunu degistiriyor.
 
-8 aile x 7 sembol, +10 bar ileri getiri t-istatistigi
+8 aile (arsiv) x 7 sembol, +10 bar ileri getiri t-istatistigi
 (`cursor/reverse_family_edge_matrix.py`):
 
 | sembol | mtf_pull | burst | dual_t3 | t3_flip | stoch_flip | parabolic | ichimoku | channel_break |
@@ -5604,12 +5604,12 @@ beklentili.
 
 ## F47 - scalping yanlis yon: bilgi yavas tarafta (olculdu, 31.08)
 
-Operator: "8 ailenin verimini tart, verimsizse kendimiz yazalim; scalping icin
+Operator: "8 ailenin (arsiv) verimini tart, verimsizse kendimiz yazalim; scalping icin
 hangi gosterge daha iyiyse ona gecelim."
 
 Birim olarak R veya ATR degil **spread** kullanildi: "ortalama sinyal kac
 spread kazandiriyor". Girise 1 spread odendigi icin 1.0 basabas demektir.
-Ufuk suepuru, 8 aile x 10 pencere (`cursor/scalp_floor.py`):
+Ufuk suepuru, 8 aile (arsiv) x 10 pencere (`cursor/scalp_floor.py`):
 
 | aile | h=1 | h=3 | h=5 | h=10 | h=20 |
 |---|---|---|---|---|---|
@@ -5662,7 +5662,7 @@ F47'nin isaret ettigi yavas ufuk arastirildi (`cursor/slow_discover.py`):
 12 aday ilkel (zaman serisi momentumu, fiyat-ortalama mesafesi, ortalama
 egimi, Kaufman verimliligi) x 4 geriye bakis x 3 ufuk, 10 pencere, %60/40
 train/test, birim spread. Kitapta duz momentum yoktu; literaturdeki en
-dayanikli bulgu olmasina ragmen 8 ailenin hepsi gosterge turevliydi.
+dayanikli bulgu olmasina ragmen 8 ailenin (arsiv) hepsi gosterge turevliydi.
 
 ### Birinci tur: kontrol grubu adaylari sildi
 
@@ -5836,3 +5836,52 @@ gevsetebiliyor; en azindan iki yon de temsil ediliyor.
 **Not.** Bu bir kazanc iddiasi degil, bir *erisim* duzeltmesi. Aramanin daha
 dar bir tavani secip secmeyecegini bir sonraki kosu soyleyecek; F49'un ic
 orneklem olcumu secilmesi gerektigini soyluyor, kanit bu kadar.
+
+## F51 - bes aile derinlemesi: sembol eslestirme, aile rolü (01.09)
+
+`stoch_flip` / `dual_t3` / `t3_flip` emekli. Kalan bes sinyal sekli:
+
+| aile | ne soruyor | olcumde rol |
+|---|---|---|
+| **burst** | genisleyen bar, extreme kapanis | kitap geneli kazanan (6/7); F47 h=20'de en iyi spread kazanci |
+| **mtf_pullback** | HTF trend + ATR geri cekilme | NAS100 en iyi (55R vs burst 51); GER40 F46 t=2.74 |
+| **channel_break** | onceki N bar kanal kirilimi | GER40 stoch yerine (34R); JPN225'te 0.4R — sembol secimi sart |
+| **ichimoku** | TK cross + bulut | F39 en iyi asimetri (7/7) ama arama cikis eksenleriyle nadiren kazanir |
+| **parabolic_flip** | SAR flip | arama adayi; matriste nadiren birinci |
+
+**M5 taramasi sonrasi sembol bazli duzeltme** (kör burst degil, matris):
+
+| sembol | atanan | neden |
+|---|---|---|
+| XAUUSD, BTCUSD, SpotBrent | burst | skor lideri |
+| NAS100 | **mtf_pullback M30** | 55 > burst 51 |
+| JPN225 | **burst M15** | channel_break 0.4R reddedildi |
+| US30 | **burst M30** | 41R > channel_break 21 / M5 29 |
+| GER40 | channel_break M30 (kuyruk) | stoch_flip yerine olculen en iyi canli aile |
+
+**Performans icin yapilmadi:** aile birlestirme (F42), yeni aile (F48 olcum
+aparati supheli), ichimoku'ya HTF/ADX eklemek (bilerek cikis-only arama).
+
+**Yapildi:** sembol x aile eslestirmesi; zayif kazanan (JPN225 channel_break)
+duzeltildi; bes aile M5+M15+M30 taramasi tamam.
+
+## F52 - aile budamasi: parabolic_flip emekli, dort cekirdek (01.09)
+
+300 kosuluk matris: sembol basina en iyi skor `burst` 6/7, `mtf_pullback`
+1/7 (NAS100), `ichimoku` / `channel_break` / `parabolic_flip` hicbir sembolde
+birinci olmadi (channel_break GER40'ta ikinci, 34 vs burst 37).
+
+`parabolic_flip` SAR flip — emekli `stoch_flip` ile ayni sinif, sifir galibiyet.
+Arama gürültüsünü kesmek icin cikarildi.
+
+**Canli dort aile:**
+
+| aile | rol |
+|---|---|
+| **burst** | kitap omurgasi — genisleme + extreme kapanis, cost_rank kapisi |
+| **mtf_pullback** | endeks geri cekilme — NAS100 olcumu |
+| **channel_break** | kanal kirilimi — GER40 stoch yerine aday |
+| **ichimoku** | TK+bulut — F39 en iyi asimetri; arama cikis-only, nadiren kazanir ama ucuz (1080 combo) |
+
+Gelir icin kural: **stoch WF skoru kovalama** (overfit); sembol basina bu
+dort aileden olculen en iyiyi uygula.

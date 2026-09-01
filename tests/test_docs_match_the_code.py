@@ -14,15 +14,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import STRATEGIES, TIMEFRAMES
+from tests.retired_lexicon import GONE_WORDS, RETIRED_FAMILIES, RETIRED_TIMEFRAMES
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ["README.md", "MASTER_PROMPT.md", "AGENTS.md"]
 COUNTED = [*DOCS, "OPTIMIZATIONS.md"]
-RETIRED = ("trix_flip", "flow_rev", "t3_ribbon", "squeeze_brk", "orb",
-           "vwap_rev", "donchian", "liq_sweep", "alpha_trend", "mavilim",
-           "st_trend", "macd_flip",
-           "t3_stoch", "wavetrend_flip", "micro_rev")
-RETIRED_TF = ("H1", "H4", "M10", "M1 ", "M3 ")
+RETIRED = RETIRED_FAMILIES
+RETIRED_TF = tuple(f"{tf} " for tf in RETIRED_TIMEFRAMES)  # legacy spacing guard
 AILE_RE = re.compile(r"(\d+)\s+(?:strateji\s+)?aile", re.I)
 FAM_RE = re.compile(r"(\d+)\s+families", re.I)
 
@@ -41,13 +39,8 @@ def test_the_family_count_matches_the_code():
                 assert int(hit) == n, f"{name}:{i}: {line[:80]}"
 
 
-# Bir emekli ismin gecmesi tek basina hata degil - "su aileler kaldirildi"
-# notu tam olarak gecmesi gereken yer. Aranan sey, isminin **kaldirildigini
-# soylemeden** gecmesi. O yuzden satirin kendisine degil, etrafindaki iki
-# satirlik pencereye bakiyoruz.
-GONE_WORDS = ("kaldirildi", "kaldirilmis", "silindi", "emekli", "retired",
-              "gone", "artik yok", "unlike", "do not re-add", "do not port",
-              "removed", "resurrected")
+# Bir emekli ismin gecmesi tek basina hata degil - gone-word penceresi
+# (tests/retired_lexicon.py, TR + EN) ile kontrol edilir.
 
 
 def _says_removed(lines: list[str], i: int) -> bool:

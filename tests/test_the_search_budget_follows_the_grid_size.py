@@ -4,34 +4,16 @@ The grid a sweep actually samples is **not** ``strategy_grids[fam]`` - that is
 only the family's own axes. It is ``searchable_axes(fam, {**shared, **own})``,
 where the shared risk grid (sl_atr_mult 6 x trail_start_atr 6 x
 trail_step_atr 5 x max_spread_atr 6) multiplies whatever the family states.
-Read off the live blob 31.08:
+Read off the live five-family blob 01.09:
 
     ichimoku         1,080      parabolic_flip     8,640
-    stoch_flip      28,800      t3_flip          144,000
-    mtf_pullback   622,080      burst          1,244,160
-    dual_t3      2,073,600
+    channel_break   14,580      mtf_pullback     622,080
+    burst        1,244,160
 
 At a flat ``max_combos`` of 2000 that is 100% coverage for ichimoku and
-**0.12%** for dual_t3 - a 190x spread in how thoroughly each family is
-explored. The optimizer then ranks those families head to head to pick a
-symbol's winner, so a well-covered family presents something near its true
-optimum while a starved one presents the best of a tiny random draw. Expected
-best-of-sample sits well below true best, so the contest is tilted by grid
-size rather than by which idea trades better, and the starved families' winners
-move with ``combo_seed``.
-
-Budget handed to a family beyond its own grid size buys nothing - there is no
-unexplored combo left to spend it on. This hands that surplus to the families
-still short, in proportion to how much space they have left, **without
-changing the total**: same wall clock, same worker count.
-
-No family may come out worse than the flat cap, so this cannot regress a
-search that is tuned today.
-
-Scale note: only ichimoku currently sits under the cap, so the redistribution
-moves ~920 combos. It removes a real waste and it is the right shape, but on
-today's grids it is a small effect - closing the 190x spread needs the grids
-themselves to come down, which is a separate decision.
+**0.16%** for burst - a wide spread in how thoroughly each family is
+explored. Budget redistribution sends idle headroom to the worst-covered
+families without changing total wall clock.
 """
 from __future__ import annotations
 
@@ -44,12 +26,9 @@ from micofx.optimizer import coverage_budget
 
 SHIPPED = {
     "ichimoku": 1_080,
-    "parabolic_flip": 8_640,
-    "stoch_flip": 28_800,
-    "t3_flip": 144_000,
+    "channel_break": 14_580,
     "mtf_pullback": 622_080,
     "burst": 1_244_160,
-    "dual_t3": 2_073_600,
 }
 CAP = 2000
 
@@ -67,10 +46,9 @@ def test_a_small_grid_is_searched_exhaustively_and_no_further():
 
 
 def test_the_freed_budget_goes_to_the_worst_covered_family():
-    """Most unexplored space first: dual_t3 (0.12%) over stoch_flip (7%)."""
+    """Most unexplored space first: burst over channel_break."""
     got = coverage_budget(SHIPPED, CAP)
-    assert (got["dual_t3"] > got["burst"] > got["mtf_pullback"]
-            > got["t3_flip"] > got["stoch_flip"] > got["parabolic_flip"] > CAP)
+    assert (got["burst"] > got["mtf_pullback"] > got["channel_break"] > CAP)
 
 
 def test_no_family_is_worse_off_than_the_flat_cap():

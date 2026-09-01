@@ -17,13 +17,20 @@ def _eng() -> Engine:
     eng.client = SimpleNamespace(connected=True)
     eng.store = SimpleNamespace(
         symbols={"GER40": SymbolConfig(symbol="GER40", magic=1)},
-        system=SimpleNamespace(poll_interval_sec=2.0),
+        system=SimpleNamespace(
+            poll_interval_sec=2.0,
+            lot_multiplier=1.0,
+            max_margin_usage_pct=50.0,
+            max_concurrent_risk_pct=8.0,
+            size_by_edge=False,
+        ),
     )
     eng._positions = []
     eng.last_cycle_at = time.time()
     eng._capacity_cache = {}
     eng._capacity_cache_at = 0.0
     eng._capacity_pos_sig = ()
+    eng._capacity_sys_sig = ()
     eng.risk = SimpleNamespace(capacity_calls=0)
 
     def _cap(positions, account, atrs, autopsies=None):
@@ -52,6 +59,17 @@ def test_a_new_ticket_invalidates_capacity():
     atrs = {"GER40": 10.0}
     Engine._panel_capacity(eng, [{"ticket": 1, "volume": 0.1}], acc, atrs)
     Engine._panel_capacity(eng, [{"ticket": 2, "volume": 0.1}], acc, atrs)
+    assert eng.risk.capacity_calls == 2
+
+
+def test_a_sizing_change_invalidates_capacity():
+    eng = _eng()
+    acc = {"equity": 1000.0}
+    atrs = {"GER40": 10.0}
+    pos = [{"ticket": 1, "volume": 0.1}]
+    Engine._panel_capacity(eng, pos, acc, atrs)
+    eng.store.system.lot_multiplier = 2.0
+    Engine._panel_capacity(eng, pos, acc, atrs)
     assert eng.risk.capacity_calls == 2
 
 

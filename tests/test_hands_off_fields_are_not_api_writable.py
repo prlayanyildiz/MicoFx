@@ -108,20 +108,21 @@ def _client():
     return TestClient(app), store, engine
 
 
-def test_system_plumbing_is_not_writable():
+def test_lot_multiplier_is_writable_for_deleverage():
     tc, store, _ = _client()
     before = store.system.lot_multiplier
-    res = tc.post("/api/system", json={"lot_multiplier": 2.0})
-    assert res.status_code == 400
-    assert "lot_multiplier" in res.json()["detail"]
-    assert store.system.lot_multiplier == before
+    res = tc.post("/api/system", json={"lot_multiplier": 1.0})
+    assert res.status_code == 200, res.text
+    assert store.system.lot_multiplier == 1.0
+    store.update_system({"lot_multiplier": before}, source="test restore")
 
 
-def test_cost_toggles_are_not_writable():
+def test_system_plumbing_is_not_writable():
     tc, store, _ = _client()
+    before = store.system.charge_costs
     res = tc.post("/api/system", json={"charge_costs": False})
     assert res.status_code == 400
-    assert store.system.charge_costs is True
+    assert store.system.charge_costs == before
 
 
 def test_operator_system_dials_still_write():
@@ -157,12 +158,13 @@ def test_total_slot_cap_is_not_writable():
     assert store.system.max_total_positions == before
 
 
-def test_concurrent_risk_is_not_writable():
+def test_concurrent_risk_is_writable():
     tc, store, _ = _client()
     before = store.system.max_concurrent_risk_pct
     res = tc.post("/api/system", json={"max_concurrent_risk_pct": 30.0})
-    assert res.status_code == 400, res.text
-    assert store.system.max_concurrent_risk_pct == before
+    assert res.status_code == 200, res.text
+    assert store.system.max_concurrent_risk_pct == 30.0
+    store.update_system({"max_concurrent_risk_pct": before}, source="test restore")
 
 
 def test_daily_loss_and_edge_sizing_are_not_writable():

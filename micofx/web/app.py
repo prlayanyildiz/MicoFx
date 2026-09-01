@@ -304,7 +304,7 @@ def _require_optimised_before_enabling(patch: dict[str, Any], cfg) -> None:
 
     EURUSD reached ``enabled`` carrying nothing but the dataclass defaults -
     ``opt_updated_at`` 0.0, ``opt_score`` 0.0, an empty ``opt_summary`` and
-    ``stoch_flip/M5``. That is not a config the search picked; it is the factory
+    ``ichimoku/M5``. That is not a config the search picked; it is the factory
     setting, and the search had in fact already refused this symbol outright
     (365 days, four timeframes, fourteen families, no candidate cleared the
     accept gate). On M5 an FX symbol pays 25-28% of risk in spread against an
@@ -446,13 +446,15 @@ _INTERNAL_ONLY_FIELDS = ("pending_exit_patch", "pending_secondary_exit_patch",
 # returns them for the readout / pending_exit_patch kuyruk.
 _OPERATOR_SYSTEM_FIELDS = frozenset({
     "max_margin_usage_pct",
+    "lot_multiplier",
+    "max_concurrent_risk_pct",
     "backup_dir", "backup_dir_secondary", "backup_keep",
     "mt5_terminal_path", "autostart_mt5",
 })
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",
     "enabled", "group", "broker_symbol",
-    # One-way: _validate_one_way_overlay refuses any value but 0. See there.
+    # Shipped rungs only (F44 scan). 0 = off. harvest stays hands-off (F41).
     "partial_at_r",
 })
 _OPERATOR_OPT_FIELDS = frozenset({
@@ -618,25 +620,35 @@ def _cost_axis_grid(body: dict[str, Any], current: dict[str, Any]) -> None:
     body["grid"] = {**stored, **grid} if isinstance(stored, dict) else dict(grid)
 
 
+_PARTIAL_AT_R_RUNGS = frozenset({1.5, 2.0, 3.0})
+
+
 def _validate_one_way_overlay(patch: dict[str, Any]) -> None:
-    """``partial_at_r`` may only be written to 0.
+    """``partial_at_r``: 0 to disable, or a shipped rung to enable.
 
-    Hands-off gave this field an on-ramp and no off-ramp: hand-set to 1.5 on
-    five symbols 25.08 through a PATCH route since removed, then sealed. No
-    other writer reaches it - not in OPT_FIELDS so apply() skips it, not in
-    EXIT_RISK_FIELDS so it never queues in pending_exit_patch. That is a latch,
-    not a guard, and F44 measures the latched value as a loser on every
-    captured window.
+  F44 measured every rung as net-negative vs off, but the operator may still
+  want the one-shot third at a documented gate. Only 1.5 / 2.0 / 3.0 are
+  accepted on - arbitrary values and mid-trade "on" below the closed bar are
+  still refused. Turning off mid-trade is monotone safe.
 
-    Off is the only safe direction to take mid-trade: the partial then simply
-    never fires. On is the 25.08 hazard - a position already past the rung
-    sheds a third the instant the value lands - so it stays shut.
-    """
+  ``harvest_at_r`` / ``harvest_step_atr`` / ``breakeven_at_r`` stay hands-off
+  (F41 harvest worse on every setting; BE is search-owned).
+  """
     value = patch.get("partial_at_r")
-    if value is not None and float(value) != 0.0:
-        raise HTTPException(
-            400, "partial_at_r yalnizca kapatilabilir (0) - acmak icin "
-                 "arama/uygulama yolu kullanilmali")
+    if value is None:
+        return
+    try:
+        v = float(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "partial_at_r sayi olmali") from exc
+    if v == 0.0:
+        return
+    for rung in _PARTIAL_AT_R_RUNGS:
+        if abs(v - rung) < 1e-9:
+            return
+    raise HTTPException(
+        400, "partial_at_r yalnizca 0 (kapali) veya 1.5 / 2.0 / 3.0 "
+             "basamaklarindan biri olabilir")
 
 
 def _coerce_symbol_patch(raw: dict[str, Any]) -> dict[str, Any]:
@@ -715,7 +727,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # /api/state is polled often; reuse a short snapshot so MT5 is not hammered.
         now = time.time()
         if (not force and _symbol_payload_cache["rows"]
-                and now - float(_symbol_payload_cache["at"]) < 1.5):
+                and now - float(_symbol_payload_cache["at"]) < 3.0):
             return list(_symbol_payload_cache["rows"])
         symbols_snapshot = list(store.symbols.values())
         client.set_overrides({c.symbol: c.broker_symbol for c in symbols_snapshot})

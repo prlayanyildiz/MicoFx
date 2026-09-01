@@ -1,8 +1,6 @@
 """A family must not search OPT axes its compute path never reads.
 
-t3_flip and ichimoku still do not call ``_regime()`` / ``_trend_gate()``.
-The gated flips (stoch/parabolic/aroon) do, via ``_flip_gates``. The
-allow-list is derived by walking ``p.field`` in the family function and
+The allow-list is derived by walking ``p.field`` in the family function and
 same-module callees. A hand-written table would drift. Docstring words
 such as "no ADX" must not count.
 """
@@ -24,18 +22,16 @@ from micofx.strategy import (
 )
 
 
-def test_t3_flip_does_not_read_adx_min():
-    """t3_flip's docstring names ADX; only ``p.adx_min`` would make it searchable."""
-    assert "adx_min" not in opt_fields_read("t3_flip")
-    assert "htf_factor" not in opt_fields_read("t3_flip")
-    assert "min_body_ratio" not in opt_fields_read("t3_flip")
+def test_ichimoku_does_not_read_adx_min():
+    """ichimoku ignores regime gates; only ``p.adx_min`` would make it searchable."""
+    assert "adx_min" not in opt_fields_read("ichimoku")
+    assert "htf_factor" not in opt_fields_read("ichimoku")
+    assert "min_body_ratio" not in opt_fields_read("ichimoku")
 
 
 def test_a_family_that_calls_regime_does_read_adx_min():
-    # Measured 28.08: burst / dual_t3 / mtf_pullback / the gated flips
-    # (stoch/parabolic/aroon via _flip_gates) all reach _regime.
     assert "adx_min" in opt_fields_read("burst")
-    assert "adx_min" in opt_fields_read("stoch_flip")
+    assert "adx_min" in opt_fields_read("channel_break")
 
 
 def test_no_family_grid_axis_is_unread():
@@ -62,9 +58,9 @@ def test_no_family_grid_axis_is_unread():
             assert not unread, f"{name} {label} still searches unread OPT axes: {unread}"
 
 
-def test_searchable_axes_drops_adx_min_for_t3_flip():
-    kept = searchable_axes("t3_flip", {"adx_min": [0, 15], "t3_length": [5, 8],
-                                       "sl_atr_mult": [1.0, 2.0]})
+def test_searchable_axes_drops_adx_min_for_ichimoku():
+    kept = searchable_axes("ichimoku", {"adx_min": [0, 15], "sl_atr_mult": [1.0, 2.0],
+                                        "trail_start_atr": [0.5, 1.0]})
     assert "adx_min" not in kept
-    assert "t3_length" in kept
     assert "sl_atr_mult" in kept
+    assert "trail_start_atr" in kept

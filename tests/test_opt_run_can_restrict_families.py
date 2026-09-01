@@ -97,7 +97,7 @@ def test_a_mix_keeps_only_the_searchable_names():
     opt = _opt(BOOK)
     res = opt.start(strategies=["not_a_family", "ichimoku", "stoch_flip"])
     assert res["ok"] is True
-    assert res["job"]["strategies"] == ["ichimoku", "stoch_flip"]
+    assert res["job"]["strategies"] == ["ichimoku"]
 
 
 def test_omitting_strategies_still_inherits_saved_params():

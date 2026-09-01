@@ -633,9 +633,9 @@ class Optimizer:
             or list(SEARCH_TIMEFRAMES)
         refine_rounds = int(params.get("refine_rounds", 2))
         shared = {k: v for k, v in (params.get("grid") or {}).items() if isinstance(v, list) and v}
-        families = [s for s in (fam_override or params.get("strategies") or ["stoch_flip"])
+        families = [s for s in (fam_override or params.get("strategies") or ["burst"])
                     if s in STRATEGIES] \
-            or ["stoch_flip"]
+            or ["burst"]
         family_grids = params.get("strategy_grids") or {}
         # One sweep per family: its own parameters on top of the shared risk
         # grid. There used to be a second axis here - an ``exit_styles`` block

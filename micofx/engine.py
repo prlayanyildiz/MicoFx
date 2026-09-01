@@ -38,12 +38,17 @@ from .supervisor import Supervisor
 _BAR_INTEGRITY_REFRESH = 900.0  # rare full copy_rates with no new bar
 _ENTRY_BLOCK_FLUSH_SEC = 45.0
 _ACCOUNT_TTL = 2.0
-_CAPACITY_TTL = 3.0
+# Panel polls /api/state every 3s. At 3.0 this TTL expired on every poll,
+# so each tick walked all symbols through order_calc_margin on the MT5 lock
+# the cycle already shares with the worker. 9s still refreshes lot/margin
+# three times between position changes; ticket sig invalidates immediately.
+_CAPACITY_TTL = 15.0
 _CASH_FLOW_TTL = 30.0
 _TERMINAL_FLAGS_TTL = 5.0
 _PANEL_STATE_KEYS = (
-    "symbol", "atr", "adx", "t3_rising", "htf", "k", "d", "signal",
-    "bars_ready", "note", "entry_block", "session", "spread_atr",
+    "symbol", "last_bar", "atr", "adx", "t3_rising", "htf", "k", "d", "signal",
+    "primary_signal", "bars_ready", "note", "entry_block", "session", "spread_atr",
+    "last_signal_at",
 )
 
 # A cooldown is meant to stop the same setup re-firing on the next bar or two,
@@ -414,6 +419,11 @@ class Engine:
         self._capacity_cache: dict[str, Any] = {}
         self._capacity_cache_at = 0.0
         self._capacity_pos_sig: tuple = ()
+        self._capacity_sys_sig: tuple = ()
+        # Warm-start capacity rows: a fresh boot has ATR=0 until min_bars land,
+        # which zeroed lot/risk in the panel for ~15s even though the prior
+        # cycle already had a good number. Display only — lot_for still waits.
+        self._last_good_atr: dict[str, float] = {}
         # ticket -> {"rungs": how many scale-out steps already banked,
         #            "orig": the volume the position opened with}. Fractions are
         #            of the *original* size, matching the backtest ladder.
@@ -4159,6 +4169,16 @@ class Engine:
         # had 7). Overlay from the positions this snapshot already holds.
         if self._search_is_busy() and self._capacity_cache:
             return self._overlay_capacity_opens(self._capacity_cache, positions)
+        sys_cfg = self.store.system
+        sys_sig = (
+            float(getattr(sys_cfg, "lot_multiplier", 0.0) or 0.0),
+            float(getattr(sys_cfg, "max_margin_usage_pct", 0.0) or 0.0),
+            float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0),
+            bool(getattr(sys_cfg, "size_by_edge", False)),
+        )
+        if sys_sig != self._capacity_sys_sig:
+            self._capacity_cache = {}
+            self._capacity_sys_sig = sys_sig
         if (self._capacity_cache
                 and sig == self._capacity_pos_sig
                 and now - self._capacity_cache_at < _CAPACITY_TTL):
@@ -4382,9 +4402,23 @@ class Engine:
 
     def _states_view(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
+        broker_now = float(self.client.broker_now() or 0.0)
         for name, st in list(self.states.items()):
             raw = st.as_dict()
-            out[name] = {k: raw[k] for k in _PANEL_STATE_KEYS if k in raw}
+            row = {k: raw[k] for k in _PANEL_STATE_KEYS if k in raw}
+            cfg = self.store.symbols.get(name)
+            tf = getattr(cfg, "timeframe", "") if cfg else ""
+            bar = int(getattr(st, "last_bar", 0) or 0)
+            if bar > 0:
+                row["last_bar_time"] = time.strftime(
+                    "%H:%M", time.gmtime(bar))
+            if broker_now > 0 and tf:
+                tf_sec = timeframe_seconds(tf)
+                if tf_sec > 0:
+                    secs_into = int(broker_now) % tf_sec
+                    row["minutes_to_bar"] = max(
+                        0, (tf_sec - secs_into + 59) // 60)
+            out[name] = row
         return out
 
     def _measured_clock_skew(self, server_now: float) -> int | None:
@@ -4506,12 +4540,28 @@ class Engine:
         if warn:
             LOG.emit(warn, "WARN")
 
+    def _panel_atrs(self) -> dict[str, float]:
+        """ATR map for capacity display; reuse last good value across warm-up."""
+        out: dict[str, float] = {}
+        for sym, st in list(self.states.items()):
+            try:
+                atr = float(st.atr or 0.0)
+            except (TypeError, ValueError):
+                atr = 0.0
+            if atr > 0:
+                self._last_good_atr[sym] = atr
+                out[sym] = atr
+            else:
+                cached = float(self._last_good_atr.get(sym) or 0.0)
+                if cached > 0:
+                    out[sym] = cached
+        return out
+
     def snapshot(self) -> dict[str, Any]:
         account = self._panel_account()
         positions = self._panel_positions()
         capacity = self._panel_capacity(
-            positions, account,
-            {s: st.atr for s, st in list(self.states.items())})
+            positions, account, self._panel_atrs())
         day = self.day_stats(max_age=15.0, fetch=False)
         equity = float(account.get("equity", 0.0))
         getter = getattr(self.client, "decision_now", None)

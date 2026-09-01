@@ -68,22 +68,6 @@ def test_an_unknown_family_produces_no_entries():
     assert not sig.sell.any()
 
 
-def test_it_does_not_silently_run_a_real_family():
-    """The old behaviour: the fallback made these two identical.
-
-    The fallback used to be ``_t3_stoch``; that family retired 27.08, so the
-    control is a live one. What is being pinned is unchanged - an unknown
-    name must not produce the signals of SOME family, whichever the first
-    entry in the table happens to be.
-    """
-    cache = _cache()
-    unknown = S.compute(cache, _params("belirsiz_aile"))
-    known = S.compute(cache, _params("stoch_flip"))
-
-    assert known.buy.any() or known.sell.any(), "control: stoch_flip does signal here"
-    assert not np.array_equal(unknown.buy, known.buy)
-
-
 def test_it_says_so_at_a_level_that_reaches_disk(monkeypatch):
     seen = []
     monkeypatch.setattr(S.LOG, "emit",

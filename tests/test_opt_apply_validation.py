@@ -167,7 +167,7 @@ def test_opt_apply_run_id_path_score_also_validated():
     class _StoreWithHistory(_FakeStore):
         def opt_history(self, symbol, limit):
             return [{"id": 9, "symbol": symbol, "params": {"sl_atr_mult": 1.5},
-                     "score": float("nan"), "timeframe": "M15", "strategy": "stoch_flip",
+                     "score": float("nan"), "timeframe": "M15", "strategy": "channel_break",
                      "validated": True}]
 
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
@@ -185,7 +185,7 @@ def test_opt_apply_accepts_valid_params():
     res = tc.post("/api/opt/apply", json={
         "symbol": "XAUUSD",
         "params": {"sl_atr_mult": 1.5, "trail_step_atr": 0.8, "trail_mode": "atr"},
-        "strategy": "stoch_flip", "timeframe": "M15",
+        "strategy": "channel_break", "timeframe": "M15",
     })
     assert res.status_code == 200
     assert len(optimizer.calls) == 1
@@ -230,7 +230,7 @@ def test_opt_apply_run_id_path_risk_bounds_also_enforced():
         def opt_history(self, symbol, limit):
             return [{"id": 11, "symbol": symbol,
                      "params": {"sl_atr_mult": 1.5, "trail_start_atr": 0.0},
-                     "score": 1.0, "timeframe": "M15", "strategy": "stoch_flip",
+                     "score": 1.0, "timeframe": "M15", "strategy": "channel_break",
                      "validated": True}]
 
     optimizer = _FakeOptimizer()
@@ -267,7 +267,7 @@ def test_opt_apply_run_id_path_also_validated():
     class _StoreWithHistory(_FakeStore):
         def opt_history(self, symbol, limit):
             return [{"id": 7, "symbol": symbol, "params": {"sl_atr_mult": "NaN"},
-                     "score": 1.0, "timeframe": "M15", "strategy": "stoch_flip",
+                     "score": 1.0, "timeframe": "M15", "strategy": "channel_break",
                      "validated": True}]
 
     # Swap in a store whose history carries a bad param.
@@ -289,7 +289,7 @@ def _history_client(validated, keep_reason="holdout negatif"):
     class _StoreWithHistory(_FakeStore):
         def opt_history(self, symbol, limit):
             return [{"id": 5, "symbol": symbol, "params": {"sl_atr_mult": 1.5},
-                     "score": 1.0, "timeframe": "M15", "strategy": "stoch_flip",
+                     "score": 1.0, "timeframe": "M15", "strategy": "channel_break",
                      "validated": validated, "keep_reason": keep_reason}]
 
     store = _StoreWithHistory({"XAUUSD": _cfg("XAUUSD", magic=990021)})
@@ -335,7 +335,7 @@ def test_a_params_apply_without_run_id_carries_no_warning():
     res = tc.post("/api/opt/apply", json={
         "symbol": "XAUUSD",
         "params": {"sl_atr_mult": 1.5, "trail_start_atr": 0.5, "trail_step_atr": 1.6},
-        "strategy": "stoch_flip", "timeframe": "M15",
+        "strategy": "channel_break", "timeframe": "M15",
     })
     assert res.status_code == 200
     assert "warning" not in res.json()

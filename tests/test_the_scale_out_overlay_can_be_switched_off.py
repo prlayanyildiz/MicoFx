@@ -87,13 +87,20 @@ def test_the_overlay_can_be_switched_off():
     assert store.symbols["US30"].partial_at_r == 0.0
 
 
-def test_the_overlay_cannot_be_switched_on():
-    """The 25.08 hazard: a position already past the rung sheds a third at once."""
+def test_the_overlay_cannot_be_switched_on_at_arbitrary_rungs():
+    """Only shipped rungs; 1.0 is not one of them."""
     tc, store = _client()
     res = tc.post("/api/symbols/US30", json={"partial_at_r": 1.0})
     assert res.status_code == 400, res.text
     assert "partial_at_r" in res.json()["detail"]
     assert store.symbols["US30"].partial_at_r == 1.5
+
+
+def test_the_overlay_can_be_switched_on_at_shipped_rungs():
+    tc, store = _client()
+    res = tc.post("/api/symbols/US30", json={"partial_at_r": 2.0})
+    assert res.status_code == 200, res.text
+    assert store.symbols["US30"].partial_at_r == 2.0
 
 
 def test_the_bulk_door_agrees_with_the_single_door():
@@ -108,8 +115,8 @@ def test_the_bulk_door_agrees_with_the_single_door():
 
     res = tc.post("/api/symbols-bulk",
                   json={"symbols": ["US30"], "patch": {"partial_at_r": 2.0}})
-    assert res.status_code == 400, res.text
-    assert store.symbols["US30"].partial_at_r == 0.0
+    assert res.status_code == 200, res.text
+    assert store.symbols["US30"].partial_at_r == 2.0
 
 
 def test_the_sibling_overlays_stay_shut():

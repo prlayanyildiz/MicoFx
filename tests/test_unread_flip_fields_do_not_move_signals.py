@@ -1,9 +1,7 @@
-"""Payload fields a remaining ungated flip never reads must not move its signals.
+"""Payload fields a family never reads must not move its signals.
 
-t3_flip and ichimoku still ignore leftover ``htf_factor`` / ``adx_min``.
-stoch/parabolic/aroon now read those gates; they live in
-``test_stoch_flip_respects_trend_and_adx``. AST ``opt_fields_read`` can
-miss a dynamic read; this bit-identical check cannot.
+ichimoku ignores leftover ``htf_factor`` / ``adx_min``. AST ``opt_fields_read``
+can miss a dynamic read; this bit-identical check cannot.
 """
 from __future__ import annotations
 
@@ -18,12 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx.models import SymbolConfig
 from micofx.strategy import IndicatorCache, Params, compute, opt_fields_read
 
-FLIP = (
-    "t3_flip",
-    "ichimoku",
-)
+FLIP = ("ichimoku",)
 
-# Values a family that *does* call ``_regime`` / ``_trend_gate`` would act on.
 POISON = {
     "htf_factor": 12,
     "htf_mode": "t3",
@@ -69,15 +63,9 @@ def test_poisoning_unread_fields_leaves_flip_signals_bit_identical(name):
 
 
 def test_a_family_that_reads_the_gates_does_move():
-    """If this also stayed identical the fixture would not be able to catch a leak.
-
-    The control has to be a family that actually reads POISON's axes.
-    dual_t3 calls ``_regime``; the remaining ungated flips (t3_flip,
-    ichimoku) do not.
-    """
     cache = _cache()
-    clean = compute(cache, _params("dual_t3"))
-    poisoned = compute(cache, _params("dual_t3", **POISON))
+    clean = compute(cache, _params("channel_break"))
+    poisoned = compute(cache, _params("channel_break", **POISON))
 
     assert clean.buy.any() or clean.sell.any()
     assert not np.array_equal(clean.buy, poisoned.buy) or not np.array_equal(

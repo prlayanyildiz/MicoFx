@@ -142,10 +142,12 @@ def test_unread_payload_keys_are_gone():
     assert "swing_overlay" not in get_opt
     assert "SWING_GRID_OVERLAY" not in get_opt
     view = inspect.getsource(Engine._states_view)
-    assert '"last_bar"' not in view
     assert '"t3_kind"' not in view
     assert '"signal_source"' not in view
     assert '"t3_kind"' in inspect.getsource(SymbolState.as_dict)
+    # last_bar + bar countdown are panel-visible (Canli tab); still no dead keys.
+    assert "last_bar_time" in view
+    assert "minutes_to_bar" in view
     assert "row.pop(\"tried\"" in (ROOT / "micofx" / "optimizer.py").read_text(
         encoding="utf-8")
 

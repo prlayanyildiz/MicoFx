@@ -11,7 +11,7 @@ healthy.
 walk_forward now screens candidates on the same ceiling, expressed as a
 share of R rather than a percentage.
 
-The fixture is a rising series with regular pullbacks, which stoch_flip can
+The fixture is a rising series with regular pullbacks, which channel_break can
 actually trade - a random walk yields no winning candidate at all, so the
 cost gate would never be reached and the assertions would pass vacuously.
 """
@@ -38,7 +38,7 @@ TF = 300
 # fixture's spread. What the file measures - that max_cost_share filters on
 # cost/R - is unchanged, and test_the_fixture_costs_what_these_thresholds_assume
 # below still guards the relationship.
-FIXTURE_COST_R = 0.124
+FIXTURE_COST_R = 0.123
 
 
 class _Bars:
@@ -65,12 +65,12 @@ def _bars(spread_points: float = 20.0):
 
 
 def _cfg():
-    return SymbolConfig(symbol="TEST", magic=1, timeframe="M5", strategy="t3_flip",
+    return SymbolConfig(symbol="TEST", magic=1, timeframe="M5", strategy="channel_break",
                         use_sessions=False)
 
 
 GRID = {"sl_atr_mult": [1.0, 2.0, 3.0], "trail_start_atr": [1.0, 2.0],
-        "trail_step_atr": [1.0, 2.0]}
+        "trail_step_atr": [1.0, 2.0], "chan_lookback": [20, 40, 60]}
 
 
 def _run(max_cost_share: float, spread_points: float = 20.0):

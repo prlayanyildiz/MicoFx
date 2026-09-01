@@ -62,26 +62,9 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Hands-off keys (system plumbing, cost toggles, AI knobs, strategy guts)
   return **400** on POST. Search `apply()` still writes `OPT_FIELDS`.
   Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
-- **8 families.** `channel_break` added 31.08: close beyond the prior
- `chan_lookback` bars' high/low, the one signal shape the book lacked
- (`burst` is range *expansion* and says so). Added on measurement, not
- taste - F40: favourable MFE/MAE asymmetry in the out-of-sample half of
- all ten captured windows, rising smoothly with lookback (1.034 at 10
- bars, 1.078 at 100), so the grid runs to 150. The old `donchian` was
- removed 12.08 for never being *searchable*, not for losing; this one is
- in `strategies`. It is **not** a book-wide upgrade - blind-selection
- holdout lands 14.2 R *behind* the incumbents overall. It wins on the
- four windows whose incumbent is `stoch_flip` (the edgeless family) and
- loses on every window whose incumbent already earns. Treat it as a
- `stoch_flip` replacement candidate, not a default. Selecting its
- lookback by net R is noisy; the asymmetry curve is what is structural.
- **Contested (F46):** on +10-bar forward-return t-stat it is the *worst*
- family book-wide (mean -0.40) and significantly negative on SpotBrent
- (-2.98). Two metrics disagree, so F40 is not settled - do not promote
- it over `stoch_flip` on F40 alone. Do not re-add `alpha_trend` or `mavilim`. `st_trend`
-  and `macd_flip` retired 26.08, `aroon_flip` 28.08 (never applied, not
-  live). `ichimoku` stays. Leftover DB names fail closed (no signal),
-  they do not crash.
+- **4 families.** `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` retired
+  01.09 (flip/zero-win class). Live set: `burst`, `mtf_pullback`, `ichimoku`,
+  `channel_break`. Leftover DB names fail closed.
 - **No restart while positions are open.** `POST /api/app/restart` and
   `/api/app/shutdown` are **409** while this process's magics still have
   tickets (MT5 down still allowed so a wedged bind can recover).

@@ -36,7 +36,7 @@ def test_retired_family_names_do_not_survive_opt_params_read(tmp_path, monkeypat
             "st_trend": {"sl_atr_mult": [1.0]},
             "burst": {"sl_atr_mult": [1.2]},
         },
-        "strategy_max_combos": {"st_trend": 999, "stoch_flip": 28800},
+        "strategy_max_combos": {"st_trend": 999, "burst": 12000},
         "strategy_timeframes": {"st_trend": ["M5"], "burst": ["M5"]},
     })
     got = s.opt_params()
@@ -50,13 +50,13 @@ def test_retired_family_names_do_not_survive_opt_params_read(tmp_path, monkeypat
     assert "st_trend" not in (got.get("strategy_grids") or {})
     assert got["strategy_grids"]["burst"]["sl_atr_mult"] == [1.2]
     assert "st_trend" not in (got.get("strategy_max_combos") or {})
-    assert got["strategy_max_combos"]["stoch_flip"] == 28800
+    assert got["strategy_max_combos"]["burst"] == 12000
     assert "st_trend" not in (got.get("strategy_timeframes") or {})
     # 27.08 lottery families: same drop as st_trend / macd_flip.
     s.set_setting("opt_params", {
         "strategies": ["burst", "t3_stoch", "wavetrend_flip", "micro_rev"],
         "strategy_grids": {"t3_stoch": {"sl_atr_mult": [1.0]}, "burst": {"sl_atr_mult": [1.2]}},
-        "strategy_max_combos": {"wavetrend_flip": 999, "stoch_flip": 28800},
+        "strategy_max_combos": {"wavetrend_flip": 999, "burst": 12000},
         "strategy_timeframes": {"micro_rev": ["M5"], "burst": ["M5"]},
     })
     got = s.opt_params()
@@ -73,14 +73,14 @@ def test_save_opt_params_does_not_persist_retired_family_names(tmp_path, monkeyp
     s.save_opt_params({
         "strategies": ["burst", "st_trend", "macd_flip"],
         "strategy_grids": {"st_trend": {"sl_atr_mult": [1.0]}},
-        "strategy_max_combos": {"st_trend": 999, "stoch_flip": 28800},
+        "strategy_max_combos": {"st_trend": 999, "burst": 12000},
     })
     raw = s.get_setting("opt_params") or {}
     assert "st_trend" not in (raw.get("strategies") or [])
     assert "macd_flip" not in (raw.get("strategies") or [])
     assert "st_trend" not in (raw.get("strategy_grids") or {})
     assert "st_trend" not in (raw.get("strategy_max_combos") or {})
-    assert raw["strategy_max_combos"]["stoch_flip"] == 28800
+    assert raw["strategy_max_combos"]["burst"] == 12000
     assert "burst" in raw["strategies"]
 
 

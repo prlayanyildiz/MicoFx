@@ -54,7 +54,7 @@ def test_never_applied_scan_waste_is_gone():
     # 8 since 31.08: channel_break, added on an out-of-sample measurement.
     # The old donchian went in the 12.08 cull for never being searchable,
     # which is not a verdict on the shape - this one is in ``strategies``.
-    assert len(STRATEGIES) == 8
+    assert len(STRATEGIES) == 4
 
 
 def test_the_three_lottery_families_are_gone():
@@ -87,11 +87,28 @@ def test_the_three_lottery_families_are_gone():
         assert field not in OPT_FIELDS, field
         assert field not in Params.__dataclass_fields__, field
     assert not hasattr(IndicatorCache, "wavetrend")
-    # Shared T3/stoch axes stay - t3_flip and dual_t3 still search them, and
-    # _common() reports %K/%D to the panel for every family.
+    # Shared T3/stoch axes stay - panel status and _common() still report them.
     for kept in ("t3_length", "t3_volume_factor", "stoch_length", "rsi_length"):
         assert kept in OPT_FIELDS, kept
     assert SCALP_STRATEGIES == frozenset({"burst"})
+
+
+def test_parabolic_flip_is_gone():
+    from micofx.models import STRATEGIES
+    from micofx.strategy import _FAMILIES
+
+    assert "parabolic_flip" not in STRATEGIES
+    assert "parabolic_flip" not in _FAMILIES
+
+
+def test_stoch_and_t3_families_are_gone():
+    """01.09: F39 null edge on stoch_flip; dual_t3/t3_flip weakest asymmetry."""
+    from micofx.models import STRATEGIES
+    from micofx.strategy import _FAMILIES
+
+    for name in ("stoch_flip", "dual_t3", "t3_flip"):
+        assert name not in STRATEGIES, name
+        assert name not in _FAMILIES, name
 
 
 def test_the_default_family_is_one_that_still_exists():

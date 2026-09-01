@@ -13,8 +13,10 @@ JS = (Path(__file__).resolve().parents[1] / "micofx" / "web" / "static"
 
 def test_refresh_skips_unchanged_panel_dom():
     body = JS.split("async function refresh()", 1)[1].split("async function ", 1)[0]
-    assert "viewPulse" in body
-    assert "lastViewPulse" in body
+    assert "topPulse" in body
+    assert "tablePulse" in body
+    assert "lastTopPulse" in body
+    assert "lastTablePulse" in body
     assert "renderTop()" in body
 
 
@@ -25,7 +27,7 @@ def test_opt_progress_is_part_of_the_view_pulse():
     Iptal stayed disabled and combo_done froze. Opt state is the thing that
     *is* moving.
     """
-    pulse = JS.split("function viewPulse", 1)[1].split("async function refresh", 1)[0]
+    pulse = JS.split("function tablePulse", 1)[1].split("async function refresh", 1)[0]
     assert "s.opt" in pulse
     assert "combo_done" in pulse
 

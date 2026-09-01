@@ -1,8 +1,8 @@
 """required_bars must not scale by an HTF dial the family never reads.
 
-searchable_axes already drops unread OPT axes. The fetch size did not: a
-dual_t3 row with htf_factor=12 (SpotBrent, 24.08) asked for 960 bars while
-the same stack with factor 1 needs 640. The extra 320 never enter compute.
+searchable_axes already drops unread OPT axes. The fetch size did not: leftover
+htf_factor on a family that never calls _trend_gate asked for extra bars the
+stack cannot use.
 """
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from micofx.strategy import Params, opt_fields_read, required_bars
 
 
 def test_unread_htf_factor_does_not_inflate_required_bars():
-    assert "htf_factor" not in opt_fields_read("dual_t3")
-    fat = Params(strategy="dual_t3", htf_mode="t3", htf_factor=12, t3_length=4)
-    thin = Params(strategy="dual_t3", htf_mode="t3", htf_factor=1, t3_length=4)
+    assert "htf_factor" not in opt_fields_read("ichimoku")
+    fat = Params(strategy="ichimoku", htf_mode="t3", htf_factor=12)
+    thin = Params(strategy="ichimoku", htf_mode="t3", htf_factor=1)
     assert required_bars(fat) == required_bars(thin)
 
 
@@ -28,8 +28,8 @@ def test_a_family_that_reads_htf_still_scales_required_bars():
     assert required_bars(wide) > required_bars(narrow)
 
 
-def test_stoch_flip_scales_required_bars_with_htf():
-    assert "htf_factor" in opt_fields_read("stoch_flip")
-    wide = Params(strategy="stoch_flip", htf_mode="t3", htf_factor=6)
-    narrow = Params(strategy="stoch_flip", htf_mode="t3", htf_factor=1)
+def test_channel_break_scales_required_bars_with_htf():
+    assert "htf_factor" in opt_fields_read("channel_break")
+    wide = Params(strategy="channel_break", htf_mode="t3", htf_factor=6)
+    narrow = Params(strategy="channel_break", htf_mode="t3", htf_factor=1)
     assert required_bars(wide) > required_bars(narrow)

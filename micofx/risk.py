@@ -759,7 +759,8 @@ class RiskManager:
             return 0.0
         if balance <= 0 or pct <= 0:
             return 0.0
-        return balance * pct / 100.0 * float(self.edge_scale(cfg) or 1.0)
+        mult = max(0.1, float(self.store.system.lot_multiplier or 1.0))
+        return balance * pct / 100.0 * float(self.edge_scale(cfg) or 1.0) * mult
 
     def fill_holdout_projection(self, rows: list[dict[str, Any]],
                                 balance: float) -> dict[str, Any]:
@@ -926,12 +927,20 @@ class RiskManager:
         concurrent_margin = sum(enabled_margins)
 
         # How far size could scale before either the risk budget or margin runs out.
-        # The risk budget is one full daily-loss allowance across all open trades.
-        risk_budget = equity * max(0.5, sys_cfg.daily_loss_pct) / 100.0
-        by_risk = risk_budget / concurrent_risk if concurrent_risk > 0 else 0.0
+        # When daily_loss_pct is off the risk leg is inert — do not invent a
+        # fake 0.5% floor (that made safe_multiplier read 0.04 at 3x lot).
         margin_room = equity * sys_cfg.max_margin_usage_pct / 100.0
         by_margin_all = margin_room / concurrent_margin if concurrent_margin > 0 else 0.0
-        headroom = max(0.0, min(by_risk, by_margin_all))
+        try:
+            loss_pct = float(sys_cfg.daily_loss_pct or 0.0)
+        except (TypeError, ValueError):
+            loss_pct = 0.0
+        if loss_pct > 0 and concurrent_risk > 0:
+            risk_budget = equity * loss_pct / 100.0
+            by_risk = risk_budget / concurrent_risk
+            headroom = max(0.0, min(by_risk, by_margin_all))
+        else:
+            headroom = max(0.0, by_margin_all)
 
         # Live remaining 1R across the open book. Leftover
         # max_concurrent_risk_pct is unread; this is for STOPSUZ and the

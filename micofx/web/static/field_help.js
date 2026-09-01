@@ -45,12 +45,12 @@ const FIELD_HELP = {
   "chan_lookback": "channel_break kanalinin uzunlugu (bar). Kapanis, KENDISINDEN ONCEKI bu kadar barin en yuksegini asarsa alis, en dusugunu kirarsa satis. Uzun pencere daha seyrek ama olculen asimetrisi daha yuksek.",
   "chan_buffer_atr": "Kirilimin seviyeyi en az bu kadar ATR gecmesi gerekir. 0 = kapali. Seviyenin kilinda gezinen kirilimlari eler.",
 
-  "t3_fast": "dual_t3 hizli T3 uzunlugu.",
-  "t3_slow_mult": "Yavas T3 = hizli x bu.",
-  "t3_fast_vf": "Hizli T3'un kendi hacim faktoru. 0 = yavas ile ayni.",
-  "st_period": "SuperTrend ATR periyodu. dual_t3 onay bantinin ATR uzunlugu.",
-  "st_mult": "SuperTrend bant genisligi x ATR. 0 dual_t3'te onayi kapatir.",
-  "t3_accel_min": "t3_flip: donus barinda T3 ivmesi ATR x bu kadar olmali. 0 = kapali.",
+  "t3_fast": "Emekli dual_t3 ekseni; canli dort aile okumaz. Eski satir kalintisinda gorunur.",
+  "t3_slow_mult": "Emekli T3 cifti: yavas = hizli x bu. Canli kitap okumaz.",
+  "t3_fast_vf": "Emekli T3 hizli hacim faktoru. Canli kitap okumaz.",
+  "st_period": "Emekli SuperTrend onay ekseni (dual_t3). Canli dort aile okumaz.",
+  "st_mult": "Emekli SuperTrend bant genisligi. 0 = kapali. Canli kitap okumaz.",
+  "t3_accel_min": "Emekli t3_flip ivme filtresi. Canli dort aile okumaz.",
 
   "adx_period": "ADX periyodu (rejim filtresi).",
   "adx_min": "ADX bunun altindaysa giris yok. 0 = kapali.",

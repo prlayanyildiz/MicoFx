@@ -10,7 +10,7 @@ silent in the dangerous direction: a name in STRATEGIES but not in
 returns ``_no_signal`` for an unknown name, but the lists must still
 match so the optimizer never offers a family the engine cannot run.
 
-They match today (eight each). This exists so they still match after the next
+They match today (five each). This exists so they still match after the next
 family is added - the same reason test_risk_block_keys_cover_every_reason.py
 exists for the other pair of hand-kept lists in this codebase.
 
@@ -25,10 +25,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import SCALP_STRATEGIES, STRATEGIES
-from micofx.strategy import _FAMILIES, Params, compute
+from micofx.strategy import _FAMILIES, IndicatorCache, Params, compute
 
 
 def test_every_name_a_config_may_carry_can_actually_be_dispatched():
@@ -59,21 +61,17 @@ def test_the_scalp_set_names_only_real_families():
         f"sayisi ve cikis izgarasi yanlis aileye uygulanir")
 
 
-def test_the_fallback_is_what_makes_this_matter():
-    """States the mechanism the guards above protect against, so a future
-    change to compute()'s fallback is noticed here rather than in production.
-
-    Not an endorsement of the fallback: mid-cycle it is safer than raising.
-    What must not happen is a name reaching it, which is what the checks above
-    make impossible.
-    """
-    sig = compute.__globals__["_FAMILIES"]
-    assert sig.get("bu_aile_yok") is None
-    fallback = compute.__globals__["_stoch_flip"]
-    assert sig.get("bu_aile_yok", fallback) is fallback
+def test_unknown_names_fail_closed_not_via_a_fallback_builder():
+    cache = IndicatorCache(
+        close=np.array([100.0, 101.0, 102.0]),
+        high=np.array([100.5, 101.5, 102.5]),
+        low=np.array([99.5, 100.5, 101.5]),
+    )
+    sig = compute(cache, Params(strategy="bu_aile_yok"))
+    assert not sig.buy.any() and not sig.sell.any()
 
 
 def test_a_known_family_routes_to_its_own_builder():
-    for name in ("parabolic_flip", "burst", "mtf_pullback"):
-        assert _FAMILIES[name] is not compute.__globals__["_stoch_flip"]
+    for name in ("channel_break", "burst", "mtf_pullback"):
+        assert _FAMILIES[name] is not None
         assert Params(strategy=name).strategy == name

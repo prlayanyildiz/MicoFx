@@ -28,7 +28,7 @@ def test_exec_and_live_tables_are_on_tani_not_panel():
 
 
 def test_refresh_still_fills_exec_and_live_on_tani():
-    assert 'activeTab === "tani"' in JS
+    assert 'tab === "tani"' in JS or 'activeTab === "tani"' in JS
     assert "renderExecution()" in JS
     assert "renderLive()" in JS
     assert 'id="exec-table"' in HTML

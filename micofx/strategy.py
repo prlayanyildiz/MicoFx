@@ -24,7 +24,7 @@ _UNSTAMPED_GATES = (
 # family were never in their apply stamp (28.08 Brent/NAS). dual_t3/burst
 # already read the same dials; an omitted stamp key there is the live row
 # (GER40 adx_min=15), not a leftover to wipe.
-_GATED_FLIPS = frozenset({"stoch_flip", "parabolic_flip"})
+_GATED_FLIPS = frozenset()
 
 # mtf_pullback: a shallower dip is index noise, not a pullback. Search used
 # to offer 0.3; NAS100 live (27.08) paid 22 SL of 34 closes on that value.
@@ -35,7 +35,7 @@ MIN_PULL_DEPTH_ATR = 0.5
 class Params:
     """Flat parameter view so the optimizer can vary values without a full config."""
 
-    strategy: str = "stoch_flip"
+    strategy: str = "ichimoku"
 
     # ---- higher-timeframe trend pullback ----
     pull_fast: int = 8
@@ -941,10 +941,6 @@ def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
 _FAMILIES = {
     "mtf_pullback": _mtf_pullback,
     "burst": _burst,
-    "dual_t3": _dual_t3,
-    "t3_flip": _t3_flip,
-    "stoch_flip": _stoch_flip,
-    "parabolic_flip": _parabolic_flip,
     "ichimoku": _ichimoku,
     "channel_break": _channel_break,
 }

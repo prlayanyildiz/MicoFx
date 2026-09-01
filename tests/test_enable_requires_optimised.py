@@ -82,7 +82,7 @@ def _cfg(symbol, *, optimised, enabled=False, magic=1):
     if optimised:
         c.opt_updated_at = time.time()
         c.opt_score = 12.3
-        c.strategy = "t3_flip"
+        c.strategy = "channel_break"
         c.timeframe = "M30"
     return c
 
@@ -103,11 +103,11 @@ def test_an_unsearched_symbol_cannot_be_switched_on():
 
 
 def test_the_message_names_what_it_is_actually_carrying():
-    """"stoch_flip/M5" is the default, and saying so is the whole point."""
+    """"ichimoku/M5" is the default, and saying so is the whole point."""
     tc, _ = _client([_cfg("EURUSD", optimised=False)])
     body = tc.post("/api/symbols/EURUSD", json={"enabled": True}).text
     assert "EURUSD" in body
-    assert "stoch_flip" in body and "M5" in body
+    assert "ichimoku" in body and "M5" in body
 
 
 def test_bulk_enable_is_refused_for_the_same_reason():

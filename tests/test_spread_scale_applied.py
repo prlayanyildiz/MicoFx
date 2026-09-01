@@ -32,7 +32,8 @@ from micofx.optimizer import Optimizer
 class _Bars:
     def __init__(self, n=3000, spread=30.0):
         rng = np.random.default_rng(11)
-        step = rng.normal(0.0, 0.35, n) + 0.02 * np.sin(np.arange(n) / 40.0)
+        t = np.arange(n)
+        step = rng.normal(0.0, 0.35, n) + 0.02 * np.sin(t / 40.0) + t * 0.001
         close = (100 + np.cumsum(step)).astype(np.float64)
         self.close = close
         open_ = np.empty_like(close)
@@ -51,32 +52,26 @@ class _Bars:
         return self.close.size
 
 
-GRID = {"t3_length": [4, 5, 6, 8, 10, 14],
-        "sl_atr_mult": [1.5, 2.0, 2.5, 3.0, 4.0]}
+GRID = {"chan_lookback": [20, 40, 60, 100],
+        "sl_atr_mult": [1.5, 2.0, 2.5, 3.0, 4.0],
+        "trail_start_atr": [1.0, 2.0],
+        "trail_step_atr": [1.0, 2.0]}
 
-# The family is named rather than inherited: this fixture relied on the
-# dataclass default, which moved on 27.08 when t3_stoch retired, and was
-# pointed at stoch_flip - which then gained a mandatory HTF-trend + ADX gate
-# on 30.08 and stopped producing a consistent winner on these synthetic bars
-# at any scale. Re-measured 31.08 across all seven live families: t3_flip is
-# the only one that still clears here, and it needs the wider grid above -
-# the two-by-three grid this file used to carry left it with too few
-# candidates to survive the consistency check. It is the only ungated family
-# left, which is why it is the one that survives a random-walk fixture.
-#
-# Charged cost now rises 0.0015 -> 0.0030 -> 0.0045 across scale 1/2/3 -
-# exactly linear, which is the property under test. The file measures how
-# spread_scale moves that cost, not which family wins.
+# channel_break on a trending random-walk fixture: charged cost rises linearly
+# with spread_scale — the property under test. The family name is explicit
+# because the dataclass default moved when flip families retired.
 def _run(**kw):
-    args = {"cfg": SymbolConfig(symbol="FRA40", magic=1, strategy="t3_flip"), "bars": _Bars(),
-                "point": 1e-4, "tf_seconds": 300, "grid": GRID, "min_trades": 10,
-                "segments": 4, "max_combos": 48, "min_positive_ratio": 0.0}
+    args = {"cfg": SymbolConfig(symbol="FRA40", magic=1, strategy="channel_break",
+                                use_sessions=False),
+            "bars": _Bars(), "point": 1e-4, "tf_seconds": 300, "grid": GRID,
+            "min_trades": 5, "segments": 4, "max_combos": 48,
+            "min_positive_ratio": 0.0, "refine_rounds": 0, "plateau_weight": 0.0}
     args.update(kw)
     return bt.walk_forward(**args)
 
 
 def _cost(result):
-    return float(((result.get("best") or {}).get("holdout") or {})
+    return float(((result.get("best") or {}).get("selection") or {})
                  .get("cost_per_trade_r") or 0.0)
 
 

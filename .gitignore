@@ -18,6 +18,9 @@ _probe_*.py
 .env
 .pytest_cache/
 .pytest_tmp/
+.mypy_cache/
+.ruff_cache/
+*.url
 .vscode/
 # Ajan koprüsü: brief'ler, cevaplar, olcum scriptleri ve oturum kancalari.
 # Bunlar CALISMA malzemesi, urun degil - depoyu klonlayan biri MicoFX'i

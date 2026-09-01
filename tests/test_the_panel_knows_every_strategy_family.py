@@ -12,7 +12,7 @@ absent from the map, so four live symbols displayed a raw key like
 ``wavetrend_flip`` where a name belonged. That was repaired by hand;
 nothing stopped it happening again.
 
-Both sides are currently correct - eight keys against eight families - so this adds
+Both sides are currently correct - four keys against four families - so this adds
 no behaviour. It exists because the failure is silent: a missing label
 degrades to the raw key rather than raising, and a stale one lies about
 a family that cannot run.

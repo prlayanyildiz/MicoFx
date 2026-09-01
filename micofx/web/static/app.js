@@ -70,7 +70,8 @@ let portfolioSig = "";
 let aiTableSig = "";
 let refreshBusy = false;
 let refreshQueued = false;
-let lastViewPulse = "";
+let lastTopPulse = "";
+let lastTablePulse = "";
 let lastViewTab = "";
 
 async function api(path, options = {}) {
@@ -186,7 +187,8 @@ function rowsInto(table, rows, emptyText, colspan) {
 
 function selectTab(name) {
   activeTab = name;
-  lastViewPulse = "";
+  lastTopPulse = "";
+  lastTablePulse = "";
   lastViewTab = "";
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === `page-${name}`));
@@ -890,6 +892,9 @@ function renderLive() {
     const block = st.entry_block
       ? `<span class="pill off">${esc(st.entry_block)}</span> `
       : "";
+    const barHint = st.minutes_to_bar != null
+      ? ` <span class="dim mono" title="Son kapali bar ${esc(st.last_bar_time || "-")}">${st.minutes_to_bar}dk</span>`
+      : (st.last_bar_time ? ` <span class="dim mono">${esc(st.last_bar_time)}</span>` : "");
     const tr = el("tr");
     tr.innerHTML = `
       <td class="sym">${esc(cfg.symbol)}</td>
@@ -911,7 +916,7 @@ function renderLive() {
       <td class="num ${st.spread_atr > cfg.max_spread_atr ? "neg" : "dim"}">${st.spread_atr ? num(st.spread_atr, 2) + "x" : "-"}</td>
       <td class="num ${capCls}" title="${esc(capTitle)}">${capCell}</td>
       <td>${cfg.enabled ? sig : '<span class="pill off">kapali</span>'}</td>
-      <td class="dim">${block}${esc(st.note || "")}</td>`;
+      <td class="dim">${block}${esc(st.note || "")}${barHint}</td>`;
     return tr;
   });
   rowsInto($("#live-table"), rows, "Sembol yok", 14);
@@ -922,13 +927,6 @@ function renderLive() {
 const STRATEGY_LABEL = {
   mtf_pullback: "Ust TF Trend Geri Cekilmesi",
   burst: "Momentum Patlamasi Devami",
-  dual_t3: "Ikili T3 + ATR (sade cekirdek)",
-  t3_flip: "Tek Tillson T3 Yon Donusu (tek cizgi)",
-  // The flip families were missing here entirely, so live symbols showed
-  // a raw key instead of a name. Must stay in step with models.STRATEGIES;
-  // the card header and live-table title read this map.
-  stoch_flip: "Stochastic Yon Donusu",
-  parabolic_flip: "Parabolic SAR Yon Donusu",
   ichimoku: "Ichimoku TK + bulut (gecikmeli, ileri bakissiz)",
   channel_break: "N barlik kanal kirilimi (Donchian)",
 };
@@ -2215,30 +2213,32 @@ async function pollLogs() {
 
 /* ----------------------------------------------------------------- poll */
 
-function viewPulse(s) {
+function topPulse(s) {
   const pos = (s.positions || []).map(
     (p) => `${p.ticket}:${p.sl}:${p.profit}:${p.volume}:${p.r_open}`).join("|");
-  const st = s.states || {};
-  const notes = Object.keys(st).sort().map(
-    (k) => `${k}:${st[k].signal || ""}:${st[k].note || ""}:${st[k].k}:${st[k].atr}`
-  ).join("|");
   const day = s.day || {};
   const acc = s.account || {};
   const bot = s.bot || {};
   const mt5 = s.mt5 || {};
+  return [bot.running, mt5.connected, acc.equity, acc.profit,
+          day.realised, day.halted, pos].join("\0");
+}
+
+function tablePulse(s) {
+  const st = s.states || {};
+  const notes = Object.keys(st).sort().map(
+    (k) => `${k}:${st[k].signal || ""}:${st[k].note || ""}:${st[k].entry_block || ""}:`
+      + `${st[k].minutes_to_bar ?? ""}`
+  ).join("|");
   const hv = s.harvest || {};
   const opt = s.opt || {};
-  // Deliberately NOT bot.last_cycle_at / cycle / last_cycle_ms: those change
-  // on every single cycle, so including one made this signature differ on
-  // every poll and the "nothing changed, skip the repaint" guard below never
-  // fired once. They are rendered by renderSystem into #sys-bot-note, which
-  // is not one of the views this guard covers. With them out, a quiet book
-  // (market closed, no open position) stops rebuilding the positions,
-  // capacity, harvest, day, execution and live tables every 3s.
-  return [bot.running, mt5.connected, acc.equity, acc.profit,
-          day.realised, day.halted, pos, notes, s.ai && s.ai.last_review,
+  const cap = s.capacity || {};
+  // Round dollars so a $0.03 equity tick does not rebuild seven tables.
+  const capR = Math.round(Number(cap.projected_costed_monthly || 0));
+  return [notes, s.ai && s.ai.last_review,
           hv.left_on_table_r, (hv.partial_on || []).join(","),
-          opt.state, opt.busy, opt.combo_done, opt.done, opt.current].join("\0");
+          opt.state, opt.busy, opt.combo_done, opt.done, opt.current,
+          capR, cap.lot_multiplier, cap.concurrent_risk_pct].join("\0");
 }
 
 async function refresh() {
@@ -2260,23 +2260,36 @@ async function refresh() {
       setTimeout(() => { pulse.className = "pulse"; }, 250);
     }
 
-    const vp = viewPulse(STATE);
-    const same = vp === lastViewPulse && activeTab === lastViewTab;
-    lastViewPulse = vp;
-    lastViewTab = activeTab;
-    if (!same) {
+    const tp = topPulse(STATE);
+    const tbl = tablePulse(STATE);
+    const tab = activeTab;
+    const topChanged = tp !== lastTopPulse || tab !== lastViewTab;
+    const tblChanged = tbl !== lastTablePulse || tab !== lastViewTab;
+    lastTopPulse = tp;
+    lastTablePulse = tbl;
+    lastViewTab = tab;
+
+    if (topChanged) {
       renderTop();
-      if (activeTab === "panel") {
-        renderCapacity(); renderPositions(); renderHarvest(); renderDayTable();
+      if (tab === "panel") {
+        renderPositions();
+        renderDayTable();
       }
-      if (activeTab === "panel" || activeTab === "tani") {
-        renderExecution(); renderLive();
+    }
+    if (tblChanged) {
+      if (tab === "panel") {
+        renderCapacity();
+        renderHarvest();
+      }
+      if (tab === "panel" || tab === "tani") {
+        renderExecution();
+        renderLive();
       }
       if (!cardsBuilt && SYMBOLS.length) buildSymbolCards();
-      if (activeTab === "semboller") updateSymbolCards();
-      if (activeTab === "opt") { renderOptJob(); syncOptPicker(); }
-      if (activeTab === "ai") renderAI();
-      if (activeTab === "sistem") renderSystem();
+      if (tab === "semboller") updateSymbolCards();
+      if (tab === "opt") { renderOptJob(); syncOptPicker(); }
+      if (tab === "ai") renderAI();
+      if (tab === "sistem") renderSystem();
     }
     if (activeTab === "log") pollLogs();
   } catch (e) {
@@ -2292,7 +2305,7 @@ async function refresh() {
       const hidden = typeof document !== "undefined" && document.hidden;
       // Do not drop to 1.5s while a search is running: that is when the
       // engine, workers, and this poll already share one MT5 lock.
-      const delay = hidden ? 6000 : 3000;
+      const delay = hidden ? 10000 : (STATE.opt && STATE.opt.busy ? 4000 : 5000);
       pollTimer = setTimeout(refresh, delay);
     }
   }
