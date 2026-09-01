@@ -18,7 +18,7 @@
     "min_free_margin": 50.0,
     "slippage_points": 20,
     "close_on_stop": false,
-    "mt5_terminal_path": "C:\\Program Files\\Pepperstone MetaTrader 5\\terminal64.exe",
+    "mt5_terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",
     "autostart_mt5": true,
     "autostart_mt5_wait_sec": 90,
     "backup_enabled": true,

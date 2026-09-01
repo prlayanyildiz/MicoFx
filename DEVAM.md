@@ -409,7 +409,7 @@ Süreç sınırını geçmesi gereken her şey **veri** olarak geçmeli
 | sanal ortam | `C:\MicoFX-venv` — **proje dışında, bilerek**. `python`/`pytest` PATH'te değil |
 | test/ruff | `C:\MicoFX-venv\Scripts\python.exe -m pytest -q` ve `... -m ruff check .` |
 | panel portu | 8900 (`MICO_PORT` ile değişir) |
-| MT5 | `C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe` |
+| MT5 | `C:\Program Files\MetaTrader 5\terminal64.exe` |
 | **botu başlat** | `C:\MicoFX-venv\Scripts\pythonw.exe run.py` (cwd = proje) |
 
 **Bot iki `pythonw.exe` süreci gösterir — bu normaldir.** Venv'in

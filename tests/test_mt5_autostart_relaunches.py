@@ -15,7 +15,7 @@ from micofx.mt5client import MT5Client
 
 def _client(*, autostart: bool) -> tuple[MT5Client, list]:
     launched: list[bool] = []
-    c = MT5Client(r"C:\Program Files\Pepperstone MetaTrader 5\terminal64.exe")
+    c = MT5Client(r"C:\Program Files\MetaTrader 5\terminal64.exe")
     c.autostart = autostart
     c.connected = False
     c._last_attempt = 0.0
