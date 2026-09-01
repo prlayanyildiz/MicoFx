@@ -150,6 +150,14 @@ def test_autostart_mt5_is_writable():
     assert store.system.autostart_mt5 is True
 
 
+def test_autostart_bot_is_writable():
+    """Reboot must not wait for a click. running is still not auto-resumed."""
+    tc, store, _ = _client()
+    res = tc.post("/api/system", json={"autostart_bot": True})
+    assert res.status_code == 200, res.text
+    assert store.system.autostart_bot is True
+
+
 def test_total_slot_cap_is_not_writable():
     tc, store, _ = _client()
     before = store.system.max_total_positions

@@ -4105,7 +4105,13 @@ class Engine:
         for minutes (148s measured 26.08); the cycle then looks stale and
         a blocking positions_get/account_info/terminal_info hangs the
         panel. Halt/flatten still wait inside ``_cycle``, not here.
+
+        Disconnected is the same hazard from the other side: ensure() is
+        inside initialize() (IPC timeout) and the panel used to fall
+        through because ``_cycle_book_is_fresh`` requires ``connected``.
         """
+        if not getattr(self.client, "connected", False):
+            return True
         if self._cycle_book_is_fresh():
             return True
         return bool(self._search_is_busy() and self.last_cycle_at)
@@ -4129,10 +4135,10 @@ class Engine:
         already held. Empty is not a valid cached book (no reading yet),
         so this *does* fall through on a missing snapshot.
         """
-        if self._panel_reuse_cycle_book() and self._account:
-            return self._account
+        if self._panel_reuse_cycle_book():
+            return self._account or {}
         if self._search_is_busy():
-            return self._account
+            return self._account or {}
         return self.refresh_account()
 
     def _panel_terminal_flags(self) -> dict[str, Any]:
@@ -4140,7 +4146,7 @@ class Engine:
         cache = getattr(self, "_terminal_flags_cache", None) or {}
         now = time.time()
         last = float(getattr(self, "_terminal_flags_at", 0.0) or 0.0)
-        if self._search_is_busy():
+        if not getattr(self.client, "connected", False) or self._search_is_busy():
             return cache
         if cache and now - last < _TERMINAL_FLAGS_TTL:
             return cache
@@ -4169,6 +4175,10 @@ class Engine:
         # had 7). Overlay from the positions this snapshot already holds.
         if self._search_is_busy() and self._capacity_cache:
             return self._overlay_capacity_opens(self._capacity_cache, positions)
+        if not getattr(self.client, "connected", False):
+            if self._capacity_cache:
+                return self._overlay_capacity_opens(self._capacity_cache, positions)
+            return {}
         sys_cfg = self.store.system
         sys_sig = (
             float(getattr(sys_cfg, "lot_multiplier", 0.0) or 0.0),

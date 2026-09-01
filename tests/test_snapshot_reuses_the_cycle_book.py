@@ -63,6 +63,34 @@ def test_a_never_cycled_engine_still_reads_the_broker():
     assert out[0]["group"] == "idx"
 
 
+def test_a_disconnected_engine_does_not_take_the_broker_lock():
+    """02.09 reboot: initialize() held the MT5 lock (and the GIL) for 60s.
+
+    /api/state used to fall through to positions_get because
+    _cycle_book_is_fresh is False when connected is False. The panel then
+    queued behind the reconnect and looked dead. Empty/stale last book is
+    the honest disconnected display; reconnect stays on the engine cycle.
+    """
+    eng = _eng()
+    eng.client.connected = False
+    eng.client._next = [{"ticket": 9, "magic": 1, "symbol": "GER40"}]
+    eng._positions = [{"ticket": 1, "magic": 1, "symbol": "GER40"}]
+    eng.client.positions = lambda: (_ for _ in ()).throw(
+        AssertionError("positions_get while disconnected"))
+    eng.client.account = lambda: (_ for _ in ()).throw(
+        AssertionError("account_info while disconnected"))
+    eng.client.terminal_flags = lambda: (_ for _ in ()).throw(
+        AssertionError("terminal_info while disconnected"))
+
+    out = Engine._panel_positions(eng)
+    acc = Engine._panel_account(eng)
+    flags = Engine._panel_terminal_flags(eng)
+
+    assert out[0]["ticket"] == 1
+    assert acc == {}
+    assert flags == {}
+
+
 def test_a_stale_cycle_book_is_fetched_again():
     eng = _eng()
     eng.client._next = [{"ticket": 9, "magic": 1, "symbol": "GER40"}]

@@ -173,9 +173,6 @@ class IndicatorCache:
         self._rank: dict[tuple, np.ndarray] = {}
         self._body: np.ndarray | None = None
         self._ema: dict[int, np.ndarray] = {}
-        self._supertrend: dict[tuple, np.ndarray] = {}
-        self._stoch_slow: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
-        self._psar: dict[tuple, np.ndarray] = {}
         self._lists: tuple | None = None
         self._atr_lists: dict[int, list] = {}
         self.volume = volume if volume is not None else np.ones(close.size)
@@ -245,31 +242,11 @@ class IndicatorCache:
             self._stoch[key] = ind.stoch_rsi(self.close, *key)
         return self._stoch[key]
 
-    def supertrend(self, period: int, multiplier: float) -> np.ndarray:
-        """SuperTrend direction (+1/-1); an ATR trailing band read as a trend."""
-        key = (int(period), round(float(multiplier), 4))
-        if key not in self._supertrend:
-            self._supertrend[key] = ind.supertrend(self.high, self.low, self.close,
-                                                   key[0], key[1])
-        return self._supertrend[key]
-
     def atr(self, period: int) -> np.ndarray:
         key = int(period)
         if key not in self._atr:
             self._atr[key] = ind.atr(self.high, self.low, self.close, key)
         return self._atr[key]
-
-    def stoch_slow(self, k_period: int, k_smooth: int, d_smooth: int) -> tuple[np.ndarray, np.ndarray]:
-        key = (int(k_period), int(k_smooth), int(d_smooth))
-        if key not in self._stoch_slow:
-            self._stoch_slow[key] = ind.stochastic_slow(self.high, self.low, self.close, *key)
-        return self._stoch_slow[key]
-
-    def psar(self, af_step: float, af_max: float) -> np.ndarray:
-        key = (round(float(af_step), 5), round(float(af_max), 5))
-        if key not in self._psar:
-            self._psar[key] = ind.parabolic_sar(self.high, self.low, *key)
-        return self._psar[key]
 
     # ---- python-list views ------------------------------------------------
     # The backtest's trade-management loop is inherently sequential and reads a
@@ -442,48 +419,10 @@ def _trend_gate(cache: IndicatorCache, p: Params) -> tuple[np.ndarray, np.ndarra
     return zero, zero, allow, allow
 
 
-def _t3_accel(line: np.ndarray, atr_series: np.ndarray) -> np.ndarray:
-    """Curvature of a T3 line: its second difference, normalised by ATR.
-
-    The first difference only says the line is going up; it says nothing about
-    whether the move is still building or already rolling over. Tillson's own
-    write-up treats T3 as a smooth enough curve to differentiate twice, which is
-    the point of the six-EMA cascade - a raw EMA's second difference is noise.
-    Dividing by ATR makes the number comparable across symbols and regimes, so
-    one threshold can be searched per symbol instead of a price-scale constant.
-    """
-    prev = np.roll(line, 1)
-    prev[0] = line[0]
-    prev2 = np.roll(line, 2)
-    prev2[:2] = line[0]
-    accel = np.zeros(line.size, dtype=np.float64)
-    live = atr_series > 1e-12
-    np.divide((line - prev) - (prev - prev2), atr_series, out=accel, where=live)
-    return accel
-
-
 def _resolve_conflicts(buy: np.ndarray, sell: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Drop bars where both sides fired; they cannot both be traded."""
     both = buy & sell
     return buy & ~both, sell & ~both
-
-
-def _flip_gates(cache: IndicatorCache, p: Params, buy: np.ndarray, sell: np.ndarray):
-    """HTF T3 bias + ADX floor/ceiling on a transition-only flip.
-
-    Slow-stochastic / SAR / Aroon crosses are cheap in ranges. Public
-    trend-following templates keep the cross and add a higher-timeframe
-    agreement and an ADX floor (burst already had both). 0 on those
-    dials leaves the ungated flip, so a search can keep today's behaviour.
-    """
-    size = cache.close.size
-    need_adx = p.adx_min > 0 or p.adx_max > 0
-    adx_series = cache.adx(p.adx_period) if need_adx else np.zeros(size, dtype=np.float64)
-    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
-    regime = _regime(p, adx_series, size)
-    buy = buy & allow_long & regime
-    sell = sell & allow_short & regime
-    return buy, sell, htf_up, htf_down, adx_series
 
 
 def _mtf_pullback(cache: IndicatorCache, p: Params) -> Signals:
@@ -596,250 +535,6 @@ def _burst(cache: IndicatorCache, p: Params) -> Signals:
     buy, sell = _resolve_conflicts(buy, sell)
     return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
                    htf_up=htf_up, htf_down=htf_down)
-
-
-def _dual_t3(cache: IndicatorCache, p: Params) -> Signals:
-    """Two Tillson T3 lines and nothing else. The cross IS the entry.
-
-    This is the deliberately minimal core of the system: a fast T3 crossing a
-    slow T3 decides direction and timing, and ATR decides everything about risk
-    (the hard stop and the trail - shared with every other family, none of it
-    reinvented here). There is no Stochastic RSI, no RSI, no higher-timeframe
-    agreement gate, no Bollinger/Keltner squeeze, no order-flow volume proxy,
-    no Fibonacci ratio, no body-ratio filter. Those series are not merely
-    disabled here, they are never computed for this family.
-
-    The ADX regime gate *is* read, and this docstring said otherwise until
-    20.08.2026. ``adx_min`` / ``adx_max`` reach ``_regime`` below and are live
-    on SpotBrent (15 and 25). A docstring that denies a live gate is worse than
-    no docstring: anyone reading it concludes the setting is inert and leaves
-    it out of their reasoning - which is how the same class of mistake has
-    already cost this project a stamp that described a config it never ran and
-    a backup that documented itself as working.
-
-    The one optional layer is SuperTrend (``st_mult > 0``), and it is admitted
-    only because it is itself an ATR construction - an ATR envelope around the
-    bar midpoint that ratchets toward price - so it says nothing the T3 + ATR
-    vocabulary cannot already say. When it is on, its direction must agree with
-    the cross; when it is off (the default, and the grid is allowed to keep it
-    off) the cross stands alone. Whether it earns its place is decided by the
-    walk-forward, not by taste.
-
-    Portfolio safety rails - session windows, spread sanity, cooldown, the daily
-    loss halt, the supervisor - all still apply at the engine level. They are
-    not indicators and stripping the signal does not strip them.
-    """
-    close = cache.close
-    size = close.size
-    # T3 and ATR only for the signal. k/d stay at zero - display slots for a
-    # Stochastic RSI this family does not compute. ADX is different and this
-    # comment used to lump it in with them: when adx_min or adx_max is set the
-    # series is real and gates entries, which is live on SpotBrent at 15/25.
-    t3 = cache.t3(p.t3_length, p.t3_volume_factor)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-
-    fast_len = max(2, int(p.t3_fast))
-    slow_len = max(fast_len + 1, int(round(fast_len * max(1.2, float(p.t3_slow_mult)))))
-    # A T3's volume factor is a curvature knob, not a second length, so the two
-    # lines may be damped differently. 0 inherits the slow line's factor.
-    fast_vf = float(p.t3_fast_vf) if float(p.t3_fast_vf) > 0 else float(p.t3_volume_factor)
-    fast = cache.t3(fast_len, fast_vf)
-    slow = cache.t3(slow_len, p.t3_volume_factor)
-
-    fast_prev, slow_prev = np.roll(fast, 1), np.roll(slow, 1)
-    fast_prev[0], slow_prev[0] = fast[0], slow[0]
-    buy = (fast_prev <= slow_prev) & (fast > slow)
-    sell = (fast_prev >= slow_prev) & (fast < slow)
-
-    if float(p.st_mult) > 0:
-        direction = cache.supertrend(p.st_period, p.st_mult)
-        buy = buy & (direction > 0)
-        sell = sell & (direction < 0)
-
-    # Same two optional gates every other family already has (adx_min/adx_max,
-    # atr_pct_min) - not new indicators, just the existing regime/volatility
-    # vocabulary made available to this family too, off by default.
-    need_adx = p.adx_min > 0 or p.adx_max > 0
-    adx_series = cache.adx(p.adx_period) if need_adx else zeros
-    if need_adx:
-        ok = _regime(p, adx_series, size)
-        buy &= ok
-        sell &= ok
-    if p.atr_pct_min > 0:
-        lively = cache.atr_rank(p.atr_period) >= p.atr_pct_min
-        buy &= lively
-        sell &= lively
-
-    # The cascaded EMAs are meaningless until the slow line has a full cascade
-    # behind it; the ATR the exits are sized from needs its own warmup too.
-    warmup = min(size, max(slow_len * 8, p.atr_period * 3,
-                           int(p.st_period) * 3 if float(p.st_mult) > 0 else 0,
-                           p.adx_period * 4 if need_adx else 0))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=zeros, d=zeros, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
-
-
-def _t3_flip(cache: IndicatorCache, p: Params) -> Signals:
-    """ONE Tillson T3 line. The line's own direction change IS the entry.
-
-    This is the smallest T3 rule that exists, and it is deliberately not the
-    other T3 family in this file: ``dual_t3`` needs a *second* line and trades
-    the crossover. Here there is no second line and no second indicator: the bar on
-    which the single line stops falling and starts rising is the long, the bar on
-    which it stops rising and starts falling is the short. That is exactly the
-    green/red line a T3 is drawn as on a chart, traded literally.
-
-    Why that is worth measuring on its own: a crossover of two smoothed lines is
-    a *lagged* read of the same turn this fires on - the fast line has to travel
-    far enough past the slow one before the cross registers, which on M5 costs
-    several bars of the move and, when the two lines are braided in a range,
-    manufactures crosses the underlying curve never justified. The direction
-    change is the earliest honest statement the curve can make about itself, and
-    T3's six-EMA cascade is smooth enough that a one-bar direction change is a
-    real turn rather than the tick noise a raw EMA's slope would report.
-
-    Nothing else is computed for this family - no Stochastic RSI, no ADX, no
-    higher-timeframe agreement, no order-flow proxy, no Bollinger/Keltner, no
-    body-ratio or ATR-percentile screen, no SuperTrend, no second T3. Those
-    series are not "disabled", they are never built.
-
-    The single optional layer is ``t3_accel_min`` (0 disables, and the grid is
-    free to keep it off), which answers the one weakness this signal genuinely
-    has: in a flat market the line still wiggles, and every wiggle is a flip. The
-    curvature of the line at the flip bar - its second difference, normalised by
-    ATR - is how hard that turn actually was. It is not a new indicator: it is
-    the same line's own derivative, so the family stays a single-T3 read, and it
-    can only veto a flip, never create one. Whether it is worth its place is
-    decided by the walk-forward per symbol, not assumed here.
-
-    Exits are the shared ATR mechanics: a hard ATR stop at entry and the ATR
-    trail as the only way out of a winner. That suits a direction-change entry
-    particularly well - it has no level to aim at; it either keeps curving or
-    it flips back.
-    """
-    close = cache.close
-    size = close.size
-    # T3 and ATR only. k/d/adx are UI display slots; this family leaves them at
-    # zero rather than computing series it never reads.
-    t3 = cache.t3(p.t3_length, p.t3_volume_factor)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
-
-    prev = np.roll(t3, 1)
-    prev[0] = t3[0]
-    rising = t3 > prev
-    falling = t3 < prev
-    # A flip is a *transition*: the previous bar has to have been going the other
-    # way, otherwise every bar of a trend would be an entry.
-    was_rising = np.roll(rising, 1)
-    was_falling = np.roll(falling, 1)
-    was_rising[0] = False
-    was_falling[0] = False
-    buy = rising & ~was_rising
-    sell = falling & ~was_falling
-
-    if p.t3_accel_min > 0:
-        # At a flip bar the second difference always has the trade's sign (the
-        # line changed direction), so this is a magnitude gate, not a direction
-        # one: it throws away the shallow turns a flat market is made of and
-        # keeps the ones with real curvature behind them.
-        accel = _t3_accel(t3, atr_series)
-        thr = float(p.t3_accel_min)
-        buy &= accel >= thr
-        sell &= accel <= -thr
-
-    # Six cascaded EMAs are meaningless until the cascade has filled, and the
-    # ATR the exits are sized from needs its own warmup.
-    warmup = min(size, max(p.t3_length * 8, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=t3, k=zeros, d=zeros, atr=atr_series, adx=zeros, buy=buy, sell=sell,
-                   htf_up=flat, htf_down=flat)
-
-
-def _stoch_flip(cache: IndicatorCache, p: Params) -> Signals:
-    """Slow Stochastic %K/%D crossover - a fourth, independent flip read.
-
-    Not the StochRSI read the panel shows: that runs a Stochastic calculation
-    *on RSI values* and `_common` computes it for every family as a display
-    series. This measures
-    where the close sits inside its own recent high/low range directly - RSI
-    is never computed - and the %K/%D crossover *is* the entry, with no T3
-    line involved at all. Genuinely different information: RSI reads
-    average gain/loss momentum, raw Stochastic reads range position.
-
-    Same discipline as the other flip families: the crossover bar is the
-    whole signal, transition only, no zone read (classic <20/>80
-    overbought/oversold is a different, separately justified strategy).
-    Optional ``htf_factor`` / ``adx_min`` (0 = off) are the public
-    trend-following pair: do not take a range-position cross against the
-    higher-timeframe T3 or in a dead ADX. Search has to earn them.
-    """
-    close = cache.close
-    size = close.size
-    k, d = cache.stoch_slow(p.stoch_k_period, p.stoch_k_smooth, p.stoch_d_smooth)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-
-    above = k > d
-    below = k < d
-    was_above = np.roll(above, 1)
-    was_below = np.roll(below, 1)
-    was_above[0] = False
-    was_below[0] = False
-    buy = above & ~was_above
-    sell = below & ~was_below
-    buy, sell, htf_up, htf_down, adx_series = _flip_gates(cache, p, buy, sell)
-
-    warmup = min(size, max(p.stoch_k_period * 4, (p.stoch_k_smooth + p.stoch_d_smooth) * 8,
-                           p.atr_period * 3, p.adx_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=zeros, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
-
-
-def _parabolic_flip(cache: IndicatorCache, p: Params) -> Signals:
-    """Parabolic SAR side flip - a fifth, independent flip read.
-
-    A trailing band whose own side change is the entry, like SuperTrend, but
-    a genuinely different band: SuperTrend's width is a fixed ATR multiple,
-    SAR's is its own accelerating step toward the last extreme - it tightens
-    the longer a trend runs, so it can flip on a shallower pullback late in a
-    move than an ATR band of fixed width would. Optional HTF/ADX gates match
-    stoch_flip (0 = off).
-    """
-    close = cache.close
-    size = close.size
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-
-    direction = cache.psar(p.psar_af_step, p.psar_af_max)
-    prev = np.roll(direction, 1)
-    prev[0] = direction[0]
-    buy = (direction > 0) & (prev <= 0)
-    sell = (direction < 0) & (prev >= 0)
-    buy, sell, htf_up, htf_down, adx_series = _flip_gates(cache, p, buy, sell)
-
-    warmup = min(size, max(30, p.atr_period * 3, p.adx_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=direction.astype(np.float64), k=zeros, d=zeros, atr=atr_series, adx=adx_series,
-                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down,
-                   t3_kind="direction")
 
 
 def _cross_over(fast: np.ndarray, slow: np.ndarray) -> np.ndarray:

@@ -449,12 +449,12 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
     "lot_multiplier",
     "max_concurrent_risk_pct",
     "backup_dir", "backup_dir_secondary", "backup_keep",
-    "mt5_terminal_path", "autostart_mt5",
+    "mt5_terminal_path", "autostart_mt5", "autostart_bot",
 })
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",
     "enabled", "group", "broker_symbol",
-    # Shipped rungs only (F44 scan). 0 = off. harvest stays hands-off (F41).
+    # 0 = off. POST accepts 0 only (F44). harvest stays hands-off (F41).
     "partial_at_r",
 })
 _OPERATOR_OPT_FIELDS = frozenset({
@@ -620,20 +620,14 @@ def _cost_axis_grid(body: dict[str, Any], current: dict[str, Any]) -> None:
     body["grid"] = {**stored, **grid} if isinstance(stored, dict) else dict(grid)
 
 
-_PARTIAL_AT_R_RUNGS = frozenset({1.5, 2.0, 3.0})
-
-
 def _validate_one_way_overlay(patch: dict[str, Any]) -> None:
-    """``partial_at_r``: 0 to disable, or a shipped rung to enable.
+    """``partial_at_r``: 0 to disable. No writer turns it back on.
 
-  F44 measured every rung as net-negative vs off, but the operator may still
-  want the one-shot third at a documented gate. Only 1.5 / 2.0 / 3.0 are
-  accepted on - arbitrary values and mid-trade "on" below the closed bar are
-  still refused. Turning off mid-trade is monotone safe.
-
-  ``harvest_at_r`` / ``harvest_step_atr`` / ``breakeven_at_r`` stay hands-off
-  (F41 harvest worse on every setting; BE is search-owned).
-  """
+    F44 measured every rung as net-negative vs off. 23:58 bulk write put
+    1.5 on every live symbol; POST now accepts 0 only. Turning off
+    mid-trade is monotone safe. ``harvest_at_r`` / ``harvest_step_atr`` /
+    ``breakeven_at_r`` stay hands-off.
+    """
     value = patch.get("partial_at_r")
     if value is None:
         return
@@ -643,12 +637,8 @@ def _validate_one_way_overlay(patch: dict[str, Any]) -> None:
         raise HTTPException(400, "partial_at_r sayi olmali") from exc
     if v == 0.0:
         return
-    for rung in _PARTIAL_AT_R_RUNGS:
-        if abs(v - rung) < 1e-9:
-            return
     raise HTTPException(
-        400, "partial_at_r yalnizca 0 (kapali) veya 1.5 / 2.0 / 3.0 "
-             "basamaklarindan biri olabilir")
+        400, "partial_at_r yalnizca 0 (kapali) yazilabilir")
 
 
 def _coerce_symbol_patch(raw: dict[str, Any]) -> dict[str, Any]:

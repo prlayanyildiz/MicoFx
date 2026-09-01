@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import subprocess
 import threading
 import time
@@ -122,6 +123,12 @@ DECISION_CLOCK_MAX_AGE_SEC = 600.0
 BROKER_CLOCK_MIN_WINDOW_SEC = 60.0
 BROKER_CLOCK_MIN_RATE = 0.5
 _RECONNECT_COOLDOWN = 5.0
+# MetaTrader5's default initialize timeout is 60s and 5.0.6090 ignores
+# timeout= (02.09 probe: 2000ms still waited 60s). Keep the kwarg so a
+# future package that honours it shortens the hang; the panel-safe gate
+# is _ipc_ready(), which skips initialize until the terminal log is
+# synchronized so this process never sits in the GIL wait at boot.
+_INITIALIZE_TIMEOUT_MS = 10_000
 
 
 def timeframe_const(name: str) -> int:
@@ -235,10 +242,17 @@ class MT5Client:
         # Last SL/TP-modify failure per ticket, so a stuck trail does not
         # reprint the same WARN every bar. Cleared on a successful modify.
         self._sltp_fail_seen: dict[int, str] = {}
+        self._data_dir: Path | None = None
+        self._ipc_not_ready_logged: float = 0.0
+        self._ipc_failed_start_key: str = ""
+        # run.py clears this until uvicorn is accepting so the first
+        # initialize() cannot freeze GET / for 60s. Tests leave it True.
+        self.allow_initialize: bool = True
 
     def set_terminal_path(self, path: str) -> None:
         """Pin this process to one terminal64.exe; empty means refuse auto-attach."""
         self.terminal_path = (path or "").strip()
+        self._data_dir = None
 
     @staticmethod
     def _exe_from_path(path: str) -> Path | None:
@@ -393,6 +407,124 @@ class MT5Client:
                 return True, str(o)
         return False, " | ".join(hints) or "(bos)"
 
+    def _data_dir_for_exe(self, exe: Path) -> Path | None:
+        """Roaming Terminal hash whose origin.txt points at this install."""
+        if self._data_dir is not None:
+            return self._data_dir
+        appdata = os.environ.get("APPDATA", "")
+        root = Path(appdata) / "MetaQuotes" / "Terminal" if appdata else None
+        if root is None or not root.is_dir():
+            return None
+        try:
+            want = exe.resolve()
+        except Exception:
+            want = exe
+        want_dir = want.parent
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            return None
+        for child in children:
+            if not child.is_dir() or child.name.lower() == "common":
+                continue
+            origin_file = child / "origin.txt"
+            if not origin_file.is_file():
+                continue
+            try:
+                raw = origin_file.read_bytes()
+            except OSError:
+                continue
+            for enc in ("utf-16", "utf-16-le", "utf-8-sig", "utf-8", "cp1254"):
+                try:
+                    text = raw.decode(enc).replace("\x00", "").strip()
+                except Exception:
+                    continue
+                if not text:
+                    continue
+                p = Path(text)
+                try:
+                    o = p.resolve() if p.exists() else p
+                except Exception:
+                    o = p
+                if o == want or o == want_dir or (o / "terminal64.exe") == want:
+                    self._data_dir = child
+                    return child
+        return None
+
+    @staticmethod
+    def _read_text_guess(path: Path) -> str:
+        raw = path.read_bytes()
+        if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+            return raw.decode("utf-16", errors="replace")
+        for enc in ("utf-8-sig", "utf-8", "cp1254"):
+            try:
+                return raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return raw.decode("utf-8", errors="replace")
+
+    def _ipc_ready(self, exe: Path) -> bool:
+        """True when initialize() is unlikely to sit on the 60s pipe wait.
+
+        MetaTrader5 5.0.6090 ignores ``timeout=`` and holds the GIL for the
+        whole IPC wait. A background thread still freezes uvicorn. The
+        terminal log is a file read: skip initialize until it says
+        synchronized, or until today's log has no fresh start line (the
+        process has been up since yesterday).
+        """
+        data_dir = self._data_dir_for_exe(exe)
+        if data_dir is None:
+            return False
+        log = data_dir / "logs" / time.strftime("%Y%m%d.log")
+        if not log.is_file():
+            return False
+        try:
+            text = self._read_text_guess(log)
+        except OSError:
+            return False
+        for line in reversed(text.splitlines()):
+            low = line.lower()
+            if "terminal synchronized" in low:
+                return True
+            if "started for" in low:
+                return False
+        # No boot line today: the terminal has been up since before this file.
+        return bool(text.strip())
+
+    def _boot_key(self, exe: Path) -> str:
+        """Identity of the current terminal process boot, from its log."""
+        data_dir = self._data_dir_for_exe(exe)
+        if data_dir is None:
+            return ""
+        log = data_dir / "logs" / time.strftime("%Y%m%d.log")
+        if not log.is_file():
+            return ""
+        try:
+            text = self._read_text_guess(log)
+        except OSError:
+            return ""
+        for line in reversed(text.splitlines()):
+            if "started for" in line.lower():
+                return line.strip()
+        return f"ready:{time.strftime('%Y%m%d')}" if text.strip() else ""
+
+    def _ipc_latched(self, exe: Path | None = None) -> bool:
+        """True after a pipe timeout on this terminal boot; no more initialize()."""
+        if not self._ipc_failed_start_key:
+            return False
+        if exe is None:
+            exe = self._exe_from_path(self.terminal_path) if self.terminal_path else None
+        if exe is None:
+            return bool(self._ipc_failed_start_key)
+        boot_key = self._boot_key(exe)
+        return bool(boot_key and boot_key == self._ipc_failed_start_key)
+
+    def clear_ipc_latch(self) -> None:
+        """Allow one more initialize() after operator MT5 restart or reconnect."""
+        self._ipc_failed_start_key = ""
+        self._ipc_not_ready_logged = 0.0
+        self._last_attempt = 0.0
+
     def connect(self) -> bool:
         """Attach only to the configured terminal path.
 
@@ -406,10 +538,7 @@ class MT5Client:
                 LOG.emit(self.last_error, "ERROR")
                 return False
 
-            try:
-                mt5.shutdown()
-            except Exception:
-                pass
+            was_connected = self.connected
             self.connected = False
 
             if not self.terminal_path:
@@ -427,14 +556,51 @@ class MT5Client:
                 return False
             path = str(exe)
 
-            try:
-                mt5.shutdown()
-            except Exception:
-                pass
-            if not mt5.initialize(path=path):
+            if not self.allow_initialize:
+                self.last_error = "MT5 IPC bekleniyor (panel once baglandi)"
+                self.connected = False
+                return False
+
+            if not self._ipc_ready(Path(path)):
+                self.last_error = (
+                    "MT5 IPC henuz hazir degil (terminal senkron degil) | "
+                    f"denenen: {path}"
+                )
+                self.connected = False
+                now = time.time()
+                if now - self._ipc_not_ready_logged >= 30.0:
+                    self._ipc_not_ready_logged = now
+                    LOG.emit(self.last_error, "WARN")
+                return False
+
+            boot_key = self._boot_key(Path(path))
+            if self._ipc_latched(Path(path)):
+                self.last_error = (
+                    "MT5 IPC bu oturumda yanit vermedi - terminali yeniden "
+                    f"baslatin veya Yeniden Baglan deyin | denenen: {path}"
+                )
+                self.connected = False
+                return False
+
+            if was_connected:
+                try:
+                    mt5.shutdown()
+                except Exception:
+                    pass
+            if not mt5.initialize(path=path, timeout=_INITIALIZE_TIMEOUT_MS):
                 code, text = mt5.last_error()
                 self.last_error = f"MT5 baglantisi kurulamadi ({code}: {text}) | denenen: {path}"
                 self.connected = False
+                if code in (-10003, -10004, -10005):
+                    self._ipc_failed_start_key = boot_key or f"ready:{time.strftime('%Y%m%d')}"
+                    if code == -10003:
+                        LOG.emit(
+                            "MT5 Python IPC yanit vermiyor (-10003). Terminalde "
+                            "Araclar > Secenekler > Uzman Danismanlar: "
+                            "'Dis Python API uzerinden otomatik islem' KAPALI "
+                            "olmali (common.ini [Experts] Api=1). Sonra "
+                            "terminal64 yeniden baslatin ve panelden Yeniden Baglan.",
+                            "ERROR")
                 LOG.emit(self.last_error, "ERROR")
                 return False
             return self._after_connect(expected=path)
@@ -471,6 +637,7 @@ class MT5Client:
 
         self.connected = True
         self.last_error = ""
+        self._ipc_failed_start_key = ""
         self._info_cache.clear()
         self._tick_cache.clear()
         self._margin_cache.clear()
@@ -515,6 +682,9 @@ class MT5Client:
                 LOG.emit(self.last_error, "ERROR")
             if time.time() - self._last_attempt < _RECONNECT_COOLDOWN:
                 return False
+            exe = self._exe_from_path(self.terminal_path) if self.terminal_path else None
+            if exe is not None and self._ipc_latched(exe):
+                return False
             self._last_attempt = time.time()
             # Boot Popen lives in run.py. Mid-cycle a dead terminal used to
             # leave initialize() failing forever (22.08). Launch the
@@ -525,7 +695,7 @@ class MT5Client:
 
     def reconnect(self) -> bool:
         with self._lock:
-            self._last_attempt = 0.0
+            self.clear_ipc_latch()
             return self.connect()
 
     def shutdown(self) -> None:

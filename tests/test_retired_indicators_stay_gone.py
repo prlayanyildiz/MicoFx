@@ -111,6 +111,23 @@ def test_stoch_and_t3_families_are_gone():
         assert name not in _FAMILIES, name
 
 
+def test_retired_family_functions_are_gone():
+    """01.09 families left _FAMILIES but the builders stayed in strategy.py.
+
+    Leftover DB names already fail closed. The functions themselves were
+    dead weight and a false 'still in the tree' read for anyone grepping
+    the module. Same shape as trix/wavetrend after those families left.
+    """
+    import micofx.strategy as strategy
+
+    for name in ("_dual_t3", "_t3_flip", "_stoch_flip", "_parabolic_flip",
+                 "_t3_accel", "_flip_gates"):
+        assert not hasattr(strategy, name), name
+    from micofx.strategy import IndicatorCache
+    for name in ("supertrend", "stoch_slow", "psar"):
+        assert not hasattr(IndicatorCache, name), name
+
+
 def test_the_default_family_is_one_that_still_exists():
     """``SymbolConfig``/``Params`` defaulted to ``t3_stoch``. A seed written
     against a retired name would be refused by the enum check the moment it

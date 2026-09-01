@@ -26,7 +26,7 @@ const FIELD_HELP = {
   "trail_start_atr": "Fiyat ATR x bu kadar kara gecmeden trail baslamaz.",
   "trail_step_atr": "Trail, fiyatin ATR x bu kadar gerisinde durur. Buyutmek daha genis trail, daha seyrek cikis.",
   "breakeven_at_r": "Acik kar bu kadar R olunca stop girise cekilir. 0 = kapali (sadece trail). 1.5, holdout'ta hicbir sembolu bozmayan esik; 0.5 GER40'ta -32 R verdi.",
-  "partial_at_r": "Kapali bar kari bu kadar R olunca bir kez parca kapanir. 0 = kapali. Lot ~biletin ucte biri, broker min/adimina yuvarlanir; kalan min lotun altina duserse hic kapatmaz. TP merdiveni degil.",
+  "partial_at_r": "Kapali. F44 her basamagi kapaliya gore kaybettirdi; POST yalnizca 0 kabul eder.",
   "harvest_at_r": "Kapali bar kari bu kadar R olunca trail mesafesi harvest_step_atr'ye iner (daha siki). 0 = kapali. 1.5 = BE ile ayni esik; 0.5 GER40'ta -32 R verdi. OPT ekseni degil.",
   "harvest_step_atr": "Hasat esigi gecince trail bu kadar ATR geride durur. 0 = kapali. 0.4, XAUUSD'nin holdout'ta %80 hasat eden adimi. trail_step_atr aranmaya devam eder; bu overlay onu ezmez, sadece odenmis islemde sikistirir.",
   "partial_close_frac": "Kagit agirligi (0 = canli ile ayni ucte bir). Arama ekseni degil.",
@@ -44,13 +44,6 @@ const FIELD_HELP = {
 
   "chan_lookback": "channel_break kanalinin uzunlugu (bar). Kapanis, KENDISINDEN ONCEKI bu kadar barin en yuksegini asarsa alis, en dusugunu kirarsa satis. Uzun pencere daha seyrek ama olculen asimetrisi daha yuksek.",
   "chan_buffer_atr": "Kirilimin seviyeyi en az bu kadar ATR gecmesi gerekir. 0 = kapali. Seviyenin kilinda gezinen kirilimlari eler.",
-
-  "t3_fast": "Emekli dual_t3 ekseni; canli dort aile okumaz. Eski satir kalintisinda gorunur.",
-  "t3_slow_mult": "Emekli T3 cifti: yavas = hizli x bu. Canli kitap okumaz.",
-  "t3_fast_vf": "Emekli T3 hizli hacim faktoru. Canli kitap okumaz.",
-  "st_period": "Emekli SuperTrend onay ekseni (dual_t3). Canli dort aile okumaz.",
-  "st_mult": "Emekli SuperTrend bant genisligi. 0 = kapali. Canli kitap okumaz.",
-  "t3_accel_min": "Emekli t3_flip ivme filtresi. Canli dort aile okumaz.",
 
   "adx_period": "ADX periyodu (rejim filtresi).",
   "adx_min": "ADX bunun altindaysa giris yok. 0 = kapali.",

@@ -165,6 +165,31 @@ def port_busy(host: str, port: int) -> bool:
             return True
 
 
+def _retry_autostart(engine) -> None:
+    """Keep offering start() until IPC is up or the boot window closes.
+
+    A one-shot Timer(3s, engine.start) fired while initialize() was still
+    the 60s pipe wait; start() failed and trading never opened (02.09).
+    Sleep between tries releases the GIL so the panel stays alive. Stop
+    once IPC latched on this terminal boot - hammering start() buys nothing.
+    """
+    deadline = time.time() + 90.0
+    client = engine.client
+    while time.time() < deadline:
+        if engine.running:
+            return
+        exe = getattr(client, "_exe_from_path", lambda _p: None)(
+            client.terminal_path) if client.terminal_path else None
+        if exe is not None and getattr(client, "_ipc_latched", lambda _e=None: False)(exe):
+            return
+        try:
+            if engine.start().get("ok"):
+                return
+        except Exception:
+            pass
+        time.sleep(2.0)
+
+
 def main() -> int:
     # Before Store() / Engine: those emit WARN/ERROR. Ad-hoc imports of
     # micofx must not reach this line, so they cannot append the live log.
@@ -200,21 +225,17 @@ def main() -> int:
         return startup_fail(f"[{APP_NAME}] {exc}")
     client = MT5Client(store.system.mt5_terminal_path)
     client.autostart = bool(store.system.autostart_mt5)
+    # initialize() holds the GIL for up to 60s (package ignores timeout=).
+    # Stay False until uvicorn is accepting so GET / is served first.
+    client.allow_initialize = False
 
     if store.system.autostart_mt5:
-        # Optional convenience: launch the *configured* terminal64.exe only if
-        # it is not already running. Never bypasses the strict path lock below
-        # - connect() still verifies the attached terminal matches the config.
-        if client.ensure_terminal_process():
-            wait_sec = max(0, int(store.system.autostart_mt5_wait_sec or 0))
-            deadline = time.time() + wait_sec
-            while time.time() < deadline:
-                if client.connect():
-                    break
-                time.sleep(2.0)
-
-    if not client.connected and not client.connect():
-        LOG.emit(client.last_error or "MT5 baglantisi kurulamadi", "ERROR")
+        # Launch only. initialize() holds the GIL for the IPC timeout, so a
+        # wait loop of connect() here delayed uvicorn.bind past
+        # start_silent.vbs's 2.5s browser open (02.09 reboot hang). The
+        # watch loop's ensure() attaches once the pipe is up; the path lock
+        # still runs there.
+        client.ensure_terminal_process()
 
     engine = Engine(store, client)
     optimizer = Optimizer(store, client)
@@ -248,17 +269,22 @@ def main() -> int:
             f"degiskenine yazin, yoksa her baslatmada degisir.", "ERROR")
     app = create_app(store, client, engine, optimizer, api_token=api_token)
 
-    # The observation loop always runs so the terminal shows live state; order
-    # placement always waits for an explicit start. ``system.running`` is
-    # still persisted (so the UI/API can show whether trading was on when the
-    # process went down), but it must never be read back to auto-resume
-    # trading itself - a crash or a killed process is exactly the moment a
-    # human should look before orders start going out again, not the moment
-    # to silently pick back up. Only the explicit, user-set ``autostart_bot``
-    # flag may start the bot on its own.
-    engine.start_watch()
-    if store.system.autostart_bot:
-        threading.Timer(3.0, engine.start).start()
+    # Bind first. start_watch is a thread start, not initialize(). Arm
+    # initialize a moment later so GET / has a live socket; a failed IPC
+    # is not retried on the same terminal boot (GIL loop).
+    def _arm_initialize() -> None:
+        client.allow_initialize = True
+
+    def _watch_after_bind() -> None:
+        engine.start_watch()
+        threading.Timer(2.0, _arm_initialize).start()
+        if store.system.autostart_bot:
+            threading.Thread(
+                target=_retry_autostart, args=(engine,),
+                daemon=True, name="micofx-autostart",
+            ).start()
+
+    app.router.add_event_handler("startup", _watch_after_bind)
 
     url = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
     print(f"[{APP_NAME} {__version__}] terminal: {url}")
