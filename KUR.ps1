@@ -350,49 +350,8 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     Say "  Git yok - surum gecmisi ve push kullanilamaz." "Yellow"
 }
 
-# --------------------------------------------------- [7] MQL5 takvim koprusu
-Step 7 "MT5 takvim koprusu kuruluyor..."
-# MT5'in ekonomik takvimi yalniz MQL5 dilinden okunabiliyor; Python paketinde
-# karsiligi yok. Betik terminalin kendi veri klasorunde derli durmali, yoksa
-# yeni bir makinede takvim olcumu sessizce calismaz. Derleme komut satirindan
-# olur; calistirmak grafik ister ve o adim operatorde kalir.
-$MqlSrc = Join-Path $Root "mql5"
-if (-not (Test-Path $MqlSrc)) {
-    Say "  mql5 klasoru yok - atlaniyor." "Yellow"
-} else {
-    $editor = Get-ChildItem "C:\Program Files\*MetaTrader 5\MetaEditor64.exe" -ErrorAction SilentlyContinue |
-              Select-Object -First 1 -ExpandProperty FullName
-    $termRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal"
-    $dataDirs = @()
-    if (Test-Path $termRoot) {
-        $dataDirs = Get-ChildItem $termRoot -Directory -ErrorAction SilentlyContinue |
-                    Where-Object { Test-Path (Join-Path $_.FullName "MQL5\Scripts") }
-    }
-    if (-not $editor) {
-        Say "  MetaEditor64.exe bulunamadi - takvim koprusu kurulmadi." "Yellow"
-    } elseif ($dataDirs.Count -eq 0) {
-        Say "  MT5 veri klasoru bulunamadi - takvim koprusu kurulmadi." "Yellow"
-    } else {
-        foreach ($d in $dataDirs) {
-            $dest = Join-Path $d.FullName "MQL5\Scripts"
-            foreach ($f in Get-ChildItem (Join-Path $MqlSrc "*.mq5") -ErrorAction SilentlyContinue) {
-                Copy-Item $f.FullName $dest -Force
-                $target = Join-Path $dest $f.Name
-                # /log writes next to the source; the exit code alone does not
-                # distinguish "compiled with warnings" from "did not compile".
-                Invoke-Native { & $editor "/compile:$target" "/log" } | Out-Null
-                $ex5 = [IO.Path]::ChangeExtension($target, ".ex5")
-                if (Test-Path $ex5) { Say ("  derlendi: " + $f.Name) "Green" }
-                else { Say ("  DERLENMEDI: " + $f.Name) "Yellow" }
-            }
-        }
-        Say "  Calistirmak icin MT5 > Gezgin > Komut Dosyalari > MicoTakvimDisaAktar (cift tik)." "Gray"
-        Say "  Araclar > Secenekler > Sunucu > 'Haberleri etkinlestir' acik olmali." "Gray"
-    }
-}
-
-# ---------------------------------------------------------- [8] Dogrulama
-Step 8 "Kurulum kendini dogruluyor (test suite)..."
+# ---------------------------------------------------------- [7] Dogrulama
+Step 7 "Kurulum kendini dogruluyor (test suite)..."
 # A green suite here is the difference between "the files copied" and "this
 # machine can actually run it". Cheap - about a minute - and it has already
 # caught a broken venv that every earlier step reported as fine.
