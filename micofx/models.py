@@ -117,36 +117,6 @@ class SymbolConfig:
     chan_lookback: int = 50          # channel is the N bars BEFORE the signal bar
     chan_buffer_atr: float = 0.0     # 0 = off; break must clear the level by this much ATR
 
-    # ---- fast/slow T3 pair (dual_t3) ----
-    # Named for t3_ribbon, the family these were added for; that family was
-    # removed on 12.08 and dual_t3 still reads all three. T3 is a low-lag
-    # curve, so a *pair* of them carries what a plain moving-average ribbon
-    # carries without the lag that makes an EMA ribbon useless intraday. Fast
-    # above slow is the bias; the cross is the trigger.
-    t3_fast: int = 5                 # fast T3 length
-    t3_slow_mult: float = 3.0        # slow T3 length = fast * this
-    # The two lines may run DIFFERENT volume factors. A T3's vf is its curvature
-    # knob, not just a smoothing length: the widely shared Tillson scalping
-    # template pairs a length-8 / vf-0.7 line with a length-5 / vf-0.618 line, so
-    # the fast curve is both shorter and differently damped. 0 inherits
-    # ``t3_volume_factor`` and reproduces a single-vf pair exactly.
-    t3_fast_vf: float = 0.0
-
-    # ---- T3 slope quality / curvature (t3_flip + dual_t3) ----
-    # Second difference of the T3 line in ATR units: "rising" is a one-bar fact,
-    # this asks whether the curve is still bending the trade's way instead of
-    # decelerating into exhaustion. 0 disables, so the search has to earn it.
-    t3_accel_min: float = 0.0
-
-    # ---- optional SuperTrend confirmation (dual_t3 only) ----
-    # SuperTrend is an ATR envelope around the bar midpoint whose bands ratchet
-    # toward price; its direction flips on a close through the active band. It
-    # is the only confirmation layer the minimal dual-T3 core is allowed,
-    # because it introduces no new indicator family - it is ATR, the same thing
-    # the exits are already made of. 0 multiplier disables it completely.
-    st_period: int = 10
-    st_mult: float = 0.0
-
     # ---- adaptive cost-regime gate (scalping families only) ----
     # Percentile ceiling on the bar's cost-to-range ratio inside its own trailing
     # distribution. Unlike ``max_spread_atr`` this is not a fixed number: it
@@ -156,15 +126,6 @@ class SymbolConfig:
 
     # ---- reversion regime ceiling (_regime) ----
     adx_max: float = 0.0             # reversion only; 0 disables
-
-    # ---- Slow Stochastic crossover (price range, not RSI) ----
-    stoch_k_period: int = 10
-    stoch_k_smooth: int = 6
-    stoch_d_smooth: int = 3
-
-    # ---- Parabolic SAR flip ----
-    psar_af_step: float = 0.02
-    psar_af_max: float = 0.2
 
     # lot_for: remaining-margin share across vacant names, clipped by
     # auto 1R (max stored risk_percent, 2%) × denetci. Leftover max_lot /
@@ -531,15 +492,11 @@ OPT_FIELDS = [
     "pull_fast", "pull_depth_atr", "pull_max_bars", "pull_break_confirm",
     "brst_lookback", "brst_range_z", "brst_close_pct",
     "chan_lookback", "chan_buffer_atr",
-    "t3_fast", "t3_slow_mult", "t3_fast_vf", "t3_accel_min",
-    "st_period", "st_mult",
     "cost_rank_max",
     # Spread is a far larger fraction of a scalp's target than of a swing's, so
     # the search is allowed to tune the spread/ATR entry gate per symbol rather
     # than leaving it disabled at the group default.
     "max_spread_atr",
-    "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
-    "psar_af_step", "psar_af_max",
 ]
 
 # Keys Optimizer.apply() may stage onto pending_primary_patch, and the only

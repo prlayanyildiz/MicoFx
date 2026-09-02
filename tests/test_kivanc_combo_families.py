@@ -56,7 +56,8 @@ def test_ichimoku_is_dispatched_and_never_both_sides():
     assert sig.buy.size == close.size
 
 
-def test_ichimoku_is_unread_flip_shaped():
+def test_ichimoku_reads_htf_and_regime_gates():
+    """02.09: ichimoku runs _trend_gate/_regime on purpose (not unread-flip)."""
     read = opt_fields_read("ichimoku")
     for field in ("htf_factor", "adx_min", "min_body_ratio", "atr_pct_min"):
-        assert field not in read
+        assert field in read

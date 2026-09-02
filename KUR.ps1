@@ -42,7 +42,7 @@ function Test-PythonRuns([string]$exe) {
     if (-not (Test-Path -LiteralPath $exe)) { return $false }
     return ((Invoke-Native { & $exe -c "import sys" }) -eq 0)
 }
-function Step([int]$n, [string]$msg) { Write-Host ""; Say "[$n/8] $msg" "Cyan" }
+function Step([int]$n, [string]$msg) { Write-Host ""; Say "[$n/7] $msg" "Cyan" }
 
 # Only used to tell the operator how to re-add a missing remote (ZIP installs
 # arrive without one). Kept next to the step counter so the two stay in view.

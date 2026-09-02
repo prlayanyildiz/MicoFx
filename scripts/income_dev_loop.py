@@ -38,6 +38,10 @@ _SPREAD_FILL_ALERT = 0.25
 _MARGIN_ALERT_FRAC = 0.75
 # auto spread-calibrate when dominant spread blocks exceed this (per enabled name)
 _SPREAD_AUTO_MIN = 10
+# Ignore lifetime entry_blocks if the counter epoch is older than this (F-D3).
+# Engine also rolls at ENTRY_BLOCKS_ROLL_SEC after restart; this guards the
+# income loop against pre-restart DB noise.
+_ENTRY_BLOCKS_MAX_AGE_SEC = 7 * 86400
 
 
 def _db() -> sqlite3.Connection:
@@ -143,6 +147,10 @@ def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def fetch_entry_blocks(headers: dict[str, str]) -> list[dict[str, Any]]:
     data = _api_get("/api/analysis/entry-blocks", headers)
     if not data:
+        return []
+    since = float(data.get("since") or 0.0)
+    if since > 0 and (time.time() - since) > _ENTRY_BLOCKS_MAX_AGE_SEC:
+        # Stale lifetime tallies poison spread/lot auto actions.
         return []
     return _aggregate_entry_blocks(list(data.get("rows") or []))
 

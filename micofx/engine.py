@@ -126,6 +126,10 @@ SPREAD_RATIO_MIN_SAMPLES = 400
 # - small next to ``execution_samples``, enough for a G7-style window after
 # a restart. Oldest dropped.
 ENTRY_EVENT_LIMIT = 2048
+# Lifetime counter blob age. Flush writes are debounced at 45s; this rolls the
+# *counts* (not the bounded events ring) so income_dev_loop / panel tallies
+# stop acting on weeks-old spread noise. Matches ~1 week of live rate.
+ENTRY_BLOCKS_ROLL_SEC = 7 * 86400
 # Closed-trade autopsies. Separate ring, own dirty flag: this is ~2000 rows
 # of per-trade fields, not the entry-block episode log that hit 9 GB/day when
 # it flushed on every poll. A close without a row here is the defect POST-1
@@ -626,7 +630,8 @@ class Engine:
                 self._entry_blocks[str(sym)] = kept
         self._entry_blocks_since = as_number(
             store.get_setting("entry_blocks_since"), 0.0, "entry_blocks_since") or time.time()
-        self._entry_blocks_dirty = False
+        # Aged lifetime tallies (F-D3) must not survive into this process.
+        self._entry_blocks_dirty = bool(self._roll_entry_blocks_if_stale())
         # In-memory only: the (bar, reason) episode each leg was last counted
         # for, so the per-poll retry loop cannot inflate the signal count. A
         # restart starting a fresh episode is the honest reading - the new
@@ -1523,6 +1528,20 @@ class Engine:
             self._entry_events = events[-limit:]
         self._entry_events_dirty = True
 
+    def _roll_entry_blocks_if_stale(self, now: float | None = None) -> bool:
+        """Wipe aged counters; keep the bounded events ring for autopsy windows."""
+        now = float(now if now is not None else time.time())
+        since = float(getattr(self, "_entry_blocks_since", 0.0) or 0.0)
+        window = float(getattr(self, "_entry_blocks_roll_sec", ENTRY_BLOCKS_ROLL_SEC)
+                       or ENTRY_BLOCKS_ROLL_SEC)
+        if since <= 0 or (now - since) < window:
+            return False
+        self._entry_blocks = {}
+        self._entry_last_bar = {}
+        self._entry_blocks_since = now
+        self._entry_blocks_dirty = True
+        return True
+
     def _flush_entry_blocks(self, force: bool = False) -> None:
         """Persist counters and, separately, the observation ring.
 
@@ -1532,6 +1551,7 @@ class Engine:
         rows; ``reset`` / symbol-delete pass ``force=True``.
         """
         try:
+            self._roll_entry_blocks_if_stale()
             blocks_dirty = getattr(self, "_entry_blocks_dirty", False)
             events_dirty = getattr(self, "_entry_events_dirty", False)
             if not blocks_dirty and not events_dirty:
@@ -1617,7 +1637,8 @@ class Engine:
         self._entry_blocks = {}
         self._entry_last_bar = {}
         self._entry_events = []
-        self._entry_blocks_since = time.time()
+        prev = float(getattr(self, "_entry_blocks_since", 0.0) or 0.0)
+        self._entry_blocks_since = max(time.time(), prev + 1e-6)
         self._entry_blocks_dirty = True
         self._entry_events_dirty = True
         self._flush_entry_blocks(force=True)
@@ -1771,9 +1792,17 @@ class Engine:
                            execution.DEAL_REASON_WEB):
             return "manuel"
         if reason_code == execution.DEAL_REASON_SL:
-            orig = float(book.get("original_sl") or 0)
-            cur_sl = float(book.get("sl") or 0)
-            if orig and cur_sl and abs(cur_sl - orig) > max(1e-9, abs(orig) * 1e-8):
+            try:
+                orig = float(book.get("original_sl") or 0)
+            except (TypeError, ValueError):
+                orig = 0.0
+            try:
+                cur_sl = float(book.get("sl") or 0)
+            except (TypeError, ValueError):
+                cur_sl = 0.0
+            # Poisoned (<=0) originals must not count as a moved trail
+            # (GER40/US30 02.09: original_sl=-49.5 labelled "trail").
+            if orig > 0 and cur_sl > 0 and abs(cur_sl - orig) > max(1e-9, abs(orig) * 1e-8):
                 return "trail"
             return "sl"
         if reason_code == execution.DEAL_REASON_TP:
@@ -3351,6 +3380,15 @@ class Engine:
                     bars = state.bars
                     last_bar = state.last_bar
                 ticket = pos["ticket"]
+                # Trail/BE/partial need a closed-bar pin. Signal ``last_bar``
+                # can stay 0 after restart/history gap while ``state.bars``
+                # already holds closed candles — use that pin so the ticket
+                # is not left on the broker hard stop alone.
+                if not last_bar and bars is not None:
+                    try:
+                        last_bar = int(getattr(bars, "last_closed_time", 0) or 0)
+                    except (TypeError, ValueError):
+                        last_bar = 0
                 if last_bar:
                     # Always re-run overlay_stop on this closed bar. The level
                     # does not move until last_bar does, so a same-target retry
@@ -3362,12 +3400,10 @@ class Engine:
                     # because the live quote, not the close, blocked placement.
                     self._update_stop(cfg, pos, atr, bars)
                 else:
-                    # last_bar 0 means _refresh_signals never got past its
-                    # min_bars floor for this symbol, so trail, breakeven,
-                    # partial and harvest all skip and the ticket runs on its
-                    # broker stop alone. Reachable after a restart into a
-                    # history gap. Silence made an unmanaged position look
-                    # like a managed one.
+                    # No closed-bar pin at all: trail/BE/partial/harvest skip
+                    # and the ticket runs on its broker stop alone. Reachable
+                    # after a restart into a history gap. Silence made an
+                    # unmanaged position look like a managed one.
                     self._note_unmanaged_ticket(cfg, pos)
                 self._maybe_scale_out(cfg, pos, atr, bars)
 
@@ -3893,6 +3929,10 @@ class Engine:
         if is_buy and target <= entry - original_risk:
             return settled
         if not is_buy and target >= entry + original_risk:
+            return settled
+        # Never clear a live stop by sending sl=0 (low-priced symbols /
+        # bad trail arithmetic). Index books are safe; the path is not.
+        if float(target) <= 0:
             return settled
 
         if self.client.modify_position(pos["ticket"], target, pos["tp"], cfg.symbol):

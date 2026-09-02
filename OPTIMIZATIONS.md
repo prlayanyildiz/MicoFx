@@ -13,7 +13,914 @@ restart-with-tickets, not duration.
 
 ---
 
-## 27.08 22:36 — Income-max + 00:06 search (armed)
+## 02.09 20:20 — RE FİLOSU KONSOLİDE (6 paralel salt-okur agent + DB doğrulama)
+
+Operatör "tam yetki, kod kod, acımadan" mandate'i. 6 agent: engine+execution,
+optimizer+backtest+holdout, risk+supervisor, strategy+indicators, mt5client+web+store,
+web/GitHub/X araştırma (TR+EN). Hiçbir şey PATCH edilmedi. Anahtar iddialar canlı DB ile
+doğrulandı (aşağıda "✓DB").
+
+### Nedensel zincir (özet)
+
+Sistemin **ölçülen edge'i NEGATİF (avgR −0.13R)** → Kelly = 0 → risk-optimal stake sıfır.
+Sebep: optimizer kırılgan config seçiyor (churn + degradasyon terimi yok + şanslı-dilim),
+bunlar iyimser bir backtest'te (trail şişmesi + fill-sırası + spread asimetrisi) iyi
+görünüp canlıda tutmuyor; üstüne GER40/M5 burst tüm tasarım gate'leri kapalı çalışıyor,
+trail hiç devreye girmiyor, ve slippage telemetrisi ölü olduğu için fark ölçülemiyor.
+Riskin büyüklüğü: sizing bug'ı işlem başına ~%2 yerine ~%10 risk aldırıyor, günlük
+zarar freni yok, olan fren de bozuk, supervisor reaktif katmanı bu frekansta atıl.
+
+---
+
+### A — OPTIMIZER: CHURN + KIRILGAN SEÇİM  (agent 2)
+
+* **A1 [CRITICAL]** `_beats_incumbent` (`optimizer.py:1754-1885`): rakip skoru cost-free
+  (`walk_forward` `charge_costs=False`), mevcut config skoru `_holdout_costed` →
+  `charged_holdout` ile HEP maliyetli (`holdout_cost.py:34-51`, charge_costs dalı yok).
+  Test `new_score >= old_score` → rakip yapısal avantajlı → **sürekli config değişimi.**
+  `reject_reason` yorumu (`optimizer.py:1621-1633`) canlı kaybedenleri churn'e bağlıyor.
+  **−41R/+90R'nin en olası mekanik sebebi.**
+* **A2 [CRITICAL]** costed-negatif apply reddi `if ... and charging:` arkasında
+  (`optimizer.py:2093-2105`); `charge_costs=False` → blok atlanıyor, `costed_negative`/
+  `holdout_costed` damgalanmıyor, "maliyetli holdout negatif" reddi hiç tetiklenmiyor.
+  Yorum: "UK100/SpotBrent/JPN225 faturaydı". (= F-D1) `reject_reason` maliyet gate'leri
+  + `walk_forward` `rejected_costly` de cost-free'de ölü.
+* **A3 [MED-HIGH]** Objektif = ham `score` = `net_r × sample_disc × dd_disc`
+  (`backtest.py:100-112`). Sortino/degradasyon YOK. `score_consistency` hesaplanıp
+  **kasıtlı dışlanıyor** (`backtest.py:117-119`). `holdout_retention` 0.25'te pass/fail
+  veto, gradyan değil — retention 0.30 olan, 0.95 olanı yener validation bir tık yüksekse.
+* **A4 [MED]** holdout 8-yollu seçim vetosu (4 aile × 2 TF/sembol), `as_dict(MIN_TEST_
+  TRADES=12)` ile tam ağırlıkta puanlanıyor (`backtest.py:1518`) → 12-işlemlik şanslı
+  dilim `_beats_incumbent`'ı tam güvenle sürüyor.
+* **A5 [MED]** apply gate'leri gevşek: `MIN_TEST_TRADES=12`, `MIN_OOS_PF=1.10`,
+  `min_positive_ratio` UI'dan 0.3'e inebilir. `_generalises` retention ≤ 0 → "ölçülemez"
+  → retention kontrolü **atlanıyor** (`optimizer.py:1583`).
+* **A6 [HIGH]** GER40 canlı TF (M5) otonom re-opt yolunda HİÇ aranmıyor — quarantine
+  re-opt `SEARCH_TIMEFRAMES` M15/M30'a sabitli (`supervisor.py:1052`, `optimizer.py:631`).
+  Aranınca incumbent replay M5 bar'ı bulamıyor (`allow_fetch=False`) → bayat apply
+  stamp'ine düşüyor (kod: "+224.2R loglanmış, aynı setup bu geceki pinlerde −89.1R").
+* **A7 [HIGH]** Grid kapsamı: burst ~8.1M grid @ %0.025, mtf_pullback ~1.5M @ %0.13,
+  channel_break ~%1, ichimoku ~%15. `coverage_budget` yeniden-dağıtımı ölü (3/4 grid
+  cap'i aşınca surplus=0). Seçim küçük-grid'li aileye (ichimoku) yanlı.
+* **A8 [HIGH]** burst (scalp) yalnız swing-genişliği stop'la aranabiliyor:
+  `uses_swing_exits` M15/M30'da hep true → `SWING_GRID_OVERLAY` `sl_atr_mult` floor 1.0;
+  shipped `grid.sl_atr_mult [0.5,0.7,0.9]` default aramada ölü. burst/M5 tight-stop
+  yapısal olarak ulaşılamaz.
+* **A9 [MED]** decaying-ama-quarantine-değil config hiç yeniden aranmıyor; `combo_seed=7`
+  sabit → retry aynı 2000 combo'yu çekiyor; `reopt_retry_cooldown_hours=1` → aynı çekim.
+
+### B — BACKTEST İYİMSERLİĞİ  (agent 2 + araştırma)
+
+* **B1 [MED]** `min_stop_series` ölçeksiz bar-spread kullanıyor (`backtest.py:388`);
+  canlı `min_stop_distance` tick-spread → `spread_scale ×` (CHFJPY'de 3.35'e kadar)
+  daha geniş. Backtest trail'i canlının izin verdiğinden ~scale× daha sıkı hug ediyor —
+  tek yönlü, tam da reward-ratio'nun dayandığı trailed-winner'ları şişiriyor.
+* **B2 [araştırma #3]** intrabar fill-sırası: aynı bar'da hard stop + trail-update
+  olunca backtest lehte sırayı varsayıyor. Stop-first (kötü durum) varsayılmalı.
+* **B3 [MED]** long/short spread asimetrisi: short non-stop çıkışlarda spread'i iki
+  uçtan ödüyor, eşdeğer long bir kez (`backtest.py:809-811,866-868`). Cost-free'de
+  latent ama repo tarihindeki her costed ölçüm + her `_beats_incumbent` replay yanlı.
+* **B4 [LOW-MED]** `lookback_days=0` → her TF farklı miktar geçmiş (90k M30 ≈ 5.1yıl,
+  M15 ≈ 2.6yıl, M5 ≈ 10ay). Kod yorumunun uyardığı cross-TF haksızlık geri gelmiş —
+  M30'a sistematik seçim avantajı.
+
+### C — SIZING: HESAP-KATİLİ  (agent 3) — ✓DB
+
+* **C1 [CRITICAL]** `lot_for` (`risk.py:459-565`, özellikle 542-554): `raw` (risk% tabanlı
+  lot) hesaplanıp **atılıyor**. `r_cap` (gerçek %2 tavan) broker min-lot'un altına
+  düşünce — ~$225 hesapta NORMAL durum — 543-551 `lot = min(auto, ceiling)` yapıyor;
+  `auto` = marj payı. 1:500 kaldıraç `lev>=100` dalını garantiliyor. Sonuç: her endeks
+  girişi marj payına (~5–30× hedeflenen risk) sizing yapıyor. Kanıt: R başına ~$20 /
+  ~$225 bakiye ≈ %10/işlem, %2 değil. −$827 kümülatif yalnız $300+ depozitle ayakta.
+* **C2 [CRITICAL]** Kümülatif günlük zararı hiçbir şey kapamıyor. ✓DB `daily_loss_pct=0`.
+  `DailyGuard.check` hep `Verdict(True)` dönüyor; `_halt(loss)`/`loss_halted`/
+  `daily_loss_flatten` tümü `daily_loss_pct>0` dalının altında → ulaşılamaz. Tek savunma:
+  supervisor `_drawdown_scale` (en kötü 0.6× kısma, DUR yok) + `max_concurrent_risk_pct=46`
+  (4 korelasyonlu endeks long).
+* **C3 [HIGH]** ✓DB `day_start_balance=100.51`, `day_cash_flow=300.0`, equity ~225 →
+  `pnl_pct = (225−300−100.51)/100.51 ≈ −%174.7`. `rollover` bugün yeniden çıpalamıyor.
+  Sonuç: `_drawdown_scale(−174%)` → `risk_scale_floor=0.6`; ✓DB `supervisor_state.
+  risk_scale = 0.6` — kitap **kazara** 0.6× damperde. VE: operatör `daily_loss_pct>0`
+  yaparsa `check()` sahte −%174'te **anında + kalıcı** halt + `daily_loss_flatten`
+  hepsini kapatır. **C2'nin çözümü C3 tarafından tuzaklanmış.** Düzeltme: `pnl_pct`
+  paydası `start_balance + max(0, cash_flow)`.
+* **C4 [HIGH]** PF quarantine breaker atıl: `judged_n` yalnız `opt_updated_at` sonrası
+  işlemleri sayıyor; configler 4.5s önce reopt → `judged_trades` 0-2 → PF arm ateşlenemez;
+  quarantine auto-reopt (`quarantine_hours=1`) counter'ı sıfır tutuyor. Streak arm
+  `quarantine_losses=11` → 319 işlemde beklenen en uzun kayıp serisi ≈ 11.3, yani "asla
+  zamanında değil"; ateşlenince C1 sizing'de 11 kayıp ≈ **%69 hesap DD**. `hard_block_
+  only_quarantine=true` → quarantine = "0.6×'te trade", hard block ölü kod.
+* **C5 [HIGH]** supervisor yalnız KESER, asla yükseltmez — "MAX INCOME"un throttle-up
+  mekanizması yok. Bad-hour kuralları atıl (saatte 80 işlem gerek, kitap sembol başına
+  10-30 toplam). Edge-decay atıl (100 işlem/sembol gerek). Decayed sembol hiç
+  re-optimise edilmiyor (yalnız quarantine kuyruğa alıyor).
+* **C6 [MED]** `edge_scale` (EDGE_MIN/MAX 0.6-2.2) canlı sizing'de atıl — `raw`'a
+  besleniyor, o da atılıyor (C1). "Tek en yüksek kaldıraçlı yapısal fix" = `raw`/`r_cap`'i
+  `min()`'de tut.
+* **C7 [stratejik]** Ölçülen expectancy NEGATİF (−0.13R). Kelly kesri negatif → optimal
+  stake sıfır. `max_concurrent_risk_pct=46` × 4 korelasyonlu endeks long ≈ 9× tek-isim
+  %2 ≈ holdout-Kelly'de sepet için ~2.4× tam Kelly. Ölçülen ~%10/işlem sizing'de: 5
+  kayıp → %41 DD, 8 → %57, 11 → %69. Gerçek %2'de: %10 / %15 / %20.
+* **C8 [INFO]** `remaining_position_risk` muhasebesi DOĞRU (trailed stop bütçe serbest
+  bırakıyor, double-count yok) — ✓ kontrol edildi.
+
+### D — ENGINE / EXECUTION  (agent 1 + agent 5)
+
+* **D1 [HIGH]** Shakeout SL tabanı: `lot_for`'a `sl_size` (1 ATR) geçiliyor ama stop
+  `sl_dist` (2 ATR floor, 3 kayıp/10) yerleştiriliyor → shakeout episodlarında gerçek
+  risk 2×. `engine.py:2605-2632` / `risk.py:537`. (agent 1 F2 + agent 3 F8 çapraz-doğrulama)
+* **D2 [HIGH]** Günlük-zarar breaker'ı `manage_positions`'ın saniyeler süren broker
+  çağrılarından ÖNCE alınan equity'ye bakıyor (`engine.py:863` → 916 → 918). Hızlı ters
+  harekette fren bir tam cycle geç.
+* **D3 [HIGH]** `execution_samples` (canlı slippage) yapısal aç: `record()` `filled<=0`da
+  erken dönüyor; buffer yalnız graceful shutdown'da flush; 7 satır/17 gün, biri düz str.
+  Backtest↔canlı farkını kapatacak tek sinyal birikemiyor → `ExecutionMonitor._verdict`
+  neredeyse hiç ateşlenmiyor.
+* **D4 [HIGH]** `entry_blocks` pencereleme/reset yok: `_entry_blocks_since` bir kez
+  seed (2026-08-16), yalnız `POST .../reset` sıfırlıyor (kimse çağırmıyor). `forget_
+  entry_blocks` yalnız sembol DELETE'te. → prune kararları bayat, çok-config kanıtına
+  dayanıyor. (= F-D3, derinleştirildi)
+* **D5 [MED]** `entry_blocks` bloklanıp-sonra-dolan sinyali çift sayıyor (episode kimliği
+  `(bar_key, reason)`; spread'de reddedilip acildi'de dolan → signals += 2). `fill_rate =
+  opened/total` → raporlanan %22-33 fill kısmen artefakt.
+* **D6 [MED]** `_broker_now` 48h içindeki herhangi bir ileri-tarihli tick ile zehirleniyor
+  → seans sınırları + trading günü kalıcı kayıyor; tek kurtarma = restart. (agent 1 F6
+  + agent 5 F6 çapraz-doğrulama)
+* **D7 [MED]** bar-kapanış refetch backoff yok (lag'li sembol her 2sn `copy_rates(400-
+  1680)` RLock altında); `_probe_book_ticks` koşulsuz N kilit round-trip/cycle.
+* **D8 [MED]** bir çözülemeyen fill sembolün TÜM girişlerini ~20 dk donduruyor
+  (`_orphan_scan`, `stale_after=900s` + `abandon_grace=300s`).
+* **D9 [MED latent]** off-127.0.0.1 bind'de: `GET /` herkese `Set-Cookie` token veriyor;
+  Origin check yalnız tarayıcı CSRF'i durduruyor → non-browser client `POST /api/bot/
+  panic` vb. çağırabilir. Default localhost'ta moot.
+* **D10 [LOW]** optimizer patch yolu (`_land_pending_primary`) `trail_mode`'u structure/
+  hybrid'e çevirebilir, HTTP'deki widen-only/hands-off guard'ı yok. ✓DB şu an hepsi `atr`.
+
+### E — STRATEGY / SİNYAL  (agent 4) — ✓DB
+
+* **E1 [HIGH]** GER40/M5 burst = −41R motoru: ✓DB `brst_close_pct=0.6` (7 burst satırının
+  en gevşeği; JPN225 0.9), `brst_lookback=40` (en uzun), `cost_rank_max=0` (ailenin M5'te
+  taşımak için TASARLANDIĞI gate), seans 03:15-22:59'a genişletilmiş. Ölçülen "kısa tutuş
+  = saf zarar" profiliyle birebir.
+* **E2 [HIGH]** Grid-içi chop kolu zaten var, no-op'a sabitli: ✓DB burst'te `brst_close_
+  pct`, `cost_rank_max`, `atr_pct_min`, `min_body_ratio` hepsi 0. Kardeş burst satırları
+  `cost_rank_max` 0.3-0.7, `atr_pct_min` 0.25 kullanıyor. Bunları yükseltmek pre-open
+  ince-range popülasyonunu trend-saati girişlerine dokunmadan filtreler.
+* **E3 [MED]** ✓DB GER40/JPN225/NAS100/US30 `opt_summary.params` YALNIZ sıfırlanmış
+  gate'leri damgalıyor `[adx_max, adx_min, atr_pct_min, cost_rank_max, max_spread_atr,
+  min_body_ratio]` — trade eden sinyal paramlarını (brst_lookback=40, brst_close_pct=0.6,
+  htf_factor=3, t3_length) DAMGALAMIYOR. Yani `validated=True` bir gates-disabled pass'i
+  belgeliyor; sinyal paramları önceki bir sweep'ten kalıntı, zeroed-gate'lerle birlikte
+  walk-forward doğrulanmamış. (Kontrast: SpotBrent/XAUUSD/BTCUSD tam set damgalı.)
+* **E4 [MED-HIGH]** `adx_max` ölü-ve-tehlikeli: reversion-ailesi kalıntısı, 4 ailenin
+  hiçbiri reversion değil; non-zero `adx_max` bunları yalnız güçlü trendden ÇIKARIR. Hâlâ
+  `OPT_FIELDS` + `Params.key()`'de → sweep gürültüde spurious non-zero `adx_max` kazanıp
+  `apply()` edebilir. `absent_regime_gates_to_zero` yalnız kazanan onu adlandırmayınca
+  sıfırlıyor. → 4 aile için `OPT_FIELDS`'ten çıkar.
+* **E5 [MED]** NAS100 mtf_pullback: ✓DB `htf_factor=3` → trend ayağı T3(4)/M90, whippy,
+  "HTF zaten trend'de olmalı" DEĞİL (`else 6` yalnız htf_factor≤1'de). `pull_depth_atr=0.3`
+  saklı ama 0.5 çalışıyor (MIN_PULL_DEPTH_ATR floor) → grid `{0.3,0.5}` özdeş sinyal
+  üretiyor, 0.3'ü kazanan kaydediyor (DB'nin gösterdiği). `required_bars` factor 6
+  varsayıyor, sinyal factor 3 koşuyor — sessiz tutarsızlık.
+* **E6 [LOW-MED]** burst `expansion` self-inclusive mean/sd (`sma`/`rolling_std` pencereleri
+  i'yi İÇERİYOR) → `brst_range_z` göründüğünden katı; her burst holdout distorted
+  istatistikte puanlanmış. `channel_break` etkilenmiyor (kanalı bir bar kaydırıyor).
+  Minör: `rolling_std` `out=np.zeros` allocate edip kullanmıyor (ölü satır).
+* **E7 [LOW]** ölü kod: `indicators.py` `supertrend`/`parabolic_sar`/`stochastic_slow`
+  (~130 LOC, sıfır çağıran), `stoch_extreme` (`Params.key()`'de bile yok), `_GATED_FLIPS
+  = frozenset()` → `unstamped_gates_to_zero` koşulsuz `{}` dönüyor (F-D4/C4 kalıntı).
+
+### F — ARAŞTIRMA: EN YÜKSEK-ROI DIŞ FİKİRLER  (agent 6, TR+EN)
+
+1. **ATR trail aktivasyonunu düzelt.** `trail_start` = veri: **0.3-0.5 × medyan kazanan
+   MFE_R** (bizde ≈ 0.2-0.4R), VEYA Chandelier (girişte arm, 2.5-3× ATR, aktivasyon
+   paramı yok). Validation reddi: **trail kazananların <%30'unda devreye giriyorsa** o
+   set fixed-stop sistemi, at. = C2-ölçümü ve en büyük gelir kaldıracı.
+2. **Deflated Sharpe + CPCV validation gate.** DSR ≤ 0 (trial sayısı = grid boyu) veya
+   PBO ≥ 0.5 → reddet. Mutlak OOS bar (PF>1.2, ≥30 işlem). Holdout(+)/canlı(−)'ye
+   doğrudan saldırı. Repo: `eslazarev/purged-cross-validation` (drop-in).
+3. **Intrabar fill-sırası düzelt** (stop-first kötü-durum) = B2.
+4. **Aile-spesifik entry gate.** pullback+ichimoku: ADX(14) **22-50 bandı** (+ opsiyonel
+   ER≥0.3). burst+channel_break: **ADX tabanı YOK** — yerine volatilite-sıkışması
+   (Bollinger-bandwidth son 100 barın alt ~%20'si / NR7) + ER≥0.3 tetik barında. ADX
+   breakout'a −0.12R expectancy verdi (test). = C3-ölçümü + E2/E4.
+5. **Per-sembol seans whitelist + rollover blackout.** burst/channel_break yalnız
+   cash-open + US-overlap (GER40 09:00-11:30 & 14:30-16:00 CET; NAS100/US30 NY ilk 60-90
+   dk). Asya öğle, Avrupa öncesi, Cuma PM, rollover ±2 bar blok.
+6. **TF seçimi R/gün + maliyet tavanı.** Sembol×aile için TF sweep; **R/gün = expectancy_R
+   × işlem/gün (maliyetli)** maks, `cost_R/gross < ~0.35` ve ≥30 validation işlem şartıyla,
+   eşitlikte yavaş TF'e. (Maliyet teorisi: maliyet arttıkça lookback uzat.)
+7. **Volatilite-hedefli sizing + katmanlı frenler.** Taban **%1 risk/işlem** (holdout
+   istatistiğinden ≤ 0.25× Kelly), ~%0.10/gün volatilite katkısına sized (4 endeks eşit
+   risk); **günlük fren %3-4**, **haftalık %8-10**; **3 ardışık kayıptan sonra yarıya**,
+   yeni equity zirvesinde tam; **min-lot riski hedefin >1.5×'i ise işlemi atla**.
+   Pyramiding YOK (zaten yok — veri onaylıyor: pyramiding max DD %49 vs VT %25).
+8. **Cadence + profit_drop supervisor.** Sembolü **N kapalı işlem sonrası** re-opt
+   (takvim cap yedek); param yalnız incumbent'ı OOS marjıyla yenerse değiştir ("bir kötü
+   hafta değil, istatistiksel kanıt"). Canlı: son-50-işlem **canlı/holdout expectancy
+   oranı < 0.5 → oto de-risk + zorla re-opt**; iki-katmanlı kill switch (equity DD% +
+   feed/broker sağlığı, >30sn kopukta watchdog flatten).
+
+Repo/thread: `EarnForex/ATR-Trailing-Stop`, `xMattC/mt5-strategy-factory` (staged IS/OOS
+WFO orkestrasyon), `eslazarev/purged-cross-validation` (DSR+PBO+CPCV), `polakowo/vectorbt`,
+`Concretum` (vol-target 0.10%/gün, VT DD %25 vs pyramiding %49), `@macrocephalopod` thread
+(vol-norm sinyal, 3-6ay ufuk, no-trade buffer band), NY Fed SR 917 (overnight drift).
+
+---
+
+### ÖNCELİK — P0..P4 (uygulama Cursor lane'inde; red = operatör)
+
+**P0 — GÜVENLİK (gelir çalışmasından ÖNCE, kanama hızını kes):**
+`C1` sizing bug (`raw`/`r_cap`'i `min()`'de tut = C6 fix) · `C3` pnl_pct payda tuzağı
+(bunu düzeltmeden C2'ye dokunma) · `C2` günlük zarar freni %3-4 (operatör red, C3 sonrası)
+· `D1`/`D2` shakeout sizing + bayat-equity fren · `C4` streak `quarantine_losses` ~5-6
+· `D6` `_broker_now` clamp `≈ 2×max_tf`.
+
+**P1 — KÖTÜ CONFIG SEÇİMİNİ DURDUR (−0.13R'yi costed-holdout'un +0.05..+0.19'una çek):**
+`A1` `_beats_incumbent` simetrik maliyet · `A2` costed-negatif reddi charge_costs'tan
+bağımsız çalıştır · `A3` objektif = `score × retention` veya DSR terimi · `A5` gate'leri
+sıkı (`MIN_TEST_TRADES` ~25, `MIN_OOS_PF` ~1.25) · `F2` DSR+PBO.
+
+**P2 — BACKTEST GERÇEKLİĞİ (ölçebilmek için):**
+`B1` scaled `min_stop_series` · `B2` stop-first · `B3` spread simetrisi · `D3` slippage
+telemetrisini onar (sonra apply gate'i buna kalibre) · `D4`/`D5` entry_blocks pencere+reset.
+
+**P3 — GELİR KALDIRAÇLARI (asıl optimizasyon):**
+`F1`/C2-ölçümü per-sembol `trail_start ≈ 0.5×medyan MFE` costed ara · `E2` burst
+`cost_rank_max`/`atr_pct_min` (kardeş-satır değerleri) · `F4`/C3-ölçümü `adx_min=15`
+YALNIZ NAS100+US30; burst'e volatilite-sıkışması gate · `F5` per-sembol seans whitelist ·
+`F6` TF-by-R/gün · `E5` NAS100 `htf_factor≥6` + config-honesty · `A6`/`A8` GER40 M5'i
+kendi TF'inde + tight-stop grid'iyle ara.
+
+**P4 — TEMİZLİK / OTONOMİ:**
+`E4` `adx_max` OPT_FIELDS'ten çıkar · `E7`+C4-kalıntı ölü kod · `A7` grid kapsam eşitle ·
+`C5`/`F8` supervisor eşiklerini bu frekansa ölçekle + decay→reopt trigger · `D7` perf ·
+`C4` orphan verdict temizliği + `supervisor_state.updated_at`.
+
+**Operatör (red/yellow):** `daily_loss_pct` değeri, `max_concurrent_risk_pct` düşüşü
+(46→~12-15), disabled sembol reopen (XAUUSD/GOLD-PERP/BTCUSD costed güçlü), `claude` /login,
+commit.
+
+### EK — trail_start / trail_step costed sweep (02.09 20:26, salt-okur) — P3 REVİZYON
+
+`c_trail_sweep.py`, npz + `charged_holdout`, canlı aile/exit, `trail_start_atr ∈
+{0.3..2.0}`. Kazanan-işlem medyan MFE_R (autopsy): GER40 1.74, JPN225 2.19, NAS100 1.45,
+US30 1.87 — yani **C2'deki 0.47-0.77 "medyan MFE" TÜM işlemlerin medyanıydı; KAZANANların
+medyanı 1.45-2.19R**, canlı `trail_start` 2.0-2.5R kabaca kazanan-medyanında.
+
+| snapshot | live TS_R | ts=0.3 | ts=0.5 | ts=0.8 | ts=1.2 | ts=2.0 |
+|----------|-----------|--------|--------|--------|--------|--------|
+| GER40_M30 | 2.00 | +17.5 | +17.5 | +17.2 | +13.4 | **+21.4** |
+| JPN225_M15 | 2.50 | +47.7 | +47.7 | +47.7 | +47.7 | **+48.3** |
+| NAS100_M30 | 2.50 | +39.2 | +39.2 | +39.2 | +38.8 | **+41.1** |
+| US30_M30 | 0.30 | +18.0 | +18.0 | +18.0 | +17.5 | +18.9 |
+
+**Ölçülen sonuç:** `trail_start` sıkılaştırmanın costed net_r'ye faydası YOK — düz veya
+hafif negatif (4 sembol). Trend-takip literatürünün "mekanik trail sıkılaştırma çoğu
+testte getiriyi düşürür" uyarısıyla tutarlı. → **P3'ten "per-sembol trail_start ≈ 0.5×
+medyan MFE" ADAYI DÜŞÜYOR** (araştırma agent'ının "en büyük kaldıraç" iddiası bizim
+veriyle desteklenmedi). C2'nin "trail fiilen ölü" çerçevesi fazla güçlüydü — düzeltildi.
+
+**AMA — US30 `trail_step` sweep (trail_start=0.4'te) GERÇEK bir kaldıraç:**
+
+| trail_step | net_r | exp | PF | n |
+|-----------|-------|-----|-----|---|
+| 0.4 | +6.1 | +0.016 | 1.03 | 384 |
+| 0.6 | +21.2 | +0.056 | 1.11 | 379 |
+| **0.8** | **+30.6** | **+0.082** | **1.16** | 371 |
+| 1.2 | +25.3 | +0.071 | 1.12 | 356 |
+| 1.6 | +30.0 | +0.087 | 1.14 | 344 |
+| 2.2 (canlı) | +18.0 | +0.054 | 1.08 | 334 |
+
+US30 canlı `trail_step=2.2` çok geniş; ~0.8'e sıkmak costed +12R, expectancy +0.054→+0.082,
+PF +0.08. Agent 1/5'in "US30 step çok geniş + %80 erken-stop-toparlama" bulgusuyla uyumlu.
+→ **P3 YENİ ADAY: per-sembol `trail_step` costed araması, US30 önce.** (JPN225/NAS100/GER40
+step sweep henüz yapılmadı — sıradaki.)
+
+Uyarı: tek pencere ~18k bar, son segment. Apply = optimizer full WFO/validation (Cursor).
+
+### EK2 — trail_step costed sweep, 4 canlı sembol (02.09 20:34, salt-okur)
+
+`c_trailstep_sweep.py`, canlı `trail_start` sabit, `trail_step_atr ∈ {0.25..2.5}`.
+
+| sembol / aile | canlı step | canlı net_r (exp / pf) | en iyi step | en iyi net_r (exp / pf) | Δ |
+|---------------|-----------|------------------------|-------------|-------------------------|---|
+| **US30** channel_break/M30 | 2.2 | +18.0 (.054 / 1.08) | **0.8** | **+33.6 (.090 / 1.18)** | **+15.6** |
+| **NAS100** mtf_pullback/M30 | 2.5 | +23.6 (.021 / 1.03) | **1.6** | **+39.6 (.032 / 1.05)** | **+16.0** |
+| GER40 burst/M30* | 1.8 | +22.1 (.051 / 1.08) | 1.6 | +26.4 (.060 / 1.09) | +4.3 (gürültü) |
+| JPN225 burst/M15 | 2.5 | +48.3 (.192 / 1.28) | 2.2 | +51.0 (.201 / 1.29) | +2.7 (gürültü) |
+
+**Ölçülen sonuç — aile-spesifik (adx_min ile aynı yönde):**
+- **channel_break (US30) + mtf_pullback (NAS100)** = "yerleşik yapıya giren" aileler →
+  DAHA DAR `trail_step` istiyor (US30 ~0.8, NAS100 ~1.6). US30 çift-doğrulandı (bu run +
+  ts=0.4'te step 0.8 = +30.6). NAS100 0.6-1.6 arası ~+38, 2.2'de düşüyor.
+- **burst (JPN225, GER40)** = range-expansion → GENİŞ `trail_step` istiyor (2.2+);
+  0.8 altına sıkmak yıkıcı (JPN225 step≤0.8'de negatife düşüyor). Canlı değerleri
+  zaten yakın-optimal.
+
+→ **P3 firm:** `trail_step` **US30 2.2→~0.8** (en güçlü) + **NAS100 2.5→~1.6**; JPN225/GER40
+burst step'i geniş bırak. adx_min=15 (NAS100+US30 only) ile aynı ikili: iki yapı-giriş
+ailesi daha sıkı yönetim istiyor, iki burst ailesi istemiyor.
+
+Uyarı: tek pencere ~18k bar son segment; GER40 M30 proxy (canlı M5); apply = full WFO.
+
+### EK3 — burst gates (cost_rank_max / atr_pct_min) costed sweep (02.09 20:40, salt-okur)
+
+| snapshot | canlı (cr=0,ap=0) | cr=0.3 | cr=0.5/0.7 | atr_pct etkisi |
+|----------|-------------------|--------|------------|----------------|
+| **GER40_M30**\* | +21.4 | **+35.5** (ap=0), +36.3 (ap=0.1) | +21.4 (inert) | ap↑ → net_r↓ |
+| GER40_M15\* | −33.6 | −22.8 | −33.6 | hep negatif |
+| **JPN225_M15** | +48.3 | **+19.8** (−28R!) | +48-49 (inert) | ap↑ → 48→39→10 |
+
+**Ölçülen sonuç — burst içinde bile aile değil SEMBOL-spesifik:**
+- **GER40 burst: `cost_rank_max=0.3`** → +14R costed (M30 proxy). Ailenin M5'te taşımak
+  için tasarlandığı gate; GER40'ın 03:15 pre-open saatlerindeki ince-range popülasyonunu
+  filtreliyor. (agent 4 E2 ile birebir.)
+- **JPN225 burst: gate DEĞİŞTİRME** — `cost_rank_max=0.3` yıkıcı (−28R), yüksek cr inert,
+  `atr_pct_min` her seviyede zarar. JPN225/M15 canlı zaten optimal.
+- `atr_pct_min` hiçbir burst'te yardımcı değil.
+
+### EK4 — F5: seans-saati autopsy kırılımı (02.09 20:40, salt-okur)
+
+Broker saati (naive epoch → gmtime, autopsy `fill_time` bucketing). n=319.
+
+**KİTAP GENELİ — negatif saatler:** `hr 16: −17.0R / n=28 / %18 win` (tek en kötü, büyük
+örnek, 4 sembolde de negatif) · hr 12 −8.7/n10/%0 · hr 13 −8.5/n12/%8 · hr 5 −6.1 · hr 6 −4.7.
+**Pozitif:** hr 10 +13.1/n21 · hr 14 +9.4/n17 · hr 23 +3.3/n11/%64 · hr 8 +2.8/%50.
+
+**Per-sembol (küçük örnek — WFO doğrulaması şart):**
+- **US30 (en güçlü):** neg hr 13/16/21/22 (+18) toplam ≈ −22R; poz hr 10/14/19/23 ≈ +27R.
+  Bu 4-5 saati bloklamak tarihsel −3.4R → **~+22R**.
+- **GER40:** tek iyi saat hr 10 (+5.8); pre-open (hr 3-8, genişletilmiş 03:15 seansı)
+  çoğu negatif/mikro; hr 11/16 −3R. → cash session'a (~hr 8-15) daralt + hr 16 blok.
+- **NAS100:** neg hr 1/4/6/16/17; poz hr 20-22. hr 16-17 bloğu −6.4R.
+- **JPN225:** neg hr 6/10/12-15/19; hr 12-15 bloğu −11.7R.
+
+**Sonuç:** en sağlam sinyal `hr 16` kitap-geneli (n=28, −17R). Konservatif hamle: **hr 16
+kitap-geneli blok + GER40 genişletilmiş 03:15 pre-open seansını kaldır** (F-E5). İnce
+per-sembol saat blacklist'i curve-fit riski — WFO'da doğrula. `hour_risk_scales` kancası
+zaten var (supervisor `bad_hour_min_trades=80` bu frekansta atıl — eşiği ~6-8'e çek).
+
+### EK5 — Disabled sembol reopen tablosu (02.09 20:52, salt-okur — OPERATÖR kararı)
+
+Costed holdout last-seg, canlı-benzeri config + en iyi adx_min/trail_step.
+
+| sembol | aile/TF | baseline costed | en iyi adx_min | en iyi trail_step |
+|--------|---------|-----------------|----------------|-------------------|
+| **GOLD-PERP** | mtf_pullback/M30 | **+114.3** (C1 run) | — | — |
+| **XAUUSD** | burst/M15 | **+83.4** | adx=20 → **+94.6** (exp .223) | step=1.0 → +83 |
+| **BTCUSD** | burst/M30 | +58.5 | adx=15 → +60.6 (exp .205) | step=2.2 |
+| SpotBrent | burst/M30 & M15 | −27 / −18 | −27 / −15 | −23 / −24 |
+
+**Sonuç:** GOLD-PERP + XAUUSD + BTCUSD costed holdout'ta **canlı 4'ün 3'ünden güçlü**
+(JPN225 +48, NAS100 +24, US30 +18, GER40/M30 +21). SpotBrent her TF costed zararda →
+disabled kalsın. Uyarı: tek pencere, iyimser; canlıda XAUUSD +9.8R / SpotBrent +2.1R
+(küçük örnek). Reopen = operatör red + full WFO.
+
+**GOLD-PERP mtf_pullback/M30 detay (20:56 sweep):** baseline (adx_min=0, sl 1.5,
+trail 3.0/1.8) = **+114.3R / exp +0.219 / PF 1.35 / n=523**. adx_min: **0 en iyi**
+(15→+104.7, 20→+61.9) — NAS100 mtf_pullback'in adx_min=15'ten faydalanmasının TERSİ.
+→ desen "aile-spesifik" değil **enstrüman+aile**: index yapı-giriş aileleri ADX
+floor'dan fayda görüyor, commodity (GOLD) görmüyor. trail_step 1.6 marjinal en iyi
+(+115.8), canlı 1.8 zaten yakın-optimal. **GOLD-PERP en temiz reopen adayı — param
+ayarı gerekmiyor.**
+
+---
+
+## 02.09 19:35 — Claude A–Z hard/stres tarama (ölçümlü, kod YOK)
+
+Operatör: API+web+her şey, çalışmayan/ölü/bayat/emekli/okunmayan ne varsa ayrı ayrı;
+kalkan özelliklerden kaynaklı sorunlar; kaçan işlem/kâr tek tek; ölçümlü, öneri değil;
+bulgular Cursor'a → doğrulayıp plan. Hiçbir şey PATCH edilmedi, arama/flatten/capture/
+restart/commit YOK. HEAD `4528b40`. Canlı: 1 ticket (NAS100), marj ~%6.5/70, kasa ~$225.
+
+**Çalışma ağacı temiz DEĞİL:** `micofx/engine.py` (+18) ve `micofx/execution.py` (+87)
+commit'siz WIP; untracked `scripts/start_bridge_daemon.ps1`, `tests/test_note_fill_
+repairs_poisoned_sl.py`. Bazı test kırıkları bu WIP'ten olabilir (F-T3).
+
+### 1) Optimization Summary
+
+* **Sağlık:** Test paketi KIRMIZI — `4528b40`'ta **19 fail / 2720 pass** (+2 ruff
+  import-sort, test dosyaları). Canlı defter **−41.2 R / −$826.60 / 319 işlem**
+  (14 gün), tüm zarar `sl` kovasında (**−156 R / 166 işlem / avgR −0.94**). Cost-free
+  mod, "her cost-free apply'ın yanında maliyetli sayı" güvenlik ağını (72cbfb1/fba488b)
+  sessizce kapatmış → hangi canlı config'in paper-pozitif/charged-negatif olduğu artık
+  ÖLÇÜLMÜYOR. Auto-pilot 17 günlük sıfırlanmamış `entry_blocks` sayacına göre karar
+  veriyor (bayat sinyal).
+* **En yüksek etkili 3:** (1) F-D1 cost-free apply maliyet damgasını + costed-negatif
+  reddini kapatıyor (3 test kırık, holdout↔canlı ayrımının kör noktası). (2) F-E1/E2
+  yapısal sinyal kaybı: `risk_sembol_limiti` 259 + `risk_ters_yon` 223 sinyal-barı
+  düşüyor; fill oranları US30 %22, GER40 %29. (3) F-D3 `entry_blocks` 2026-08-16'dan
+  beri sıfırlanmıyor → auto-pilot "SPREAD US30 kalibre" önerisini kapalı gate + bayat
+  sayaç üzerine tekrar tekrar üretiyor.
+* **Değişmezse en büyük risk:** kırmızı test paketi = regresyon dedektörü yok; canlı
+  −R üretmeye devam ederken (avgR −0.13) devre kesici kapalı (`daily_loss_pct=0`),
+  concurrent risk %46, marj tavanı %78, ~$225 hesap 1:500. Kayıp motoru frensiz.
+
+### 2) Findings (öncelik sırası)
+
+Her bulgu ölçümlü. "Removal Safety" ve "Reuse Scope" verildi. Kanıt = dosya:satır
+veya DB anahtarı + sayı.
+
+---
+
+**F-D1 — Cost-free mod maliyetli-holdout damgasını ve costed-negatif reddini kapatıyor**
+* Kategori: Reliability / Cost · Severity: **Critical**
+* Etki: holdout↔canlı ayrımı ölçülemez; `--force` ile charged-negatif config canlıya
+  geçebilir.
+* Kanıt: `micofx/optimizer.py` `apply()` (~2093–2105) — `charging = bool(store.system
+  and store.system.charge_costs)`; `if detail is not None and charging:` bloğu costed
+  eval + `costed_negative` reddini sarıyor. `charge_costs=False` (DB `system`) → blok
+  hiç çalışmıyor → `opt_summary` içinde `holdout_costed` YOK, `costed_negative` YOK.
+  Kırık testler: `tests/test_holdout_costed_on_apply.py::test_negative_costed_holdout_
+  is_not_applied` (ok=True bekleniyordu False), `::test_force_still_applies_a_costed_
+  negative_candidate` (KeyError `costed_negative`), `::test_positive_costed_holdout_is_
+  stamped_without_the_flag` (KeyError `holdout_costed`).
+* Neden verimsiz: 72cbfb1 "An applied configuration carries its own held-out record" +
+  fba488b "Put a charged number beside every cost-free apply" bilerek eklenmişti; bu
+  gate onu geri alıyor. Canlı 4 config'in kaçının paper-pozitif/charged-negatif olduğu
+  bilinmiyor — tam da −41R/+90R ayrımını yakalayacak enstrüman.
+* Removal Safety: **Needs Verification** (bilinçli mi, regresyon mu — Cursor).
+* Reuse Scope: service-wide (optimizer apply + auto-pilot raporu + supervisor).
+* Beklenen etki: charged sayı geri gelirse costed replay ile 4 aile yeniden sıralanır;
+  M5/M15 burst seçimlerinin ~0.1–0.3R/işlem fantom edge taşıdığı hipotezi ölçülebilir.
+
+**F-D2 — Fill/trade log satırında canlı maliyet payı boş**
+* Kategori: Reliability · Severity: Low
+* Kanıt: `tests/test_fill_trade_line_carries_magic.py::test_the_fill_trade_line_names_
+  magic_and_live_cost_share` → `cost_bit = ""`. Cost-free mod maliyet payını kaldırıyor.
+* Removal Safety: Likely Safe (kozmetik) ama F-D1 ile aynı kök: "maliyet görünürlüğü"
+  toptan kapanmış.
+* Reuse Scope: module (fill logging).
+
+**F-D3 — `entry_blocks` sayaçları 17 gündür sıfırlanmıyor; auto-pilot bayat sayıya göre karar veriyor**
+* Kategori: DB / Reliability · Severity: **High**
+* Kanıt: DB `entry_blocks_since = 1786905256` = 2026-08-16 18:34 (16.9 gün). Cost-free
+  mod ~5 commit önce (ced7e08). `entry_blocks.US30.primary.signals.spread = 144`,
+  `SpotBrent...spread = 213` — cost-free ÖNCESİ döneme ait. Enabled index isimlerde
+  `max_spread_atr = 0.0` (kapalı). Yine de `scripts/income_dev_loop.py:196-223`
+  `spread_recovery_actions` bu kümülatif sayaçtan "SPREAD US30/JPN225/GER40 kalibre"
+  üretiyor; `cursor/FOR_CLAUDE.md` her tick tekrarlıyor.
+* Neden verimsiz: karar sinyali gürültülü/geçmişe dönük; auto-pilot no-op iş öneriyor,
+  `apply_spread_calibration` charge_costs=false'ta zaten atlıyor → sonsuz "atlandı" logu.
+* Removal Safety: Needs Verification (sayaç rotasyonu / pencere ekle).
+* Reuse Scope: service-wide (auto-pilot + panel entry-blocks analizi).
+
+**F-D4 — 11 ölü `Params`/`SymbolConfig` alanı (emekli aileler)**
+* Kategori: Memory / Maintainability (Dead Code) · Severity: Low
+* Kanıt: `micofx/strategy.py:58-82` ve `micofx/models.py:120-141` — `t3_fast,
+  t3_slow_mult, t3_fast_vf, t3_accel_min, st_period, st_mult, stoch_k_period,
+  stoch_k_smooth, stoch_d_smooth, psar_af_step, psar_af_max`. `opt_fields_read`
+  çıktısı (ölçüldü) 4 canlı aile için bunların HİÇBİRİNİ içermiyor. Hâlâ:
+  `Params.key()` tuple'ında (satır 145-150) ve `required_bars()` içinde
+  (satır 770-773: `int(p.t3_fast*max(1.2,p.t3_slow_mult))*20`, stoch_k toplamı*8)
+  her çağrıda hesaplanıyor.
+* Neden verimsiz: her `required_bars` çağrısında ölü aritmetik; `key()` tuple'ı 11
+  eleman şişik (sinyal cache anahtarı). Bağlanmıyor ama drift riski + kafa karışıklığı.
+* Removal Safety: **Likely Safe** — canlı aile okumuyor; `from_config` geriye-uyumlu
+  kalır (eksik alan default). DB payload'da varsa yok sayılır.
+* Reuse Scope: module (strategy + models + optimizer grid).
+
+**F-D5 — DB `opt_params.strategies` emekli aileleri listeliyor + `strategy_max_combos.stoch_flip`**
+* Kategori: DB / Cost (Dead Config) · Severity: Medium
+* Kanıt: DB `opt_params.strategies = ['mtf_pullback','burst','dual_t3','t3_flip',
+  'stoch_flip','parabolic_flip','ichimoku','channel_break']` — 4'ü emekli (AGENTS.md
+  "Leftover DB names fail closed"). DB `opt = {"strategy_max_combos":{"stoch_flip":
+  28800}}`. `micofx/optimizer.py:109-110,168` stoch_flip'i özel-kılıf yapıyor;
+  ledger'a göre `stoch_flip` 28800 ≈ 3.08 M kombinasyon duvarının 2.07 M'i.
+* Neden verimsiz: arama bütçesinin büyük kısmı ÖLÜ bir aileyi modellemeye ayrılmış
+  (fail-closed olsa da combo tahsisi/coverage_budget hesabı onu sayıyor).
+* Removal Safety: Needs Verification (DB yazımı panel/HTTP 400 — `opt_params` write
+  yolu AGENTS.md'e göre kısıtlı; nasıl temizleneceği Cursor).
+* Reuse Scope: service-wide (optimizer combo budget).
+
+**F-D6 — `ichimoku` artık htf_factor/adx okuyor ama 4 test eski "unread" halini iddia ediyor**
+* Kategori: Maintainability / Reliability · Severity: Medium
+* Kanıt: `_ichimoku` → `_trend_gate(cache,p)` (`strategy.py:579`) `p.htf_factor`/
+  `p.htf_mode` okuyor; `_common`→`_regime` adx okuyor. `opt_fields_read('ichimoku')`
+  (ölçüldü) = `{adx_max, adx_min, atr_pct_min, htf_factor, min_body_ratio, ...}`.
+  Kırık: `tests/test_kivanc_combo_families.py::test_ichimoku_is_unread_flip_shaped`,
+  `tests/test_required_bars_ignores_unread_htf.py::test_unread_htf_factor_does_not_
+  inflate_required_bars`, ve `test_kivanc_combo_families` htf_factor varyantı. Değişim
+  commit `715c32e` "Strengthen ichimoku and pullback families". `absent_regime_gates_
+  to_zero` guard'ı artık ichimoku'yu da kapsıyor (bkz. tick-1 audit).
+* Removal Safety: N/A — testler koda göre güncellenmeli (davranış bilinçli görünüyor).
+* Reuse Scope: module (strategy + testler + `required_bars`).
+
+**F-D7 — `test_enable_requires_optimised` x8: `_Engine` stub'ında `.supervisor` yok**
+* Kategori: Reliability · Severity: Medium
+* Kanıt: 8 test `AttributeError: '_Engine' object has no attribute 'supervisor'`.
+  Traceback → `micofx/web/app.py:705` `_on_symbol_newly_enabled` sembol enable
+  edilince `engine.supervisor`'ı koşulsuz dereference ediyor. Testin sahte Engine'i
+  bu attr'ı taşımıyor.
+* Neden önemli: canlı Engine her zaman `.supervisor` taşıyorsa sadece bayat stub;
+  taşımadığı bir yol varsa enable sırasında AttributeError (latent).
+* Removal Safety: Needs Verification (canlı Engine invariant'ı — Cursor doğrulasın:
+  `getattr(engine,"supervisor",None)` guard mı, yoksa stub mı düzelecek).
+* Reuse Scope: module (web enable path + testler).
+
+**F-D8 — `kasa_auto` testleri x2: growth-mode hedefleri testle çelişiyor**
+* Kategori: Reliability / Cost · Severity: **High** (canlı risk parametrelerini sürüyor)
+* Kanıt: `tests/test_kasa_auto.py:18` `assert 0.92 == 0.85` (lot_multiplier),
+  `:44` `assert 78.0 == 68` (max_margin_usage_pct). Commit `25e6674` "kasa growth mode"
+  hedefleri değiştirdi, test güncellenmedi. `scripts/kasa_auto.py` canlıya
+  `lot_multiplier` + `max_margin_usage_pct` PATCH'liyor (auto-pilot her tick).
+* Neden önemli: test ya bayat (bilinçli growth) ya da growth hedefleri fazla agresif
+  ve test kanaryası. Şu an DB: lot_multiplier 0.92, margin %78 — test 0.85 / %68 diyor.
+* Removal Safety: Needs Verification — operatör + Cursor: growth hedefleri onaylı mı?
+* Reuse Scope: service-wide (kasa_auto canlı PATCH + auto-pilot).
+
+**F-D9 — `execution_samples` telemetrisi ölü/bozuk**
+* Kategori: Reliability / Observability · Severity: Medium
+* Kanıt: DB `execution_samples` = 17 günde 7 satır; en az biri düz `str` (dict değil —
+  `AttributeError: 'str' object has no attribute 'get'` okuma denemesinde). Canlı
+  slippage ölçülemiyor → "backtest↔canlı slippage farkı" (literatür #1 sebep) sayıyla
+  gösterilemez.
+* Removal Safety: Needs Verification (yazım yolu bozuk mu, yoksa kullanılmıyor mu).
+* Reuse Scope: module (execution + panel).
+
+**F-D10 — `supervisor_state` freshness damgası yok**
+* Kategori: Reliability · Severity: Low
+* Kanıt: DB `supervisor_state` anahtarları = `['verdicts','risk_scale']`, `updated_at`
+  yok. NAS100 net −36.03 verdict'inin ne kadar güncel olduğu bilinemez.
+* Reuse Scope: module (supervisor + auto-pilot ranked tablo).
+
+---
+
+**F-E1 — `risk_sembol_limiti` (1 ticket/isim) 259 sinyal-barı düşürüyor**
+* Kategori: Algorithm / Cost (kaçan işlem) · Severity: **High**
+* Kanıt: DB `entry_block_events` (son 1472): `risk_sembol_limiti` 259 —
+  GER40 82, US30 83, JPN225 54, NAS100 22 (DB `entry_blocks.<sym>.primary.signals`).
+  Aile pozisyon açıkken 2./3. sinyali üretiyor, hepsi atılıyor.
+* Neden verimsiz: yapısal sinyal kaybı; en çok GER40/US30. AGENTS.md "Live count is
+  1 ticket per name" bilinçli — ama pyramiding/re-entry hiç ölçülmemiş.
+* Karşı-olgu (ölçülmeli, Faz-1): cap 2'ye çıkarsa GER40+82 / US30+83 sinyal-barı
+  uygun olur; MEVCUT canlı beklenti avgR −0.13 / win %34 ile bu **negatif EV** —
+  rejim filtresi (F-E4) ile eşleşmeden tek başına açma. Sayı: 259 × (−0.13 R) ≈
+  −34 R "kaçırılan" ama negatif, yani şu an cap KORUYUCU.
+* Removal Safety: Needs Verification — costed + regime-filtered replay olmadan dokunma.
+* Reuse Scope: service-wide (risk.py + engine entry gate).
+
+**F-E2 — `risk_ters_yon` (ters yön gate) 223 sinyal-barı düşürüyor; ters sinyal çıkışa çevrilmiyor**
+* Kategori: Algorithm / Cost (kaybedilen kâr) · Severity: **High**
+* Kanıt: `entry_block_events` `risk_ters_yon` 223 — US30 77, JPN225 56, SpotBrent 48,
+  GER40 23. Açık long dururken short sinyal (veya tersi) → **atılıyor**, pozisyon
+  kapatma/flip için kullanılmıyor.
+* Neden verimsiz: `sl` kovası 166 tam-stop / avgR −0.94 = tüm zarar. Bu 166'nın bir
+  kısmı stop yemeden önce ters sinyal üretmiş olabilir (erken çıkış fırsatı).
+* Karşı-olgu (ölçülmeli, Faz-1): `entry_block_events(risk_ters_yon)` → `trade_
+  autopsies` join (symbol + [fill_time, exit_time] penceresi). Kaç `sl` çıkışı,
+  stoptan önce ters sinyal gördü? Her biri ~(mfe_r − (−1)) R kurtarma potansiyeli.
+  Kaba tavan: 166 sl × ort. left_on_table yok ama mae_r ~0.9 → ters-sinyal-çıkış
+  bu işlemleri ~−1R yerine ~breakeven'a çekebilseydi ≈ +80–120 R aralığı (ÜST SINIR,
+  doğrulanacak).
+* Removal Safety: Needs Verification — "ters sinyalde flat" yeni davranış; costed
+  backtest'te ölç, exit modelini değiştirmeden (sadece erken çıkış).
+* Reuse Scope: service-wide (engine signal handling + backtest simulate).
+* **ÖLÇÜM 02.09 19:40 (join yapıldı, tez ZAYIFLADI):** 223 `risk_ters_yon` olayının
+  131'i bir açık-işlem penceresine düşüyor. Bu 131'in çıkışı: **`trail` 101 (kârlı!)**,
+  `flatten` 6, `sl` yalnız 24. Yani ters sinyallerin çoğu, sonradan trail ile kâra
+  giden işlemler sırasında geldi — "ters sinyalde kapat" 101 kazananı keserdi.
+  Ters sinyal görüp KÖTÜ çıkan farklı işlem sayısı **32** (realised −24.7 R / −$249),
+  yoğunluk JPN225 (14, −11 R) + US30 (9, −9 R). Kurtarma tahmini **düşük ~+9 R /
+  yüksek ~+23 R**, medyan 1 ters sinyal/işlem. **Sonuç:** blanket "ters sinyalde flat"
+  net NEGATİF/marjinal. Koşullu varyant (yalnız işlem >0.5R zararda + ters sinyal,
+  JPN225/US30 alt kümesi) curve-fit riski — costed backtest olmadan canlıya alınmaz.
+  Severity **High -> Medium**.
+
+**F-E3 — Fill oranları: US30 %22, GER40 %29, JPN225 %33; SpotBrent %6**
+* Kategori: Cost (kaçan işlem) · Severity: Medium (bilgi + F-E1/E2/D3'e bağlı)
+* Kanıt: DB `entry_blocks.<sym>.primary.signals` `acildi` / toplam:
+  GER40 56/191 (%29), JPN225 91/280 (%33), NAS100 62/120 (%52), US30 98/450 (%22),
+  XAUUSD 45/70 (%64), SpotBrent 19/335 (%6). Blokör dağılımı F-E1 (sembol dolu) +
+  F-E2 (ters yön) + spread (F-D3 bayat) + `bar_bosluk` (M5/M15 gece boşluğu, 138).
+* Removal Safety: N/A (ölçüm).
+* Reuse Scope: service-wide.
+
+**F-E4 — Rejim filtresi tamamen kapalı (tüm canlı isimlerde adx_min=adx_max=0)**
+* Kategori: Algorithm · Severity: **High**
+* Kanıt: DB symbols payload — GER40/JPN225/NAS100/US30 hepsinde `adx_min=0`,
+  `adx_max=0`. `_regime()` (`strategy.py:407-413`) her iki dal da no-op → filtre yok.
+  Grid'de `adx_min [0,15,20]` zaten var (`config/defaults.json`). Literatür: ADX
+  filtre (eşik 20/25), sinyal değil.
+* Karşı-olgu (ölçülmeli): per-sembol `adx_min>0` costed holdout araması. `sl` kovası
+  166 işlem çoğunlukla chop girişi hipotezi — ADX≥20 filtresi bunların X'ini eler.
+* Removal Safety: N/A (ekleme değil, mevcut ekseni aramak).
+* Reuse Scope: service-wide (optimizer search + strategy compute).
+
+**F-E5 — GER40 seansı 03:15–22:59'a genişletilmiş (defaults 10:00)**
+* Kategori: Cost · Severity: Medium
+* Kanıt: DB `symbols.GER40.sessions = [{start:"03:15", end:"22:59"}]`; `config/
+  defaults.json` index preset 16:30–22:55, GER40 override 10:00–22:55.
+  GER40 burst/M5 canlı −6.9 R, fill %29, `bar_bosluk` bloklu.
+* Neden verimsiz: burst/M5 nakit-açılış öncesi ince saatlerde ateşliyor; spread geniş,
+  hacim düşük — literatürde en pahalı/R dilim.
+* Removal Safety: Needs Verification (seans daraltma canlı param — operatör/Cursor).
+* Reuse Scope: symbol config.
+
+**F-E6 — `lot` bloğu: 38 sinyal-barı undersize (JPN225 23)**
+* Kategori: Cost · Severity: Low
+* Kanıt: `entry_block_events` `lot` 38; DB `entry_blocks` signals: JPN225 23,
+  US30 6, XAUUSD 6, NAS100 3. ~$225 hesap, 2% risk / SL mesafesi broker min-lot'un
+  altında → işlem atlanıyor. Auto-pilot "LOT engeli" alarmı her tick.
+* Removal Safety: N/A (hesap büyüklüğü fonksiyonu; kasa büyüdükçe azalır).
+* Reuse Scope: risk.py sizing.
+
+---
+
+**F-T1 — Canlı performans: −41.2 R / −$826.60 / 319 işlem (14 gün)**
+* Kategori: — (ölçüm, kök F-D1/E2/E4) · Severity: **Critical**
+* Kanıt: DB `trade_autopsies` (n=319, 2026-08-19→09-02): sumR −41.2, nakit −826.60,
+  win %34, avgR −0.129. Cikis: `sl` n=166 avgR **−0.94** (−156 R) · `trail` n=100
+  avgR +0.84 (+84 R) · `flatten` n=48 avgR +0.59 (+28 R) · `manuel` n=5 +2.3.
+  Son 100: −25.8 R. Son 20: +1.2 R. MFE-capture (`r_realised/mfe_r`, mfe≥0.3R,
+  n=218) medyan **0.00**, ort −0.41 (sağlıklı > 0.5).
+* Yorum: kitabı ayakta tutan tek kova `flatten` (seans/gün-sonu zorunlu çıkış).
+  `sl` kovası tüm zararı yazıyor → sorun giriş kalitesi + tam-stop sıklığı, trail
+  değil (trail kovası pozitif).
+
+**F-T2 — En yüksek holdout'lu iki isim canlıda en çok kaybeden**
+* Kategori: — (ölçüm) · Severity: **High**
+* Kanıt: canlı sumR: NAS100 **−18.7**, JPN225 **−17.4**, GER40 −6.9, US30 −3.4;
+  XAUUSD **+9.8** (disabled), SpotBrent +2.1 (disabled). Holdout net R: NAS100
+  **+91.8**, JPN225 +68.3, XAUUSD +113.6, GER40 +53.6, US30 +37.6. Korelasyon ters.
+* Yorum: holdout (cost-free, F-D1) canlı geliri öngörmüyor. Costed replay şart.
+
+**F-T3 — 19 test fail / 2 ruff hatası `4528b40`'ta + kirli çalışma ağacı**
+* Kategori: Reliability (regresyon dedektörü yok) · Severity: **High**
+* Kanıt: `pytest -q` → `19 failed, 2720 passed, 1 xfailed` (108 s). Gruplar:
+  F-D1 (3), F-D6 (3), F-D7 (8), F-D8 (2), `test_fill_trade_line_carries_magic` (1,
+  F-D2), `test_original_sl_survives_restart` (1, muhtemel WIP execution.py),
+  `test_empty_patch_is_rejected::test_bulk_changed_counts_only_real_diffs` (1),
+  `test_install_brings_the_tools_it_configures` (1, KUR.ps1 adım sayacı /7). Ruff:
+  `tests/test_burst_and_channel_honour_body_ratio.py`,
+  `tests/test_note_fill_repairs_poisoned_sl.py` import sıralaması.
+* Removal Safety: N/A — testler/kod uzlaştırılmalı (çoğu bayat test, F-D1 gerçek risk).
+
+---
+
+**F-P1 — God-file'lar: engine.py 4712 LOC / 116 fn, web/app.py 2285/80, mt5client 2218/62, optimizer 2305/48**
+* Kategori: Maintainability · Severity: Medium
+* Kanıt: `wc -l` + `grep -c "^\s*def"`. engine.py 2 sınıf, 116 fonksiyon tek dosyada.
+* Neden önemli: değişiklik riski yüksek; test izolasyonu zor; F-D6/D7 gibi
+  "değiştir ama testi/guard'ı unut" hataları bu yüzeyde tekrar ediyor.
+* Removal Safety: N/A (refactor, davranış korunmalı — Cursor kararı).
+* Reuse Scope: service-wide.
+
+**F-P2 — `_cycle` her 2 sn'de sıralı MT5 round-trip'leri tek RLock altında**
+* Kategori: Concurrency / I/O · Severity: Low-Medium (likely, ölçüm gerek)
+* Kanıt: `micofx/engine.py:857` `_cycle`; `refresh_account(force=True)` (863),
+  `_probe_book_ticks` (867), `_reload_positions` (891) sıralı. `mt5client.py` 39 lock
+  bölgesi. `/api/state` (her 3 sn) aynı lock (AGENTS.md gotcha). Ledger `last_cycle_ms`
+  geçmişte 3–7 ms → şu an dar değil ama opt `busy` iken snapshot fallback var.
+* Ölçülecek: yük altında `last_cycle_ms` p95; `/api/state` latency opt çalışırken.
+* Removal Safety: N/A.
+* Reuse Scope: engine + web + mt5client.
+
+**F-P3 — Arama combo duvarı ~3.08 M'in ~2.07 M'i emekli `stoch_flip`'e ayrılmış**
+* Kategori: Cost / CPU · Severity: Medium
+* Kanıt: `micofx/optimizer.py:109-110` yorum + `:168` `strategy_max_combos.stoch_flip
+  = 28800`; DB `opt.strategy_max_combos` aynı. stoch_flip fail-closed ama combo
+  bütçesi/coverage_budget hesabı onu sayıyor.
+* Beklenen etki: dead family combo tahsisi kalkarsa canlı 4 aile daha derin taranır
+  (aynı duvar bütçesiyle).
+* Removal Safety: Needs Verification (DB opt_params write yolu kısıtlı).
+* Reuse Scope: optimizer.
+
+**F-P4 — `required_bars()` her çağrıda ölü aile lookback terimleri hesaplıyor**
+* Kategori: CPU (micro) · Severity: Low
+* Kanıt: `strategy.py:770-773` — `int(p.t3_fast*max(1.2,p.t3_slow_mult))*20`,
+  `int(p.st_period)*10 if p.st_mult>0`, `(stoch_k_period+stoch_k_smooth+stoch_d_smooth)
+  *8`. 4 canlı aile bunları okumuyor (F-D4). `max(...)` içinde, genelde bağlanmıyor.
+* Removal Safety: Likely Safe (F-D4 ile birlikte).
+* Reuse Scope: module.
+
+### 3) Quick Wins (önce bunlar) — hepsi ölçüm/temizlik, davranış değişmez
+
+1. **F-T3 ruff** (2 test dosyası import sıralaması) — `ruff --fix`, davranış yok.
+2. **F-D6 / F-D7 / F-D8 testleri** koda göre güncelle (ichimoku artık htf okur;
+   `_Engine` stub'a `supervisor`; kasa_auto hedefleri) — VEYA F-D8'de growth hedefi
+   yanlışsa kod. Cursor karar.
+3. **F-D3** `entry_blocks` pencere/rotasyon — auto-pilot bayat sayaç kararını kes, sonsuz
+   "SPREAD kalibre atlandı" logunu durdur.
+4. **F-D5 / F-P3** DB `opt_params.strategies` + `opt.strategy_max_combos` emekli aile
+   temizliği — arama bütçesi canlı 4 aileye.
+5. **F-D4 / F-P4** 11 ölü Params alanı — `Params.key()` + `required_bars` sadeleşir.
+
+### 4) Deeper Optimizations (sonra)
+
+* **F-D1** cost görünürlüğünü geri getir (charged sayı her apply'da) + Faz-1 costed
+  replay (4 aile × aktif+disabled × son 10 pencere) → gerçek net-R sırası.
+* **F-E4** per-sembol `adx_min>0` costed holdout araması.
+* **F-E2** ters-sinyal-çıkış: backtest simulate'e "açık pozisyonda ters sinyal → flat"
+  ölç (exit modelini bozmadan). F-E1 pyramiding'i YALNIZ F-E4 ile birlikte.
+* **F-P1** engine.py / app.py modülerleştirme (davranış + WFO honesty korunur).
+* Objektif fonksiyon: seçim metriğini ham `score`'dan Sortino/robustluk + `profit_drop`
+  (IS→OOS) kolonuna çevir (RESEARCH_QUEUE "walk-forward OOS lock").
+
+### 5) Validation Plan
+
+* **Testler:** `4528b40`'ta 19 fail listesini referans al; her düzeltme sonrası
+  `pytest -q` = 0 fail hedef. Fail-first (AGENTS.md).
+* **Costed replay:** `charge_costs=True` ile son 10 holdout penceresi, 4 aile ×
+  {GER40,JPN225,NAS100,US30,XAUUSD,SpotBrent,BTCUSD}. Metrik: net R, expectancy,
+  PF — cost-free sıralamasıyla diff. Beklenti: M5/M15 burst düşer.
+* **Autopsy join:** `entry_block_events(risk_ters_yon)` × `trade_autopsies` symbol+
+  zaman penceresi → kaç `sl` çıkışı stoptan önce ters sinyal gördü, toplam kurtarma R.
+* **entry_blocks:** rotasyondan sonra 7 günlük pencere ile fill oranı + blokör
+  dağılımı; önce/sonra.
+* **Perf:** yük altında `last_cycle_ms` p95, `/api/state` latency (opt busy iken),
+  arama süresi (emekli-aile temizliği önce/sonra).
+* **Canlı:** değişiklik sonrası günlük autopsy sumR / avgR / MFE-capture medyan;
+  hedef avgR ≥ 0 ve MFE-capture medyan ≥ 0.4.
+
+### 6) Optimized Code / Patch
+
+Yok — operatör talimatı: "hiçbir şeyi düzeltme, hepsi OPTIMIZATIONS.md'ye." Bulgular
+Cursor'a doğrulama + plan + görev dağılımı için `claude/FOR_CURSOR.md`'ye özetlendi.
+
+---
+
+### EK — C1 costed replay ÖLÇÜMÜ (02.09 19:52, salt-okur)
+
+Yöntem: `data/holdout_bars/*.npz` (yakalanmış 90k-bar pencereler) → `holdout_cost.
+charged_holdout` son segment (~18k bar), CANLI DB config (aile/exits) snapshot TF'ine
+zorlanarak, iki kez: **COSTED** = gerçek `spread_scale` (1.00–1.25) + komisyon;
+**FREE** = spread_scale 0 + komisyon 0 (canlı aramanın gördüğü). Script:
+scratchpad `c1_costed_replay.py`. PATCH/DB/API yok.
+
+| snapshot | canlı aile/TF | COSTED net_r / exp / PF / n | FREE net_r | Δ (cost drag) |
+|----------|---------------|-----------------------------|-----------|---------------|
+| GER40_M15 | burst (canlı **M5**) | **−33.6** / −0.074 / 0.89 / 457 | −20.5 | −13.2 |
+| GER40_M30 | burst (canlı **M5**) | **+21.4** / +0.049 / 1.07 / 438 | +42.9 | −21.5 |
+| JPN225_M15 | burst/M15 ✓ | **+48.3** / +0.192 / 1.28 / 252 | +62.7 | −14.4 |
+| NAS100_M30 | mtf_pullback/M30 ✓ | **+23.6** / +0.021 / 1.03 / 1099 | +44.0 | −20.4 |
+| US30_M30 | channel_break/M30 ✓ | **+18.0** / +0.054 / 1.08 / 334 | +19.7 | −1.8 |
+| US30_M5 | (canlı M30) | −30.8 / −0.101 / 0.86 | −30.9 | +0.1 |
+| XAUUSD_M15 | burst *(disabled)* | **+83.4** / +0.143 / 1.22 | +98.3 | −14.8 |
+| BTCUSD_M30 | burst *(disabled)* | +58.5 / +0.183 / 1.27 | +81.8 | −23.4 |
+| GOLD-PERP_M30 | mtf_pullback *(disabled)* | **+114.3** / +0.219 / 1.35 | +118.7 | −4.4 |
+| SpotBrent_M15 | burst *(disabled)* | −18.3 / −0.032 / 0.95 | +19.8 | −38.1 |
+| SpotBrent_M30 | burst *(disabled)* | −27.2 / −0.035 / 0.95 | +41.8 | −69.0 |
+
+**Ölçülen sonuçlar (F-D1 / lever A ilişkin):**
+1. **Maliyet, canlı 4 için ANA katil DEĞİL.** Cost drag 18k-bar pencerede −2..−21 R;
+   işareti çevirmiyor. COSTED bile: JPN225 +48, NAS100 +24, US30 +18, GER40/M30 +21.
+   → `charge_costs=False` holdout'u ~%15–45 şişiriyor ama +90R-holdout / −41R-canlı
+   ayrımı **öncelikli olarak cost-modeling artefaktı değil**. **Lever A: birincil →
+   ikincil.**
+2. **Asıl açık holdout(+) ↔ canlı(−).** Costed holdout NAS100 +24 / JPN225 +48 derken
+   canlı NAS100 −19 / JPN225 −17. Maliyet değil; işaret eden yerler: rejim/timing
+   (adx=0, F-E4), fill kalitesi %22–33 (F-E3), 1-ticket cap iyi 2. sinyali düşürüyor
+   (F-E1), veya WFO iyimserliği / pencere sonrası rejim kayması. **Lever B (rejim
+   filtresi) + yapısal (fill/cap) öne çıkıyor.**
+3. **GER40 canlı TF (M5) snapshot YOK.** M15 costed −33.6 (kötü), M30 costed +21.4
+   (iyi). Canlı burst/M5. M5, M15 gibiyse GER40 costed zararda. GER40_M5 yakalama
+   gerek (flat kitap, operatör/Cursor).
+4. **US30 canlı M30 doğru seçim** (M30 costed +18 vs M5 costed −31).
+5. **Disabled kazananlar costed bile güçlü:** GOLD-PERP/mtf_pullback **+114**,
+   XAUUSD/burst **+83**, BTCUSD/burst **+58** — canlı 4'ün 3'ünden iyi. Fill/rejim
+   soruları çözülünce yeniden-açma adayı (operatör red).
+6. **SpotBrent her TF'de costed zararda** (−18..−27) — doğru şekilde disabled.
+
+Uyarı: yöntem canlı aile+exit'i snapshot bar-TF'ine zorluyor; GER40 M5≠M15/M30.
+`block_reverse=True`, son-segment — optimizer holdout'una sadık.
+
+---
+
+### EK — C3 / C-next A: per-sembol `adx_min` COSTED sweep (02.09 20:05, salt-okur)
+
+Aynı npz + `charged_holdout`, canlı aile/exit, `adx_min ∈ {0,15,20}` (0 = mevcut canlı
+= filtre yok). Costs ON. Script: scratchpad `c3_adxmin_sweep.py`.
+
+| sembol / aile-TF | adx_min=0 (canlı) | =15 | =20 | en iyi |
+|------------------|-------------------|-----|-----|--------|
+| **NAS100** mtf_pullback/M30 | +23.6 (exp .021, n1099) | **+57.0** (exp .055, n1033) | +46.8 (exp .057, n823) | **15** (+33 R, exp 2.5×) |
+| **US30** channel_break/M30 | +18.0 (exp .054) | **+23.9** (exp .075) | +19.9 (exp .076) | **15** (+6 R) |
+| **JPN225** burst/M15 | **+48.3** (exp .192) | +31.1 | +12.6 | **0** (filtre −17..−36 R zarar) |
+| **GER40** burst/M30 | **+21.4** | +19.1 | +16.3 | **0** (filtre hafif zarar) |
+| GER40 burst/M15 | −33.6 | −31.8 | −43.2 | (M15 zaten kötü) |
+| XAUUSD burst/M15 *(off)* | +83.4 | +73.4 | +94.6 (exp .223) | 20 (gürültülü) |
+| BTCUSD burst/M30 *(off)* | +58.5 | +60.6 | +15.1 | 15 |
+
+**Ölçülen sonuç:**
+1. **`adx_min` aile-spesifik, evrensel değil.** `mtf_pullback` (NAS100) ve
+   `channel_break` (US30) için `adx_min=15` net costed iyileşme (NAS100 +33 R,
+   expectancy 2.5×, işlem sayısı korunur; US30 +6 R). `burst` (JPN225, GER40) için
+   HERHANGİ bir ADX tabanı zarar veriyor.
+2. **Sebep tasarımsal:** burst bir range-*expansion* girişi, düşük-ADX patlamada
+   ateşlenir; trend-gücü filtresi tam da edge'ini siler (burst docstring + ADX
+   literatürü: filtre trend-devam setup'ına yarar, expansion'a değil).
+3. **F-E4 / lever B — ölçülü öneri:** `adx_min=15` YALNIZ NAS100 (mtf_pullback) +
+   US30 (channel_break); burst isimleri (JPN225, GER40) `adx_min=0` kalsın. ichimoku
+   canlıya girerse ayrı test.
+4. **NAS100 en güçlü aday:** +23.6 → +57.0 costed, şu ana kadarki en büyük tekil
+   ölçülü iyileşme; NAS100 canlıda en kötü (−18.7 R). Yüksek güven.
+
+Uyarı: tek pencere (son segment ~18k bar). Apply öncesi optimizer'ın tam walk-forward
++ validation gate'i şart (apply yolu = Cursor, ben değil). GER40 canlı TF M5 hâlâ
+test edilemiyor.
+
+---
+
+### EK — C2 / C-next B: MFE zaman-profili (canlı autopsy, 02.09 20:12, salt-okur)
+
+`trade_autopsies` (n=319). `bars_held` null → `held_min` proxy; `mfe_r` tüm-işlem
+tepe (bar-indeksli eğri yok). Script: scratchpad `c2_mfe_profile.py`.
+
+**Trail aktivasyon gerçeği (canlı 4):**
+
+| sembol | trail_start | =R | medyan MFE | trail'e ULAŞAN % | medyan realised | capture ratio |
+|--------|-------------|----|-----------|------------------|-----------------|---------------|
+| GER40 | 2.0 ATR | 2.00 R | 0.60 R | **%14** | −1.00 | 0.11 |
+| JPN225 | 2.5 ATR | 2.50 R | 0.77 R | **%11** | −0.58 | −0.36 |
+| NAS100 | 2.5 ATR | 2.50 R | 0.47 R | **%13** | −1.00 | 0.17 |
+| US30 | 0.3 ATR | 0.30 R | 0.72 R | %68 | −1.00 | 0.05 |
+
+* GER40/JPN225/NAS100: `trail_start` 2.0–2.5 R ama medyan MFE 0.47–0.77 R. İşlemlerin
+  yalnız **%11–14'ü** trail eşiğine ulaşıyor; kalan ~%86 sabit −1R stop'ta trailsiz
+  sürüyor → medyan realised tam −1.00 R (GER40, NAS100). **Trail, ulaşılabilir MFE'nin
+  3–5 katı öteye kurularak fiilen devre dışı.**
+* US30: `trail_start=0.3R` erken, %68 ulaşıyor — ama `trail_step=2.2 ATR` çok geniş →
+  korumuyor; capture 0.05; `sl` çıkışlarının **%80'i 1 saat içinde entry'yi geri
+  geçti** (whipsaw / erken stop). medHeld 31 dk (en hızlı), 92 işlemin 50'si `sl`.
+
+**MFE, tutuş-süresi çeyreğine göre (tüm semboller):**
+
+| çeyrek | held | ort. MFE_r | ort. realised_r | n |
+|--------|------|-----------|-----------------|---|
+| Q1 en kısa | 0–24 dk | +0.27 | **−0.91** | 79 |
+| Q2 | 24–73 dk | +1.03 | −0.32 | 79 |
+| Q3 | 74–179 dk | +1.32 | +0.18 | 79 |
+| Q4 en uzun | 180 dk+ | +1.85 | **+0.50** | 82 |
+
+* Kısa işlem = saf zarar (Q1: MFE +0.27, realised −0.91). Hızlı ölen işlemde hareket
+  hiç olmamış. Uzun yaşayan (Q4) para kazanıyor. Klasik trend-takip: edge koşuculardadır.
+* Erken-stop (sl, 1 saatte entry'yi geri geçti): US30 **%80**, NAS100 %52, GER40 %48,
+  JPN225 %44. left_on_table medyan ~1.1–1.3 R / işlem (capture ~0 ile tutarlı).
+
+**Ölçülen sonuç (exit MODELİ değişmez — sadece grid içi eşik):**
+1. **`trail_start` GER40/JPN225/NAS100 için ulaşılabilir MFE'nin çok ötesinde.** Aday:
+   per-sembol `trail_start_atr` ≈ 0.5 × medyan MFE (≈ 0.3–0.4 ATR) costed holdout ile
+   ara. Grid'de `trail_start_atr [0.3,0.4,0.5,...]` zaten var.
+2. **US30: trail aktif ama `trail_step=2.2 ATR` çok geniş + %80 erken-stop.** Daha dar
+   step ara; + F-E4 `adx_min=15` (zaten bulundu) whipsaw girişlerini keser. US30
+   medHeld 31 dk = hızlı chop'ta aşırı işlem.
+3. **Edge Q4'te (uzun tutuş).** Hızlı-ölüm oranını artıran (gevşek giriş, rejim filtresi
+   yok) veya Q2/Q3 orta-işlemleri korumayan (ulaşılamaz trail) her şey kitabı akıtıyor.
+   İki ölçülü kaldıraç: rejim filtresi (F-E4, NAS100/US30) + ulaşılabilir `trail_start`
+   (per-sembol costed arama).
+4. Uyarı: MFE bar-indeksli değil; "ilk N bar" kesin değil — çeyrek ayrımı proxy.
+   Apply = optimizer WFO/validation (Cursor).
+
+---
+
+### EK — C4: emekli-aile ölü alan temizlik PLANI (02.09 20:22, UYGULAMA YOK)
+
+11 ölü alan: `t3_fast, t3_slow_mult, t3_fast_vf, t3_accel_min, st_period, st_mult,
+stoch_k_period, stoch_k_smooth, stoch_d_smooth, psar_af_step, psar_af_max`
+(dual_t3/t3_flip/stoch_flip/parabolic_flip — 01.09 emekli). Canlı 4 aile
+`opt_fields_read` çıktısı bunların HİÇBİRİNİ okumuyor (ölçüldü).
+
+**Güvenlik doğrulaması:**
+- `_coerce` (models.py:42) bilinmeyen key'i atlıyor → eski DB payload / fixture'lar
+  alan silinince sorunsuz yükleniyor. ✓
+- `Params.from_config` (strategy.py:116) `cls.__dataclass_fields__`'e filtreliyor →
+  alan Params'tan çıkınca kopyalanmıyor. ✓
+- `Params.key()` değişimi → sinyal cache kimliği değişir, bir kez yeniden hesaplanır
+  (kalıcı cache yok). ✓
+- `required_bars()` sadeleşmesi → bazı configlerde fetch boyutu DÜŞER (ölü terimler
+  yalnız şişiriyordu). ✓ (F-P4 mikro-kazanç)
+
+**Dokunulacak (önerilen diff, Cursor uygular):**
+
+| # | Dosya | Değişiklik | Satır |
+|---|-------|-----------|-------|
+| 1 | `micofx/strategy.py` | `Params`'tan 11 alanı sil | 58–82 |
+| 2 | `micofx/strategy.py` | `Params.key()` tuple'ından 11 alanı çıkar | 145–150 |
+| 3 | `micofx/strategy.py` | `required_bars()` 3 ölü terimi sil (`t3_fast*slow_mult*20`, `st_period*10`, `stoch_k toplamı*8`) | 770–773 |
+| 4 | `micofx/models.py` | `SymbolConfig`'ten 11 alanı sil | 126–167 |
+| 5 | `micofx/models.py` | `OPT_FIELDS`'ten 11 girişi sil | 534–542 |
+| 6 | `micofx/web/app.py` | `_INDICATOR_PERIOD_BOUNDS`'tan `t3_fast, st_period, stoch_k_period, stoch_k_smooth, stoch_d_smooth` çıkar; 190 yorumunu güncelle | 190, 197 |
+| 7 | `tests/test_indicator_periods_are_bounded.py` | silinen bound'ları beklemeyi kaldır (14 ref) | — |
+| 8 | DB `opt_params.strategies` | 4 emekli aile adını çıkar → `[mtf_pullback, burst, ichimoku, channel_break]` | settings |
+| 9 | DB `opt` | `strategy_max_combos.stoch_flip` (28800) sil | settings |
+
+**Bırakılacak:** `tests/fixtures/eski_ikincil_konfig_*.json` (152+21 ref) — bunlar
+"eski config yüklenebiliyor mu" regresyon testi; `_coerce` bilinmeyeni atladığı için
+silme sonrası bu testler tam da doğru şeyi kanıtlar.
+
+**Kontrol edilecek (Cursor, apply öncesi):** `test_every_family_on_every_timeframe.py`,
+`test_exit_param_bounds_everywhere.py`, `test_family_grid_only_searches_fields_it_reads.py`
+bu alanlara değiyor mu; canlı sembol `opt_summary.params` stamp'i emekli alan taşıyor mu
+(taşıyorsa `unstamped_gates_to_zero` zaten sıfırlıyor). DB 8–9: panel POST `opt_params`
+= 400 (AGENTS.md); doğrudan `Store` çağrısı veya migration gerek.
+
+**Beklenen etki:** kod −~40 satır ölü; `OPT_FIELDS` 11 eksen daralır (emekli-aile
+ekseni artık aranamaz/uygulanamaz — F-D5); arama combo bütçesi canlı 4 aileye
+(`stoch_flip` 28800 ≈ 3.08M duvarın 2.07M'i — F-P3). Davranış değişmez.
+
+---
 
 Operator: maximize income, fix gaps, GitHub+web, run opt at 00:06.
 No engine PATCH. Live 22:36: 4 tickets (GER40 overnight 2.0 ATR + JPN/XAU/NAS),

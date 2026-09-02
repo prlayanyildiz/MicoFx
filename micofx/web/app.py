@@ -187,14 +187,13 @@ _SYMBOL_RISK_BOUNDS = {
 # 1 while the panel, the stored config and the opt grid all say -5.
 #
 # Integer periods only. The float axes beside them use zero as a switch -
-# st_mult "0 disables the confirmation entirely", adx_max and cost_rank_max
-# carry "0 disables" in models.py - and bounding those at 1 would refuse the
-# live US500 config. A length has no such reading: an average over no bars is
-# a mistake, not a disabled filter.
+# adx_max and cost_rank_max carry "0 disables" in models.py - and bounding
+# those at 1 would refuse a live config. A length has no such reading: an
+# average over no bars is a mistake, not a disabled filter.
 # ``adx_length`` / ``atr_length`` sat here until 31.08 and are not fields of
 # anything - SymbolConfig carries ``adx_period`` and ``atr_period``. The two
 # periods this table was written to bound were the two it never reached.
-_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_fast", "t3_length", "st_period", "rsi_length", "stoch_length", "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth", "adx_period", "atr_period", "trail_lookback"), (1, 10000, True))
+_INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_length", "rsi_length", "stoch_length", "adx_period", "atr_period", "trail_lookback"), (1, 10000, True))
 
 # The search budget drives the walk-forward that ultimately writes live
 # trading params. Every refine round is charged a full ``max_combos`` sweep
@@ -2252,7 +2251,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/app/restart")
     def app_restart() -> dict[str, Any]:
-        _refuse_if_bot_open("restart yok")
+        # Operator 02.09: restart with open tickets is allowed — MT5 keeps
+        # the fills; track()/open_original_sl reattach after bind. Holdout
+        # capture and shutdown stay refused while tickets are open.
+        if client.connected:
+            magics = {c.magic for c in list(store.symbols.values())}
+            pos = client.positions()
+            if client.connected:
+                n = sum(1 for p in pos if p.get("magic") in magics)
+                if n:
+                    LOG.emit(
+                        f"Yeniden baslatma acik {n} ticket ile - MT5 tutuyor, "
+                        f"process yeniden baglanacak.",
+                        "WARN")
         LOG.emit("Yeniden baslatma istegi alindi.", "WARN")
         # Kill used to skip this: last_opt_job stayed "running" and the OPT
         # cancel line never landed. Persist happens inside cancel() so a

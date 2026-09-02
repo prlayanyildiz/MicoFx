@@ -12,19 +12,14 @@ loud in ema()'s docstring:
 Nothing crashes, because every length-taking helper in indicators.py clamps
 with ``max(1, int(length))`` - that was fixed for ema and wilder already. The
 damage is quieter: the config stores and the panel displays a period the system
-does not use. Set t3_fast to -5 and the symbol keeps trading a T3 of length 1
+does not use. Set t3_length to -5 and the symbol keeps trading a T3 of length 1
 while every screen says -5, and an optimiser grid carrying one searches a
 degenerate point that reports as a real one.
 
 Only the integer periods are bounded. The float axes are deliberately left
-alone because zero means something there - st_mult "0 disables the confirmation
-entirely", and adx_max and cost_rank_max carry "0 disables" in models.py beside
-them. A period of zero has no such reading; a moving average over no bars is
-not a disabled filter, it is a mistake.
-
-Verified against the live book before tightening: sixteen of these fields are
-in use across the ten symbols and the opt grid, and not one holds a value below
-1, so no existing config becomes unpatchable.
+alone because zero means something there - adx_max and cost_rank_max carry
+"0 disables" in models.py beside them. A period of zero has no such reading;
+a moving average over no bars is not a disabled filter, it is a mistake.
 """
 from __future__ import annotations
 
@@ -46,8 +41,8 @@ def _check(patch):
 
 # ------------------------------------------------------------- the defect
 
-@pytest.mark.parametrize("field", ["t3_fast", "st_period", "rsi_length",
-                                   "stoch_k_period"])
+@pytest.mark.parametrize("field", ["t3_length", "rsi_length", "stoch_length",
+                                   "atr_period"])
 def test_a_negative_period_is_refused(field):
     with pytest.raises(HTTPException) as exc:
         _check({field: -5})
@@ -55,7 +50,7 @@ def test_a_negative_period_is_refused(field):
     assert field in str(exc.value.detail)
 
 
-@pytest.mark.parametrize("field", ["t3_fast", "st_period", "stoch_k_period"])
+@pytest.mark.parametrize("field", ["t3_length", "rsi_length", "stoch_length"])
 def test_a_zero_period_is_refused(field):
     """A moving average over no bars is a mistake, not a disabled filter."""
     with pytest.raises(HTTPException):
@@ -64,38 +59,36 @@ def test_a_zero_period_is_refused(field):
 
 def test_the_message_names_the_field_and_the_bound():
     with pytest.raises(HTTPException) as exc:
-        _check({"stoch_k_period": 0})
+        _check({"t3_length": 0})
     detail = str(exc.value.detail)
-    assert "stoch_k_period" in detail and "1" in detail
+    assert "t3_length" in detail and "1" in detail
 
 
 # --------------------------------------------------- what must keep working
 
 @pytest.mark.parametrize("field,value", [
-    ("t3_fast", 5), ("st_period", 10),
-    ("stoch_d_smooth", 3), ("trail_lookback", 5),
+    ("t3_length", 6), ("rsi_length", 9),
+    ("stoch_length", 9), ("trail_lookback", 5),
 ])
 def test_the_values_the_live_book_actually_runs_are_accepted(field, value):
     _check({field: value})
 
 
 def test_the_float_axes_that_use_zero_to_disable_are_not_in_this_table():
-    """st_mult 0 turns the SuperTrend confirmation off; adx_max and
-    cost_rank_max say "0 disables" in models.py. Bounding them at 1 would
-    refuse a live US500 config."""
-    for field in ("st_mult", "adx_max", "cost_rank_max",
-                  "t3_fast_vf", "t3_accel_min", "t3_slow_mult"):
+    """adx_max and cost_rank_max say "0 disables" in models.py. Bounding them
+    at 1 would refuse a live config."""
+    for field in ("adx_max", "cost_rank_max"):
         assert field not in _INDICATOR_PERIOD_BOUNDS
 
 
 def test_an_absurdly_long_period_is_refused():
     with pytest.raises(HTTPException):
-        _check({"t3_fast": 100000})
+        _check({"t3_length": 100000})
 
 
 def test_a_missing_or_null_field_is_left_alone():
     _check({})
-    _check({"t3_fast": None})
+    _check({"t3_length": None})
 
 
 def test_the_exit_axes_still_have_their_own_table():

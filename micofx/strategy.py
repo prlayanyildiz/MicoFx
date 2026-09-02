@@ -54,32 +54,11 @@ class Params:
     chan_lookback: int = 50
     chan_buffer_atr: float = 0.0
 
-    # ---- fast/slow T3 pair (dual_t3; named for the ribbon family, gone) ----
-    t3_fast: int = 5                 # fast T3 length
-    t3_slow_mult: float = 3.0        # slow T3 length = fast * this
-    t3_fast_vf: float = 0.0          # fast line's own volume factor; 0 inherits t3_volume_factor
-
-    # ---- T3 slope-quality (curvature) filter, shared by the T3 families ----
-    t3_accel_min: float = 0.0        # 0 disables; min T3 second difference, in ATR
-
-    # ---- optional SuperTrend confirmation (dual_t3 only) ----
-    st_period: int = 10              # ATR period of the SuperTrend envelope
-    st_mult: float = 0.0             # 0 disables the confirmation entirely
-
     # ---- adaptive cost-regime gate (burst) ----
     cost_rank_max: float = 0.0       # 0 disables; percentile ceiling on cost/range
 
     # ---- reversion regime ceiling (_regime) ----
     adx_max: float = 0.0             # 0 disables; reversion dies in strong trends
-
-    # ---- Slow Stochastic crossover (price range, not RSI) ----
-    stoch_k_period: int = 10
-    stoch_k_smooth: int = 6
-    stoch_d_smooth: int = 3
-
-    # ---- Parabolic SAR flip ----
-    psar_af_step: float = 0.02
-    psar_af_max: float = 0.2
 
     t3_length: int = 6
     t3_volume_factor: float = 0.7
@@ -142,12 +121,7 @@ class Params:
                 self.pull_break_confirm,
                 self.brst_lookback, self.brst_range_z, self.brst_close_pct,
                 self.chan_lookback, self.chan_buffer_atr,
-                self.t3_fast, self.t3_slow_mult, self.t3_fast_vf,
-                self.t3_accel_min,
-                self.st_period, self.st_mult,
-                self.cost_rank_max,
-                self.stoch_k_period, self.stoch_k_smooth, self.stoch_d_smooth,
-                self.psar_af_step, self.psar_af_max)
+                self.cost_rank_max)
 
 
 class IndicatorCache:
@@ -766,8 +740,4 @@ def required_bars(p: Params) -> int:
                    # burst ranks cost against a 240-bar window.
                    p.brst_lookback * 6 + 260,
                    # channel_break needs the full channel before its first read.
-                   int(p.chan_lookback) + 2,
-                   # dual_t3's slow line is a cascade over t3_fast * mult.
-                   int(p.t3_fast * max(1.2, p.t3_slow_mult)) * 20,
-                   int(p.st_period) * 10 if p.st_mult > 0 else 0,
-                   (p.stoch_k_period + p.stoch_k_smooth + p.stoch_d_smooth) * 8))
+                   int(p.chan_lookback) + 2))

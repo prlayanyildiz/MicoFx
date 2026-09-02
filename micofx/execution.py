@@ -221,6 +221,9 @@ class ExecutionMonitor:
                 if isinstance(row, dict):
                     sl = float(row.get("original_sl") or 0.0)
                     rd = float(row.get("risk_dist") or 0.0)
+                    # Drop poisoned negatives from price=0 fills (02.09).
+                    if sl <= 0:
+                        sl = 0.0
                     entry: dict[str, float] = {"original_sl": sl, "risk_dist": rd}
                     mfe = float(row.get("mfe") or 0.0)
                     mae = float(row.get("mae") or 0.0)
@@ -230,8 +233,9 @@ class ExecutionMonitor:
                         entry["mae"] = mae
                     self._originals[ticket] = entry
                 elif isinstance(row, (int, float)) and not isinstance(row, bool):
+                    sl = float(row)
                     self._originals[ticket] = {
-                        "original_sl": float(row), "risk_dist": 0.0}
+                        "original_sl": sl if sl > 0 else 0.0, "risk_dist": 0.0}
                 else:
                     continue
 
@@ -319,15 +323,24 @@ class ExecutionMonitor:
         is later expressed in.
         """
         seen: set[int] = set()
+        grew = False
         for pos in positions:
             ticket = int(pos["ticket"])
             seen.add(ticket)
             book = self._open.setdefault(ticket, {})
             originals = getattr(self, "_originals", None) or {}
             saved = originals.get(ticket)
+            entry = float(pos["price_open"])
             if saved:
                 # Fill-time values win over the live (possibly trailed) stop.
-                book.setdefault("original_sl", float(saved.get("original_sl") or 0.0))
+                # Poisoned (<=0) originals from price=0 fills must not stick —
+                # leave the key unset so first-sight below can heal.
+                try:
+                    saved_sl = float(saved.get("original_sl") or 0.0)
+                except (TypeError, ValueError):
+                    saved_sl = 0.0
+                if saved_sl > 0:
+                    book.setdefault("original_sl", saved_sl)
                 if float(saved.get("risk_dist") or 0.0) > 0:
                     book.setdefault("risk_dist", float(saved["risk_dist"]))
                 saved_mfe = float(saved.get("mfe") or 0.0)
@@ -338,28 +351,66 @@ class ExecutionMonitor:
                     book["mae"] = max(float(book.get("mae") or 0.0), saved_mae)
             book.update({
                 "symbol": pos["symbol"], "side": pos["side"], "sl": float(pos["sl"]),
-                "tp": float(pos["tp"]), "entry": float(pos["price_open"]),
+                "tp": float(pos["tp"]), "entry": entry,
                 "magic": int(pos["magic"]),
             })
-            book.setdefault("risk_dist", abs(float(pos["price_open"]) - float(pos["sl"]))
-                            if pos["sl"] else 0.0)
+            try:
+                live_sl = float(pos["sl"] or 0.0)
+            except (TypeError, ValueError):
+                live_sl = 0.0
+            if live_sl <= 0:
+                live_sl = 0.0
+            book.setdefault("risk_dist", abs(entry - live_sl) if live_sl > 0 else 0.0)
             # First-sight stop, frozen the same way as risk_dist: a later trail
             # must not rewrite "did this close at the original SL or a moved
             # one". 0 means the broker had no stop on first sight.
-            # Not persisted: a restart of a pre-patch ticket would otherwise
-            # freeze the current trail as original.
-            book.setdefault("original_sl", float(pos["sl"]) if pos["sl"] else 0.0)
+            # Heal a poisoned (<=0) blob when the broker now has a real stop
+            # (attach/repair after price=0 fill).
+            try:
+                cur_orig = float(book.get("original_sl") or 0.0)
+            except (TypeError, ValueError):
+                cur_orig = 0.0
+            if cur_orig <= 0:
+                # Reconstruct only from *fill-time* risk_dist on a poisoned
+                # saved row. risk_dist just derived from the live stop is a
+                # trail — using it invents a fake original (buy SL above
+                # entry → entry−|Δ|). Pure first-sight stays the live stop
+                # and must not persist (would freeze a pre-patch trail).
+                healed = 0.0
+                saved_rd = 0.0
+                if saved:
+                    try:
+                        saved_rd = float(saved.get("risk_dist") or 0.0)
+                    except (TypeError, ValueError):
+                        saved_rd = 0.0
+                side = str(pos.get("side") or "")
+                if saved_rd > 0 and entry > 0 and side in ("buy", "sell"):
+                    healed = (entry - saved_rd) if side == "buy" else (entry + saved_rd)
+                    if healed <= 0:
+                        healed = 0.0
+                if healed <= 0:
+                    healed = live_sl
+                book["original_sl"] = healed
+                if healed > 0 and saved_rd > 0:
+                    originals = getattr(self, "_originals", None)
+                    if not isinstance(originals, dict):
+                        self._originals = {}
+                        originals = self._originals
+                    blob = originals.setdefault(ticket, {})
+                    blob["original_sl"] = healed
+                    blob["risk_dist"] = saved_rd
+                    grew = True
+            else:
+                book.setdefault("original_sl", cur_orig)
             book.setdefault("opened_at", int(pos.get("time") or 0))
             # Peak excursion from entry, in price. Divided by this trade's own
             # frozen risk_dist at close. Trailing must not shrink that R.
             cur = float(pos.get("price_current") or 0)
-            entry = float(pos.get("price_open") or 0)
             if cur > 0 and entry > 0:
                 fav = (cur - entry) if pos["side"] == "buy" else (entry - cur)
                 book["mfe"] = max(float(book.get("mfe") or 0.0), max(0.0, fav))
                 book["mae"] = max(float(book.get("mae") or 0.0), max(0.0, -fav))
         originals = getattr(self, "_originals", None)
-        grew = False
         if isinstance(originals, dict):
             for ticket in seen:
                 blob = originals.get(ticket)
@@ -382,11 +433,27 @@ class ExecutionMonitor:
 
         Called from the engine on a successful open, while signal-bar close,
         spread and ADX are still on the symbol state. ``track()`` later
-        refreshes SL/TP/MFE but never overwrites these keys.
+        refreshes SL/TP/MFE but never overwrites these keys — except a
+        repair may replace a poisoned ``original_sl`` / ``risk_dist`` (<=0)
+        with the first real hard stop (02.09 price=0 fill).
         """
         book = self._open.setdefault(int(ticket), {})
         for key, value in meta.items():
             if value is None:
+                continue
+            if key in ("original_sl", "risk_dist"):
+                try:
+                    new_v = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if new_v <= 0:
+                    continue
+                try:
+                    old_v = float(book.get(key) or 0.0)
+                except (TypeError, ValueError):
+                    old_v = 0.0
+                if key not in book or old_v <= 0:
+                    book[key] = new_v
                 continue
             book.setdefault(key, value)
         sl = book.get("original_sl")

@@ -15,8 +15,9 @@ def test_high_leverage_small_equity_targets_conservative_lot():
         global_free_slots=1, margin_usage_pct=0,
         max_margin_usage_pct=85, lot_multiplier=1.0, max_concurrent_risk_pct=50,
     )
-    assert plan["targets"]["lot_multiplier"] == 0.85
-    assert plan["targets"]["max_margin_usage_pct"] >= 55
+    # 1:500 + eq<$250 -> growth mode lot 0.92, floor marj 78
+    assert plan["targets"]["lot_multiplier"] == 0.92
+    assert plan["targets"]["max_margin_usage_pct"] >= 78.0
 
 
 def test_equity_growth_raises_lot_multiplier():
@@ -33,15 +34,16 @@ def test_equity_growth_raises_lot_multiplier():
     assert big["targets"]["lot_multiplier"] > small["targets"]["lot_multiplier"]
 
 
-def test_lot_blocks_bump_lot_only_when_live_lots_ok():
+def test_lot_blocks_do_not_widen_margin_when_counters_stale():
+    """lot_blocks is advisory only — do not bump marj off historical counters."""
     blocked = compute_kasa_targets(
         equity=200, leverage=500, n_enabled=4,
         global_free_slots=1, margin_usage_pct=0,
-        max_margin_usage_pct=68, lot_multiplier=0.85, max_concurrent_risk_pct=46,
+        max_margin_usage_pct=78, lot_multiplier=0.92, max_concurrent_risk_pct=46,
         lot_blocks=38,
     )
-    assert blocked["targets"]["lot_multiplier"] > 0.85
-    assert blocked["targets"]["max_margin_usage_pct"] == 68  # no marj bump from stale counters
+    assert blocked["targets"]["lot_multiplier"] == 0.92
+    assert blocked["targets"]["max_margin_usage_pct"] == 78.0
 
     zero = compute_kasa_targets(
         equity=200, leverage=500, n_enabled=4,

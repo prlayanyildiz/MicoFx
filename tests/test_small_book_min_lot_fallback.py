@@ -75,15 +75,16 @@ def _acct(**kw):
 def test_four_vacant_names_still_get_min_lot_on_small_account():
     cfgs = [_cfg(s) for s in ("GER40", "JPN225", "NAS100", "US30")]
     rm = RiskManager(_Store(cfgs), _IndexClient())
-    lot, note = rm.lot_for(cfgs[0], 50.0, 200.0, account=_acct())
+    # sl tight enough that min lot stays within MAX_MIN_LOT_OVERSHOOT of 1R
+    lot, note = rm.lot_for(cfgs[0], 20.0, 200.0, account=_acct())
     assert lot >= 0.1, note
-    assert "kaldirac" in note
+    assert lot == 0.1, note  # floor, not full margin share
 
 
 def test_high_leverage_allows_min_lot_when_margin_fits():
     cfgs = [_cfg("GER40")]
     rm = RiskManager(_Store(cfgs), _IndexClient())
-    lot, note = rm.lot_for(cfgs[0], 50.0, 200.0, account=_acct())
+    lot, note = rm.lot_for(cfgs[0], 20.0, 200.0, account=_acct())
     assert lot >= 0.1, note
 
 
@@ -92,4 +93,13 @@ def test_split_still_caps_when_whole_book_cannot_fund_min_lot():
     rm = RiskManager(_Store(cfgs), _IndexClient())
     lot, note = rm.lot_for(cfgs[0], 50.0, 50.0, account=_acct(equity=50.0, margin_free=50.0))
     assert lot == 0.0
+    assert "atlandi" in note
+
+
+def test_wide_stop_skips_when_min_lot_blows_past_1r_overshoot():
+    """C1: 1:500 must not unlock full margin share past the overshoot guard."""
+    cfgs = [_cfg("GER40")]
+    rm = RiskManager(_Store(cfgs), _IndexClient())
+    lot, note = rm.lot_for(cfgs[0], 50.0, 200.0, account=_acct())
+    assert lot == 0.0, note
     assert "atlandi" in note

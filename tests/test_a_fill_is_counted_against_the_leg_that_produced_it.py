@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -76,7 +77,7 @@ def _engine():
     eng.store = _Store()
     eng._entry_blocks = {}
     eng._entry_last_bar = {}
-    eng._entry_blocks_since = 1000.0
+    eng._entry_blocks_since = time.time()
     eng._entry_blocks_dirty = False
     return eng
 

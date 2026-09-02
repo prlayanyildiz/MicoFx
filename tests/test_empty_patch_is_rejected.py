@@ -66,11 +66,20 @@ class _Cli:
         return None
 
 
+class _Supervisor:
+    def update_settings(self, body):
+        return body
+
+    def clear(self, symbol=None):
+        pass
+
+
 class _Eng:
     def __init__(self):
         self.entry_lock = threading.Lock()
         self.states = {}
         self._sec_cfgs = {}
+        self.supervisor = _Supervisor()
 
 
 class _Opt:

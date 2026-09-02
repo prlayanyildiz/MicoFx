@@ -16,9 +16,10 @@ from micofx.optimizer import Optimizer
 
 
 class _Store:
-    def __init__(self, cfg):
+    def __init__(self, cfg, charge_costs=False):
         self._cfg = cfg
         self.symbols = {cfg.symbol: cfg}
+        self.system = type("Sys", (), {"charge_costs": charge_costs})()
 
     def get_setting(self, key, default=None):
         return default
@@ -41,27 +42,28 @@ class _Client:
 
 
 def _cfg() -> SymbolConfig:
-    return SymbolConfig(symbol="FRA40", magic=1, strategy="stoch_flip",
+    return SymbolConfig(symbol="FRA40", magic=1, strategy="burst",
                         timeframe="M15", sl_atr_mult=1.0, trail_step_atr=0.6)
 
 
-def _detail(paper_e=0.049):
+def _detail(paper_e=0.049, charge_costs=False):
+    cost_r = 0.05 if charge_costs else 0.0
     return {
         "holdout": {"trades": 665, "expectancy": paper_e, "net_r": 32.0,
-                    "cost_per_trade_r": 0.0, "profit_factor": 1.2, "score": 8.0},
+                    "cost_per_trade_r": cost_r, "profit_factor": 1.2, "score": 8.0},
         "validation": {"trades": 400, "expectancy": 0.06, "net_r": 20.0,
                        "profit_factor": 1.2, "score": 7.0},
         "selection": {"trades": 800, "expectancy": 0.07, "profit_factor": 1.3},
         "positive_ratio": 0.8,
         "holdout_days": 40.0,
         "validated": True,
-        "charge_costs": False,
+        "charge_costs": charge_costs,
     }
 
 
-def _apply(costed, logs=None):
+def _apply(costed, logs=None, charge_costs=True):
     cfg = _cfg()
-    store = _Store(cfg)
+    store = _Store(cfg, charge_costs=charge_costs)
     opt = Optimizer(store=store, client=_Client())
     opt._holdout_costed = lambda *a, **k: costed
     if logs is not None:
@@ -75,7 +77,8 @@ def _apply(costed, logs=None):
         LOG.emit = _cap
     try:
         result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-                           detail=_detail(), timeframe="M15", strategy="stoch_flip")
+                           detail=_detail(charge_costs=charge_costs),
+                           timeframe="M15", strategy="burst")
     finally:
         if logs is not None:
             LOG.emit = orig
@@ -84,25 +87,38 @@ def _apply(costed, logs=None):
 
 
 def test_negative_costed_holdout_is_not_applied():
-    """Paper-positive, charged-negative still applied (#50). Found 16.08:
-    UK100/SpotBrent/JPN225 paper E +0.09..+0.13, charged −0.21..−0.01,
-    together −7.55 $/day against a 2113 $ balance.
-    """
+    """When live charges costs, paper-positive / charged-negative is refused."""
     cfg = _cfg()
-    store = _Store(cfg)
+    store = _Store(cfg, charge_costs=True)
     opt = Optimizer(store=store, client=_Client())
     opt._holdout_costed = lambda *a, **k: {"trades": 665, "expectancy": -0.056}
     result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-                       detail=_detail(), timeframe="M15", strategy="stoch_flip")
+                       detail=_detail(charge_costs=True), timeframe="M15",
+                       strategy="burst")
     assert result["ok"] is False
     assert "maliyet" in result["error"]
     assert cfg.sl_atr_mult == 1.0
 
 
+def test_cost_free_apply_stamps_negative_costed_without_refusing():
+    """#50: cost-free still applies; charged look is stamped for visibility."""
+    cfg = _cfg()
+    store = _Store(cfg, charge_costs=False)
+    opt = Optimizer(store=store, client=_Client())
+    opt._holdout_costed = lambda *a, **k: {"trades": 665, "expectancy": -0.056}
+    result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
+                       detail=_detail(charge_costs=False), timeframe="M15",
+                       strategy="burst")
+    assert result["ok"] is True, result
+    assert cfg.sl_atr_mult == 2.4
+    assert cfg.opt_summary["costed_negative"] is True
+    assert cfg.opt_summary["holdout_costed"]["expectancy"] == -0.056
+
+
 def test_force_still_applies_a_costed_negative_candidate():
     logs = []
     cfg = _cfg()
-    store = _Store(cfg)
+    store = _Store(cfg, charge_costs=True)
     opt = Optimizer(store=store, client=_Client())
     opt._force_apply = True
     opt._holdout_costed = lambda *a, **k: {"trades": 665, "expectancy": -0.056}
@@ -116,7 +132,8 @@ def test_force_still_applies_a_costed_negative_candidate():
     LOG.emit = _cap
     try:
         result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-                           detail=_detail(), timeframe="M15", strategy="stoch_flip")
+                           detail=_detail(charge_costs=True), timeframe="M15",
+                           strategy="burst")
     finally:
         LOG.emit = orig
     assert result["ok"] is True, result
@@ -127,7 +144,7 @@ def test_force_still_applies_a_costed_negative_candidate():
 
 
 def test_positive_costed_holdout_is_stamped_without_the_flag():
-    cfg = _apply({"trades": 200, "expectancy": 0.12})
+    cfg = _apply({"trades": 200, "expectancy": 0.12}, charge_costs=False)
     summary = cfg.opt_summary
     assert summary["holdout_costed"]["expectancy"] == 0.12
     assert "costed_negative" not in summary
@@ -135,7 +152,7 @@ def test_positive_costed_holdout_is_stamped_without_the_flag():
 
 
 def test_missing_costed_eval_does_not_break_apply_or_invent_a_flag():
-    cfg = _apply(None)
+    cfg = _apply(None, charge_costs=False)
     summary = cfg.opt_summary
     assert cfg.sl_atr_mult == 2.4
     assert "holdout_costed" not in summary
@@ -145,7 +162,7 @@ def test_missing_costed_eval_does_not_break_apply_or_invent_a_flag():
 
 def test_a_broken_costed_eval_leaves_apply_intact():
     cfg = _cfg()
-    store = _Store(cfg)
+    store = _Store(cfg, charge_costs=True)
     opt = Optimizer(store=store, client=_Client())
 
     def _boom(*a, **k):
@@ -153,7 +170,8 @@ def test_a_broken_costed_eval_leaves_apply_intact():
 
     opt._holdout_costed = _boom
     result = opt.apply("FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-                       detail=_detail(), timeframe="M15", strategy="stoch_flip")
+                       detail=_detail(charge_costs=True), timeframe="M15",
+                       strategy="burst")
     assert result["ok"] is True
     assert "holdout_costed" not in cfg.opt_summary
     assert "costed_negative" not in cfg.opt_summary
@@ -183,14 +201,14 @@ def test_the_charged_slice_is_the_one_the_sweep_used():
 
 def test_spread_scale_on_the_row_is_the_sweeps_not_the_live_clock():
     cfg = _cfg()
-    store = _Store(cfg)
+    store = _Store(cfg, charge_costs=False)
     opt = Optimizer(store=store, client=_Client())
     opt._holdout_costed = lambda *a, **k: None
     opt._spread_scale = lambda symbol: 9.0
     result = opt.apply(
         "FRA40", {"sl_atr_mult": 2.4}, score=9.9,
-        detail={**_detail(), "spread_scale": 0.41},
-        timeframe="M15", strategy="stoch_flip")
+        detail={**_detail(charge_costs=False), "spread_scale": 0.41},
+        timeframe="M15", strategy="burst")
     assert result["ok"] is True, result
     assert cfg.opt_summary["spread_scale"] == 0.41
     assert cfg.opt_summary["charge_costs"] is False

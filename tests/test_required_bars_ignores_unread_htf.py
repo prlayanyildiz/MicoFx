@@ -14,11 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx.strategy import Params, opt_fields_read, required_bars
 
 
-def test_unread_htf_factor_does_not_inflate_required_bars():
-    assert "htf_factor" not in opt_fields_read("ichimoku")
-    fat = Params(strategy="ichimoku", htf_mode="t3", htf_factor=12)
-    thin = Params(strategy="ichimoku", htf_mode="t3", htf_factor=1)
-    assert required_bars(fat) == required_bars(thin)
+def test_ichimoku_scales_required_bars_with_htf():
+    """02.09: ichimoku reads HTF/ADX gates; fetch must match."""
+    assert "htf_factor" in opt_fields_read("ichimoku")
+    wide = Params(strategy="ichimoku", htf_mode="t3", htf_factor=12)
+    narrow = Params(strategy="ichimoku", htf_mode="t3", htf_factor=1)
+    assert required_bars(wide) > required_bars(narrow)
 
 
 def test_a_family_that_reads_htf_still_scales_required_bars():

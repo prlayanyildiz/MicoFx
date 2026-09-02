@@ -68,6 +68,15 @@ def test_deposit_is_not_counted_as_profit():
     assert g.pnl_pct(EQUITY) < 0.0, "a losing day must not report as profit"
 
 
+def test_deposit_larger_than_chip_cannot_invent_sub_100_pct_day():
+    """C3: start 100 + deposit 300 + equity 225 → trading −175, not −174%."""
+    g = _guard()
+    g.start_balance = 100.51
+    g.set_cash_flow(300.0)
+    assert g.pnl_pct(225.0) == pytest.approx(-100.0)
+    assert g.pnl_pct(225.0) >= -100.0
+
+
 def test_without_the_correction_the_day_reads_positive():
     """Pins the exact defect: no cash-flow correction => the +20.11% panel lie."""
     g = _guard()  # cash_flow left at 0.0 - the old behaviour

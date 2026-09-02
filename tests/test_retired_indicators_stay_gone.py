@@ -103,12 +103,20 @@ def test_parabolic_flip_is_gone():
 
 def test_stoch_and_t3_families_are_gone():
     """01.09: F39 null edge on stoch_flip; dual_t3/t3_flip weakest asymmetry."""
-    from micofx.models import STRATEGIES
-    from micofx.strategy import _FAMILIES
+    from micofx.models import OPT_FIELDS, STRATEGIES
+    from micofx.strategy import _FAMILIES, Params
 
     for name in ("stoch_flip", "dual_t3", "t3_flip"):
         assert name not in STRATEGIES, name
         assert name not in _FAMILIES, name
+    # C4: Params/OPT axes only those families read. Unknown keys in old DB
+    # rows still coerce away; fixtures keep the keys for regression.
+    for field in ("t3_fast", "t3_slow_mult", "t3_fast_vf", "t3_accel_min",
+                  "st_period", "st_mult",
+                  "stoch_k_period", "stoch_k_smooth", "stoch_d_smooth",
+                  "psar_af_step", "psar_af_max"):
+        assert field not in OPT_FIELDS, field
+        assert field not in Params.__dataclass_fields__, field
 
 
 def test_retired_family_functions_are_gone():

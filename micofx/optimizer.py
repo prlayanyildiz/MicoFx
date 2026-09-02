@@ -1731,8 +1731,16 @@ class Optimizer:
 
         Tests construct Optimizer with object.__new__ and no client; a
         raised replay must fall back, not invent a comparison.
+
+        When the live book searches cost-free, a charged replay here would
+        depress the incumbent and wave every paper candidate through (A1
+        churn). Same-regime only: charged fresh iff ``charge_costs`` is on.
         """
         try:
+            system = getattr(getattr(self, "store", None), "system", None)
+            charging = bool(getattr(system, "charge_costs", True)) if system is not None else True
+            if not charging:
+                return None
             params = {k: getattr(cfg, k) for k in OPT_FIELDS if hasattr(cfg, k)}
             key = (str(cfg.symbol), str(cfg.timeframe), str(cfg.strategy),
                    tuple(sorted(params.items())))
@@ -2086,21 +2094,21 @@ class Optimizer:
             return {"ok": False, "error": missing}
         if not isinstance(detail, dict):
             return {"ok": False, "error": APPLY_STAMP_MISSING}
-        # Charged same-slice look used to stamp costed_negative and still
-        # apply (#50). UK100/SpotBrent/JPN225 were the bill: paper-positive
-        # winners that lose once spread is paid. A measurement that cannot
-        # change the decision is not a gate.
+        # Charged same-slice look stamps holdout_costed / costed_negative
+        # beside every apply (#50). Refuse only while the live book actually
+        # charges costs — cost-free mode still wants the visibility stamp.
         costed = None
         charging = bool(getattr(getattr(self, "store", None), "system", None)
                         and getattr(self.store.system, "charge_costs", True))
-        if detail is not None and charging:
+        if detail is not None:
             try:
                 costed = self._holdout_costed(
                     symbol, next_tf, next_strat, applied_params)
             except Exception:
                 costed = None
             charged = float((costed or {}).get("expectancy") or 0.0) if costed else 0.0
-            if costed is not None and charged < 0 and not getattr(self, "_force_apply", False):
+            if (charging and costed is not None and charged < 0
+                    and not getattr(self, "_force_apply", False)):
                 return {"ok": False,
                         "error": f"maliyetli holdout negatif ({charged:+.3f})"}
         patch = dict(applied_params)

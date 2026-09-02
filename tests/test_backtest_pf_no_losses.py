@@ -6,8 +6,8 @@ silent unit change as `Supervisor._pf` and `Supervisor._judge` carried.
 
 The consequence runs the wrong way here: it REJECTS. `_slice_ok` decides
 whether an out-of-sample slice counts as having paid, and a slice is only
-tested once it already cleared MIN_TEST_TRADES (12) and net_r > 0. Twelve
-winning trades and no losers at +0.08R each is 0.96R, scored as "PF 0.96" and
+tested once it already cleared MIN_TEST_TRADES (25) and net_r > 0. Twenty-five
+winning trades and no losers at +0.08R each is 2.00R, scored as "PF 2.00" and
 thrown out for missing a 1.10 profit-factor floor it cannot fail on merit -
 there is no loss for the wins to be a multiple of.
 
@@ -51,9 +51,9 @@ def test_the_total_r_no_longer_decides():
 # ------------------------------------------------------------ the reachable gate
 
 def test_a_flawless_slice_is_not_rejected_for_being_small():
-    """Twelve winners at +0.08R, nothing lost - used to score 0.96 < 1.10."""
-    slice_dict = {"net_r": 0.96, "trades": MIN_TEST_TRADES,
-                  "profit_factor": _res(0.96).profit_factor}
+    """Many winners, nothing lost — must clear as a ratio, not an R sum."""
+    slice_dict = {"net_r": 2.0, "trades": MIN_TEST_TRADES,
+                  "profit_factor": _res(2.0).profit_factor}
     assert _slice_ok(slice_dict), "kayipsiz dilim R toplami kucuk diye elendi"
 
 

@@ -258,7 +258,16 @@ class DailyGuard:
         # producing it, so counting it as profit let the daily loss breaker
         # sit green through a losing day (and, via Supervisor.review, skipped
         # the drawdown lot damper too).
-        return (equity - self.cash_flow - self.start_balance) / self.start_balance * 100.0
+        trading = equity - self.cash_flow - self.start_balance
+        pct = trading / self.start_balance * 100.0
+        # C3: a deposit larger than the morning chip can make trading PnL
+        # more negative than -100% of start (lost the deposit too). That
+        # invented -174% stuck the supervisor at risk_scale_floor and would
+        # instant-halt if daily_loss_pct were armed. Cap at -100% of the
+        # chip; deposits still do not buy more room (denom stays start).
+        if pct < -100.0:
+            return -100.0
+        return pct
 
     def check(
         self,
@@ -541,14 +550,15 @@ class RiskManager:
                              f"< min {floor:g}), islem atlandi")
             lot = min(auto, r_cap, ceiling)
             if lot + 1e-12 < floor and auto + 1e-12 >= floor:
-                lev = float((account or {}).get("leverage") or 0.0)
-                # Margin already reflects broker leverage (order_calc_margin).
-                # When 1:100+ and min lot fits the margin share, do not let a
-                # shakeout-wide 1R math block every entry on a small account.
-                if floor < r_cap * self.MAX_MIN_LOT_OVERSHOOT:
-                    lot = min(auto, ceiling)
-                elif lev >= 100:
-                    lot = min(auto, ceiling)
+                # Min lot may overshoot the 1R cap by a broker-granularity
+                # factor. Past that, skip — do NOT fall through to the full
+                # margin share (old ``lev >= 100`` path sized ~10% of a $225
+                # book per index fill).
+                if floor <= r_cap * self.MAX_MIN_LOT_OVERSHOOT + 1e-12:
+                    lot = min(floor, auto, ceiling)
+                else:
+                    return 0.0, (f"lot sifir ({note}, 1R tavan {r_cap:g} "
+                                 f"< min {floor:g}), islem atlandi")
             if lot + 1e-12 < floor:
                 return 0.0, (f"lot sifir ({note}, 1R tavan {lot:g} "
                              f"< min {floor:g}), islem atlandi")

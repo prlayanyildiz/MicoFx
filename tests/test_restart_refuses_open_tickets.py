@@ -1,8 +1,10 @@
-"""Panel restart/shutdown must 409 while this process still has tickets.
+"""Shutdown must 409 while this process still has tickets; restart may proceed.
 
-21:20 / 21:43 / ~21:59 restarted with opens and killed the 20:21 search.
-Broker SL survives either way; the miss is first-sight trail + opt death.
-MT5 down still allows restart so a wedged bind can recover.
+21:20 / 21:43 / ~21:59 restarted with opens and killed the 20:21 search —
+first-sight trail was the miss. Operator 02.09: restart with open tickets is
+allowed (MT5 keeps fills; track()/open_original_sl reattach). Shutdown and
+holdout capture stay refused. MT5 down still allows restart so a wedged bind
+can recover.
 """
 from __future__ import annotations
 
@@ -86,12 +88,15 @@ def _post(path, client, monkeypatch=None):
     return tc.post(path, headers={"Origin": "http://testserver"})
 
 
-def test_restart_is_409_while_a_bot_ticket_is_open(monkeypatch):
+def test_restart_proceeds_while_a_bot_ticket_is_open(monkeypatch):
     client = _Client([{"ticket": 9, "magic": 1, "symbol": "GER40"}])
     res = _post("/api/app/restart", client, monkeypatch)
-    assert res.status_code == 409
-    assert "acik pozisyon" in res.json()["detail"].lower()
-    assert client.killed is False
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+    # Thread still runs shutdown after the response; give it a tick.
+    import time
+    time.sleep(0.05)
+    assert client.killed is True
 
 
 def test_shutdown_is_409_while_a_bot_ticket_is_open(monkeypatch):

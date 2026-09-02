@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_the_fill_trade_line_names_magic_and_live_cost_share():
     src = (ROOT / "micofx" / "engine.py").read_text(encoding="utf-8")
     start = src.index("cost_bit = ")
-    chunk = src[start:start + 700]
+    chunk = src[start:start + 1400]
     assert "magic={cfg.magic}" in chunk, chunk
     assert "maliyet %" in chunk, chunk
     assert '"TRADE"' in chunk

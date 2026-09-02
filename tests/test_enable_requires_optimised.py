@@ -65,11 +65,20 @@ class _Client:
     def tick(self, s): return None
 
 
+class _Supervisor:
+    def update_settings(self, body):
+        return body
+
+    def clear(self, symbol=None):
+        pass
+
+
 class _Engine:
     def __init__(self):
         self.states = {}
         self.entry_lock = threading.Lock()
         self._sec_cfgs = {}
+        self.supervisor = _Supervisor()
 
 
 class _Optimizer:

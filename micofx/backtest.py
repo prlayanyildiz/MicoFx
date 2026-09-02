@@ -31,7 +31,7 @@ def _drop_blocked_entry_hours(cfg: SymbolConfig, times: np.ndarray,
     return mask & ~np.isin(bar_hour, np.asarray(hours, dtype=np.int64))
 
 # Out-of-sample samples thinner than this are noise, not evidence.
-MIN_TEST_TRADES = 12
+MIN_TEST_TRADES = 25
 
 # Reported when nothing lost: the best a profit factor can describe. A run with
 # no losses has no denominator, and returning the win total instead silently
