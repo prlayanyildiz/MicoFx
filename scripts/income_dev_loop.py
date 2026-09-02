@@ -513,6 +513,26 @@ def render_markdown(report: dict[str, Any], applied: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _run_family_audit(headers: dict[str, str]) -> list[str]:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "family_audit", ROOT / "scripts" / "family_audit.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod.sync_family_gaps(headers)
+
+
+def _run_signal_health(headers: dict[str, str]) -> list[str]:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "signal_health", ROOT / "scripts" / "signal_health.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod.check_signal_health(headers)
+
+
 def _run_holdout_live_sync(headers: dict[str, str]) -> list[str]:
     import importlib.util
     spec = importlib.util.spec_from_file_location(
@@ -561,6 +581,8 @@ def main() -> int:
         applied.extend(apply_trust_entries(report))
         applied.extend(apply_spread_calibration(report))
         applied.extend(_run_holdout_live_sync(headers))
+        applied.extend(_run_family_audit(headers))
+        applied.extend(_run_signal_health(headers))
         import importlib.util as _ilu
         spec_cf = _ilu.spec_from_file_location(
             "cost_free_mode", ROOT / "scripts" / "cost_free_mode.py")

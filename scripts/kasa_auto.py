@@ -29,7 +29,9 @@ def compute_kasa_targets(
     lot_cur = float(lot_multiplier or 1.0)
 
     if lev >= 400:
-        margin_target = min(85.0, 55.0 + eq / 40.0 + n * 2.0)
+        margin_target = min(85.0, 58.0 + eq / 35.0 + n * 2.5)
+        if eq < 500:
+            margin_target = max(margin_target, 78.0)
     elif lev >= 100:
         margin_target = min(80.0, 50.0 + eq / 60.0 + n * 1.5)
     else:
@@ -39,7 +41,7 @@ def compute_kasa_targets(
     if eq < 120:
         lot_target = 0.65
     elif eq < 250:
-        lot_target = 0.85
+        lot_target = 0.92 if lev >= 400 else 0.85
     elif eq < 500:
         lot_target = 1.0
     elif eq < 1200:
@@ -63,15 +65,26 @@ def compute_kasa_targets(
 
     patch: dict[str, Any] = {}
     reasons: list[str] = list(heal_notes)
+    flat_growth = (
+        global_free_slots > 0
+        and margin_usage_pct < 15.0
+        and zero_lot == 0
+    )
 
     if abs(margin_target - float(max_margin_usage_pct or 0)) >= 1.0:
-        patch["max_margin_usage_pct"] = margin_target
-        reasons.append(
-            f"marj %{max_margin_usage_pct:g}->%{margin_target:g} (1:{int(lev)} x {n} sembol)")
+        if flat_growth and margin_target < float(max_margin_usage_pct or 0):
+            pass  # flat kitap: marji dusurme
+        else:
+            patch["max_margin_usage_pct"] = margin_target
+            reasons.append(
+                f"marj %{max_margin_usage_pct:g}->%{margin_target:g} (1:{int(lev)} x {n} sembol)")
 
     if abs(lot_target - lot_cur) >= 0.05:
-        patch["lot_multiplier"] = lot_target
-        reasons.append(f"lot_mult {lot_cur}->{lot_target} (eq ${eq:.0f})")
+        if flat_growth and lot_target < lot_cur:
+            pass  # flat kitap: lot carpani dusurme
+        else:
+            patch["lot_multiplier"] = lot_target
+            reasons.append(f"lot_mult {lot_cur}->{lot_target} (eq ${eq:.0f})")
 
     if abs(conc_target - float(max_concurrent_risk_pct or 0)) >= 2.0:
         patch["max_concurrent_risk_pct"] = conc_target
