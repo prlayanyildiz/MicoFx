@@ -644,6 +644,11 @@ class MT5Client:
         self._name_map.clear()
         self._symbol_names_cache = []
         self._symbol_names_at = 0.0
+        # Fresh attach: rediscover broker clock pace from live ticks instead of
+        # carrying a pre-disconnect anchor that can read as frozen forever.
+        self._broker_now = 0.0
+        self._broker_seen_at = 0.0
+        self._broker_anchor = None
         broker = getattr(info, "company", "?")
         login = getattr(acc, "login", "?") if acc is not None else "?"
         server = getattr(acc, "server", "?") if acc is not None else "?"
@@ -873,15 +878,20 @@ class MT5Client:
             # nothing is left unprotected, but nothing new is ever taken again
             # until someone restarts the process.
             return None
-        data = {"bid": float(t.bid), "ask": float(t.ask), "time": float(t.time),
+        stamp = float(t.time)
+        time_msc = getattr(t, "time_msc", None)
+        if time_msc:
+            # Some indices stall the second field while time_msc still moves.
+            stamp = max(stamp, float(time_msc) / 1000.0)
+        data = {"bid": float(t.bid), "ask": float(t.ask), "time": stamp,
                 "spread": float(t.ask - t.bid)}
         self._tick_cache[symbol] = (now, data)
         # Newest broker-clock reading seen anywhere in the book - see
         # market_open() for why this, and not the wall clock, is the yardstick.
-        if data["time"] > self._broker_now:
+        if stamp > self._broker_now:
             if self._broker_anchor is None:
-                self._broker_anchor = (time.time(), data["time"])
-            self._broker_now = data["time"]
+                self._broker_anchor = (time.time(), stamp)
+            self._broker_now = stamp
             self._broker_seen_at = time.time()
         return data
 

@@ -60,10 +60,6 @@ def compute_kasa_targets(
         margin_target = round(min(85.0, margin_target + 5.0 + zero_lot * 2.0), 1)
         lot_target = round(min(1.2, lot_target + 0.05 * zero_lot), 2)
         heal_notes.append(f"lot=0 sembol {zero_lot} -> marj/lot artir")
-    elif lot_blocks >= 20 and global_free_slots > 0:
-        # Historical entry-block counters linger; only nudge when live lots exist.
-        lot_target = round(min(1.15, lot_target + 0.03), 2)
-        heal_notes.append(f"lot engeli gecmis {lot_blocks} -> lot hafif artir")
 
     patch: dict[str, Any] = {}
     reasons: list[str] = list(heal_notes)
