@@ -1,17 +1,22 @@
-# Gelir geliştirme döngüsü
+# Gelir geliştirme döngüsü (tam otomatik)
 
-Sonsuz iyileştirme hattı: ölç → güvenli düzelt → planla → kodla → test et.
+Sonsuz iyileştirme hattı: ölç → güvenli düzelt → araştır → kodla → test et → sync.
 
 ## Bileşenler
 
 | Parça | Açıklama |
 |-------|----------|
-| `scripts/income_dev_loop.py` | DB + panel audit; `partial_at_r=0`, `autostart_bot` güvenli fix |
-| `scripts/start_income_loop.ps1` | 6 saatte bir audit (PowerShell döngüsü) |
+| `scripts/auto_pilot.py` | **Ana giriş** — gelir döngüsü + AR-GE taraması |
+| `scripts/income_dev_loop.py` | Audit, trust mode, spread, holdout hizala |
+| `scripts/holdout_live_sync.py` | Flat aktif sembollerde spread + config |
+| `scripts/kasa_auto.py` | Kaldıraç + equity → lot/marj/conc risk otomatik ayar |
+| `scripts/start_income_loop.ps1` | 15 dk auto_pilot daemon |
 | `GELIR_DONGUSU.bat` | Döngü + auto git sync başlatır |
-| `AUTO_GIT_SYNC.bat` | Sadece otomatik commit/push (~90s debounce) |
-| `logs/income_loop_latest.md` | Son rapor (Türkçe) |
+| `AUTO_GIT_SYNC.bat` | Otomatik commit/push (~90s debounce) |
+| `logs/income_loop_latest.md` | Son gelir raporu |
+| `logs/research_latest.md` | Son AR-GE raporu |
 | `cursor/FOR_CLAUDE.md` | Köprü özeti (agent uyandırma) |
+| `cursor/RESEARCH_QUEUE.md` | Uygulanabilir AR-GE kuyruğu |
 
 ## Başlatma
 
@@ -19,32 +24,33 @@ Sonsuz iyileştirme hattı: ölç → güvenli düzelt → planla → kodla → 
 GELIR_DONGUSU.bat
 ```
 
-veya tek seferlik:
+Tek seferlik:
 
 ```
-C:\MicoFX-venv\Scripts\python.exe scripts\income_dev_loop.py --apply-safe
+C:\MicoFX-venv\Scripts\python.exe scripts\auto_pilot.py
 ```
 
-## Her turda ne olur
+## Her 15 dakikada
 
-1. **Audit** — holdout net R, supervisor, opt yaşı, risk ayarları
-2. **Güvenli fix** — `partial_at_r≠0` → 0; `autostart_bot` kapalıysa aç
-3. **Koru** — canlı skor > opt adayı ise uygulama yok (churn freni)
-4. **Reopt planı** — 48 saat + zayıf retention/watch semboller listelenir
-5. **Agent tick** — Cursor agent raporu okur, kod/test/commit (operator onayı)
+1. **Gelir audit** — aktif semboller, holdout, entry-blocks, marj
+2. **Kasa auto** — equity + kaldıraç (1:500) → lot_multiplier / marj % / eşzamanlı risk
+3. **Trust mode** — AI engellemez (sadece lot kısar); spread kalibre
+3. **Holdout sync** — flat aktif sembollerde EXEC/DRIFT hizala
+4. **AR-GE taraması** — GitHub + web; `RESEARCH_QUEUE.md` güncelle
+5. **Köprü** — `FOR_CLAUDE.md` agent için özet
+6. **Git sync** — değişiklik varsa otomatik commit/push
 
-## Gelir kuralları (değiştirme)
+## Operator kuralları
 
-- **XAUUSD / NAS100 (mtf_pullback) / JPN225** — risk bütçesi önceliği (`supervisor.priority` + `size_by_edge`)
-- **partial_at_r, harvest** — kapalı (F41/F44)
-- **Emekli aileler** — uygulanmaz
-- **Opt zorla** — sadece pozisyon yokken, operator veya agent onayıyla
-- **Sarı kırmızı** — `size_by_edge`, `daily_loss_pct`, kaldıraç: operator kararı
+- **Kapattığın sembol açılmaz** — otomasyon sadece `enabled=true` olanları işler
+- **Kasa auto** — `scripts/kasa_auto.py`: 1:500 + equity → lot_multiplier / marj % / concurrent risk
+- **Opt zorla yok** — karantina dışı otomatik search yok (AGENTS.md)
+- **partial/harvest kapalı** — F41/F44
 
-## Cursor agent prompt (her tick)
+## Agent prompt (her tick)
 
 ```
-Gelir dongusu tick: logs/income_loop_latest.md ve cursor/FOR_CLAUDE.md oku.
-Onerilen aksiyonlari uygula; guvenli kod iyilestirmeleri yap; pytest+ruff;
-commit/push sadece operator isteyince.
+auto_pilot tick: logs/income_loop_latest.md, logs/research_latest.md,
+cursor/FOR_CLAUDE.md, cursor/RESEARCH_QUEUE.md oku.
+Constitution-safe aksiyonlari uygula; pytest+ruff; commit operator isteyince.
 ```

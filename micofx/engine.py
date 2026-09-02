@@ -2573,17 +2573,16 @@ class Engine:
             cfg.sl_atr_mult, cfg.symbol,
             getattr(self, "_trade_autopsies", None))
         sl_dist = max(atr * sl_mult, min_stop)
+        sl_size = max(atr * float(cfg.sl_atr_mult or 0), min_stop)
         # No take-profit, ever. A trailing system decides when a move is over by
-        # watching the move, not by naming a price in advance; a fixed target is
-        # just a cap on the winners that pay for the losers. mt5client.open_market
-        # reads tp <= 0 as "no take-profit level".
+        # watching the move, not by naming a price in advance.
         tp_dist = 0.0
 
         # Optional live cost gate — off by default; optimizer already models cost.
         sys = self.store.system
         if sys.block_high_cost and sys.max_cost_pct_of_risk > 0:
             lot_probe, _ = self.risk.lot_for(
-                cfg, sl_dist, account.get("balance", 0.0),
+                cfg, sl_size, account.get("balance", 0.0),
                 account=account, side=side, positions=self._positions)
             if lot_probe > 0:
                 r_value = sl_dist * self.client.money_per_price_unit(cfg.symbol, lot_probe)
@@ -2596,7 +2595,7 @@ class Engine:
                     return
 
         lot, note = self.risk.lot_for(
-            cfg, sl_dist, account.get("balance", 0.0), ai_scale=scale,
+            cfg, sl_size, account.get("balance", 0.0), ai_scale=scale,
             account=account, side=side, positions=self._positions)
         if sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
             logged = getattr(self, "_sl_floor_logged", None)

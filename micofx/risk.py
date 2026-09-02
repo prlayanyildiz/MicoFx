@@ -63,6 +63,19 @@ def shakeout_sl_atr_mult(base: float, symbol: str,
     return max(floor_base, _SHAKEOUT_SL_FLOOR)
 
 
+def size_sl_distance(cfg: SymbolConfig, atr: float, client: MT5Client) -> float:
+    """SL distance for lot sizing — searched multiple, not shakeout floor."""
+    if not math.isfinite(atr) or atr <= 0:
+        return 0.0
+    try:
+        base = float(cfg.sl_atr_mult or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if base <= 0:
+        return 0.0
+    return max(atr * base, client.min_stop_distance(cfg.symbol))
+
+
 def shakeout_size_note(lot: float, lot_note: str) -> str:
     """Dollar-risk side effect of a wider stop, from lot_for's answer.
 
@@ -426,7 +439,8 @@ class RiskManager:
             scale = max(0.0, float(ai_scale))
         except (TypeError, ValueError):
             scale = 1.0
-        budget = budget / n * scale
+        whole = budget * scale
+        share = whole / n
         unit = floor if floor > 0 else 0.01
         try:
             need = float(self.client.margin_for(cfg.symbol, unit, side) or 0.0)
@@ -434,7 +448,13 @@ class RiskManager:
             return None
         if need <= 0:
             return None
-        return min(broker_ceiling, unit * (budget / need))
+        # Splitting across vacant names must not zero every entry on a small
+        # account: if one share cannot fund min lot but the whole book can,
+        # size this signal on whole remaining budget. can_open() and
+        # max_concurrent_risk_pct still bind when several names fill.
+        if share + 1e-12 < need and whole + 1e-12 >= need:
+            share = whole
+        return min(broker_ceiling, unit * (share / need))
 
     def lot_for(self, cfg: SymbolConfig, sl_distance: float, balance: float,
                ai_scale: float = 1.0, account: dict[str, Any] | None = None,
@@ -520,6 +540,15 @@ class RiskManager:
                 return 0.0, (f"lot sifir ({note}, marj payi {auto:g} "
                              f"< min {floor:g}), islem atlandi")
             lot = min(auto, r_cap, ceiling)
+            if lot + 1e-12 < floor and auto + 1e-12 >= floor:
+                lev = float((account or {}).get("leverage") or 0.0)
+                # Margin already reflects broker leverage (order_calc_margin).
+                # When 1:100+ and min lot fits the margin share, do not let a
+                # shakeout-wide 1R math block every entry on a small account.
+                if floor < r_cap * self.MAX_MIN_LOT_OVERSHOOT:
+                    lot = min(auto, ceiling)
+                elif lev >= 100:
+                    lot = min(auto, ceiling)
             if lot + 1e-12 < floor:
                 return 0.0, (f"lot sifir ({note}, 1R tavan {lot:g} "
                              f"< min {floor:g}), islem atlandi")
@@ -527,6 +556,12 @@ class RiskManager:
                 note += f" | marj pay {auto:.3f}"
             if r_cap + 1e-12 < auto:
                 note += f" | 1R tavan {r_cap:.3f}"
+            try:
+                lev = int((account or {}).get("leverage") or 0)
+            except (TypeError, ValueError):
+                lev = 0
+            if lev >= 100:
+                note += f" | kaldirac 1:{lev}"
             return self.client.normalize_volume(cfg.symbol, lot), note
 
         if raw < floor:
@@ -846,19 +881,23 @@ class RiskManager:
             broker = self.client.resolve(cfg.symbol) or cfg.symbol
             open_now = [p for p in mine if p["symbol"] == broker]
             atr = float(atr_by_symbol.get(cfg.symbol, 0.0))
-            # Route through the engine's own sizing so the table is the real number.
             sl_mult = shakeout_sl_atr_mult(
                 cfg.sl_atr_mult, cfg.symbol, autopsies)
-            sl_dist = max(atr * sl_mult, self.client.min_stop_distance(cfg.symbol)) \
-                if atr > 0 else 0.0
+            sl_dist = size_sl_distance(cfg, atr, self.client)
             lot, lot_note = self.lot_for(cfg, sl_dist, balance, account=account,
                                          positions=mine)
             if sl_dist <= 0:
                 lot_note = "risk (ATR bekleniyor)"
             elif sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
-                lot_note = f"risk (SL x{sl_mult:g} shakeout)"
+                lot_note = f"risk (SL x{sl_mult:g} shakeout, lot x{cfg.sl_atr_mult:g})"
+            slot_left = max(0, 1 - len(open_now)) if cfg.enabled else 0
             margin = self.client.margin_for(cfg.symbol, lot, "buy")
-            by_margin = int(budget // margin) if margin > 0 else 0
+            if margin <= 0 and slot_left and sl_dist > 0:
+                probe = self.client.margin_for(cfg.symbol, float(
+                    (self.client.info(cfg.symbol) or {}).get("volume_min") or 0.0), "buy")
+                by_margin = int(budget // probe) if probe > 0 else slot_left
+            else:
+                by_margin = int(budget // margin) if margin > 0 else 0
 
             # What one unit of risk (1R) is worth in account currency at this lot.
             r_value = self.risk_dollars(cfg.symbol, lot, sl_dist)
@@ -871,7 +910,6 @@ class RiskManager:
             expectancy_r = float(Supervisor.holdout_expectancy(cfg) or 0.0)
             # Long-run cost per trade in R, straight from the holdout slice.
             expectancy_cost = float(hold.get("cost_per_trade_r", 0.0) or 0.0)
-            slot_left = max(0, 1 - len(open_now)) if cfg.enabled else 0
             rows.append({
                 "symbol": cfg.symbol,
                 "broker_symbol": broker,

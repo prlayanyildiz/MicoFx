@@ -20,6 +20,8 @@ _UNSTAMPED_GATES = (
     "htf_factor", "adx_min", "adx_max", "min_body_ratio", "atr_pct_min",
     "cost_rank_max",
 )
+_ABSENT_GATE_ZERO = frozenset(
+    ("adx_min", "adx_max", "min_body_ratio", "atr_pct_min"))
 # These three just started reading HTF/ADX. Leftover numbers from a previous
 # family were never in their apply stamp (28.08 Brent/NAS). dual_t3/burst
 # already read the same dials; an omitted stamp key there is the live row
@@ -535,6 +537,11 @@ def _burst(cache: IndicatorCache, p: Params) -> Signals:
     buy = ok & (clv >= edge) & (close > open_) & allow_long
     sell = ok & (clv <= 1.0 - edge) & (close < open_) & allow_short
 
+    if p.min_body_ratio > 0:
+        body = cache.body_ratio()
+        buy &= body >= p.min_body_ratio
+        sell &= body >= p.min_body_ratio
+
     warmup = min(close.size, max(window * 4, 260, p.atr_period * 3))
     buy[:warmup] = False
     sell[:warmup] = False
@@ -647,6 +654,11 @@ def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
     buy = ok & allow_long & (close > prev_hi + pad)
     sell = ok & allow_short & (close < prev_lo - pad)
 
+    if p.min_body_ratio > 0:
+        body = cache.body_ratio()
+        buy &= body >= p.min_body_ratio
+        sell &= body >= p.min_body_ratio
+
     warmup = min(size, max(window + 1, p.atr_period * 3))
     buy[:warmup] = False
     sell[:warmup] = False
@@ -717,6 +729,17 @@ def unstamped_gates_to_zero(family: str, stamped: dict[str, Any]) -> dict[str, A
     read = opt_fields_read(family)
     return {name: 0 for name in _UNSTAMPED_GATES
             if name in read and name not in stamped}
+
+
+def absent_regime_gates_to_zero(family: str, stamped: dict[str, Any]) -> dict[str, Any]:
+    """Zero regime gates a family reads when the search winner did not name them.
+
+    Without this, an apply leaves stale adx_max / min_body_ratio from the
+    previous family or an older sweep on the live row - SpotBrent kept
+    adx_max=25 while the burst winner only stamped adx_min=0.
+    """
+    read = opt_fields_read(family)
+    return {name: 0 for name in _ABSENT_GATE_ZERO if name in read and name not in stamped}
 
 
 def searchable_axes(family: str, axes: dict[str, Any]) -> dict[str, Any]:

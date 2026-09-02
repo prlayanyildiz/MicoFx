@@ -35,7 +35,7 @@ from .models import (
 from .mt5client import Bars, MT5Client, timeframe_seconds
 from .spread_calibration import calibrate
 from .store import Store
-from .strategy import searchable_axes, unstamped_gates_to_zero
+from .strategy import absent_regime_gates_to_zero, searchable_axes, unstamped_gates_to_zero
 
 APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
 
@@ -2068,6 +2068,7 @@ class Optimizer:
         )
         applied_params = {k: v for k, v in params.items() if k in OPT_FIELDS}
         applied_params.update(unstamped_gates_to_zero(next_strat, applied_params))
+        applied_params.update(absent_regime_gates_to_zero(next_strat, applied_params))
         # Last gate before this reaches a live symbol. The API checks the same
         # bounds on its own request bodies, but auto-apply (Optimizer.start
         # with apply_best) lands here straight off a search result without

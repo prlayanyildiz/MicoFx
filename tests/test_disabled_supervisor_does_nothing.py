@@ -95,15 +95,15 @@ class TestTheGate:
         assert reason == ""
         assert scale == 1.0
 
-    def test_a_quarantine_still_blocks_while_enabled(self):
-        """The breaker itself is untouched - only the switch changed."""
+    def test_a_quarantine_scales_not_blocks_while_enabled(self):
+        """Default hard_block_only_quarantine: karantina lot kisar, engellemez."""
         sup = _sup(enabled=True)
         cfg = _quarantined(sup)
 
         allowed, reason, scale = sup.gate(cfg, NOW)
 
-        assert allowed is False
-        assert scale == 0.0
+        assert allowed is True
+        assert scale == DEFAULTS["watch_risk_scale"]
         assert "karantina" in reason
 
     def test_watch_sizing_does_not_apply_while_disabled(self):

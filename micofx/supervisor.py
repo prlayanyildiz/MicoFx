@@ -56,11 +56,11 @@ DEFAULTS: dict[str, Any] = {
     "dd_soft_pct": 1.5,              # daily drawdown where lot scaling starts
     "dd_hard_pct": 3.0,              # ...and where it reaches the floor
     "risk_scale_floor": 0.4,
-    "prefer_strong_on_dd": True,     # under daily stress, only let strong symbols enter
+    "prefer_strong_on_dd": False,    # off: do not refuse idle/watch under daily dd
     # Search never sees this gate. A hard refuse (ai_gate) therefore cuts
-    # fills the walk-forward already counted. Default: only quarantine may
-    # refuse; watch / idle / blocked hours / prefer_strong_on_dd only scale.
-    # False restores the old refusals. AX: 156 signals, 34 died on ai_gate.
+    # fills the walk-forward already counted. Default: nothing refuses; watch /
+    # idle / blocked hours / quarantine only scale lot. False restores the old
+    # refusals. AX: 156 signals, 34 died on ai_gate.
     "hard_block_only_quarantine": True,
     "reopt_min_age_hours": 48,
     # Quarantine is the only auto-search: a breaker that already fired.
@@ -334,6 +334,9 @@ class Supervisor:
         # supervisor WOULD do - it just does not do it.
         if not self.enabled:
             return True, "", 1.0
+
+        hard_only = bool(self.settings.get("hard_block_only_quarantine", True))
+
         if verdict is not None and verdict.state == "quarantine":
             # Gate on the *state*, not the clock. quarantine_until firing does
             # not itself lift a quarantine - review() does, by reclassifying
@@ -343,6 +346,11 @@ class Supervisor:
             # turned that back into a live 10% entry the instant the clock
             # ticked over, before anything had actually re-earned the size.
             left = max(0, int((verdict.quarantine_until - now) / 60))
+            if hard_only:
+                watch = float(self.settings.get("watch_risk_scale", 0.6))
+                return (True,
+                        f"AI karantina {left}dk lot kisildi ({verdict.reason})",
+                        max(0.1, watch))
             return False, f"AI karantina {left}dk ({verdict.reason})", 0.0
 
         if verdict is None:
@@ -352,7 +360,6 @@ class Supervisor:
         # ``server_now`` here is that same stamp (``decision_now``), so gmtime
         # is the broker hour, matching how hour_risk_scales were bucketed.
         hour = time.gmtime(server_now).tm_hour
-        hard_only = bool(self.settings.get("hard_block_only_quarantine", True))
         if hour in (verdict.blocked_hours or []) and not hard_only:
             return False, f"AI: {hour:02d}:00 saati zararli", 0.0
 

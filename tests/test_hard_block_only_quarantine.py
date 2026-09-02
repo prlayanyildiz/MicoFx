@@ -7,8 +7,8 @@ Found in live ``entry_blocks`` (AX, 46.3h): 156 signals, 35 fills, 34
 NAS100 at −122$ stayed ok 1.0x. Relative change, not dollars.
 
 Default ``hard_block_only_quarantine``: watch / idle / blocked hours /
-prefer_strong_on_dd only scale. Quarantine still refuses. False restores
-the old refusals.
+quarantine / prefer_strong_on_dd only scale lot. False restores the old
+refusals.
 """
 from __future__ import annotations
 
@@ -68,11 +68,11 @@ def test_blocked_hour_does_not_refuse():
     assert scale <= 0.5
 
 
-def test_quarantine_still_refuses():
+def test_quarantine_scales_not_refuses():
     v = SymbolVerdict(symbol="NAS100", state="quarantine", reason="PF cok dusuk")
     v.quarantine_until = time.time() + 3600
     v.risk_scale = 0.0
     allowed, reason, scale = _gate(_sup(1.0), v)
-    assert allowed is False
-    assert scale == 0.0
+    assert allowed is True, reason
+    assert scale == 0.6
     assert "karantina" in reason

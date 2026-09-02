@@ -106,6 +106,8 @@ class OptApply(_ForbidModel):
     timeframe: str | None = None
     strategy: str | None = None
     force: bool = False
+    # Entry-gate retune only — keep live family/TF; use run_id for stamp evidence.
+    gates_only: bool = False
 
 
 class StopBody(_ForbidModel):
@@ -470,7 +472,7 @@ _OPERATOR_OPT_FIELDS = frozenset({
 # does not reach a live book either: Store.opt_params merges {**shipped,
 # **stored} per axis, so a stored axis keeps its values forever.
 _OPERATOR_GRID_AXES = frozenset({"max_spread_atr", "cost_rank_max"})
-_OPERATOR_AI_FIELDS = frozenset({"enabled"})
+_OPERATOR_AI_FIELDS = frozenset({"enabled", "prefer_strong_on_dd", "hard_block_only_quarantine"})
 
 
 # strategy_allows_timeframe() falls back to "allow every timeframe" for a
@@ -691,6 +693,22 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.api_token = api_token
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+
+    def _on_symbol_newly_enabled(symbol: str) -> None:
+        """Operator turned a name on — no AI baggage, spread cap widened if needed."""
+        cfg = store.symbols.get(symbol)
+        if cfg is None or not cfg.enabled:
+            return
+        engine.supervisor.update_settings({
+            "prefer_strong_on_dd": False,
+            "hard_block_only_quarantine": True,
+        })
+        engine.supervisor.clear(symbol)
+        if client.connected:
+            try:
+                optimizer._recalibrate_spread_cap(symbol, cfg.timeframe)
+            except Exception:
+                pass
 
     @app.middleware("http")
     async def _require_session(request, call_next):
@@ -986,6 +1004,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _validate_risk_bounds(patch, _INDICATOR_PERIOD_BOUNDS)
         _validate_sessions(patch)
         current = store.symbols.get(symbol)
+        was_enabled = bool(current.enabled) if current is not None else False
         _require_optimised_before_enabling(patch, current)
         _require_current_cost_basis_before_enabling(patch, current, optimizer)
         # Same hazard as DELETE: the magic number is the only thing that maps
@@ -1076,6 +1095,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if updated is None:
             raise HTTPException(404, f"{symbol} bulunamadi")
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
+        if updated.enabled and not was_enabled:
+            _on_symbol_newly_enabled(symbol)
         # Every other mutation endpoint forces the cache fresh; this one didn't,
         # so a poll landing inside the old 1.5s window could hand the rest of
         # the UI (Panel, opt picker) the pre-edit row right after a save - the
@@ -1484,6 +1505,33 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             symbol=symbol, reason="panel sembol kapat")
         return {"ok": remaining == 0, "closed": closed, "remaining": remaining}
 
+    @app.post("/api/symbols/{symbol}/spread-calibrate")
+    def spread_calibrate(symbol: str) -> dict[str, Any]:
+        """Re-read ``max_spread_atr`` off the symbol's live timeframe.
+
+        One-way widen only (``spread_calibration.cap_from_bands``). Safe while
+        a position is open — entry gate only, not mid-trade exit math.
+        """
+        cfg = store.symbols.get(symbol)
+        if cfg is None:
+            raise HTTPException(404, f"{symbol} bulunamadi")
+        if not client.connected:
+            raise HTTPException(409, "MT5 baglantisi yok")
+        before = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)
+        optimizer._recalibrate_spread_cap(symbol, cfg.timeframe)
+        cfg = store.symbols.get(symbol)
+        after = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0) if cfg else before
+        changed = abs(after - before) >= 1e-9
+        return {
+            "ok": True,
+            "symbol": symbol,
+            "timeframe": cfg.timeframe if cfg else None,
+            "before": before,
+            "after": after,
+            "changed": changed,
+            "reason": "kalibre" if changed else "degismedi",
+        }
+
     @app.post("/api/symbols-bulk")
     def bulk_patch(body: BulkPatch) -> dict[str, Any]:
         body.patch = _coerce_symbol_patch(body.patch)
@@ -1587,12 +1635,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                         rejected.append(symbol)
                         continue
                 current = store.symbols.get(symbol)
+                was_enabled = bool(current.enabled) if current is not None else False
                 material = current is not None and any(
                     getattr(current, k, None) != body.patch[k]
                     for k in body.patch if hasattr(current, k))
                 updated = store.update_symbol(symbol, body.patch, source="panel toplu")
                 if updated is not None and material:
                     changed += 1
+                if updated is not None and updated.enabled and not was_enabled:
+                    _on_symbol_newly_enabled(symbol)
         finally:
             if guarded:
                 engine.entry_lock.release()
@@ -1982,13 +2033,42 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         score = body.score
         detail: dict[str, Any] | None = None
         timeframe, strategy = body.timeframe, body.strategy
-        if params is None and body.run_id is not None:
+        gate_axes = {"max_spread_atr", "cost_rank_max", "min_atr_ratio"}
+        if body.run_id is not None:
             match = next((r for r in store.opt_history(body.symbol, 40) if r["id"] == body.run_id), None)
             if match is None:
                 raise HTTPException(404, "kayit bulunamadi")
-            params, score, detail = match.get("params"), match.get("score", 0.0), match
-            timeframe = timeframe or match.get("timeframe")
-            strategy = strategy or match.get("strategy")
+            score = float(match.get("score", 0.0))
+            detail = match
+            if body.gates_only:
+                if not body.params:
+                    raise HTTPException(400, "gates_only icin params gerekli")
+                bad = sorted(k for k in body.params if k not in gate_axes)
+                if bad:
+                    raise HTTPException(
+                        400, f"{', '.join(bad)} gates_only'de yazilamaz - "
+                             f"yalnizca {', '.join(sorted(gate_axes))}")
+                live_cfg = store.symbols.get(body.symbol)
+                params = dict(body.params)
+                if "max_spread_atr" in params and live_cfg is not None:
+                    cur = float(getattr(live_cfg, "max_spread_atr", 0.0) or 0.0)
+                    nxt = float(params["max_spread_atr"])
+                    if nxt < cur - 1e-9:
+                        raise HTTPException(
+                            400, f"max_spread_atr daraltamaz ({cur:g} -> {nxt:g})")
+                timeframe, strategy = None, None
+            else:
+                params = dict(match.get("params") or {})
+                timeframe = timeframe or match.get("timeframe")
+                strategy = strategy or match.get("strategy")
+                if body.params:
+                    # Incumbent evidence from run_id; allow entry-gate retunes only.
+                    bad = sorted(k for k in body.params if k not in gate_axes)
+                    if bad:
+                        raise HTTPException(
+                            400, f"{', '.join(bad)} run_id uzerine yazilamaz - "
+                                 f"yalnizca {', '.join(sorted(gate_axes))}")
+                    params.update(body.params)
         if not params:
             raise HTTPException(400, "parametre yok")
         if detail is None:
@@ -2048,7 +2128,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         live = store.symbols.get(body.symbol)
         previous = ({"strategy": live.strategy, "timeframe": live.timeframe}
                     if live is not None else None)
-        result = optimizer.apply(body.symbol, params, float(score), detail, timeframe, strategy)
+        prev_force = bool(getattr(optimizer, "_force_apply", False))
+        if body.force:
+            optimizer._force_apply = True
+        try:
+            result = optimizer.apply(body.symbol, params, float(score), detail,
+                                     timeframe, strategy)
+        finally:
+            optimizer._force_apply = prev_force
         if not result.get("ok"):
             raise HTTPException(400, result.get("error", "uygulanamadi"))
         applied_at = time.time()
