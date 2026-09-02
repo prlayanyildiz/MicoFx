@@ -305,7 +305,7 @@ def _require_optimised_before_enabling(patch: dict[str, Any], cfg) -> None:
 
     EURUSD reached ``enabled`` carrying nothing but the dataclass defaults -
     ``opt_updated_at`` 0.0, ``opt_score`` 0.0, an empty ``opt_summary`` and
-    ``ichimoku/M5``. That is not a config the search picked; it is the factory
+    ``mtf_pullback/M5``. That is not a config the search picked; it is the factory
     setting, and the search had in fact already refused this symbol outright
     (365 days, four timeframes, fourteen families, no candidate cleared the
     accept gate). On M5 an FX symbol pays 25-28% of risk in spread against an

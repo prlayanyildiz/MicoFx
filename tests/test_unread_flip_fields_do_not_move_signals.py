@@ -1,8 +1,4 @@
-"""Payload fields a family never reads must not move its signals.
-
-ichimoku now reads HTF/ADX gates on purpose (02.09). This file guards
-families that still ignore leftover poison fields.
-"""
+"""Payload fields a family never reads must not move its signals."""
 from __future__ import annotations
 
 import sys
@@ -13,7 +9,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import SymbolConfig
-from micofx.strategy import IndicatorCache, Params, compute, opt_fields_read
+from micofx.strategy import IndicatorCache, Params, compute
 
 POISON = {
     "htf_factor": 12,
@@ -39,21 +35,6 @@ def _cache(n=900):
 def _params(strategy: str, **overrides):
     return Params.from_config(SymbolConfig(symbol="X", strategy=strategy),
                               **overrides)
-
-
-def test_ichimoku_reads_regime_gates():
-    read = opt_fields_read("ichimoku")
-    for field in ("htf_factor", "adx_min", "atr_pct_min"):
-        assert field in read
-
-
-def test_ichimoku_signals_move_when_regime_gates_change():
-    cache = _cache()
-    clean = compute(cache, _params("ichimoku"))
-    poisoned = compute(cache, _params("ichimoku", **POISON))
-    assert clean.buy.any() or clean.sell.any()
-    assert not np.array_equal(clean.buy, poisoned.buy) or not np.array_equal(
-        clean.sell, poisoned.sell)
 
 
 def test_a_family_that_reads_the_gates_does_move():

@@ -4,15 +4,14 @@ The grid a sweep actually samples is **not** ``strategy_grids[fam]`` - that is
 only the family's own axes. It is ``searchable_axes(fam, {**shared, **own})``,
 where the shared risk grid (sl_atr_mult 6 x trail_start_atr 6 x
 trail_step_atr 5 x max_spread_atr 6) multiplies whatever the family states.
-Read off the live five-family blob 01.09:
+Read off the live three-family blob 02.09:
 
-    ichimoku        12,960      (entry gates + exits; was exit-only 1,080)
     channel_break   14,580      mtf_pullback     622,080
     burst        1,244,160
 
-At a flat ``max_combos`` of 2000 ichimoku now samples ~15% of its grid
-(entry gates landed 02.09); burst is still ~0.16%. Budget redistribution
-only fires when a family's grid is smaller than the cap.
+At a flat ``max_combos`` of 2000 channel_break samples most of its grid;
+burst is still ~0.16%. Budget redistribution only fires when a family's
+grid is smaller than the cap.
 """
 from __future__ import annotations
 
@@ -24,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx.optimizer import coverage_budget
 
 SHIPPED = {
-    "ichimoku": 12_960,
     "channel_break": 14_580,
     "mtf_pullback": 622_080,
     "burst": 1_244_160,

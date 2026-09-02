@@ -37,7 +37,7 @@ MIN_PULL_DEPTH_ATR = 0.5
 class Params:
     """Flat parameter view so the optimizer can vary values without a full config."""
 
-    strategy: str = "ichimoku"
+    strategy: str = "mtf_pullback"
 
     # ---- higher-timeframe trend pullback ----
     pull_fast: int = 8
@@ -527,60 +527,6 @@ def _burst(cache: IndicatorCache, p: Params) -> Signals:
                    htf_up=htf_up, htf_down=htf_down)
 
 
-def _cross_over(fast: np.ndarray, slow: np.ndarray) -> np.ndarray:
-    """True on the bar ``fast`` goes from below ``slow`` to above it."""
-    prev_fast = np.roll(fast, 1)
-    prev_slow = np.roll(slow, 1)
-    out = (prev_fast < prev_slow) & (fast > slow)
-    out[0] = False
-    return out
-
-
-def _ichimoku(cache: IndicatorCache, p: Params) -> Signals:
-    """TK cross with cloud, Chikou, and optional regime gates.
-
-    Tenkan 9 / Kijun 26 / Span B 52. The cloud at this bar is the spans from
-    26 bars ago - no forward plot. Long needs TK cross up, close above the
-    cloud, Chikou above price 26 bars back, and the same HTF/ADX/ATR gates
-    the other swing families use. FX literature and open repos (PyQuantLab,
-    ilahuerta-IA/backtrader-atr-stop-loss) all filter raw Ichimoku with trend
-    strength and confirmation; the bare cross alone underperforms on currencies.
-    """
-    close = cache.close
-    size = close.size
-    tenkan, kijun, cloud_top, cloud_bot = ind.ichimoku_lines(cache.high, cache.low)
-    t3, k, d, atr_series, adx_series = _common(cache, p)
-    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
-    regime = _regime(p, adx_series, size)
-    lag = 26
-    chikou_ref = np.roll(close, lag)
-    chikou_ref[:lag] = np.nan
-    chikou_bull = np.isfinite(chikou_ref) & (close > chikou_ref)
-    chikou_bear = np.isfinite(chikou_ref) & (close < chikou_ref)
-    above = np.isfinite(cloud_top) & (close > cloud_top)
-    below = np.isfinite(cloud_bot) & (close < cloud_bot)
-    buy = (_cross_over(tenkan, kijun) & above & regime & allow_long
-           & chikou_bull)
-    sell = (_cross_over(kijun, tenkan) & below & regime & allow_short
-            & chikou_bear)
-    if p.atr_pct_min > 0:
-        lively = cache.atr_rank(p.atr_period) >= p.atr_pct_min
-        buy &= lively
-        sell &= lively
-    if p.min_body_ratio > 0:
-        body = cache.body_ratio()
-        buy &= body >= p.min_body_ratio
-        sell &= body >= p.min_body_ratio
-    warmup = min(size, max(52 + 26, p.atr_period * 3))
-    buy[:warmup] = False
-    sell[:warmup] = False
-    buy = ind.first_of_run(buy)
-    sell = ind.first_of_run(sell)
-    buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=tenkan, k=kijun, d=d, atr=atr_series, adx=adx_series,
-                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down)
-
-
 def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
     """Close beyond the highest high (or lowest low) of the prior N bars.
 
@@ -588,9 +534,7 @@ def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
     this bar's own high-low against its trailing distribution - and says so in
     its own docstring: "a level-based breakout keys off a price the market has
     already printed - a session's opening range, an N-bar channel", which it
-    deliberately is not. ``ichimoku`` is the nearest thing, since tenkan/kijun
-    are N-bar midpoints, and it measured best of the seven on MFE/MAE asymmetry
-    while running on no live symbol.
+    deliberately is not.
 
     Measured out-of-sample on every captured window before this was written
     (F40): the asymmetry a stop-and-trail system monetises rises smoothly with
@@ -649,7 +593,6 @@ def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
 _FAMILIES = {
     "mtf_pullback": _mtf_pullback,
     "burst": _burst,
-    "ichimoku": _ichimoku,
     "channel_break": _channel_break,
 }
 

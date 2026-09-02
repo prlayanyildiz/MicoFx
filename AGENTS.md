@@ -62,9 +62,10 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Hands-off keys (system plumbing, cost toggles, AI knobs, strategy guts)
   return **400** on POST. Search `apply()` still writes `OPT_FIELDS`.
   Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
-- **4 families.** `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` retired
-  01.09 (flip/zero-win class). Live set: `burst`, `mtf_pullback`, `ichimoku`,
-  `channel_break`. Leftover DB names fail closed.
+- **3 families.** `ichimoku` retired 02.09 (no symbol/TF holdout win).
+  `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` retired 01.09
+  (flip/zero-win class). Live set: `burst`, `mtf_pullback`, `channel_break`.
+  Leftover DB names fail closed.
 - **No restart while positions are open.** `POST /api/app/restart` and
   `/api/app/shutdown` are **409** while this process's magics still have
   tickets (MT5 down still allowed so a wedged bind can recover).

@@ -112,11 +112,11 @@ def test_an_unsearched_symbol_cannot_be_switched_on():
 
 
 def test_the_message_names_what_it_is_actually_carrying():
-    """"ichimoku/M5" is the default, and saying so is the whole point."""
+    """"mtf_pullback/M5" is the default, and saying so is the whole point."""
     tc, _ = _client([_cfg("EURUSD", optimised=False)])
     body = tc.post("/api/symbols/EURUSD", json={"enabled": True}).text
     assert "EURUSD" in body
-    assert "ichimoku" in body and "M5" in body
+    assert "mtf_pullback" in body and "M5" in body
 
 
 def test_bulk_enable_is_refused_for_the_same_reason():

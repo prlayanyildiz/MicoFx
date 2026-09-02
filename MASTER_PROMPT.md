@@ -164,7 +164,7 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
     mt5client.py    locked MT5 bridge
     sessions.py     broker-time windows
     indicators.py   T3, StochRSI, ATR, ADX, SuperTrend, helpers
-    strategy.py     Params, IndicatorCache, 4 families → Signals
+    strategy.py     Params, IndicatorCache, 3 families → Signals
     backtest.py     bar replay + walk_forward
     optimizer.py    background TF×strategy search + apply gates
     risk.py         DailyGuard + lot_for + can_open + edge_scale
@@ -255,7 +255,7 @@ Bars where both `buy` and `sell` are True must be **dropped** (neither side). Do
 
 ## 7. Strategy families (shared)
 
-`STRATEGIES = ["mtf_pullback", "burst", "ichimoku", "channel_break"]` — **4 canli aile**.
+`STRATEGIES = ["mtf_pullback", "burst", "channel_break"]` — **3 canli aile**.
 
 `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` **emekli** (01.09): F39 sifir
 ileri edge; canli kitap kaniyordu; WF skoru gurultuye uyuyor. DB'de kalan isimler
@@ -272,7 +272,7 @@ MFE/MAE asimetrisi 1'in ustunde ve lookback ile duzgun buyuyor (10 barda
 icin degil, `strategies` listesinde olmadigi icin hic aranamadigindan. Yani
 sekil hakkinda bir hukum degildi; bu aile listede.
 
-Kivanc combo (25.08): `ichimoku` is TK cross vs the cloud from i-26 (no forward displacement). `alpha_trend` and `mavilim` retired 26.08 (emekli): AlphaTrend could not clear `MIN_TEST_TRADES` (7 vs 12, lag-2 cross); MavilimW had enough trades and lost (GER −20.2 R / PF 0.92). `st_trend` and `macd_flip` retired 26.08 (emekli): neither was live, neither was ever applied, and each still consumed a full `max_combos` slot per TF. BBW is not a family (`atr_pct_min` already gates dead regimes). TD Sequential is a fade counter and was skipped. `ichimoku` is not applied live until holdout beats the same-TF incumbent.
+Kivanc combo (25.08): `ichimoku` retired 02.09 (emekli) — no symbol/TF holdout win in the Claude+Cursor matrix; leftover DB names fail closed; `ichimoku_lines` went with it. `alpha_trend` and `mavilim` retired 26.08 (emekli): AlphaTrend could not clear `MIN_TEST_TRADES` (7 vs 12, lag-2 cross); MavilimW had enough trades and lost (GER −20.2 R / PF 0.92). `st_trend` and `macd_flip` retired 26.08 (emekli): neither was live, neither was ever applied, and each still consumed a full `max_combos` slot per TF. BBW is not a family (`atr_pct_min` already gates dead regimes). TD Sequential is a fade counter and was skipped.
 
 `flow_rev` ve `trix_flip` 14.08 emekli edildi; gostergeleri de silindi ve
 `test_retired_indicators_stay_gone.py` geri gelmelerini engelliyor.

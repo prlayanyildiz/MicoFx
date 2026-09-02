@@ -45,7 +45,7 @@ def test_retired_family_names_do_not_survive_opt_params_read(tmp_path, monkeypat
     assert "macd_flip" not in names
     assert "burst" in names
     # Shipped families the saved subset never named still come back.
-    assert "ichimoku" in names
+    assert "channel_break" in names
     assert set(names) <= set(STRATEGIES)
     assert "st_trend" not in (got.get("strategy_grids") or {})
     assert got["strategy_grids"]["burst"]["sl_atr_mult"] == [1.2]

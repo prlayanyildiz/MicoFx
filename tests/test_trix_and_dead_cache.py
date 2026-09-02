@@ -64,7 +64,7 @@ def test_every_living_family_still_computes_without_those_helpers():
     times = np.arange(n, dtype=np.int64) * 300
     cache = IndicatorCache(high, low, close, times, 300, open_, np.ones(n), np.zeros(n))
     assert sorted(STRATEGIES) == sorted(
-        ["mtf_pullback", "burst", "ichimoku", "channel_break"])
+        ["mtf_pullback", "burst", "channel_break"])
     for family in STRATEGIES:
         sig = compute(cache, Params(strategy=family))
         assert sig.buy.size == n and sig.sell.size == n

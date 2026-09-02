@@ -31,10 +31,10 @@ from micofx.strategy import (
     compute,
 )
 
-LIVE_NOW = ("burst", "mtf_pullback", "ichimoku", "channel_break")
+LIVE_NOW = ("burst", "mtf_pullback", "channel_break")
 RETIRED = ("alpha_trend", "mavilim", "trix_flip", "flow_rev",
            "orb_retest", "t3_ribbon", "st_trend", "macd_flip",
-           "stoch_flip", "dual_t3", "t3_flip", "parabolic_flip")
+           "stoch_flip", "dual_t3", "t3_flip", "parabolic_flip", "ichimoku")
 
 
 def _cache(close: np.ndarray, *, cost: float | None = 0.05) -> IndicatorCache:
@@ -112,7 +112,7 @@ def test_live_book_families_are_still_searchable():
     for name in LIVE_NOW:
         assert name in STRATEGIES
         assert name in _FAMILIES
-    assert len(STRATEGIES) == 4
+    assert len(STRATEGIES) == 3
     assert set(STRATEGIES) == set(_FAMILIES)
 
 

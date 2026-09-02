@@ -22,17 +22,10 @@ from micofx.strategy import (
 )
 
 
-def test_ichimoku_reads_regime_gates():
-    """ichimoku now filters like the other swing families (FX literature)."""
-    read = opt_fields_read("ichimoku")
-    assert "adx_min" in read
-    assert "htf_factor" in read
-    assert "atr_pct_min" in read
-
-
 def test_a_family_that_calls_regime_does_read_adx_min():
     assert "adx_min" in opt_fields_read("burst")
     assert "adx_min" in opt_fields_read("channel_break")
+    assert "adx_min" in opt_fields_read("mtf_pullback")
 
 
 def test_no_family_grid_axis_is_unread():
@@ -59,8 +52,8 @@ def test_no_family_grid_axis_is_unread():
             assert not unread, f"{name} {label} still searches unread OPT axes: {unread}"
 
 
-def test_searchable_axes_keeps_ichimoku_entry_and_exit_axes():
-    kept = searchable_axes("ichimoku", {
+def test_searchable_axes_keeps_channel_entry_and_exit_axes():
+    kept = searchable_axes("channel_break", {
         "adx_min": [0, 15], "htf_factor": [0, 3],
         "atr_pct_min": [0, 0.25],
         "sl_atr_mult": [1.0, 2.0], "trail_start_atr": [0.5, 1.0],

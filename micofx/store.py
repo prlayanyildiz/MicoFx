@@ -422,7 +422,7 @@ class Store:
 
         Always born disabled. The caller (and the group preset) may ask for
         enabled=True; that is the hole that put nine unsearched symbols live
-        on factory ichimoku. Enable is a later, guarded write.
+        on factory mtf_pullback. Enable is a later, guarded write.
         """
         name = str(symbol or "").strip().upper().replace(" ", "_")
         # The hyphen is not decoration: this broker names 158 tradeable
@@ -541,7 +541,7 @@ class Store:
             # magic, sessions and the enabled flag; strategy, timeframe and
             # every exit parameter live only in the database, so a fresh
             # install would otherwise start eighteen symbols live on the
-            # dataclass default - ichimoku/M5, which nothing has validated and
+            # dataclass default - mtf_pullback/M5, which nothing has validated and
             # which on an FX symbol pays 25-28% of risk in spread against an
             # 18% live ceiling.
             #

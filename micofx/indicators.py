@@ -451,39 +451,3 @@ def swing_lows(low: np.ndarray, lookback: int = 5) -> np.ndarray:
 def swing_highs(high: np.ndarray, lookback: int = 5) -> np.ndarray:
     """Rolling maximum of the last `lookback` bars, excluding the current bar."""
     return _rolling_edge(high, lookback, -np.inf, np.max)
-
-
-def ichimoku_lines(high: np.ndarray, low: np.ndarray,
-                   tenkan_len: int = 9, kijun_len: int = 26,
-                   span_b_len: int = 52,
-                   displacement: int = 26) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Tenkan, Kijun, and the cloud that exists *now* - no forward plot.
-
-    TradingView draws Senkou spans ``displacement`` bars ahead. Trading that
-    drawing would read bars that have not closed. The cloud at bar i is the
-    spans computed ``displacement`` bars ago.
-    """
-    tenkan_len = max(1, int(tenkan_len))
-    kijun_len = max(1, int(kijun_len))
-    span_b_len = max(1, int(span_b_len))
-    displacement = max(0, int(displacement))
-
-    def _mid(length: int) -> np.ndarray:
-        highest = rolling_min_max(high, length)[1]
-        lowest = rolling_min_max(low, length)[0]
-        return (highest + lowest) * 0.5
-
-    tenkan = _mid(tenkan_len)
-    kijun = _mid(kijun_len)
-    span_a = (tenkan + kijun) * 0.5
-    span_b = _mid(span_b_len)
-    n = high.size
-    cloud_a = np.full(n, np.nan)
-    cloud_b = np.full(n, np.nan)
-    if displacement == 0:
-        cloud_a = span_a
-        cloud_b = span_b
-    elif n > displacement:
-        cloud_a[displacement:] = span_a[:-displacement]
-        cloud_b[displacement:] = span_b[:-displacement]
-    return tenkan, kijun, np.maximum(cloud_a, cloud_b), np.minimum(cloud_a, cloud_b)

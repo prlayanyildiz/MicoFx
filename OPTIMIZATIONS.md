@@ -49,7 +49,7 @@ zarar freni yok, olan fren de bozuk, supervisor reaktif katmanı bu frekansta at
   (`backtest.py:100-112`). Sortino/degradasyon YOK. `score_consistency` hesaplanıp
   **kasıtlı dışlanıyor** (`backtest.py:117-119`). `holdout_retention` 0.25'te pass/fail
   veto, gradyan değil — retention 0.30 olan, 0.95 olanı yener validation bir tık yüksekse.
-* **A4 [MED]** holdout 8-yollu seçim vetosu (4 aile × 2 TF/sembol), `as_dict(MIN_TEST_
+* **A4 [MED]** holdout 8-yollu seçim vetosu (4 aile × 2 TF/sembol), `as_dict(MIN_TEST_ (arsiv)
   TRADES=12)` ile tam ağırlıkta puanlanıyor (`backtest.py:1518`) → 12-işlemlik şanslı
   dilim `_beats_incumbent`'ı tam güvenle sürüyor.
 * **A5 [MED]** apply gate'leri gevşek: `MIN_TEST_TRADES=12`, `MIN_OOS_PF=1.10`,
@@ -172,11 +172,11 @@ zarar freni yok, olan fren de bozuk, supervisor reaktif katmanı bu frekansta at
   htf_factor=3, t3_length) DAMGALAMIYOR. Yani `validated=True` bir gates-disabled pass'i
   belgeliyor; sinyal paramları önceki bir sweep'ten kalıntı, zeroed-gate'lerle birlikte
   walk-forward doğrulanmamış. (Kontrast: SpotBrent/XAUUSD/BTCUSD tam set damgalı.)
-* **E4 [MED-HIGH]** `adx_max` ölü-ve-tehlikeli: reversion-ailesi kalıntısı, 4 ailenin
+* **E4 [MED-HIGH]** `adx_max` ölü-ve-tehlikeli: reversion-ailesi kalıntısı, 4 ailenin (arsiv)
   hiçbiri reversion değil; non-zero `adx_max` bunları yalnız güçlü trendden ÇIKARIR. Hâlâ
   `OPT_FIELDS` + `Params.key()`'de → sweep gürültüde spurious non-zero `adx_max` kazanıp
   `apply()` edebilir. `absent_regime_gates_to_zero` yalnız kazanan onu adlandırmayınca
-  sıfırlıyor. → 4 aile için `OPT_FIELDS`'ten çıkar.
+  sıfırlıyor. → 4 aile için `OPT_FIELDS`'ten çıkar. (arsiv)
 * **E5 [MED]** NAS100 mtf_pullback: ✓DB `htf_factor=3` → trend ayağı T3(4)/M90, whippy,
   "HTF zaten trend'de olmalı" DEĞİL (`else 6` yalnız htf_factor≤1'de). `pull_depth_atr=0.3`
   saklı ama 0.5 çalışıyor (MIN_PULL_DEPTH_ATR floor) → grid `{0.3,0.5}` özdeş sinyal
@@ -322,6 +322,267 @@ Uyarı: tek pencere ~18k bar, son segment. Apply = optimizer full WFO/validation
 burst step'i geniş bırak. adx_min=15 (NAS100+US30 only) ile aynı ikili: iki yapı-giriş
 ailesi daha sıkı yönetim istiyor, iki burst ailesi istemiyor.
 
+**EK6 — adx_min + trail_step STACK ediyor (21:19, apply-ready sayılar):**
+
+| config | net_r | exp | pf | n |
+|--------|-------|-----|-----|---|
+| US30 live (adx0/step2.2) | +18.0 | .054 | 1.08 | 334 |
+| US30 +adx15 | +23.9 | .075 | 1.12 | 319 |
+| US30 +step0.8 | +33.6 | .090 | 1.18 | 372 |
+| **US30 +adx15 +step0.8** | **+42.1** | **.118** | **1.24** | 355 |
+| NAS100 live (adx0/step2.5) | +23.6 | .021 | 1.03 | 1099 |
+| NAS100 +adx15 | +57.0 | .055 | 1.09 | 1033 |
+| NAS100 +step1.6 | +39.6 | .032 | 1.05 | 1234 |
+| **NAS100 +adx15 +step1.6** | **+65.8** | **.057** | 1.09 | 1162 |
+| GER40/M30proxy +cost_rank=0.3 | +35.5 | .087 | 1.13 | 410 |
+
+İki kaldıraç ADDITIVE: US30 +24R (exp 2.2×), NAS100 +42R (exp 2.7×) live'a göre. Apply
+= optimizer full WFO; bu tablo hedef param + beklenen yön.
+
+**XAU/BTC (yeniden açıldı) canlı-config costed:** XAUUSD_M15 **+128.3** (exp .168, pf 1.27,
+n764) · BTCUSD_M30 **+52.5** (.158, 1.24, n333). İkisi de güçlü — reopen costed-haklı.
+
+### EK7 — Beklenen-aylık vs holdout vs CANLI sapması (21:34, item 4) — BEKLENTİ YÖNETİMİ
+
+**Panel projeksiyonu (`/api/state` capacity):** `projected_costed_monthly_pct = 98.3`
+(+%98/ay costed!), `projected_monthly_pct = 77.3`. `total_risk_per_trade = $40.01` /
+balance $229 = **%17.5/işlem** → C1 sizing bug HÂLÂ CANLI (fix commit'li ama process
+restart olmadı). `projected_costed_negative = False` (canlının negatif olduğunu bile
+işaretlemiyor).
+
+**Holdout — DOĞRU şekilde aylığa normalize (lookback_days=0 → her sembol farklı gün):**
+
+| sembol | holdout kümülatif | süre | **→ R/ay** | canlı R (exp) |
+|--------|-------------------|------|-----------|---------------|
+| NAS100 | +91.8R / 1029tr | 555g | **+5** | −18.7R (exp −0.346) |
+| GER40 | +53.6R / 335tr | 107g | +15 | −6.9R (exp −0.160) |
+| JPN225 | +68.3R / 225tr | 278g | +7 | −17.4R (exp −0.232) |
+| US30 | +37.6R / 319tr | 557g | +2 | −3.4R (exp −0.037) |
+| XAUUSD | +66.4R / 426tr | 280g | +7 | +9.8R (exp +0.316) |
+| BTCUSD | +67.4R / 286tr | 376g | +5 | −2.8R (n=4) |
+| **KİTAP** | | | **~+41R/ay (gerçekçi tavan)** | **−41.2R / 14.3g → −87R/ay** |
+
+**Ölçülen sapma:**
+1. Herkesin alıntıladığı "+90R holdout" NAS100 için **1.5 YIL**. Aylığa **+5R**. Kümülatif
+   sayılar süre normalize edilmeden karşılaştırılamaz (B4: `lookback_days=0`).
+2. Kitap-geneli gerçekçi holdout ≈ **+41R/ay**. Panel **+%98/ay** diyor — bu, kırık
+   sizing ($40/R) × iyimser işlem-frekansı ekstrapolasyonunun artefaktı. Ulaşılabilir değil.
+3. **Canlı gerçek: −87R/ay trajesi** (−%38/ay, mevcut sizing). Panel +%98 ile arada
+   **~136 puan** fark.
+4. Her sembolün canlı expectancy'si holdout'unun **~0.25-0.45R ALTINDA** — kitap-geneli
+   tutarlı ~0.3R/işlem decay/execution gap'i.
+
+**Gerçekçi hedef (P1-P3 sonrası):** canlı expectancy −0.13R → holdout ~+0.15R ortalamaya
+çek. Düzgün-sized $230 hesapta ≈ **+$150-250/ay**, +%98/ay DEĞİL. `projected_*` alanları
+gerçekçi trade-frekansı + doğru sizing ile yeniden hesaplanmalı; `projected_costed_negative`
+canlı expectancy'yi de okumalı.
+
+**entry_blocks:** ✓DB `entry_blocks_since` artık 09-02 17:57 (F-D3 roll CANLI). Sayaçlar
+taze. `entry_block_events` (ring, 1474): spread 398 / acildi 376 / risk_sembol_limiti 261
+/ risk_ters_yon 223 / bar_bosluk 138 / lot 38 — F-E1/E2/E3 profili değişmedi.
+
+### EK8 — NAS100 htf_factor (E5) + JPN225 burst params (E3) — İNTERAKSİYON UYARISI (21:49)
+
+**NAS100 mtf_pullback/M30 — `htf_factor` sweep (canlı=3):**
+
+| htf_factor | net_r | exp | pf |
+|-----------|-------|-----|-----|
+| 2 | −21.8 | −.018 | 0.97 |
+| **3 (canlı)** | +23.6 | .021 | 1.03 |
+| 6 | **+53.0** | .052 | 1.08 |
+| 8 | +55.5 | .056 | 1.09 |
+| **12** | **+72.3** | **.075** | 1.12 |
+
+E5 DOĞRULANDI + büyük: `htf_factor=3` "zorunlu HTF trend ayağı"nı işlevsiz bırakıyor
+(T3(4)/M90). 12'ye çıkarmak **+49R** — NAS100 (en kötü canlı sembol) için bulunan tek
+en büyük kaldıraç. `required_bars` zaten factor 6 varsayıyor.
+
+**AMA İNTERAKSİYON:** htf=12 + adx15 + step1.6 = **+46.7R** < htf=12 tek başına (+72.3).
+`htf_factor` ve `adx_min` örtüşüyor (ikisi de trend filtresi). → **NAS100 için P3'ü
+revize et: adx15+step1.6 (EK6) DEĞİL — {htf_factor, adx_min, trail_step} BİRLİKTE WFO.**
+Tek-eksen delta'ları toplamsal değil.
+
+**JPN225 burst/M15 — signal params (canlı lb=15, rz=1.5, cp=0.9):**
+- Baseline +48.3 (exp .192). **lookback=20, range_z=1.0 → +60.9R** (+12.6, modest).
+- `brst_close_pct`: canlı **0.9 EN İYİ** (+48.3, exp .192); 0.8→+40.5, 0.6/0.7→+21.
+  JPN225'in sıkı close_pct'si DOĞRU — GER40'ın 0.6'sının TERSİ (E1). Leftover paramlar
+  büyük ölçüde sağlam; lb 15→20 + rz 1.5→1.0 küçük kazanç, acil değil.
+
+**Genel çıkarım:** per-sembol P3 kaldıraçları BİRBİRİYLE ETKİLEŞİYOR (htf×adx, adx×step).
+Tek-eksen costed delta'ları "aday aralık" olarak ver, apply = optimizer'ın JOINT WFO'su.
+Claude tek-eksen tarıyor; Cursor birlikte aratıp validate ediyor.
+
+### EK9 — JOINT mini-grid'ler (21:55) — APPLY HEDEFLERİ NETLEŞTİ
+
+**US30 (adx_min × trail_step):**
+
+| | step 0.6 | step 0.8 | step 1.2 | step 2.2 |
+|---|---|---|---|---|
+| adx=0 | +21.2 | +33.6 | +26.1 | +18.0 |
+| **adx=15** | +28.5 | **+42.1** | +38.0 | +23.9 |
+
+İki kaldıraç her hücrede ADDITIVE, tepe köşede. **US30 APPLY: {adx_min=15,
+trail_step=0.8} → +42.1R (exp .118, pf 1.24).** Firm.
+
+**NAS100 (htf_factor × adx_min, step 2.5 & 1.6):**
+
+| step 2.5 | adx0 | adx15 | adx20 |
+|---|---|---|---|
+| htf=3 | +23.6 | +57.0 | +46.8 |
+| htf=6 | +53.0 | +52.5 | +68.9 |
+| **htf=12** | **+72.3** | +57.2 | +68.4 |
+
+`htf_factor` ve `adx_min` **SUBSTITUTE** (tamamlayıcı değil): htf=12 tek başına +72.3;
+htf=12 + adx=15 = +57.2 (İKİSİ birden DAHA KÖTÜ). Bir güçlü trend filtresi yeter.
+**NAS100 APPLY: {htf_factor=12, adx_min=0 (değişme), trail_step=2.5 (değişme)} → +72.3R.**
+= tek-param değişiklik, EK6/EK8'deki "adx15+step1.6" (+65.8) önerisinden **BASİT + İYİ**.
+(htf=6/adx20 = +68.9 de alternatif.)
+
+**GOLD-PERP (mtf_pullback/M30 — add adayı):**
+
+| config | net_r | exp | pf |
+|--------|-------|-----|-----|
+| **baseline (as-is)** | **+114.3** | .219 | 1.35 |
+| adx15 | +104.7 | .219 | 1.36 |
+| htf6 | +67.2 | .133 | 1.21 |
+| htf12 | +74.5 | .147 | 1.23 |
+| step1.6 | +115.8 | .219 | 1.35 |
+
+**GOLD-PERP baseline near-optimal — AS-IS ekle, ayar yok.** adx_min zarar (commodity),
+htf değişimi zarar (NAS100'ün TERSİ — GOLD'un htf_factor=3'ü doğru), step marjinal.
++114R costed = kitabın en güçlü add adayı.
+
+**GER40 M5 (item 1) — KESİN DURUM:** `data/holdout_bars/`'da GER40_M5.npz YOK; panel'de
+bulk-bar GET endpoint'i YOK; MT5 sidecar YASAK. GER40 M5 costed doğrulama **Claude
+tarafından yapılamaz** — `POST /api/holdout/capture GER40 M5` gerek (flat kitap, 409
+ticket varken). **Cursor görevi.** M30 proxy: cost_rank=0.3 → +35.5R (+14R), en iyi
+mevcut kanıt.
+
+### EK10 — Live-vs-holdout 0.3R/işlem DECAY dekompozisyonu (22:04) — SEBEP BULUNDU
+
+319 canlı autopsy dökümü:
+
+1. **Giriş slippage'i SORUN DEĞİL:** `fill_vs_signal_close_r` medyan +0.014, ort +0.031,
+   toplam +7.8R / 252 işlem. Spread at-fill medyan 0.05 ATR. Toplam ~5-10R açıklıyor.
+2. **Noise-stop DEĞİL:** 166 `sl` çıkışından **%0'ı** "MAE 1.00-1.15 + önce MFE≥0.5"
+   (kıl payı stop) değil. Stop yiyenler gerçekten ters gidip ters kalan işlemler.
+3. **Exit mix:** `sl` %52 (avgR −0.94, −156R) · `trail` %31 (+0.84) · `flatten` %15
+   (+0.59). Win rate %48 — trend sistemi için avgWin +0.84/avgLoss −0.94 ile ~%53 gerek.
+   **Kıl payı kaybediyor, sorun %52 sl oranı.**
+4. **ASIL SEBEP — after_1h:** 129 `sl` işleminin **%74'ü 1 saat içinde entry'yi geri
+   geçti** (medyan recovery +1.28R, ort +1.68R). ≈95 stop, fiyatın geri geldiği işlem.
+5. **Tutuş-süresi:** `<15m` n47 avgR **−0.91** · `15-45m` n73 **−0.67** · `45-120m` +0.03
+   · `120-300m` +0.11 · **`300m+` n41 avgR +0.97, sumR +40 (kitabın TÜM kârı)**.
+   120 işlem (<45m) −92R kaybediyor; 41 işlem (300m+) +40R kazanıyor. **Kitap ilk 45
+   dakikayı hayatta geçirip geçirmemeye bağlı.**
+
+**sl_atr_mult sweep (canlı=1.0 hepsi):**
+
+| sembol / aile | sl0.9 | sl1.0 | sl1.2 | sl1.5 | sl2.0 |
+|---------------|-------|-------|-------|-------|-------|
+| **NAS100** mtf_pullback | −4.7 | +23.6 | +54.9 | **+71.0** | +36.1 |
+| **JPN225** burst | **+61.2** | +48.3 | +38.0 | +23.4 | +14.3 |
+| US30 channel_break | +16.3 | +18.0 | +19.7 | +17.9 | +15.1 |
+| GER40 burst/M30 | +14.6 | +21.4 | +19.5 | +9.3 | +7.5 |
+
+**Aile-spesifik, yine:**
+- **NAS100 (mtf_pullback): geniş stop çok yardımcı** (1.0→1.5 = +47R). Ama `htf_factor`
+  ile SUBSTITUTE: sl1.5+htf12 = +33.8 (< htf12 tek başına +72). İkisi de "hızlı ölüm"
+  sorununu çözüyor, birlikte over-correct (n 969→730). → NAS100 için: **htf_factor=12
+  VEYA sl_atr_mult=1.5** (~+72 vs +71) — BİRİNİ seç, htf tercih (stop geometrisine
+  dokunmaz, risk profili temiz).
+- **JPN225 (burst): DAHA DAR stop** (0.9) → +13R. burst tasarımı gereği hızlı ölür,
+  kısa tasma doğru. NAS100'ün TERSİ.
+- US30/GER40: sl 1.0-1.2, mevcuta yakın.
+
+**Decay sonucu:** 0.3R/işlem gap'i büyük ölçüde NAS100 (mtf_pullback) kaynaklı — 1.0 ATR
+ilk stop, pullback-devam hareketi gelişmeden yakalıyor. Fix = `htf_factor=12` (zaten
+tespit edildi). burst isimleri sıkı stop'ta zaten doğru. Kitabın kalan gap'i daha yaygın
+(rejim kayması, 1.5yıl holdout vs 14g canlı örneklem).
+
+### EK11 — WFO RUN SONUCU (21:53-22:10) — churn freni + NAS100 burst (22:12)
+
+Operatör "US30 opt geçemedi, stratejiler karmaşık" dedi. Log gerçeği:
+
+| sembol | WFO kazananı | validation | holdout | uygulanmadı ÇÜNKÜ |
+|--------|--------------|-----------|---------|-------------------|
+| **NAS100** | **burst/M30** skor 85.7 | PF 1.51 +189.6R | PF 1.29 **+99.1R** | churn freni (config 7s < 48s) |
+| JPN225 | burst/M30 skor 58 | PF 1.41 +93R | PF 1.19 +50.4R | churn freni |
+| GER40 | burst/M5 skor 58 | PF 1.23 +52.8R | PF 1.14 +31.4R | churn freni |
+| **US30** | YOK | — | — | hiçbir aday kapıdan geçmedi (gate DOĞRU) |
+
+- **US30:** alternatifler holdout'ta çöktü (mtf_pullback/M5 val +54R → holdout −71R PF 0.83).
+  Mevcut channel_break/M30 validated + retention 1.12 → US30'un veride en iyisi. A5
+  (MIN_TEST=25) + gate overfit'i reddediyor = istenen davranış. "Karmaşık strateji" değil.
+- **NAS100 aile karşılaştırması (aynı pencere, costed):** current mtf_pullback/M30 (arsiv)
+  **+23.6R** (exp .021) · mtf_pullback+htf12 **+72.3R** (exp .075, n969) · WFO burst/M30
+  **+59.4R** (exp **.110**, PF 1.17, n**538**). burst yarı turnover'da daha yüksek
+  expectancy + WFO tam-doğrulamadan geçti (+99R). mtf+htf12 tek-pencere bulgusu,
+  doğrulanmadı.
+
+**Reframe:** En hızlı gelir kaldıracı benim param sweep'lerim DEĞİL — **WFO'nun bulduğu
+3 config'i uygulamak** (NAS100 burst +99R, JPN +50R, GER +31R holdout). `reopt_min_age_
+hours` 48 → geçici ~4-6 VEYA bu 3 için force-apply (A1 fix yeni; oturunca 48'e geri).
+Benim EK8-10 NAS100 tuninglerim mtf_pullback üzerineydi → NAS100 burst'e geçince geçersiz.
+Kitap 3/4 burst'e yakınsıyor (channel_break yalnız US30, mtf_pullback hiçbir yer, ichimoku 0).
+
+### EK12 — HEDEF MİMARİ SENTEZ (research agent #2 + ölçümler, 22:24)
+
+Araştırma (Carver, Davey, WFO literatürü, ORB replikasyonları — TR+EN, tam kaynaklar
+FOR_CURSOR.md) + bizim ölçümlerimiz aynı yere işaret ediyor:
+
+**A. AİLE YAPISI**
+- **"Tek edge, çok enstrüman" > "çok aile, sembol-başına-en-iyi".** Carver: sembol-başına
+  fit "açıkça aptalca" (Sharpe individual 0.60 vs pooled 0.65). `burst` ve `channel_break`
+  AYNI edge (range/seviye genişlemesi) — ayrı "aile" saymak sahte çeşitlendirme.
+- **Holdout+/canlı− açığı = multiple-comparisons makinesi.** "4 aile × TF × grid, sembol (arsiv)
+  başına en iyi" = çok sayıda gürültülü tahminin maksimumunu seçmek → garantili iyimser
+  holdout + canlı düşüş (bizim −0.13R). Çözüm: seçimdeki serbestlik derecesini AZALT,
+  daha çok tuning DEĞİL.
+- **KARAR:** `ichimoku` tamamen çıkar. `burst`+`channel_break` → TEK breakout ailesi
+  kavramı, birlikte skorla, re-opt başına BİR seç. `mtf_pullback` yalnız metal/emtia
+  (GOLD-PERP +114R; indeks aramasından çık).
+
+**B. PARAMETRELER: EVRENSEL (pooled), sembol-başına DEĞİL**
+- 4 indeks için TEK {sl_atr, trail_start, trail_step, lookback, close_pct} — pooled trade
+  set üzerinde fit. Sembol-başına tek knob: volatilite/maliyet skaları (pozisyon boyutu
+  + trail sıkılığı ATR/spread ile ölçeklenir).
+- Fit'in PLATO'da olması şart: ±%10 / ±1 grid adım pozitif + tepenin ~%20'si içinde.
+- **Bu, benim EK2-11 per-sembol sweep'lerimin çoğunu geçersiz kılıyor** — onlar
+  sembol-başına tuning. Doğru yön: eksenleri POOLED ara.
+
+**C. CHURN FRENİ — 48s saat brake'i ÇÖPE, compound gate:**
+Canlı config DEĞİŞİR ancak HEPSİ sağlanırsa: (1) challenger OOS expectancy ≥ +0.20R/işlem
+VE ≥%25-30 rel PF üstün; (2) challenger ≥100 kendi-holdout işlemi; (3) plato testi;
+(4) rolling OOS alt-pencerelerin ≥%60-70'inde net-pozitif (regime-concentration tuzağı);
+(5) incumbent ≥1 tam OOS penceresi canlı çalışmış (≥60 gün VE ≥40 canlı işlem).
+Ayrı **kill-switch:** canlı expectancy < −0.30R / ≥40 işlem → config'i sideline et,
+taze backtest'ten OTOMATIK değiştirme; çeyreklik döngü yeniden türetsin.
+
+**D. CANLIYı NEGATİFTEN POZİTİFE ÇEKECEK 5 KURAL (burst'e — YENİ OPT eksenleri):**
+1. **Kasılma ön-koşulu (EN YÜKSEK KALDIRAÇ):** NR7 VEYA `ATR(setup)/ATR(20) ≤ ~0.7` VEYA
+   BB bandwidth son 50 barın alt %15-20'sinde ≥3 bar. "Her yayınlanmış versiyonun
+   kullandığı, bizim ailenin muhtemelen eksik olduğu filtre."
+2. **Rejim/eğim gate:** long yalnız fiyat > HTF EMA + eğim ≥ 0. (Bizim `htf_factor` bir
+   T3 yön bayrağı, eğim gate'i değil.)
+3. **Tetik-barı sertleştir:** TR ≥ 1.5×ATR(20) VE kapanış barın üst/alt %15-25'inde;
+   inside/outside tetik barı reddet; sonraki-bar giriş boşluğu > x·ATR ise reddet.
+4. **TF + seans:** motoru H1/H4'e taşı (fakeout ~%65→~%50); cash-open sonrası ilk N dk +
+   düşük-likidite bakım penceresini blokla. (F5/EK4 ile uyumlu.)
+5. **Maliyet-edge gate:** spread > ATR-stop mesafesinin k%'si VEYA ATR alt çeyrekte ise
+   atla; beklenen lehte hareket ≥ ~3× round-turn maliyet.
+Bonus: cross-index teyit (korelasyonlu indeks sinyal anında hemfikir olsun — replikasyonda
++$0.125/share t=2.05); ATR trail'i GEVŞET (aşırı-sıkı trail klasik holdout-iyi/canlı-kötü).
+
+**E. RE-OPT CADENCE:** çeyreklik (≈63 işlem günü), 6-ay OOS roll, 2-3 yıl IS. Bir config
+canlıya UYGUN olmadan: ≥8-15 walk-forward döngüsü, döngü başına ≥90 IS işlem (30×3 param),
+WFE ≥ 0.5 (ideal ≥0.6, ≥7 ardışık döngü).
+
+**ÖNCELİK:** D1 (kasılma filtresi) + D2 (eğim gate) = en yüksek beklenen canlı-P&L etkisi,
+ama YENİ kod (`_burst` + OPT_FIELDS + grid + test). C (churn gate) = P1'in parçası, WFO
+overfit seçmesini durdurur. A/B (aile+param sadeleşme) = operatör onaylı yön. Sıralama
+Cursor + operatör.
+
 Uyarı: tek pencere ~18k bar son segment; GER40 M30 proxy (canlı M5); apply = full WFO.
 
 ### EK3 — burst gates (cost_rank_max / atr_pct_min) costed sweep (02.09 20:40, salt-okur)
@@ -442,7 +703,7 @@ veya DB anahtarı + sayı.
   bilinmiyor — tam da −41R/+90R ayrımını yakalayacak enstrüman.
 * Removal Safety: **Needs Verification** (bilinçli mi, regresyon mu — Cursor).
 * Reuse Scope: service-wide (optimizer apply + auto-pilot raporu + supervisor).
-* Beklenen etki: charged sayı geri gelirse costed replay ile 4 aile yeniden sıralanır;
+* Beklenen etki: charged sayı geri gelirse costed replay ile 4 aile yeniden sıralanır; (arsiv)
   M5/M15 burst seçimlerinin ~0.1–0.3R/işlem fantom edge taşıdığı hipotezi ölçülebilir.
 
 **F-D2 — Fill/trade log satırında canlı maliyet payı boş**
@@ -682,7 +943,7 @@ veya DB anahtarı + sayı.
 * Kanıt: `micofx/optimizer.py:109-110` yorum + `:168` `strategy_max_combos.stoch_flip
   = 28800`; DB `opt.strategy_max_combos` aynı. stoch_flip fail-closed ama combo
   bütçesi/coverage_budget hesabı onu sayıyor.
-* Beklenen etki: dead family combo tahsisi kalkarsa canlı 4 aile daha derin taranır
+* Beklenen etki: dead family combo tahsisi kalkarsa canlı 4 aile daha derin taranır (arsiv)
   (aynı duvar bütçesiyle).
 * Removal Safety: Needs Verification (DB opt_params write yolu kısıtlı).
 * Reuse Scope: optimizer.
@@ -704,13 +965,13 @@ veya DB anahtarı + sayı.
 3. **F-D3** `entry_blocks` pencere/rotasyon — auto-pilot bayat sayaç kararını kes, sonsuz
    "SPREAD kalibre atlandı" logunu durdur.
 4. **F-D5 / F-P3** DB `opt_params.strategies` + `opt.strategy_max_combos` emekli aile
-   temizliği — arama bütçesi canlı 4 aileye.
+   temizliği — arama bütçesi canlı 4 aileye. (arsiv)
 5. **F-D4 / F-P4** 11 ölü Params alanı — `Params.key()` + `required_bars` sadeleşir.
 
 ### 4) Deeper Optimizations (sonra)
 
 * **F-D1** cost görünürlüğünü geri getir (charged sayı her apply'da) + Faz-1 costed
-  replay (4 aile × aktif+disabled × son 10 pencere) → gerçek net-R sırası.
+  replay (4 aile × aktif+disabled × son 10 pencere) → gerçek net-R sırası. (arsiv)
 * **F-E4** per-sembol `adx_min>0` costed holdout araması.
 * **F-E2** ters-sinyal-çıkış: backtest simulate'e "açık pozisyonda ters sinyal → flat"
   ölç (exit modelini bozmadan). F-E1 pyramiding'i YALNIZ F-E4 ile birlikte.
@@ -722,7 +983,7 @@ veya DB anahtarı + sayı.
 
 * **Testler:** `4528b40`'ta 19 fail listesini referans al; her düzeltme sonrası
   `pytest -q` = 0 fail hedef. Fail-first (AGENTS.md).
-* **Costed replay:** `charge_costs=True` ile son 10 holdout penceresi, 4 aile ×
+* **Costed replay:** `charge_costs=True` ile son 10 holdout penceresi, 4 aile × (arsiv)
   {GER40,JPN225,NAS100,US30,XAUUSD,SpotBrent,BTCUSD}. Metrik: net R, expectancy,
   PF — cost-free sıralamasıyla diff. Beklenti: M5/M15 burst düşer.
 * **Autopsy join:** `entry_block_events(risk_ters_yon)` × `trade_autopsies` symbol+
@@ -879,7 +1140,7 @@ tepe (bar-indeksli eğri yok). Script: scratchpad `c2_mfe_profile.py`.
 
 11 ölü alan: `t3_fast, t3_slow_mult, t3_fast_vf, t3_accel_min, st_period, st_mult,
 stoch_k_period, stoch_k_smooth, stoch_d_smooth, psar_af_step, psar_af_max`
-(dual_t3/t3_flip/stoch_flip/parabolic_flip — 01.09 emekli). Canlı 4 aile
+(dual_t3/t3_flip/stoch_flip/parabolic_flip — 01.09 emekli). Canlı 4 aile (arsiv)
 `opt_fields_read` çıktısı bunların HİÇBİRİNİ okumuyor (ölçüldü).
 
 **Güvenlik doğrulaması:**
@@ -917,7 +1178,7 @@ bu alanlara değiyor mu; canlı sembol `opt_summary.params` stamp'i emekli alan 
 = 400 (AGENTS.md); doğrudan `Store` çağrısı veya migration gerek.
 
 **Beklenen etki:** kod −~40 satır ölü; `OPT_FIELDS` 11 eksen daralır (emekli-aile
-ekseni artık aranamaz/uygulanamaz — F-D5); arama combo bütçesi canlı 4 aileye
+ekseni artık aranamaz/uygulanamaz — F-D5); arama combo bütçesi canlı 4 aileye (arsiv)
 (`stoch_flip` 28800 ≈ 3.08M duvarın 2.07M'i — F-P3). Davranış değişmez.
 
 ---

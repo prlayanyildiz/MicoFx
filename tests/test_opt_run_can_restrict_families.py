@@ -1,7 +1,7 @@
-"""A manual search must be able to name the families it wants.
+﻿"""A manual search must be able to name the families it wants.
 
 store.opt_params() always re-appends every shipped family, so saving a
-subset cannot actually restrict a sweep. The 26.08 ichimoku holdout had
+subset cannot actually restrict a sweep. The 26.08 channel_break holdout had
 to run that family only - without applying, without leaving auto-reopt
 stuck on a subset. The start() door already does this for timeframes;
 families need the same one-off override.
@@ -51,7 +51,7 @@ def _cfg(symbol):
 
 BOOK = [_cfg("GER40"), _cfg("NAS100")]
 
-NEW = ["ichimoku"]
+NEW = ["channel_break"]
 
 
 class _FakeThread:
@@ -95,9 +95,9 @@ def test_unknown_family_names_are_dropped_and_an_empty_kept_set_is_refused():
 
 def test_a_mix_keeps_only_the_searchable_names():
     opt = _opt(BOOK)
-    res = opt.start(strategies=["not_a_family", "ichimoku", "stoch_flip"])
+    res = opt.start(strategies=["not_a_family", "channel_break", "stoch_flip"])
     assert res["ok"] is True
-    assert res["job"]["strategies"] == ["ichimoku"]
+    assert res["job"]["strategies"] == ["channel_break"]
 
 
 def test_omitting_strategies_still_inherits_saved_params():

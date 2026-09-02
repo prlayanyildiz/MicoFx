@@ -96,9 +96,9 @@ class SymbolConfig:
     enabled: bool = True
     timeframe: str = "M5"
     broker_symbol: str = ""          # override when the broker renames an instrument
-    # mtf_pullback | burst | ichimoku | channel_break (see models.STRATEGIES)
+    # mtf_pullback | burst | channel_break (see models.STRATEGIES)
     # (see models.STRATEGIES)
-    strategy: str = "ichimoku"
+    strategy: str = "mtf_pullback"
 
     # ---- higher-timeframe trend pullback ----
     pull_fast: int = 8               # fast EMA the pullback must reach
@@ -516,7 +516,6 @@ PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
 # COST, not for a bad holdout: none owned its exit axes, so the shared
 # 6x6x5 product multiplied their grids (t3_stoch to ~1.43e9 against a 2000
 # budget, coverage 0.0001), and none was live on a symbol.
-# ichimoku stayed (GER 208 trades, +27.9 R, PF 1.21).
 # aroon_flip 28.08 - slowest sweep (~800s), worst validated holdout (~21 R
 # median), 1/7 applied, never live on a symbol; its aroon() indicator and
 # aroon_length axis went with it (no other reader).
@@ -525,7 +524,9 @@ PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
 # fail closed via compute(), they do not crash.
 # parabolic_flip retired 01.09: flip class, 0/7 symbol wins in 300-run matrix;
 # same SAR-flip shape as retired stoch_flip. Leftover names fail closed.
-STRATEGIES = ["mtf_pullback", "burst", "ichimoku", "channel_break"]
+# ichimoku retired 02.09: Claude+Cursor matrix - no symbol/TF holdout win;
+# leftover DB names fail closed; ichimoku_lines went with it.
+STRATEGIES = ["mtf_pullback", "burst", "channel_break"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
 # Longer TFs turn them into slow mean-reversion with the wrong cost geometry.

@@ -927,7 +927,7 @@ function renderLive() {
 const STRATEGY_LABEL = {
   mtf_pullback: "Ust TF Trend Geri Cekilmesi",
   burst: "Momentum Patlamasi Devami",
-  ichimoku: "Ichimoku TK + bulut (gecikmeli, ileri bakissiz)",
+  ichimoku: "Ichimoku (emekli - aranmaz)",
   channel_break: "N barlik kanal kirilimi (Donchian)",
 };
 

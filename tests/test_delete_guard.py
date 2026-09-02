@@ -64,7 +64,7 @@ class _FakeStore:
         cfg = self.symbols.get(symbol)
         if cfg is None:
             return None
-        updated = SymbolConfig.from_dict({**cfg.to_dict(), "strategy": "ichimoku", "timeframe": "M5"})
+        updated = SymbolConfig.from_dict({**cfg.to_dict(), "strategy": "mtf_pullback", "timeframe": "M5"})
         self.symbols[symbol] = updated
         return updated
 
@@ -284,21 +284,21 @@ def test_patch_allows_non_magic_fields_with_open_position():
 
 
 def test_patch_refuses_strategy_change_with_open_position():
-    # default SymbolConfig is strategy="ichimoku", timeframe="M5"
+    # default SymbolConfig is strategy="mtf_pullback", timeframe="M5"
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     positions = [{"ticket": 1, "symbol": "XAUUSD", "magic": 990021, "side": "sell"}]
     tc, store = _client(symbols, positions)
 
-    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "ichimoku", "timeframe": "M30"})
+    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst", "timeframe": "M30"})
     assert res.status_code == 400
-    assert store.symbols["XAUUSD"].strategy == "ichimoku"  # unchanged
+    assert store.symbols["XAUUSD"].strategy == "mtf_pullback"  # unchanged
 
 
 def test_patch_refuses_strategy_even_when_flat():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
-    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "ichimoku", "timeframe": "M30"})
+    res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst", "timeframe": "M30"})
     assert res.status_code == 400
     assert store.symbols["XAUUSD"].timeframe != "M30"
 
@@ -313,7 +313,7 @@ def test_bulk_patch_refuses_strategy_for_the_whole_request():
 
     res = tc.post("/api/symbols-bulk", json={
         "symbols": ["XAUUSD", "COPPER"],
-        "patch": {"strategy": "ichimoku", "timeframe": "M30"},
+        "patch": {"strategy": "burst", "timeframe": "M30"},
     })
     assert res.status_code == 400
     assert store.symbols["XAUUSD"].timeframe != "M30"
@@ -342,7 +342,7 @@ def test_reset_refuses_with_open_position():
 
     res = tc.post("/api/symbols/XAUUSD/reset")
     assert res.status_code == 400
-    assert store.symbols["XAUUSD"].strategy == "ichimoku"
+    assert store.symbols["XAUUSD"].strategy == "mtf_pullback"
 
 
 def test_seed_overwrite_refuses_with_open_bot_position():

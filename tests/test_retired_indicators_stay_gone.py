@@ -20,41 +20,50 @@ def test_retired_indicator_helpers_are_gone():
         assert not hasattr(ind, name), name
 
 
+def test_ichimoku_is_gone():
+    """02.09: Claude+Cursor matrix - no symbol/TF holdout win. Fail closed."""
+    import micofx.indicators as ind
+    import micofx.strategy as strategy
+    from micofx.models import STRATEGIES
+    from micofx.strategy import _FAMILIES
+
+    assert "ichimoku" not in STRATEGIES
+    assert "ichimoku" not in _FAMILIES
+    assert not hasattr(strategy, "_ichimoku")
+    assert not hasattr(ind, "ichimoku_lines")
+    assert len(STRATEGIES) == 3
+
+
 def test_retired_kivanc_losers_are_gone():
     """26.08 holdout: alpha_trend unmeasurable (7 trades < 12), mavilim
-    negative (GER -20.2 R / PF 0.92). ichimoku stayed - it passed the gate.
+    negative (GER -20.2 R / PF 0.92). ichimoku retired 02.09 (zero TF wins).
     """
     from micofx.models import STRATEGIES
     from micofx.strategy import _FAMILIES
 
     for name in ("alpha_trend_rsi", "mavilim_w"):
         assert not hasattr(ind, name), name
-    for name in ("alpha_trend", "mavilim"):
+    for name in ("alpha_trend", "mavilim", "ichimoku"):
         assert name not in STRATEGIES, name
         assert name not in _FAMILIES, name
-    assert "ichimoku" in STRATEGIES and "ichimoku" in _FAMILIES
 
 
 def test_never_applied_scan_waste_is_gone():
     """26.08 opt history: st_trend 1/0 apply, macd_flip 5/0 apply, neither
-    live. Each still ate a full max_combos slot per TF. ichimoku stays -
-    it cleared the same holdout gate (GER +27.9 R).
+    live. Each still ate a full max_combos slot per TF.
     """
     from micofx.models import OPT_FIELDS, STRATEGIES
     from micofx.strategy import _FAMILIES, IndicatorCache, Params
 
-    for name in ("st_trend", "macd_flip"):
+    for name in ("st_trend", "macd_flip", "ichimoku"):
         assert name not in STRATEGIES, name
         assert name not in _FAMILIES, name
     for field in ("macd_fast", "macd_slow", "macd_signal"):
         assert field not in OPT_FIELDS, field
         assert field not in Params.__dataclass_fields__
     assert not hasattr(IndicatorCache, "macd")
-    assert "ichimoku" in STRATEGIES
-    # 8 since 31.08: channel_break, added on an out-of-sample measurement.
-    # The old donchian went in the 12.08 cull for never being searchable,
-    # which is not a verdict on the shape - this one is in ``strategies``.
-    assert len(STRATEGIES) == 4
+    # 3 since 02.09: ichimoku retired (zero TF wins).
+    assert len(STRATEGIES) == 3
 
 
 def test_the_three_lottery_families_are_gone():
@@ -68,14 +77,13 @@ def test_the_three_lottery_families_are_gone():
     ``wavetrend_flip`` 20 runs / 2 applies, holdout retention 0.453;
     ``micro_rev`` 11 runs, retention 0.382. Neither live.
 
-    The families that stayed either own their exit axes (so the 180x never
-    lands on them) or are cheap enough to cover fully: ``ichimoku`` is ~12,960
-    combos and 144 seconds.
+    Remaining families either own exit axes or are cheap enough to cover:
+    channel_break ~14k, burst/mtf_pullback larger but measured.
     """
     from micofx.models import OPT_FIELDS, SCALP_STRATEGIES, STRATEGIES
     from micofx.strategy import _FAMILIES, IndicatorCache, Params
 
-    for name in ("t3_stoch", "wavetrend_flip", "micro_rev"):
+    for name in ("t3_stoch", "wavetrend_flip", "micro_rev", "ichimoku"):
         assert name not in STRATEGIES, name
         assert name not in _FAMILIES, name
         assert name not in SCALP_STRATEGIES, name
@@ -129,7 +137,7 @@ def test_retired_family_functions_are_gone():
     import micofx.strategy as strategy
 
     for name in ("_dual_t3", "_t3_flip", "_stoch_flip", "_parabolic_flip",
-                 "_t3_accel", "_flip_gates"):
+                 "_t3_accel", "_flip_gates", "_ichimoku"):
         assert not hasattr(strategy, name), name
     from micofx.strategy import IndicatorCache
     for name in ("supertrend", "stoch_slow", "psar"):

@@ -28,6 +28,7 @@ RETIRED_FAMILIES = (
     "dual_t3",
     "t3_flip",
     "parabolic_flip",
+    "ichimoku",
 )
 
 RETIRED_TIMEFRAMES = ("H1", "H4", "M10", "M1", "M3")
