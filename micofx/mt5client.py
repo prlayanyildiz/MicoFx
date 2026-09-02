@@ -120,8 +120,10 @@ DECISION_CLOCK_MAX_AGE_SEC = 600.0
 # between the book's frozen symbol stamps (seconds), so a shut market cannot
 # fill the window; half is loose enough that a quiet instrument or a slow poll
 # does not read as frozen.
-BROKER_CLOCK_MIN_WINDOW_SEC = 60.0
-BROKER_CLOCK_MIN_RATE = 0.5
+BROKER_CLOCK_MIN_WINDOW_SEC = 30.0
+BROKER_CLOCK_MIN_RATE = 0.2
+BROKER_CLOCK_RECENT_ADVANCE_SEC = 45.0
+BROKER_CLOCK_MIN_GAIN_SEC = 2.0
 _RECONNECT_COOLDOWN = 5.0
 # MetaTrader5's default initialize timeout is 60s and 5.0.6090 ignores
 # timeout= (02.09 probe: 2000ms still waited 60s). Keep the kwarg so a
@@ -215,6 +217,7 @@ class MT5Client:
         # _broker_now keeps returning Friday's close, and anything that reads
         # it as "now" is wrong by however long the market has been shut.
         self._broker_seen_at: float = 0.0
+        self._broker_last_advance_at: float = 0.0
         # First (local, broker) pair this process saw, and the anchor for
         # asking whether the broker clock is RUNNING rather than merely
         # readable.
@@ -648,6 +651,7 @@ class MT5Client:
         # carrying a pre-disconnect anchor that can read as frozen forever.
         self._broker_now = 0.0
         self._broker_seen_at = 0.0
+        self._broker_last_advance_at = 0.0
         self._broker_anchor = None
         broker = getattr(info, "company", "?")
         login = getattr(acc, "login", "?") if acc is not None else "?"
@@ -842,10 +846,10 @@ class MT5Client:
         self._info_cache[symbol] = (now, data)
         return data
 
-    def tick(self, symbol: str) -> dict[str, float] | None:
+    def tick(self, symbol: str, *, force: bool = False) -> dict[str, float] | None:
         now = time.time()
         hit = self._tick_cache.get(symbol)
-        if hit and now - hit[0] < _TICK_TTL:
+        if not force and hit and now - hit[0] < _TICK_TTL:
             return hit[1]
         real = self.select(symbol)
         if real is None:
@@ -893,6 +897,7 @@ class MT5Client:
                 self._broker_anchor = (time.time(), stamp)
             self._broker_now = stamp
             self._broker_seen_at = time.time()
+            self._broker_last_advance_at = self._broker_seen_at
         return data
 
     def market_open(self, symbol: str, max_age_sec: int = 180) -> bool:
@@ -981,7 +986,7 @@ class MT5Client:
         """Whether the broker clock has kept pace with local time.
 
         Answers False until the window is long enough to be worth reading, so
-        for the first minute after any restart the broker clock is reported as
+        for the first ~30s after any restart the broker clock is reported as
         unknown. That is the honest state and it is the safe one: decision_now
         already turns unknown into a refusal, and the entry path turns that
         into "broker saati bayat" rather than into a trade.
@@ -992,7 +997,20 @@ class MT5Client:
         local_span = time.time() - anchor_local
         if local_span < BROKER_CLOCK_MIN_WINDOW_SEC:
             return False
-        return (self._broker_now - anchor_broker) >= BROKER_CLOCK_MIN_RATE * local_span
+        broker_gain = self._broker_now - anchor_broker
+        if broker_gain >= BROKER_CLOCK_MIN_RATE * local_span:
+            return True
+        # Slow index feed: stamp still moving but below the pace threshold.
+        partial = BROKER_CLOCK_MIN_RATE * local_span * 0.35
+        recent = (
+            self._broker_last_advance_at > 0
+            and time.time() - self._broker_last_advance_at <= BROKER_CLOCK_RECENT_ADVANCE_SEC
+        )
+        return (
+            recent
+            and broker_gain >= BROKER_CLOCK_MIN_GAIN_SEC
+            and broker_gain >= partial
+        )
 
     def broker_utc_offset_hours(self, symbols: list[str]) -> int | None:
         """The broker server's own UTC offset in whole hours, or None.

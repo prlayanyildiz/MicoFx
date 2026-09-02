@@ -33,6 +33,7 @@ def _client() -> MT5Client:
     c = object.__new__(MT5Client)
     c._broker_now = 0.0
     c._broker_seen_at = 0.0
+    c._broker_last_advance_at = 0.0
     c._broker_anchor = None
     return c
 
@@ -45,6 +46,7 @@ def _observe(c: MT5Client, stamp: float, at: float | None = None) -> None:
             c._broker_anchor = (now, stamp)
         c._broker_now = stamp
         c._broker_seen_at = now
+        c._broker_last_advance_at = now
 
 
 def test_age_is_unknown_before_any_tick():
@@ -52,7 +54,7 @@ def test_age_is_unknown_before_any_tick():
 
 
 def test_the_window_is_not_answered_before_it_is_long_enough():
-    """For the first minute after a restart the answer is "unknown", by design."""
+    """For the first ~30s after a restart the answer is "unknown", by design."""
     c = _client()
     _observe(c, time.time())
     assert c.broker_now_age() is None
@@ -81,6 +83,16 @@ def test_a_clock_keeping_pace_with_local_time_is_accepted():
 
     age = c.broker_now_age()
     assert age is not None, "kosan saat olculebilmeli"
+    assert c.decision_now() is not None
+
+
+def test_slow_feed_partial_pace_is_accepted_when_stamps_keep_moving():
+    """Index ticks can advance slower than 0.2x local; recent moves still count."""
+    c = _client()
+    started = time.time() - (BROKER_CLOCK_MIN_WINDOW_SEC + 10)
+    broker0 = started - 3 * 3600
+    for k in (0, 15, 30, 35):
+        _observe(c, broker0 + k * 0.1, at=started + k)
     assert c.decision_now() is not None
 
 

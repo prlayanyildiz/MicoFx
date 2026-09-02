@@ -82,7 +82,7 @@ SPREAD_RATIO_BUCKETS = 51
 # minutes.
 BROKER_CLOCK_MAX_AGE_SEC = DECISION_CLOCK_MAX_AGE_SEC
 CLOCK_STALE_WARN_SEC = 900.0
-CLOCK_STALE_WARN_AFTER_CYCLES = 30
+CLOCK_STALE_WARN_AFTER_CYCLES = 15
 # Below this many samples the ratio is not reported or applied - a handful of
 # ticks from one hour is exactly the reading that misled us once already.
 SPREAD_RATIO_MIN_SAMPLES = 400
@@ -4490,7 +4490,7 @@ class Engine:
             return
         for cfg in list(self.store.symbols.values()):
             try:
-                tick(cfg.symbol)
+                tick(cfg.symbol, force=True)
             except Exception:
                 pass
 

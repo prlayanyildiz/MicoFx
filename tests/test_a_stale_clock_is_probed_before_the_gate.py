@@ -31,6 +31,9 @@ def test_the_cycle_probes_ticks_before_decision_now():
     assert gate_at != -1
     assert probe_at < gate_at, (
         "tick kapidan sonra - evaluate donunce probe'a hic gelinmez")
+    probe_src = Path("micofx/engine.py").read_text(encoding="utf-8")
+    probe_body = probe_src.split("def _probe_book_ticks", 1)[1].split("\n    def ", 1)[0]
+    assert "force=True" in probe_body, "probe cache'i bayat tick'i tekrar etmemeli"
 
 
 def test_a_stale_clock_is_warned_once_not_every_cycle(monkeypatch):

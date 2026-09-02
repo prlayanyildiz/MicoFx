@@ -38,6 +38,7 @@ def test_after_connect_clears_broker_clock_state(monkeypatch):
     assert c._after_connect() is True
     assert c._broker_now == 0.0
     assert c._broker_seen_at == 0.0
+    assert c._broker_last_advance_at == 0.0
     assert c._broker_anchor is None
 
 
