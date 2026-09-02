@@ -203,8 +203,10 @@ _INDICATOR_PERIOD_BOUNDS = dict.fromkeys(("t3_length", "rsi_length", "stoch_leng
 # admitting 1e9.
 _OPT_PARAM_BOUNDS = {
     "max_combos": (1, 100000, True),
-    "refine_rounds": (1, 20, True),
-    "lookback_days": (1, 3650, True),
+    # 0 = coarse sweep only (no local refine). Matches field_help + panel min.
+    "refine_rounds": (0, 20, True),
+    # 0 = no calendar cap; bar_cap alone binds (optimizer._plan_symbol).
+    "lookback_days": (0, 3650, True),
 }
 
 

@@ -117,11 +117,18 @@ def test_an_absurd_search_budget_is_refused(field, value):
     assert field in res.text
 
 
-@pytest.mark.parametrize("field", ["max_combos", "refine_rounds", "lookback_days"])
-def test_a_zero_or_negative_search_budget_is_refused(field):
-    for value in (0, -1):
-        res = _tc().post("/api/opt/params", json={field: value}, headers=HEAD)
-        assert res.status_code == 400, f"{field}={value}: {res.text}"
+@pytest.mark.parametrize("field,value", [
+    ("max_combos", 0),
+    ("max_combos", -1),
+    ("refine_rounds", -1),
+    ("lookback_days", -1),
+])
+def test_a_broken_search_budget_is_refused(field, value):
+    # max_combos=0 is empty work. lookback_days=0 and refine_rounds=0 are
+    # legal offs (bar_cap alone / coarse sweep only) - see help text +
+    # test_a_zero_day_window_means_no_limit.
+    res = _tc().post("/api/opt/params", json={field: value}, headers=HEAD)
+    assert res.status_code == 400, f"{field}={value}: {res.text}"
 
 
 def test_the_search_budget_the_book_actually_runs_is_accepted():
@@ -132,6 +139,22 @@ def test_the_search_budget_the_book_actually_runs_is_accepted():
         headers=HEAD,
     )
     assert res.status_code == 200, res.text
+    assert store.saved["max_combos"] == 2000
+
+
+def test_panel_save_keeps_zero_lookback_and_allows_refine_five():
+    # Live book: lookback_days=0 (unlimited calendar; bar_cap binds). The
+    # panel Kaydet posts every dial together, so a refine_rounds edit used
+    # to 400 on lookback_days=0 even though the operator never touched it.
+    store = _Store()
+    res = _tc(store).post(
+        "/api/opt/params",
+        json={"lookback_days": 0, "refine_rounds": 5, "max_combos": 2000},
+        headers=HEAD,
+    )
+    assert res.status_code == 200, res.text
+    assert store.saved["lookback_days"] == 0
+    assert store.saved["refine_rounds"] == 5
     assert store.saved["max_combos"] == 2000
 
 

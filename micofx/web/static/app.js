@@ -1157,7 +1157,9 @@ function saveSymbol(symbol, patch, flashNode) {
 // this far (opt speed vs. depth). Statistical-gate internals left the panel
 // 27.08; they stay in opt_params.
 const OPT_SETTING_FIELDS = [
-  { k: "lookback_days", label: "Gecmis penceresi (gun)", step: 10, min: 20 },
+  // 0 = calendar off (bar_cap binds). Was min:20 while live ran 0, so Kaydet
+  // always re-posted 0 and the server 400'd every dial edit together.
+  { k: "lookback_days", label: "Gecmis penceresi (gun)", step: 10, min: 0 },
   { k: "refine_rounds", label: "Yerel iyilestirme turu", step: 1, min: 0, max: 5 },
   { k: "max_combos", label: "Maks kombinasyon", step: 100, min: 20 },
 ];
