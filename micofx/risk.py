@@ -817,7 +817,8 @@ class RiskManager:
             summary = cfg.opt_summary if isinstance(cfg.opt_summary, dict) else {}
             if "charge_costs" in summary:
                 stamps.append(bool(summary.get("charge_costs")))
-            if summary.get("costed_negative"):
+            if summary.get("costed_negative") and bool(
+                    getattr(sys_cfg, "charge_costs", True)):
                 projected_costed_negative = True
             hold = summary.get("holdout") or {}
             try:

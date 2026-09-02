@@ -2091,7 +2091,9 @@ class Optimizer:
         # winners that lose once spread is paid. A measurement that cannot
         # change the decision is not a gate.
         costed = None
-        if detail is not None:
+        charging = bool(getattr(getattr(self, "store", None), "system", None)
+                        and getattr(self.store.system, "charge_costs", True))
+        if detail is not None and charging:
             try:
                 costed = self._holdout_costed(
                     symbol, next_tf, next_strat, applied_params)

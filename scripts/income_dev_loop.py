@@ -357,7 +357,7 @@ def apply_safe(report: dict[str, Any]) -> list[str]:
 
 
 def apply_trust_entries(report: dict[str, Any]) -> list[str]:
-    """No AI hard refuse; spread calibrate all flat enabled names."""
+    """No AI hard refuse; spread calibrate only when costs are charged."""
     headers, up = _api_session()
     if not up:
         return ["panel offline — trust mode atlandi"]
@@ -368,6 +368,11 @@ def apply_trust_entries(report: dict[str, Any]) -> list[str]:
         "hard_block_only_quarantine": True,
     })
     done.append(f"AI trust mode {'ok' if ok else 'fail'} {msg[:80]}")
+
+    st = _api_get("/api/state", headers) or {}
+    if not (st.get("system") or {}).get("charge_costs", True):
+        done.append("spread kalibre atlandi (charge_costs=false)")
+        return done
 
     live = report.get("live") or {}
     open_syms = set(live.get("open_symbols") or [])
@@ -398,6 +403,10 @@ def apply_spread_calibration(report: dict[str, Any]) -> list[str]:
         return ["opt calisiyor — spread kalibrasyon atlandi"]
     if not live.get("mt5_connected"):
         return ["MT5 bagli degil — spread kalibrasyon atlandi"]
+
+    st = _api_get("/api/state", headers) or {}
+    if not (st.get("system") or {}).get("charge_costs", True):
+        return ["spread kalibrasyon atlandi (charge_costs=false)"]
 
     done: list[str] = []
     targets = set(report.get("spread_auto") or [])
@@ -552,6 +561,13 @@ def main() -> int:
         applied.extend(apply_trust_entries(report))
         applied.extend(apply_spread_calibration(report))
         applied.extend(_run_holdout_live_sync(headers))
+        import importlib.util as _ilu
+        spec_cf = _ilu.spec_from_file_location(
+            "cost_free_mode", ROOT / "scripts" / "cost_free_mode.py")
+        cf_mod = _ilu.module_from_spec(spec_cf)
+        assert spec_cf.loader is not None
+        spec_cf.loader.exec_module(cf_mod)
+        applied.extend(cf_mod.apply_cost_free_mode(headers))
 
     md = render_markdown(report, applied)
     latest_path.write_text(md, encoding="utf-8")

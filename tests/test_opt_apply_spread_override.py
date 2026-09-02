@@ -122,6 +122,22 @@ def test_run_id_strategy_override_rejected():
     assert res.status_code == 400
 
 
+def test_gates_only_spread_zero_disables_gate():
+    store = _StoreBurstRun()
+    opt = _Optimizer(store)
+    app = create_app(store, _Client(), _Engine(), opt)
+    tc = TestClient(app)
+    tc.get("/")
+    store.symbols["US30"].max_spread_atr = 0.18
+    res = tc.post("/api/opt/apply", json={
+        "symbol": "US30", "run_id": 632,
+        "params": {"max_spread_atr": 0.0},
+        "force": True, "gates_only": True,
+    }, headers=HEAD)
+    assert res.status_code == 200, res.text
+    assert store.symbols["US30"].max_spread_atr == 0.0
+
+
 def test_gates_only_widens_spread_without_changing_family():
     store = _StoreBurstRun()
     opt = _Optimizer(store)

@@ -80,6 +80,8 @@ def sync_flat_symbols(headers: dict[str, str]) -> list[str]:
     st = _get("/api/state", headers)
     if (st.get("opt") or {}).get("busy"):
         return ["holdout_live: opt busy — atlandi"]
+    if not (st.get("system") or {}).get("charge_costs", True):
+        return ["holdout_live: charge_costs=false — spread sync atlandi"]
 
     open_syms = {str(p.get("symbol") or "") for p in st.get("positions") or []}
     eb = _aggregate_entry_blocks(list(_get("/api/analysis/entry-blocks", headers).get("rows") or []))

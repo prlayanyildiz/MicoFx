@@ -51,11 +51,6 @@ while ($true) {
         $pending = $false
         continue
     }
-    if (-not $pending) {
-        $pending = $true
-        Write-Log "dirty tree — waiting for quiet period"
-        continue
-    }
     Sync-Repo
     $pending = $false
 }

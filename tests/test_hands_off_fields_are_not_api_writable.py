@@ -117,12 +117,25 @@ def test_lot_multiplier_is_writable_for_deleverage():
     store.update_system({"lot_multiplier": before}, source="test restore")
 
 
-def test_system_plumbing_is_not_writable():
+def test_system_cost_toggles_are_writable_for_zero_cost_book():
     tc, store, _ = _client()
-    before = store.system.charge_costs
-    res = tc.post("/api/system", json={"charge_costs": False})
+    res = tc.post("/api/system", json={
+        "charge_costs": False,
+        "block_high_cost": False,
+        "max_cost_pct_of_risk": 0.0,
+    })
+    assert res.status_code == 200, res.text
+    assert store.system.charge_costs is False
+    assert store.system.block_high_cost is False
+    assert store.system.max_cost_pct_of_risk == 0.0
+
+
+def test_system_plumbing_still_blocks_unknown_keys():
+    tc, store, _ = _client()
+    before = store.system.max_lot
+    res = tc.post("/api/system", json={"max_lot": 0.5})
     assert res.status_code == 400
-    assert store.system.charge_costs == before
+    assert store.system.max_lot == before
 
 
 def test_operator_system_dials_still_write():

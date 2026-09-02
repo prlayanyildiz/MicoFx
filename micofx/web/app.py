@@ -450,6 +450,9 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
     "max_margin_usage_pct",
     "lot_multiplier",
     "max_concurrent_risk_pct",
+    "charge_costs",
+    "block_high_cost",
+    "max_cost_pct_of_risk",
     "backup_dir", "backup_dir_secondary", "backup_keep",
     "mt5_terminal_path", "autostart_mt5", "autostart_bot",
 })
@@ -1328,7 +1331,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             fails: list[str] = []
             if se2 is None or abs(edge) <= se2:
                 fails.append("olculebilir")
-            if cost_r > ceiling_r:
+            if cost_r > ceiling_r and bool(getattr(store.system, "charge_costs", True)):
                 fails.append("maliyet")
             # A ceiling of 0 disables the filter entirely; only judge a live
             # reading against a ceiling that is actually switched on.
@@ -2053,7 +2056,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 if "max_spread_atr" in params and live_cfg is not None:
                     cur = float(getattr(live_cfg, "max_spread_atr", 0.0) or 0.0)
                     nxt = float(params["max_spread_atr"])
-                    if nxt < cur - 1e-9:
+                    # 0 = gate off (operator). Positive values: widen-only.
+                    if nxt > 0 and nxt < cur - 1e-9:
                         raise HTTPException(
                             400, f"max_spread_atr daraltamaz ({cur:g} -> {nxt:g})")
                 timeframe, strategy = None, None
