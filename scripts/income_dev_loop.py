@@ -566,7 +566,6 @@ def main() -> int:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "income_loop.log"
     latest_path = LOG_DIR / "income_loop_latest.md"
-    bridge_path = ROOT / "cursor" / "FOR_CLAUDE.md"
 
     c = _db()
     try:
@@ -605,17 +604,8 @@ def main() -> int:
         fh.write(f"\n{'=' * 60}\n")
         fh.write(md)
 
-    bridge_path.parent.mkdir(parents=True, exist_ok=True)
-    bridge_path.write_text(
-        f"# Gelir dongusu {report['ts']}\n\n"
-        f"Detay: `logs/income_loop_latest.md`\n\n"
-        f"Aktif: {', '.join(report.get('active_symbols') or [])}\n\n"
-        f"Marj: %{report.get('live', {}).get('margin_usage_pct', '?')}/"
-        f"%{report.get('live', {}).get('max_margin_usage_pct', '?')}\n\n"
-        f"Spread auto: {', '.join(report.get('spread_auto') or []) or 'yok'}\n\n"
-        f"Aksiyonlar:\n" + "\n".join(f"- {a}" for a in report["actions"][:10]),
-        encoding="utf-8",
-    )
+    # Do NOT rewrite cursor/FOR_CLAUDE.md — that wiped Cursor↔Claude briefs
+    # every 15m. auto_pilot.py owns the <!-- autopilot:begin/end --> section.
 
     try:
         sys.stdout.reconfigure(encoding="utf-8")

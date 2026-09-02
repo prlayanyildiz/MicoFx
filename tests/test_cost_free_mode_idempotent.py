@@ -1,4 +1,4 @@
-"""cost_free_mode must not re-apply gates when the book is already zero-cost."""
+"""cost_free_mode only toggles system cost flags; it must not wipe symbol gates."""
 from __future__ import annotations
 
 import importlib.util
@@ -19,7 +19,7 @@ def _load():
     return mod
 
 
-def test_skips_when_system_and_gates_already_off():
+def test_skips_when_system_already_off_and_preserves_gates():
     mod = _load()
     state = {
         "system": {
@@ -32,7 +32,7 @@ def test_skips_when_system_and_gates_already_off():
         "symbols": [
             {"symbol": "GER40", "enabled": True, "commission_per_lot": 0,
              "strategy": "burst", "timeframe": "M5",
-             "max_spread_atr": 0.0, "cost_rank_max": 0.0},
+             "max_spread_atr": 0.25, "cost_rank_max": 0.3},
         ],
     }
 
@@ -55,10 +55,11 @@ def test_skips_when_system_and_gates_already_off():
             return _Resp(state)
         if url.endswith("/api/symbols"):
             return _Resp(symbols)
-        raise AssertionError(f"unexpected url {url}")
+        raise AssertionError(f"unexpected apply url {url}")
 
     with patch("urllib.request.urlopen", fake_urlopen):
         lines = mod.apply_cost_free_mode({"Origin": "http://127.0.0.1:8900"})
     assert any("zaten cost-free" in x for x in lines)
-    assert any("gates zaten kapali" in x for x in lines)
+    assert any("gate korunur" in x for x in lines)
     assert not any("spread/cost_rank kapali" in x for x in lines)
+    assert not any("gates zaten kapali" in x for x in lines)

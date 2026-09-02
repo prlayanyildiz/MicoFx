@@ -9,7 +9,12 @@ PANEL = "http://127.0.0.1:8900"
 
 
 def apply_cost_free_mode(headers: dict[str, str]) -> list[str]:
-    """Turn off cost charging, live cost gate, spread/cost_rank entry gates."""
+    """Turn off system cost charging when the broker charges no commission.
+
+    Does **not** zero ``max_spread_atr`` / ``cost_rank_max``. Autopilot used to
+    wipe those every 15m and fought measured GER40 ``cost_rank_max=0.3`` and
+    XAU spread caps — that maximized fills, not expectancy.
+    """
     h = {**headers, "Origin": PANEL, "Content-Type": "application/json"}
     done: list[str] = []
 
@@ -20,8 +25,11 @@ def apply_cost_free_mode(headers: dict[str, str]) -> list[str]:
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
         return ["cost_free: state okunamadi"]
 
-    syms = json.loads(urllib.request.urlopen(
-        urllib.request.Request(f"{PANEL}/api/symbols", headers=headers), timeout=20).read())
+    try:
+        syms = json.loads(urllib.request.urlopen(
+            urllib.request.Request(f"{PANEL}/api/symbols", headers=headers), timeout=20).read())
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return ["cost_free: symbols okunamadi"]
 
     enabled = [s for s in syms.get("symbols", []) if s.get("enabled")]
     if not enabled:
@@ -51,43 +59,8 @@ def apply_cost_free_mode(headers: dict[str, str]) -> list[str]:
     else:
         done.append("sistem zaten cost-free")
 
-    for sym_row in enabled:
-        sym = sym_row["symbol"]
-        if (float(sym_row.get("max_spread_atr") or 0) <= 0
-                and float(sym_row.get("cost_rank_max") or 0) <= 0):
-            done.append(f"{sym} gates zaten kapali")
-            continue
-        hist = json.loads(urllib.request.urlopen(
-            urllib.request.Request(
-                f"{PANEL}/api/opt/history?symbol={sym}&limit=40", headers=headers),
-            timeout=30).read())
-        run = next(
-            (r for r in (hist.get("history") or [])
-             if r.get("validated") and r.get("strategy") == sym_row.get("strategy")
-             and r.get("timeframe") == sym_row.get("timeframe")),
-            None,
-        )
-        if run is None:
-            run = next((r for r in (hist.get("history") or []) if r.get("validated")), None)
-        if run is None:
-            done.append(f"{sym} gate kapatma: opt kayit yok")
-            continue
-        gate_patch = {"max_spread_atr": 0.0, "cost_rank_max": 0.0}
-        payload = json.dumps({
-            "symbol": sym,
-            "run_id": int(run["id"]),
-            "params": gate_patch,
-            "force": True,
-            "gates_only": True,
-        }).encode()
-        try:
-            req = urllib.request.Request(
-                f"{PANEL}/api/opt/apply", data=payload, headers=h, method="POST")
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                json.loads(resp.read().decode())
-            done.append(f"{sym} spread/cost_rank kapali (run {run['id']})")
-        except urllib.error.HTTPError as exc:
-            done.append(f"{sym} gate fail: {exc.read().decode()[:100]}")
+    # Preserve per-symbol entry gates (cost_rank / max_spread) — measured.
+    done.append("sembol gate korunur (cost_rank/max_spread silinmez)")
 
     if all_zero_comm:
         done.append("komisyon 0 — maliyet modeli kapali")

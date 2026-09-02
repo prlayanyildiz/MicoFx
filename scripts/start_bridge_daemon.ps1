@@ -20,8 +20,10 @@ $PingClaude = Join-Path $Root ".bridge\last_ping_claude.txt"
 $ClaudeBusy = Join-Path $Root ".bridge\claude_spawn.lock"
 $ClaudeLog = Join-Path $Root "logs\claude_spawn.log"
 $ClaudeExe = "C:\Users\Administrator\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude-code\2.1.255\claude.exe"
-$MaxTurns = 25
-$WatchdogMinutes = 12
+$MaxTurns = 40
+$WatchdogMinutes = 5
+$HeartbeatMinutes = 5
+$script:lastHeartbeat = Get-Date
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "logs") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Root ".bridge") | Out-Null
@@ -104,11 +106,12 @@ function Start-ClaudeTick([string]$reason) {
     }
     $wake = Get-SharedPrompt
     $prompt = @"
-MicoFx kopru tick ($reason).
-1) Oku: cursor/GOREV_TAHTASI.md ve cursor/FOR_CLAUDE.md (ust blok).
-2) SIMDI isini yap (olcum/salt-okur tercih; PATCH/restart/commit yok; aile genisletme yok).
-3) Cevabi claude/FOR_CURSOR.md USTUNE yeni # Claude -> Cursor basligi ile yaz.
-4) Python: C:\MicoFX-venv\Scripts\python.exe. Repo: C:\Users\Administrator\MicoFx.
+MicoFx KOPRU INCOME tick ($reason). Aktif + agresif ol.
+1) Oku: cursor/GOREV_TAHTASI.md (SIMDI satirlar) + cursor/FOR_CLAUDE.md ust blok + logs/income_loop_latest.md.
+2) Her tick en az bir somut is: costed sweep, holdout vs canli fark, trail/adx/cost_rank kuyruk olcumu, entry-block analizi, veya GOLD_PERP add adayi. Bos 'bekliyorum' yazma.
+3) Mutabakat + sayi: Claude -> Cursor basligi ile claude/FOR_CURSOR.md USTUNE yaz. Cursor apply eder.
+4) Yasak: yeni aile, daily_loss_pct acma, SpotBrent acma, commit/push (Cursor yapar), MT5 sidecar initialize.
+5) Python: C:\MicoFX-venv\Scripts\python.exe. Repo: C:\Users\Administrator\MicoFx.
 $wake
 "@
     $promptOne = ($prompt -replace "\s+", " ").Trim()
@@ -219,13 +222,15 @@ $wClaude.EnableRaisingEvents = $true
 Register-ObjectEvent -InputObject $wCursor -EventName Changed -SourceIdentifier MicoBridgeCursor | Out-Null
 Register-ObjectEvent -InputObject $wClaude -EventName Changed -SourceIdentifier MicoBridgeClaude | Out-Null
 
-Write-Log "Bridge daemon FULL-AUTO STARTED (FSW + claude.exe spawn + watchdog ${WatchdogMinutes}m)."
-Write-Output 'AGENT_LOOP_WAKE_bridge_daemon {"prompt":"Kopru full-auto: Claude spawn + Cursor notify."}'
+Write-Log "Bridge daemon FULL-AUTO STARTED (FSW + claude.exe spawn + watchdog ${WatchdogMinutes}m + heartbeat ${HeartbeatMinutes}m)."
+Write-Output 'AGENT_LOOP_WAKE_bridge_daemon {"prompt":"Kopru full-auto income: Claude spawn + Cursor notify + 5m heartbeat."}'
 
 # Kick Claude if a SIMDI task is already hanging
 if (Test-ClaudeOverdue) {
     Start-ClaudeTick "startup_overdue"
 }
+Start-ClaudeTick "startup_heartbeat"
+$script:lastHeartbeat = Get-Date
 
 try {
     while ($true) {
@@ -235,6 +240,12 @@ try {
             Handle-ClaudeMail
             if (Test-ClaudeOverdue) {
                 Start-ClaudeTick "watchdog_overdue"
+            }
+            $hbAge = (Get-Date) - $script:lastHeartbeat
+            if ($hbAge.TotalMinutes -ge $HeartbeatMinutes) {
+                Start-ClaudeTick "heartbeat"
+                $script:lastHeartbeat = Get-Date
+                Emit-Wake "AGENT_LOOP_WAKE_claude_bridge" ((Get-SharedPrompt) + " Heartbeat ${HeartbeatMinutes}m - tahta + FOR_CURSOR oku, SIMDI ilerle.") $PingCursor "Bridge heartbeat"
             }
             continue
         }
