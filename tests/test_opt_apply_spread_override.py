@@ -109,7 +109,7 @@ def test_run_id_spread_override_allowed():
     assert store.symbols["US30"].max_spread_atr == 0.18
 
 
-def test_run_id_strategy_override_rejected():
+def test_run_id_exit_override_without_force_is_rejected():
     store = _Store()
     opt = _Optimizer(store)
     app = create_app(store, _Client(), _Engine(), opt)
@@ -117,9 +117,29 @@ def test_run_id_strategy_override_rejected():
     tc.get("/")
     res = tc.post("/api/opt/apply", json={
         "symbol": "US30", "run_id": 624,
-        "params": {"sl_atr_mult": 9.0}, "force": True,
+        "params": {"trail_step_atr": 0.8}, "force": False,
     }, headers=HEAD)
     assert res.status_code == 400
+
+
+def test_force_run_id_allows_measured_exit_retune():
+    """US30 trail_step 2.2→0.8: costed sweep wins, WFO gate often will not."""
+    store = _Store()
+    opt = _Optimizer(store)
+    app = create_app(store, _Client(), _Engine(), opt)
+    tc = TestClient(app)
+    tc.get("/")
+    res = tc.post("/api/opt/apply", json={
+        "symbol": "US30", "run_id": 624,
+        "params": {"trail_step_atr": 0.8, "adx_min": 15.0},
+        "force": True,
+    }, headers=HEAD)
+    assert res.status_code == 200, res.text
+    assert opt.last_apply is not None
+    _sym, params, _tf, _st = opt.last_apply
+    assert params["trail_step_atr"] == 0.8
+    assert params["adx_min"] == 15.0
+    assert params["sl_atr_mult"] == 1.5  # stamped base kept
 
 
 def test_gates_only_spread_zero_disables_gate():

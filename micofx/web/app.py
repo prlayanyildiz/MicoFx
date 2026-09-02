@@ -2067,12 +2067,18 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 timeframe = timeframe or match.get("timeframe")
                 strategy = strategy or match.get("strategy")
                 if body.params:
-                    # Incumbent evidence from run_id; allow entry-gate retunes only.
-                    bad = sorted(k for k in body.params if k not in gate_axes)
+                    # Without force: entry-gate retunes only (spread/cost_rank).
+                    # With force: any OPT_FIELDS overlay on the stamped run —
+                    # measured exit/adx retunes (US30 trail_step 0.8) that WFO
+                    # will not beat an optimistic incumbent to land.
+                    allow = set(OPT_FIELDS) if body.force else gate_axes
+                    bad = sorted(k for k in body.params if k not in allow)
                     if bad:
+                        hint = ("OPT_FIELDS (force:true)" if body.force
+                                else ", ".join(sorted(gate_axes)))
                         raise HTTPException(
                             400, f"{', '.join(bad)} run_id uzerine yazilamaz - "
-                                 f"yalnizca {', '.join(sorted(gate_axes))}")
+                                 f"yalnizca {hint}")
                     params.update(body.params)
         if not params:
             raise HTTPException(400, "parametre yok")
