@@ -28,6 +28,7 @@ from .mt5client import (
     NON_RETRYABLE_RETCODES,
     Bars,
     MT5Client,
+    live_stop_level,
     timeframe_seconds,
 )
 from .risk import RiskManager, shakeout_size_note, shakeout_sl_atr_mult
@@ -70,6 +71,37 @@ signal_bar_expired = sessions.signal_bar_expired
 def _round_or_none(value: float | None, digits: int) -> float | None:
     """round() that carries a "not measured" through instead of raising."""
     return None if value is None else round(value, digits)
+
+
+def _fill_original_sl(side: str, entry: float, sl_dist: float,
+                      reported_sl: float) -> float | None:
+    """Persisted hard stop for autopsy/repair — never negative or zero."""
+    try:
+        rep = float(reported_sl or 0.0)
+    except (TypeError, ValueError):
+        rep = 0.0
+    if rep > 0:
+        return rep
+    try:
+        dist = float(sl_dist or 0.0)
+        px = float(entry or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if dist <= 0 or px <= 0:
+        return None
+    if side == "buy":
+        return px - dist
+    if side == "sell":
+        return px + dist
+    return None
+
+
+def _fill_log_price(result: dict[str, Any], fallback: float) -> float:
+    try:
+        px = float(result.get("price") or 0.0)
+    except (TypeError, ValueError):
+        px = 0.0
+    return px if px > 0 else float(fallback or 0.0)
 
 # Live-tick-spread / bar-spread histogram: buckets of 0.1 from 0.0 to 5.0,
 # plus a final overflow bucket for anything above.
@@ -453,20 +485,8 @@ class Engine:
         # magic. manage_positions already maps that way; the line is so a
         # restart is visible in the log instead of only in the book.
         self._open_resume_logged = False
-        # Tickets seen open with no stop attached. This system's one and only
-        # intended exit is the stop, so a position without one has no exit at
-        # all - and the trail cannot supply the missing one, because it
-        # returns early while the trade is losing (``profit_dist <= 0``),
-        # which is exactly the half where an unprotected position costs
-        # something. Nothing in this codebase writes a stopless order: the
-        # INVALID_STOPS ladder widens the levels rather than dropping them,
-        # and a refused re-anchor keeps the levels the broker already holds.
-        # What can still produce it is a stop removed by hand in the terminal
-        # and an ambiguous send adopting a fill the broker took without
-        # levels. Neither has happened here - the log carries no SL=0 open, no
-        # failed re-anchor and no adopted position - so this reports and does
-        # not act. Restoring a stop is a live behaviour change on the money
-        # path and does not get made for a case nobody has seen.
+        # Tickets already WARN/ERROR-logged as stopless. Repair is retried every
+        # cycle until a stop lands; this set only dedupes the operator shout.
         self._stopless_seen: set[int] = set()
         # symbol -> (bar key, how many of ours were open) at the moment a send
         # came back "verified unfilled". That verdict is a two-second look at
@@ -1149,12 +1169,12 @@ class Engine:
         state.note = "islem acildi"
         state.entry_block = "acildi"
         ticket = int(result.get("position", 0) or 0)
+        fill_px = _fill_log_price(result, entry)
         note_fill = getattr(self.execution, "note_fill", None)
         if ticket and callable(note_fill):
             sig_close = None
             if state.bars is not None and len(state.bars.close):
                 sig_close = float(state.bars.close[-1])
-            fill_px = float(result["price"])
             point = float(info.get("point") or 0)
             fill_vs = None
             if sig_close is not None and side:
@@ -1178,7 +1198,8 @@ class Engine:
                 side=side,
                 entry=fill_px,
                 risk_dist=float(sl_dist or 0),
-                original_sl=float(result.get("sl") or 0) or None,
+                original_sl=_fill_original_sl(side, fill_px, sl_dist,
+                                                float(result.get("sl") or 0)),
             )
         cost_bit = ""
         vol = float(result["volume"])
@@ -1189,9 +1210,13 @@ class Engine:
             tick = item.get("tick") or {}
             cost += float(tick.get("spread") or 0.0) * mpu
             cost_bit = f" maliyet %{cost / r_value * 100.0:.1f}"
+        log_sl = live_stop_level(float(result.get("sl") or 0))
+        if log_sl <= 0:
+            log_sl = _fill_original_sl(side, fill_px, sl_dist,
+                                       float(result.get("sl") or 0)) or 0.0
         LOG.emit(
-            f"#{ticket} {side.upper()} {vol:g} lot @ {result['price']:.5f} "
-            f"SL={result['sl']:.5f} TP={result['tp']:.5f} magic={cfg.magic}"
+            f"#{ticket} {side.upper()} {vol:g} lot @ {_fill_log_price(result, fill_px):.5f} "
+            f"SL={log_sl:.5f} TP={float(result.get('tp') or 0):.5f} magic={cfg.magic}"
             f"{cost_bit} | lot: {note}",
             "TRADE", cfg.symbol)
         try:
@@ -2623,6 +2648,10 @@ class Engine:
         entry = tick["ask"] if side == "buy" else tick["bid"]
         sl = entry - sl_dist if side == "buy" else entry + sl_dist
         tp = 0.0 if tp_dist <= 0 else (entry + tp_dist if side == "buy" else entry - tp_dist)
+        if sl <= 0:
+            state.note = "stop seviyesi gecersiz"
+            state.entry_block = "stop"
+            return
 
         # Held across the actual order_send + position bookkeeping so a
         # concurrent DELETE/magic-PATCH (web thread) cannot pass its own
@@ -2922,6 +2951,7 @@ class Engine:
         # (ambiguous multi-fill) and is written as such rather than omitted,
         # because a missing field and an unresolved one are different facts.
         ticket = int(result.get("position", 0) or 0)
+        fill_px = _fill_log_price(result, float(result.get("requested", entry) or entry))
         # Not ``note``: that name already holds the lot-sizing explanation this
         # method logs a few lines down. Rebinding it printed a bound method in
         # place of "risk %1.09 -> 0.515" on every fill.
@@ -2934,7 +2964,6 @@ class Engine:
             sig_close = None
             if state.bars is not None and len(state.bars.close):
                 sig_close = float(state.bars.close[-1])
-            fill_px = float(result["price"])
             point = float(info.get("point") or 0)
             fill_vs = None
             if sig_close is not None:
@@ -2959,7 +2988,8 @@ class Engine:
                 side=side,
                 entry=fill_px,
                 risk_dist=float(sl_dist or 0),
-                original_sl=float(result.get("sl") or 0) or None,
+                original_sl=_fill_original_sl(side, fill_px, sl_dist,
+                                                float(result.get("sl") or 0)),
             )
         cost_bit = ""
         vol = float(result["volume"])
@@ -2969,9 +2999,13 @@ class Engine:
             cost = cfg.commission_per_lot * vol
             cost += float((tick or {}).get("spread") or 0.0) * mpu
             cost_bit = f" maliyet %{cost / r_value * 100.0:.1f}"
+        log_sl = live_stop_level(float(result.get("sl") or 0))
+        if log_sl <= 0:
+            log_sl = _fill_original_sl(side, fill_px, sl_dist,
+                                       float(result.get("sl") or 0)) or 0.0
         LOG.emit(
-            f"#{ticket} {side.upper()} {vol:g} lot @ {result['price']:.5f} "
-            f"SL={result['sl']:.5f} TP={result['tp']:.5f} magic={cfg.magic}"
+            f"#{ticket} {side.upper()} {vol:g} lot @ {_fill_log_price(result, fill_px):.5f} "
+            f"SL={log_sl:.5f} TP={float(result.get('tp') or 0):.5f} magic={cfg.magic}"
             f"{cost_bit} | lot: {note}",
             "TRADE", cfg.symbol,
         )
@@ -3212,8 +3246,13 @@ class Engine:
             atr = state.atr if state else 0.0
 
             ticket_no = int(pos["ticket"])
-            if not float(pos.get("sl") or 0.0):
-                if ticket_no not in self._stopless_seen:
+            if live_stop_level(pos.get("sl")) <= 0:
+                if self._repair_stopless_stop(cfg, pos, atr):
+                    LOG.emit(f"#{ticket_no} STOPSUZ pozisyona stop eklendi "
+                             f"@ {float(pos['sl']):.5f}",
+                             "WARN", cfg.symbol)
+                    self._stopless_seen.discard(ticket_no)
+                elif ticket_no not in self._stopless_seen:
                     self._stopless_seen.add(ticket_no)
                     LOG.emit(f"#{ticket_no} STOPSUZ acik - bu sistemde tek cikis "
                              f"stoptur, trail ise yalnizca kardayken calisir, "
@@ -3655,6 +3694,50 @@ class Engine:
         except (TypeError, ValueError):
             return fallback
         return rd if rd > 0 else fallback
+
+    def _repair_stopless_stop(self, cfg: SymbolConfig, pos: dict[str, Any],
+                              atr: float) -> bool:
+        """Attach the fill-time hard stop to a broker-stopless ticket."""
+        min_stop = self.client.min_stop_distance(cfg.symbol)
+        atr_use = float(atr or 0.0)
+        if atr_use <= 0:
+            st = self.states.get(cfg.symbol)
+            atr_use = float(getattr(st, "atr", 0.0) or 0.0) if st else 0.0
+        sl_mult = shakeout_sl_atr_mult(
+            cfg.sl_atr_mult, cfg.symbol,
+            getattr(self, "_trade_autopsies", None))
+        risk_dist = self._fill_time_risk(pos, cfg, atr_use, min_stop)
+        if risk_dist <= 0 and atr_use > 0:
+            risk_dist = max(atr_use * sl_mult, min_stop)
+        if risk_dist <= 0:
+            return False
+        try:
+            entry = float(pos.get("price_open") or 0.0)
+        except (TypeError, ValueError):
+            return False
+        if entry <= 0:
+            return False
+        is_buy = pos.get("side") == "buy"
+        side = "buy" if is_buy else "sell"
+        sent_sl = entry - risk_dist if is_buy else entry + risk_dist
+        if sent_sl <= 0:
+            return False
+        ticket = int(pos["ticket"])
+        attached_sl, attached_tp, ok = self.client.attach_position_sl_tp(
+            cfg.symbol, ticket, side, entry, float(sent_sl), float(pos.get("tp") or 0.0))
+        if not ok:
+            return False
+        pos["sl"] = float(attached_sl)
+        note_fill = getattr(self.execution, "note_fill", None)
+        if callable(note_fill):
+            note_fill(
+                ticket,
+                original_sl=float(attached_sl),
+                risk_dist=float(risk_dist),
+                entry=entry,
+                side=side,
+            )
+        return True
 
     def _update_stop(self, cfg: SymbolConfig, pos: dict[str, Any], atr: float,
                      bars: Any = None) -> bool:
@@ -4100,10 +4183,11 @@ class Engine:
     def _panel_reuse_cycle_book(self) -> bool:
         """True when /api/state must not take the MT5 lock.
 
-        Fresh cycle book is the idle path. A search holds that same lock
-        for minutes (148s measured 26.08); the cycle then looks stale and
-        a blocking positions_get/account_info/terminal_info hangs the
-        panel. Halt/flatten still wait inside ``_cycle``, not here.
+        Once the engine has cycled at least once, always serve the last
+        cycle book. A long cycle or lock contention must not block the
+        panel on positions_get/account_info (148s measured 26.08). The
+        worker refreshes the book every poll; stale is honest until the
+        next cycle lands. Halt/flatten still wait inside ``_cycle``.
 
         Disconnected is the same hazard from the other side: ensure() is
         inside initialize() (IPC timeout) and the panel used to fall
@@ -4111,9 +4195,7 @@ class Engine:
         """
         if not getattr(self.client, "connected", False):
             return True
-        if self._cycle_book_is_fresh():
-            return True
-        return bool(self._search_is_busy() and self.last_cycle_at)
+        return bool(self.last_cycle_at)
 
     def _panel_positions(self) -> list[dict[str, Any]]:
         """Positions for /api/state. Reuse the cycle book when it is fresh.

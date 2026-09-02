@@ -32,7 +32,7 @@ def _eng() -> Engine:
         system=SimpleNamespace(poll_interval_sec=2.0),
     )
     eng._positions = []
-    eng.    last_cycle_at = 0.0
+    eng.last_cycle_at = 0.0
     eng._account = {}
     eng._account_at = 0.0
     return eng
@@ -91,7 +91,8 @@ def test_a_disconnected_engine_does_not_take_the_broker_lock():
     assert flags == {}
 
 
-def test_a_stale_cycle_book_is_fetched_again():
+def test_a_stale_cycle_book_is_reused_not_fetched():
+    """After the first cycle, /api/state never blocks on positions_get."""
     eng = _eng()
     eng.client._next = [{"ticket": 9, "magic": 1, "symbol": "GER40"}]
     eng._positions = [{"ticket": 1, "magic": 1, "symbol": "GER40"}]
@@ -99,8 +100,8 @@ def test_a_stale_cycle_book_is_fetched_again():
 
     out = Engine._panel_positions(eng)
 
-    assert eng.client.calls == 1
-    assert out[0]["ticket"] == 9
+    assert eng.client.calls == 0
+    assert out[0]["ticket"] == 1
 
 
 def test_a_fresh_cycle_reuses_the_cached_account():
@@ -117,24 +118,18 @@ def test_a_fresh_cycle_reuses_the_cached_account():
     assert out["equity"] == 100.0
 
 
-def test_a_stale_cycle_still_refreshes_the_account():
+def test_a_stale_cycle_reuses_the_cached_account():
+    """Once cycled, account_info is not retaken for a stale book."""
     eng = _eng()
     eng._account = {"equity": 1.0}
     eng._account_at = 0.0
     eng.last_cycle_at = time.time() - 30.0
-    eng.client.account_calls = 0
-
-    def _account():
-        eng.client.account_calls += 1
-        return {"equity": 9.0, "balance": 9.0}
-
-    eng.client.account = _account
-    eng._enforce_account_lock = lambda account: None
+    eng.client.account = lambda: (_ for _ in ()).throw(
+        AssertionError("account_info on a stale cycle"))
 
     out = Engine._panel_account(eng)
 
-    assert eng.client.account_calls == 1
-    assert out["equity"] == 9.0
+    assert out["equity"] == 1.0
 
 
 def test_a_fresh_open_is_decorated_without_another_broker_read():

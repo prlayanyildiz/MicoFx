@@ -889,17 +889,14 @@ def test_flush_failure_warns_once_and_rearms_after_a_success(monkeypatch):
 
 
 def test_a_position_without_a_stop_is_reported_not_silently_trailed(monkeypatch):
-    """A stopless position has no exit at all, and the trail will not supply one.
+    """A stopless position is repaired when fill-time risk is known.
 
     The trail returns early while the trade is losing, which is precisely the
-    half where a missing stop costs something - so the gap can never close by
-    itself. Nothing here writes a stopless order (the INVALID_STOPS ladder
-    widens rather than drops, a refused re-anchor keeps what the broker holds),
-    and it has never been observed on this account. It is reported rather than
-    repaired: putting a stop back is a live behaviour change on the money path
-    and is not made for a case nobody has seen.
+    half where a missing stop costs something - so the gap cannot close by
+    itself unless manage_positions can re-attach the fill-time stop.
     """
     cfg = _cfg()
+    cfg.symbol = "GER40"
     eng, client, store = _make_engine(cfg, positions_after=[])
     eng._weekend_pending = set()
     eng._force_flat_pending = set()
@@ -907,12 +904,34 @@ def test_a_position_without_a_stop_is_reported_not_silently_trailed(monkeypatch)
     eng._stopless_seen = set()
     eng._orphan_tickets = set()
     eng._positions = [{"ticket": 701, "magic": 1, "symbol": "GER40", "side": "buy",
-                       "volume": 0.1, "time": 0, "profit": 0, "swap": 0, "sl": 0.0}]
+                       "volume": 0.1, "time": 0, "profit": 0, "swap": 0, "sl": 0.0,
+                       "price_open": 24000.0, "tp": 0.0}]
+    eng.execution = SimpleNamespace(_originals={
+        701: {"original_sl": 23950.0, "risk_dist": 50.0},
+    })
+    eng.states = {"GER40": SymbolState("GER40")}
+    eng.states["GER40"].atr = 25.0
 
     class _Values:
         def values(self):
             return [cfg]
     eng.store.symbols = _Values()
+
+    client.normalize_price = lambda symbol, price: round(price, 2)
+
+    def modify_position(ticket, sl, tp, symbol):
+        eng._positions[0]["sl"] = sl
+        return True
+
+    client.modify_position = modify_position
+
+    def attach_position_sl_tp(symbol, ticket, side, fill_price, sent_sl, sent_tp):
+        if sent_sl <= 0 or fill_price <= 0:
+            return sent_sl, sent_tp, False
+        eng._positions[0]["sl"] = sent_sl
+        return sent_sl, sent_tp, True
+
+    client.attach_position_sl_tp = attach_position_sl_tp
 
     lines: list[tuple[str, str]] = []
     monkeypatch.setattr("micofx.engine.LOG.emit",
@@ -921,16 +940,61 @@ def test_a_position_without_a_stop_is_reported_not_silently_trailed(monkeypatch)
     eng.manage_positions(server_now=0.0)
     eng.manage_positions(server_now=0.0)
 
+    repaired = [m for m, lvl in lines if "stop eklendi" in m and lvl == "WARN"]
+    assert len(repaired) == 1, "ticket basina bir kez onarilir"
+    assert "701" in repaired[0]
+    assert eng._positions[0]["sl"] == 23950.0
     shouted = [m for m, lvl in lines if "STOPSUZ" in m and lvl == "ERROR"]
-    assert len(shouted) == 1, "ticket basina bir kez"
-    assert "701" in shouted[0]
+    assert shouted == [], "onarildi, ERROR yok"
     assert client.closed == [], "raporlanir, kapatilmaz"
 
-    # A stop reappearing re-arms the report, so a second disappearance is not
-    # muted by the latch.
+    # Stop restored then lost again: repair retries instead of muting.
     eng._positions[0]["sl"] = 99.0
     eng.manage_positions(server_now=0.0)
     assert eng._stopless_seen == set()
     eng._positions[0]["sl"] = 0.0
     eng.manage_positions(server_now=0.0)
-    assert len([m for m, lvl in lines if "STOPSUZ" in m]) == 2
+    assert len([m for m, lvl in lines if "stop eklendi" in m]) == 2
+    assert [m for m, lvl in lines if "STOPSUZ" in m and lvl == "ERROR"] == []
+
+
+def test_a_negative_stop_level_is_treated_as_stopless(monkeypatch):
+    cfg = _cfg()
+    cfg.symbol = "GER40"
+    eng, client, store = _make_engine(cfg, positions_after=[])
+    eng._weekend_pending = set()
+    eng._force_flat_pending = set()
+    eng._unmanaged_seen = set()
+    eng._stopless_seen = set()
+    eng._orphan_tickets = set()
+    eng._positions = [{"ticket": 702, "magic": 1, "symbol": "GER40", "side": "buy",
+                       "volume": 0.1, "time": 0, "profit": 0, "swap": 0, "sl": -49.5,
+                       "price_open": 24000.0, "tp": 0.0}]
+    eng.execution = SimpleNamespace(_originals={
+        702: {"original_sl": 0.0, "risk_dist": 50.0},
+    })
+    eng.states = {"GER40": SymbolState("GER40")}
+    eng.states["GER40"].atr = 25.0
+
+    class _Values:
+        def values(self):
+            return [cfg]
+    eng.store.symbols = _Values()
+
+    client.normalize_price = lambda symbol, price: round(price, 2)
+
+    def attach_position_sl_tp(symbol, ticket, side, fill_price, sent_sl, sent_tp,
+                              anchor_price=0.0):
+        eng._positions[0]["sl"] = sent_sl
+        return sent_sl, sent_tp, True
+
+    client.attach_position_sl_tp = attach_position_sl_tp
+
+    lines: list[tuple[str, str]] = []
+    monkeypatch.setattr("micofx.engine.LOG.emit",
+                        lambda msg, level="INFO", *a, **k: lines.append((msg, level)))
+
+    eng.manage_positions(server_now=0.0)
+
+    assert eng._positions[0]["sl"] == 23950.0
+    assert any("stop eklendi" in m for m, lvl in lines if lvl == "WARN")

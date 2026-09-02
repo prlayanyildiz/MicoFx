@@ -740,6 +740,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if (not force and _symbol_payload_cache["rows"]
                 and now - float(_symbol_payload_cache["at"]) < 3.0):
             return list(_symbol_payload_cache["rows"])
+        if not force and optimizer.busy and _symbol_payload_cache["rows"]:
+            return list(_symbol_payload_cache["rows"])
         symbols_snapshot = list(store.symbols.values())
         client.set_overrides({c.symbol: c.broker_symbol for c in symbols_snapshot})
         rows = []

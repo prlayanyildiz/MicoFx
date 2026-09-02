@@ -8,7 +8,7 @@ from typing import Any
 
 from .logbus import LOG
 from .models import SymbolConfig, SystemConfig, is_scalp_strategy
-from .mt5client import MT5Client
+from .mt5client import MT5Client, live_stop_level
 from .store import Store, as_number
 from .supervisor import Supervisor
 
@@ -707,7 +707,8 @@ class RiskManager:
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
         mine = [p for p in positions if p["magic"] in magics]
-        if any(float(p.get("volume") or 0.0) > 0 and not float(p.get("sl") or 0.0)
+        if any(float(p.get("volume") or 0.0) > 0
+               and live_stop_level(p.get("sl")) <= 0
                for p in mine):
             # Report-only STOPSUZ in manage_positions does not close the
             # ticket. Remaining risk used to return 0 for sl=0, so the

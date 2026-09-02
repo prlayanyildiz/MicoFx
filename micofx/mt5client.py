@@ -19,6 +19,15 @@ try:
 except ImportError:  # pragma: no cover - the package is Windows only
     mt5 = None
 
+
+def live_stop_level(value: float | None) -> float:
+    """Broker SL/TP level, or 0.0 when missing or invalid (<=0)."""
+    try:
+        level = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return level if level > 0.0 else 0.0
+
 # Rejects that will not clear up by polling the same bar again - a config or
 # account-state problem, not a momentary quote/margin blip. Retrying these
 # every ~1s poll until the bar closes is pure order_send spam; the caller
@@ -1283,7 +1292,9 @@ class MT5Client:
                 "ticket": int(p.ticket), "symbol": p.symbol, "magic": int(p.magic),
                 "side": "buy" if p.type == mt5.POSITION_TYPE_BUY else "sell",
                 "volume": float(p.volume), "price_open": float(p.price_open),
-                "price_current": float(p.price_current), "sl": float(p.sl), "tp": float(p.tp),
+                "price_current": float(p.price_current),
+                "sl": live_stop_level(float(p.sl)),
+                "tp": live_stop_level(float(p.tp)),
                 "profit": float(p.profit), "swap": float(p.swap),
                 "time": int(p.time), "comment": p.comment,
             })
@@ -1646,6 +1657,20 @@ class MT5Client:
                     # else: still ambiguous even among new tickets - leave
                     # unresolved (0) rather than guess between them.
 
+        if fill_price <= 0:
+            # Pepperstone sometimes returns result.price=0 on a real fill.
+            # Re-anchoring off zero produced a negative SL that normalized to
+            # stopless on a zero fill price. Prefer the position's open.
+            if pos_ticket:
+                with self._lock:
+                    pos_row = mt5.positions_get(ticket=pos_ticket)
+                if pos_row:
+                    fill_price = float(pos_row[0].price_open)
+                else:
+                    fill_price = float(price)
+            else:
+                fill_price = float(price)
+
         # SL/TP above were built from the pre-fill tick; a market order can
         # slip within ``deviation``, and rebuilding them from the tick means
         # the position's realised risk (fill -> SL) is not the R the strategy
@@ -1670,7 +1695,11 @@ class MT5Client:
             else:
                 final_sl = self.normalize_price(symbol, fill_price + sl_dist) if sl > 0 else 0.0
                 final_tp = self.normalize_price(symbol, fill_price - tp_dist) if tp > 0 else 0.0
-            if pos_ticket and (final_sl, final_tp) != (request["sl"], request["tp"]):
+            if sl > 0 and final_sl <= 0:
+                reanchor_ok = False
+            elif tp > 0 and final_tp <= 0:
+                reanchor_ok = False
+            elif pos_ticket and (final_sl, final_tp) != (request["sl"], request["tp"]):
                 reanchor_ok = self.modify_position(pos_ticket, final_sl, final_tp, symbol)
             elif not pos_ticket:
                 # No ticket to re-anchor at all (deal + order + fallback all
@@ -1690,6 +1719,22 @@ class MT5Client:
                 # path already reverts for exactly this reason; the normal
                 # fill path is the one that did not.
                 final_sl, final_tp = request["sl"], request["tp"]
+
+        if (pos_ticket and sl > 0 and request["sl"] > 0
+                and float(final_sl or 0.0) <= 0):
+            final_sl, final_tp = request["sl"], request["tp"]
+        if pos_ticket and sl > 0 and request["sl"] > 0:
+            with self._lock:
+                live_row = mt5.positions_get(ticket=int(pos_ticket))
+            if (live_row and not float(live_row[0].sl or 0.0)
+                    and not (reanchor_ok and float(final_sl or 0.0) > 0)):
+                attached_sl, attached_tp, attached_ok = self.attach_position_sl_tp(
+                    symbol, int(pos_ticket), side, fill_price,
+                    float(request["sl"]), float(request["tp"]),
+                    anchor_price=float(price))
+                if attached_ok:
+                    final_sl, final_tp = attached_sl, attached_tp
+                    reanchor_ok = True
 
         return {
             "ok": True, "order": int(result.order), "deal": int(result.deal),
@@ -1815,21 +1860,21 @@ class MT5Client:
         # requested-vs-filled distances.
         reanchor_ok = True
         min_dist = self.min_stop_distance(symbol)
-        if side and (req_sl > 0 or req_tp > 0) and abs(fill_price - requested) > min_dist * 0.1:
-            sl_dist = abs(requested - req_sl) if req_sl > 0 else 0.0
-            tp_dist = abs(req_tp - requested) if req_tp > 0 else 0.0
-            if side == "buy":
-                final_sl = self.normalize_price(symbol, fill_price - sl_dist) if req_sl > 0 else 0.0
-                final_tp = self.normalize_price(symbol, fill_price + tp_dist) if req_tp > 0 else 0.0
+        need_slip_reanchor = (
+            side and (req_sl > 0 or req_tp > 0)
+            and abs(fill_price - requested) > min_dist * 0.1)
+        need_stopless_attach = side and req_sl > 0 and not float(adopted.sl or 0.0)
+        if need_slip_reanchor or need_stopless_attach:
+            attached_sl, attached_tp, attached_ok = self.attach_position_sl_tp(
+                symbol, ticket, side, fill_price, float(req_sl), float(req_tp),
+                anchor_price=float(requested))
+            if attached_ok:
+                final_sl, final_tp = attached_sl, attached_tp
+                reanchor_ok = True
             else:
-                final_sl = self.normalize_price(symbol, fill_price + sl_dist) if req_sl > 0 else 0.0
-                final_tp = self.normalize_price(symbol, fill_price - tp_dist) if req_tp > 0 else 0.0
-            reanchor_ok = self.modify_position(ticket, final_sl, final_tp, symbol)
-            if not reanchor_ok:
-                # Broker refused the correction - the position keeps the
-                # tick-anchored levels it already has, so report those rather
-                # than the ones we wanted.
-                final_sl, final_tp = float(adopted.sl), float(adopted.tp)
+                reanchor_ok = False
+                if need_slip_reanchor or float(adopted.sl or 0.0) > 0:
+                    final_sl, final_tp = float(adopted.sl), float(adopted.tp)
 
         return {
             "ok": True, "recovered": True,
@@ -1841,14 +1886,73 @@ class MT5Client:
             "sl": final_sl, "tp": final_tp,
         }
 
+    def attach_position_sl_tp(self, symbol: str, ticket: int, side: str,
+                              fill_price: float, sent_sl: float, sent_tp: float,
+                              *, anchor_price: float = 0.0
+                              ) -> tuple[float, float, bool]:
+        """Push fill-anchored SL/TP from the levels sent with the entry order.
+
+        Used after a market fill when the broker accepted the deal stopless,
+        and by the engine's stopless repair. ``anchor_price`` is the pre-fill
+        tick the order was built from; distances are measured from that tick
+        to the sent levels, then applied at ``fill_price``.
+        """
+        if not side or ticket <= 0 or fill_price <= 0:
+            return sent_sl, sent_tp, False
+        ref = float(anchor_price) if anchor_price > 0 else float(fill_price)
+        min_dist = self.min_stop_distance(symbol)
+        sl_dist = abs(ref - sent_sl) if sent_sl > 0 else 0.0
+        tp_dist = abs(sent_tp - ref) if sent_tp > 0 else 0.0
+        if side == "buy":
+            final_sl = (self.normalize_price(symbol, fill_price - sl_dist)
+                        if sent_sl > 0 else 0.0)
+            final_tp = (self.normalize_price(symbol, fill_price + tp_dist)
+                        if sent_tp > 0 else 0.0)
+        else:
+            final_sl = (self.normalize_price(symbol, fill_price + sl_dist)
+                        if sent_sl > 0 else 0.0)
+            final_tp = (self.normalize_price(symbol, fill_price - tp_dist)
+                        if sent_tp > 0 else 0.0)
+        if sent_sl > 0 and final_sl <= 0:
+            return sent_sl, sent_tp, False
+        if sent_tp > 0 and final_tp <= 0:
+            return sent_sl, sent_tp, False
+        tick = self.tick(symbol)
+        if tick is not None and final_sl > 0:
+            live = tick["bid"] if side == "buy" else tick["ask"]
+            limit = live - min_dist if side == "buy" else live + min_dist
+            if side == "buy":
+                final_sl = min(final_sl, limit)
+            else:
+                final_sl = max(final_sl, limit)
+            final_sl = float(self.normalize_price(symbol, final_sl))
+            if final_sl <= 0:
+                return sent_sl, sent_tp, False
+        if (final_sl, final_tp) == (sent_sl, sent_tp):
+            with self._lock:
+                row = mt5.positions_get(ticket=int(ticket))
+            if row and float(row[0].sl or 0.0) > 0:
+                return float(row[0].sl), float(row[0].tp), True
+        if self.modify_position(ticket, final_sl, final_tp, symbol):
+            return final_sl, final_tp, True
+        return sent_sl, sent_tp, False
+
     def modify_position(self, ticket: int, sl: float, tp: float, symbol: str) -> bool:
         real = self.resolve(symbol) or symbol
+        sent_sl = float(self.normalize_price(symbol, sl)) if sl > 0 else 0.0
+        sent_tp = float(self.normalize_price(symbol, tp)) if tp > 0 else 0.0
+        # Caller asked for a stop but normalization collapsed it (e.g. negative
+        # level on an index). Do not send sl=0 and treat NO_CHANGES as success.
+        if sl > 0 and sent_sl <= 0:
+            return False
+        if tp > 0 and sent_tp <= 0:
+            return False
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": int(ticket),
             "symbol": real,
-            "sl": float(self.normalize_price(symbol, sl)) if sl > 0 else 0.0,
-            "tp": float(self.normalize_price(symbol, tp)) if tp > 0 else 0.0,
+            "sl": sent_sl,
+            "tp": sent_tp,
         }
         with self._lock:
             result = mt5.order_send(request)
