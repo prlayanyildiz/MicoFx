@@ -104,6 +104,7 @@ class SymbolConfig:
     pull_fast: int = 8               # fast EMA the pullback must reach
     pull_depth_atr: float = 0.5      # how deep the pullback must run, in ATR
     pull_max_bars: int = 6           # pullback must resolve within this many bars
+    pull_break_confirm: float = 0.0  # 0 = off; 1 = resume must break prior bar extreme
 
     # ---- range-expansion momentum burst (M5-native scalp) ----
     brst_lookback: int = 20          # trailing window the range distribution is built from
@@ -527,7 +528,7 @@ OPT_FIELDS = [
     "sl_atr_mult", "trail_start_atr", "trail_step_atr",
     "trail_mode", "trail_lookback",
     "min_body_ratio", "atr_pct_min",
-    "pull_fast", "pull_depth_atr", "pull_max_bars",
+    "pull_fast", "pull_depth_atr", "pull_max_bars", "pull_break_confirm",
     "brst_lookback", "brst_range_z", "brst_close_pct",
     "chan_lookback", "chan_buffer_atr",
     "t3_fast", "t3_slow_mult", "t3_fast_vf", "t3_accel_min",

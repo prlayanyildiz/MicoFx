@@ -1,7 +1,7 @@
 """Payload fields a family never reads must not move its signals.
 
-ichimoku ignores leftover ``htf_factor`` / ``adx_min``. AST ``opt_fields_read``
-can miss a dynamic read; this bit-identical check cannot.
+ichimoku now reads HTF/ADX gates on purpose (02.09). This file guards
+families that still ignore leftover poison fields.
 """
 from __future__ import annotations
 
@@ -9,14 +9,11 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import SymbolConfig
 from micofx.strategy import IndicatorCache, Params, compute, opt_fields_read
-
-FLIP = ("ichimoku",)
 
 POISON = {
     "htf_factor": 12,
@@ -44,22 +41,19 @@ def _params(strategy: str, **overrides):
                               **overrides)
 
 
-@pytest.mark.parametrize("name", FLIP)
-def test_flip_family_does_not_read_the_poison_fields(name):
-    read = opt_fields_read(name)
-    for field in POISON:
-        assert field not in read, f"{name} now reads {field}; the bit-identical test would be lying"
+def test_ichimoku_reads_regime_gates():
+    read = opt_fields_read("ichimoku")
+    for field in ("htf_factor", "adx_min", "atr_pct_min"):
+        assert field in read
 
 
-@pytest.mark.parametrize("name", FLIP)
-def test_poisoning_unread_fields_leaves_flip_signals_bit_identical(name):
+def test_ichimoku_signals_move_when_regime_gates_change():
     cache = _cache()
-    clean = compute(cache, _params(name))
-    poisoned = compute(cache, _params(name, **POISON))
-
-    assert clean.buy.any() or clean.sell.any(), f"control: {name} must signal on this series"
-    assert np.array_equal(clean.buy, poisoned.buy), f"{name} buy moved after unread poison"
-    assert np.array_equal(clean.sell, poisoned.sell), f"{name} sell moved after unread poison"
+    clean = compute(cache, _params("ichimoku"))
+    poisoned = compute(cache, _params("ichimoku", **POISON))
+    assert clean.buy.any() or clean.sell.any()
+    assert not np.array_equal(clean.buy, poisoned.buy) or not np.array_equal(
+        clean.sell, poisoned.sell)
 
 
 def test_a_family_that_reads_the_gates_does_move():

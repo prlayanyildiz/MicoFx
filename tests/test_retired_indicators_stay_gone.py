@@ -69,7 +69,7 @@ def test_the_three_lottery_families_are_gone():
     ``micro_rev`` 11 runs, retention 0.382. Neither live.
 
     The families that stayed either own their exit axes (so the 180x never
-    lands on them) or are cheap enough to cover fully: ``ichimoku`` is 1080
+    lands on them) or are cheap enough to cover fully: ``ichimoku`` is ~12,960
     combos and 144 seconds.
     """
     from micofx.models import OPT_FIELDS, SCALP_STRATEGIES, STRATEGIES

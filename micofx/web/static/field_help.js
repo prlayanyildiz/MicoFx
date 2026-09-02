@@ -36,6 +36,7 @@ const FIELD_HELP = {
   "pull_fast": "mtf_pullback hizli EMA. Trend geri cekilmesini bu cizgi olcer.",
   "pull_depth_atr": "Geri cekilmenin ATR cinsinden minimum derinligi. 0.5 alti gurultu (NAS100 0.3 + 1.0 SL).",
   "pull_max_bars": "Geri cekilme en fazla bu kadar bar surebilir.",
+  "pull_break_confirm": "1 = giris onceki barin kirilimini bekler (daha secici). 0 = eski davranis.",
 
 
   "brst_lookback": "burst menzil dagiliminin penceresi (bar).",

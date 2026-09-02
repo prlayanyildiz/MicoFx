@@ -417,7 +417,11 @@ class Supervisor:
         if v and v.trades >= max(3, int(self.settings["min_trades"]) // 2):
             # Realised $/trade is noisy; compress into a small bonus/penalty.
             live = max(-1.0, min(2.0, v.expectancy / max(0.5, abs(v.expectancy) + 1.0)))
-        score = expected_r * 2.0 + live + state_w.get(v.state if v else "idle", 0.5)
+        # Walk-forward opt_score breaks ties when several names signal in one
+        # poll and fight for the same concurrent-risk budget (XAUUSD vs GER40).
+        opt_score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
+        opt_boost = min(0.5, opt_score / 120.0) if opt_score > 0 else 0.0
+        score = expected_r * 2.0 + live + state_w.get(v.state if v else "idle", 0.5) + opt_boost
         if v:
             v.priority = round(score, 3)
         return score

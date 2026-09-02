@@ -6,14 +6,13 @@ where the shared risk grid (sl_atr_mult 6 x trail_start_atr 6 x
 trail_step_atr 5 x max_spread_atr 6) multiplies whatever the family states.
 Read off the live five-family blob 01.09:
 
-    ichimoku         1,080      parabolic_flip     8,640
+    ichimoku        12,960      (entry gates + exits; was exit-only 1,080)
     channel_break   14,580      mtf_pullback     622,080
     burst        1,244,160
 
-At a flat ``max_combos`` of 2000 that is 100% coverage for ichimoku and
-**0.16%** for burst - a wide spread in how thoroughly each family is
-explored. Budget redistribution sends idle headroom to the worst-covered
-families without changing total wall clock.
+At a flat ``max_combos`` of 2000 ichimoku now samples ~15% of its grid
+(entry gates landed 02.09); burst is still ~0.16%. Budget redistribution
+only fires when a family's grid is smaller than the cap.
 """
 from __future__ import annotations
 
@@ -25,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx.optimizer import coverage_budget
 
 SHIPPED = {
-    "ichimoku": 1_080,
+    "ichimoku": 12_960,
     "channel_break": 14_580,
     "mtf_pullback": 622_080,
     "burst": 1_244_160,
@@ -40,15 +39,16 @@ def test_the_total_spend_does_not_grow():
 
 
 def test_a_small_grid_is_searched_exhaustively_and_no_further():
-    """1,080 combos is the whole space; a 2000 budget idles 920 of it."""
-    got = coverage_budget(SHIPPED, CAP)
-    assert got["ichimoku"] == 1_080
+    """A grid under the cap spends only what it needs."""
+    got = coverage_budget({"tiny": 500, "big": 50_000}, CAP)
+    assert got["tiny"] == 500
 
 
 def test_the_freed_budget_goes_to_the_worst_covered_family():
-    """Most unexplored space first: burst over channel_break."""
-    got = coverage_budget(SHIPPED, CAP)
-    assert (got["burst"] > got["mtf_pullback"] > got["channel_break"] > CAP)
+    """Surplus from a tiny grid flows to the biggest unexplored family."""
+    got = coverage_budget({"tiny": 500, "mid": 50_000, "burst": 1_244_160}, CAP)
+    assert got["tiny"] == 500
+    assert got["burst"] > got["mid"] > CAP
 
 
 def test_no_family_is_worse_off_than_the_flat_cap():
@@ -64,9 +64,8 @@ def test_nobody_is_given_more_budget_than_it_has_grid():
 
 
 def test_coverage_of_the_worst_family_actually_improves():
-    got = coverage_budget(SHIPPED, CAP)
-    worst = min(SHIPPED, key=lambda f: CAP / SHIPPED[f])
-    assert got[worst] > CAP
+    got = coverage_budget({"tiny": 500, "burst": 1_244_160}, CAP)
+    assert got["burst"] > CAP
 
 
 # ------------------------------------------------------------ degenerate

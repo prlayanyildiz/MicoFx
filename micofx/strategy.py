@@ -41,6 +41,7 @@ class Params:
     pull_fast: int = 8
     pull_depth_atr: float = 0.5
     pull_max_bars: int = 6
+    pull_break_confirm: float = 0.0   # 0 = off; 1 = resume bar must break prior bar extreme
 
     # ---- range-expansion momentum burst (M5-native scalp) ----
     brst_lookback: int = 20
@@ -136,6 +137,7 @@ class Params:
                 self.adx_max, self.htf_factor, self.htf_mode, self.min_body_ratio,
                 self.atr_pct_min,
                 self.pull_fast, self.pull_depth_atr, self.pull_max_bars,
+                self.pull_break_confirm,
                 self.brst_lookback, self.brst_range_z, self.brst_close_pct,
                 self.chan_lookback, self.chan_buffer_atr,
                 self.t3_fast, self.t3_slow_mult, self.t3_fast_vf,
@@ -461,6 +463,13 @@ def _mtf_pullback(cache: IndicatorCache, p: Params) -> Signals:
 
     resume_up = (close > open_) & (close > fast)
     resume_dn = (close < open_) & (close < fast)
+    if float(p.pull_break_confirm or 0.0) > 0:
+        prior_hi = np.roll(cache.high, 1)
+        prior_lo = np.roll(cache.low, 1)
+        prior_hi[0] = -np.inf
+        prior_lo[0] = np.inf
+        resume_up = resume_up & (close > prior_hi)
+        resume_dn = resume_dn & (close < prior_lo)
 
     buy = up & regime & touched_dip & resume_up
     sell = down & regime & touched_pop & resume_dn
@@ -547,30 +556,48 @@ def _cross_over(fast: np.ndarray, slow: np.ndarray) -> np.ndarray:
 
 
 def _ichimoku(cache: IndicatorCache, p: Params) -> Signals:
-    """Classic TK cross against the cloud that already exists.
+    """TK cross with cloud, Chikou, and optional regime gates.
 
     Tenkan 9 / Kijun 26 / Span B 52. The cloud at this bar is the spans from
-    26 bars ago - the TradingView forward plot is not used, so a live bar
-    cannot see future highs. Long needs a TK cross up *and* close above the
-    cloud top; short is the mirror. Periods are constants; adding them to
-    OPT_FIELDS would pay a grid the first holdout has not earned.
+    26 bars ago - no forward plot. Long needs TK cross up, close above the
+    cloud, Chikou above price 26 bars back, and the same HTF/ADX/ATR gates
+    the other swing families use. FX literature and open repos (PyQuantLab,
+    ilahuerta-IA/backtrader-atr-stop-loss) all filter raw Ichimoku with trend
+    strength and confirmation; the bare cross alone underperforms on currencies.
     """
     close = cache.close
     size = close.size
     tenkan, kijun, cloud_top, cloud_bot = ind.ichimoku_lines(cache.high, cache.low)
-    atr_series = cache.atr(p.atr_period)
-    zeros = np.zeros(size, dtype=np.float64)
-    flat = np.zeros(size, dtype=bool)
+    t3, k, d, atr_series, adx_series = _common(cache, p)
+    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
+    regime = _regime(p, adx_series, size)
+    lag = 26
+    chikou_ref = np.roll(close, lag)
+    chikou_ref[:lag] = np.nan
+    chikou_bull = np.isfinite(chikou_ref) & (close > chikou_ref)
+    chikou_bear = np.isfinite(chikou_ref) & (close < chikou_ref)
     above = np.isfinite(cloud_top) & (close > cloud_top)
     below = np.isfinite(cloud_bot) & (close < cloud_bot)
-    buy = _cross_over(tenkan, kijun) & above
-    sell = _cross_over(kijun, tenkan) & below
+    buy = (_cross_over(tenkan, kijun) & above & regime & allow_long
+           & chikou_bull)
+    sell = (_cross_over(kijun, tenkan) & below & regime & allow_short
+            & chikou_bear)
+    if p.atr_pct_min > 0:
+        lively = cache.atr_rank(p.atr_period) >= p.atr_pct_min
+        buy &= lively
+        sell &= lively
+    if p.min_body_ratio > 0:
+        body = cache.body_ratio()
+        buy &= body >= p.min_body_ratio
+        sell &= body >= p.min_body_ratio
     warmup = min(size, max(52 + 26, p.atr_period * 3))
     buy[:warmup] = False
     sell[:warmup] = False
+    buy = ind.first_of_run(buy)
+    sell = ind.first_of_run(sell)
     buy, sell = _resolve_conflicts(buy, sell)
-    return Signals(t3=tenkan, k=kijun, d=zeros, atr=atr_series, adx=zeros,
-                   buy=buy, sell=sell, htf_up=flat, htf_down=flat)
+    return Signals(t3=tenkan, k=kijun, d=d, atr=atr_series, adx=adx_series,
+                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down)
 
 
 def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
