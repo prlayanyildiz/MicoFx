@@ -437,7 +437,10 @@ class Supervisor:
     def _priority_locked(self, cfg: SymbolConfig, verdict: SymbolVerdict | None = None) -> float:
         v = verdict if verdict is not None else self.verdicts.get(cfg.symbol)
         expected_r = self.holdout_expectancy(cfg)
-        state_w = {"ok": 1.0, "idle": 0.55, "watch": 0.25, "quarantine": 0.0}
+        # idle ≈ unproven (no judged history), not weak — at thin equity (~2
+        # seats) a 0.55 idle tax let NAS100 (costed e 0.046, ok) beat JPN225
+        # (0.239, idle). watch/quarantine stay punitive.
+        state_w = {"ok": 1.0, "idle": 0.9, "watch": 0.25, "quarantine": 0.0}
         live = 0.0
         if v and v.trades >= max(3, int(self.settings["min_trades"]) // 2):
             # Realised $/trade is noisy; compress into a small bonus/penalty.
@@ -446,7 +449,9 @@ class Supervisor:
         # poll and fight for the same concurrent-risk budget (XAUUSD vs GER40).
         opt_score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
         opt_boost = min(0.5, opt_score / 120.0) if opt_score > 0 else 0.0
-        score = expected_r * 2.0 + live + state_w.get(v.state if v else "idle", 0.5) + opt_boost
+        # Weight charged expectancy enough that ~0.2R edge beats the idle/ok
+        # state gap (Claude 03.09 slot race at $232).
+        score = expected_r * 3.0 + live + state_w.get(v.state if v else "idle", 0.5) + opt_boost
         if v:
             v.priority = round(score, 3)
         return score
