@@ -212,11 +212,16 @@ def floor_sl_atr_search_axis(
         values: list | None,
         floor: float = 0.9,
         *,
-        fallback: list[float] | None = None) -> list[float]:
+        fallback: list[float] | None = None,
+        keep: list | None = None) -> list[float]:
     """Drop sub-floor SL multiples that bar-WFO flatters and live autopsy rejects.
 
     Stored opt_params keep 0.5 via widen-merge, so editing defaults.json alone
     cannot retire them on a live book (Claude 03.09 premature-stop −58R).
+
+    ``keep`` re-injects exceptions below the floor (live SL, one mid-step toward
+    the floor). JPN 04.09: floor 0.9 cliffs at −33R while live 0.7→0.8 is the
+    sweet spot — without ``keep``, WFO cannot name 0.8 at all.
     """
     try:
         floor_f = float(floor)
@@ -236,10 +241,42 @@ def floor_sl_atr_search_axis(
             continue
         seen.add(key)
         out.append(v)
+    for raw in keep or []:
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if v <= 0:
+            continue
+        key = round(v, 4)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(v)
     if out:
         return out
     fb = fallback if fallback is not None else [0.9, 1.2, 1.5, 2.0]
     return [float(x) for x in fb]
+
+
+def sl_atr_search_keep(live_sl: float, floor: float = 0.9) -> list[float]:
+    """Live SL plus one mid-step below the floor (JPN 0.7→0.8 cliff)."""
+    try:
+        live = float(live_sl)
+    except (TypeError, ValueError):
+        return []
+    try:
+        floor_f = float(floor)
+    except (TypeError, ValueError):
+        floor_f = 0.9
+    keep: list[float] = []
+    if live > 0:
+        keep.append(live)
+    if 0 < live + 1e-12 < floor_f:
+        mid = round(live + 0.1, 4)
+        if mid + 1e-12 < floor_f and abs(mid - live) > 1e-9:
+            keep.append(mid)
+    return keep
 
 
 def spread_cap_search_axis(bars: Any, point: float, live_cap: float,
@@ -1467,11 +1504,19 @@ class Optimizer:
                     if hour_axis:
                         grid = {**grid, "blocked_entry_hours": hour_axis}
                     # Premature-stop: bar-WFO still loves 0.5; live does not.
+                    # Keep live + one mid-step below the floor so cliffs like
+                    # JPN 0.8 (sweet) vs 0.9 (−33R) stay searchable.
                     if "sl_atr_mult" in grid:
+                        try:
+                            live_sl = float(
+                                getattr(cfg, "sl_atr_mult", 0.0) or 0.0)
+                        except (TypeError, ValueError):
+                            live_sl = 0.0
                         grid = {
                             **grid,
                             "sl_atr_mult": floor_sl_atr_search_axis(
-                                grid.get("sl_atr_mult")),
+                                grid.get("sl_atr_mult"),
+                                keep=sl_atr_search_keep(live_sl)),
                         }
                     bars_dir = self._ensure_sweep_bars_dir()
                     safe = "".join(
