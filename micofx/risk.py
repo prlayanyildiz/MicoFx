@@ -365,7 +365,9 @@ class RiskManager:
     # Soft overshoot: broker min vs 1R (granularity). Hard ceiling even when
     # concurrent budget would fund a fatter min-lot fill (C1 / T1).
     MAX_MIN_LOT_OVERSHOOT = 1.5
-    MAX_MIN_LOT_CONCURRENT_OVERSHOOT = 3.0
+    # Live US30 at ~$236 / sl 2.5 ATR sits ~3.2x; 3.0 left it lot-0 while
+    # JPN/BTC cleared. Still well under absurd broker mins (see skip test).
+    MAX_MIN_LOT_CONCURRENT_OVERSHOOT = 3.5
     # Floor of the live 1R cap when the account picture is present. Stored
     # risk% still wins if it is already higher. Shakeout SL × full-kasa lots
     # without this bound would blow the account.

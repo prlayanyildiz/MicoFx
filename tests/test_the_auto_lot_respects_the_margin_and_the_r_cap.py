@@ -203,7 +203,9 @@ def test_a_minimum_lot_above_the_cap_skips_the_trade_rather_than_sizing_up():
     class _Wide(_Client):
         def info(self, symbol):
             i = super().info(symbol)
-            i["volume_min"] = 60.0
+            # 4x the ~20-lot 1R cap — above concurrent hard ceiling (3.5x)
+            # so unlock cannot fire even when kasa invents a live concurrent %.
+            i["volume_min"] = 80.0
             return i
 
     rm.client = _Wide()

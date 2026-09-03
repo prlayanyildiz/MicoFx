@@ -72,11 +72,22 @@ def test_min_lot_still_skips_when_concurrent_is_off():
     assert "atlandi" in note
 
 
+def test_min_lot_opens_near_live_us30_overshoot():
+    """Live US30 ~3.22x (0.1 / 0.031) must clear the concurrent door."""
+    rm = _rm(concurrent=50.0)
+    acc = {"equity": 236.0, "margin": 0.0, "margin_free": 236.0, "leverage": 500}
+    # r_cap = 236*2%/100 / (sl*5) = 0.031 → sl = 4.72/(0.031*5) wait:
+    # r_cap = 4.72 / (sl*5) = 0.031 → sl*5 = 152.258 → sl ≈ 30.45
+    lot, note = rm.lot_for(rm.store.symbols["US30"], 30.45, 236.0, account=acc)
+    assert lot == pytest.approx(0.1), note
+    assert "eszamanli" in note.lower()
+
+
 def test_extreme_overshoot_still_skips_even_with_concurrent_room():
-    """Hard ceiling (3x) — do not unlock 10% book fills."""
+    """Hard ceiling (3.5x) — do not unlock 10% book fills."""
     rm = _rm(concurrent=50.0)
     acc = {"equity": 200.0, "margin": 0.0, "margin_free": 200.0, "leverage": 500}
-    # r_cap = 4/(50*5) = 0.016; floor/r_cap = 6.25 > 3
+    # r_cap = 4/(50*5) = 0.016; floor/r_cap = 6.25 > 3.5
     lot, note = rm.lot_for(rm.store.symbols["US30"], 50.0, 200.0, account=acc)
     assert lot == 0.0, note
     assert "atlandi" in note

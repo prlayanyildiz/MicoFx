@@ -31,11 +31,10 @@ from typing import Any
 # is a R/day number, not a spread number.
 TIMEFRAMES = ["M5", "M15", "M30"]
 READABLE_TIMEFRAMES = ["M5", "M15", "M30"]
-# Default search bag. M5 stays in TIMEFRAMES so a live row (SpotBrent
-# stoch_flip/M5, 28.08) remains legal and a one-off run can still name it.
-# Overnight 00:06 paid 8 families × M5 plus the 90k-bar fetch retry; operator
-# dropped that retry as unproductive.
-SEARCH_TIMEFRAMES = ["M15", "M30"]
+# Default search bag. M5 re-entered 03.09 after the full 6-symbol charged
+# bake-off: GER40 M5 burst +74 > live M30 +42; US30 M5 competitive; NAS/BTC/
+# JPN lose on M5 and `_beats_incumbent` keeps them off. WFO picks per name.
+SEARCH_TIMEFRAMES = ["M5", "M15", "M30"]
 GROUPS = ["forex", "index", "commodity", "crypto", "stock"]
 
 

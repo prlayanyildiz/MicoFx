@@ -1,10 +1,9 @@
-"""Default WFO bag is M15/M30; M5 stays legal to trade and one-off searchable.
+"""Default WFO bag includes M5 after the 03.09 6-symbol charged bake-off.
 
-Claude 03.09 M5 costed pre-check (US30_M5 −24..−295 vs M30 +43) reconfirmed the
-28.08 drop: M5 spread vs target kills edge on tested names. Full 6-symbol M5
-snapshot comparison may reopen the bag; until then the shipped default stays
-M15/M30. ``POST /api/opt/params`` or a one-off ``POST /api/opt/run`` can still
-name M5.
+Claude's full matrix (6 live names x 3 families x trail sweep): GER40 M5 burst
++74 > live channel/M30 +42; US30 M5 ~competitive; NAS/BTC/JPN lose on M5 and
+``_beats_incumbent`` keeps incumbents. Earlier US30_M5-only pre-check had
+parked the bag — overturned by the full snapshot.
 """
 from __future__ import annotations
 
@@ -20,10 +19,9 @@ from micofx.models import SEARCH_TIMEFRAMES, TIMEFRAMES, SymbolConfig, SystemCon
 from micofx.web.app import create_app
 
 
-def test_m5_remains_a_legal_bar_but_not_default_search():
+def test_m5_is_in_the_default_search_bag():
     assert "M5" in TIMEFRAMES
-    assert SEARCH_TIMEFRAMES == ["M15", "M30"]
-    assert "M5" not in SEARCH_TIMEFRAMES
+    assert SEARCH_TIMEFRAMES == ["M5", "M15", "M30"]
 
 
 def test_shipped_search_bag_matches_search_timeframes():
@@ -93,9 +91,9 @@ def _client():
 
 def test_opt_params_post_writes_the_search_bag():
     tc, store = _client()
-    res = tc.post("/api/opt/params", json={"timeframes": ["M15", "M30"]})
+    res = tc.post("/api/opt/params", json={"timeframes": ["M5", "M15", "M30"]})
     assert res.status_code == 200, res.text
-    assert store.saved_opt["timeframes"] == ["M15", "M30"]
+    assert store.saved_opt["timeframes"] == ["M5", "M15", "M30"]
 
 
 def test_opt_params_post_refuses_an_empty_or_dead_bag():
@@ -103,11 +101,3 @@ def test_opt_params_post_refuses_an_empty_or_dead_bag():
     assert tc.post("/api/opt/params", json={"timeframes": []}).status_code == 400
     assert tc.post("/api/opt/params", json={"timeframes": ["H1"]}).status_code == 400
     assert store.saved_opt is None
-
-
-def test_opt_params_post_can_put_m5_back():
-    """One-off persist is still legal after a full 6-symbol M5 proof."""
-    tc, store = _client()
-    res = tc.post("/api/opt/params", json={"timeframes": ["M5", "M15", "M30"]})
-    assert res.status_code == 200, res.text
-    assert store.saved_opt["timeframes"] == ["M5", "M15", "M30"]
