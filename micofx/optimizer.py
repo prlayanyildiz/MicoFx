@@ -3014,26 +3014,39 @@ class Optimizer:
             return {"ok": False, "error": missing}
         if not isinstance(detail, dict):
             return {"ok": False, "error": APPLY_STAMP_MISSING}
-        # Same-family blocked_entry_hours retune must not spend charged edge.
-        # Book-wide autopsy hours on NAS[17]/XAU[16] cost −34R vs [] (Claude
-        # 04.09); JPN[14,15] +3R is the shape that may land.
+        # Same-family retunes of hour-blocks / hard stops must not spend
+        # charged edge. Book-wide autopsy hours on NAS/XAU and naked SL->1.0
+        # both crushed live stamps (Claude 04.09); WFO with floors/axes is
+        # the honest path when bar-charged disagrees with autopsy.
         if not primary_changed:
-            live_bh = _norm_entry_hours(getattr(cfg, "blocked_entry_hours", None))
-            new_bh = _norm_entry_hours(applied_params.get("blocked_entry_hours"))
-            if live_bh != new_bh:
+            try:
+                live_net = float(
+                    ((getattr(cfg, "opt_summary", None) or {})
+                     .get("holdout") or {}).get("net_r") or 0.0)
+            except (TypeError, ValueError):
+                live_net = 0.0
+            try:
+                new_net = float(
+                    (detail.get("holdout") or {}).get("net_r") or 0.0)
+            except (TypeError, ValueError):
+                new_net = 0.0
+            if live_net > 0 and new_net + 1e-9 < live_net:
+                changed: list[str] = []
+                live_bh = _norm_entry_hours(
+                    getattr(cfg, "blocked_entry_hours", None))
+                new_bh = _norm_entry_hours(
+                    applied_params.get("blocked_entry_hours"))
+                if live_bh != new_bh:
+                    changed.append("blocked_entry_hours")
                 try:
-                    live_net = float(
-                        ((getattr(cfg, "opt_summary", None) or {})
-                         .get("holdout") or {}).get("net_r") or 0.0)
+                    live_sl = float(getattr(cfg, "sl_atr_mult", 0) or 0)
+                    new_sl = float(applied_params.get("sl_atr_mult", live_sl))
                 except (TypeError, ValueError):
-                    live_net = 0.0
-                try:
-                    new_net = float(
-                        (detail.get("holdout") or {}).get("net_r") or 0.0)
-                except (TypeError, ValueError):
-                    new_net = 0.0
-                if live_net > 0 and new_net + 1e-9 < live_net:
-                    msg = (f"blocked_entry_hours charged holdout geriledi "
+                    live_sl, new_sl = 0.0, 0.0
+                if abs(live_sl - new_sl) > 1e-9:
+                    changed.append("sl_atr_mult")
+                if changed:
+                    msg = (f"{'+'.join(changed)} charged holdout geriledi "
                            f"({live_net:+.1f}R -> {new_net:+.1f}R)")
                     LOG.emit(f"{symbol}: {msg} - uygulanmadi.", "OPT", symbol)
                     return {"ok": False, "error": msg}

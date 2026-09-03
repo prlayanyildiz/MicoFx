@@ -1,16 +1,16 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**03.09 23:xx (gece oturumu)** — weak-symbol kampanyasi + 3 bleed kaynagi. Detay EK22.
-Kisa: JPN225 (7/24 +143.7R), NAS100 (sess 15-21 +101R), US30 (msa0.08+adx20 +25R),
-SpotBrent re-enabled (msa0.05+mtf+NY 13-21 +21.8R), XAUUSD/BTC/GER dokunulmadi.
-Agg charged score ~609, proj costed ~%80-108 (620'lik sayi holdout_days=36 bug'iydi,
-FIX'li). Landed: F6 waiver, `_beats_incumbent` paper->charged, seans pre-step +
-fan-out (WFO axis) + sticky, `max_spread_atr` WFO axis, spread send-recheck,
-sl_atr_mult search floor >=0.9, adx grid [0,12,18,25], holdout_days fix, proj
-min-window guard, min-lot 4.5x, priority idle-weight, MIN_COSTED_N. HEAD ~`b3d9070`.
-**SABAH:** live SL patch (NAS/JPN/XAU) + restart (spread/hours/SL-floor PID) +
-XAUUSD trail_start charged sweep + operator onaylari.
+**04.09 00:10 (gece kapanis)** — restart×3 ile gece stack canlida; hour-block
+regresyon revert; charged-beat apply gate. Detay EK22 sonu.
+Canli: JPN bh[14,15] +146.7R; NAS/XAU/US30 bh[]; US30 adx20 +25R; BTC ticket
+re-adopt. Landed ek: partial-apply regime keep (`c14e82f`), blocked/SL charged
+gerileme refuse (`40b7d1f`+). Search floor sl≥0.9 / hours WFO axis diskte —
+live SL widen sabah (charged+autopsy kapisi; bare force SL cokuyor).
+HEAD ~`40b7d1f`.
+**SABAH:** per-symbol hours WFO (book-wide degil) + live SL (charged+autopsy) +
+XAU trail_start capture bakisi + SpotBrent ilk fill.
+Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
 NAS/XAU mtf, JPN burst/M30, US30 channel re-stamp hold +43, GER/BTC
 incumbent max (no-candidate), SpotBrent **disabled FINAL**. Concurrent
@@ -7386,8 +7386,13 @@ Agg charged score ~609. Kalıp: spread'i seans-bağımlı equity index'ler (US30
    ters gitti), yön-belirsiz chop'ta öldü. Kök: book-wide saat kalitesi —
    9h/11h/14h = −29.5R PF<0.25; 23h EN İYİ (PF 4.44). Lever: `blocked_entry_hours`
    (mekanizma + WFO axis `backtest.py:1263` ZATEN VAR, hiç populate edilmemiş).
-   Öneri: WFO axis olarak aktifleştir (A2 kalıbı, per-symbol hourly-PF'den aday).
+   **LAND:** OPT_FIELDS + `blocked_hour_search_axis` + otopsi `fill_time` seed
+   (`7f00f38`/`b3d9070`). Canlı `[]` — restart+WFO apply bekliyor.
 
-**SABAH KUYRUĞU:** (1) live SL patch NAS/JPN/XAU + restart (spread + A1/hours PID'e
-iner), (2) `blocked_entry_hours` WFO axis, (3) operator onayları (SL grid tabanı,
-patch), (4) SpotBrent probe + realised vs ~%80 eğri izleme.
+**SABAH KUYRUĞU:** (1) live SL patch NAS/JPN/XAU — **charged + autopsy birlikte**
+(bare force SL→1.0 charged çöker; search floor ≥0.9 sonraki WFO için hazır),
+(2) blocked_entry_hours **per-symbol WFO only** (book-wide canlı apply
+regresyon: NAS[17] −11.9R / XAU[16] −22.3R → revert; JPN[14,15] +3.1R kaldı;
+apply gate charged gerilemede refuse), (3) XAUUSD trail_start capture bakışı
+(18:57 mfe 3.87→−0.01; holdout net_r trail’e duyarsız), (4) SpotBrent probe +
+realised vs ~%80 eğri.
