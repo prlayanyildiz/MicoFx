@@ -1272,6 +1272,32 @@ class Optimizer:
         ]
         elapsed = round(time.time() - started, 1)
         usable = [a for a in attempts if a.get("ok") and a.get("validated")]
+        # F6: drop holdout-fragile sweeps before naming a winner. Otherwise
+        # costed_e ranks a 3/6 M5 as best, reject_reason refuses apply, and a
+        # robust M30 peer never gets considered (US30 03.09).
+        try:
+            min_positive = float(
+                (self.store.opt_params() or {}).get("min_positive_ratio", 0.6)
+                or 0.6)
+        except (TypeError, ValueError, AttributeError):
+            min_positive = 0.6
+        robust = []
+        for a in usable:
+            best_a = a.get("best") or {}
+            if best_a.get("min_positive_ratio") is not None:
+                try:
+                    floor = float(best_a["min_positive_ratio"])
+                except (TypeError, ValueError):
+                    floor = min_positive
+            else:
+                floor = min_positive
+            if best_a.get("selection_positive_ratio") is None:
+                robust.append(a)
+                continue
+            hold_pr = float(best_a.get("positive_ratio", 0) or 0)
+            if hold_pr + 1e-12 >= floor:
+                robust.append(a)
+        usable = robust
         if not usable:
             if not any(a.get("ok") for a in attempts):
                 reasons = "; ".join(
