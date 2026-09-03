@@ -385,7 +385,6 @@
     "plateau_weight": 0.5,
     "refine_rounds": 5,
     "timeframes": [
-      "M5",
       "M15",
       "M30"
     ],

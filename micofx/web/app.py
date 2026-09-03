@@ -2024,22 +2024,37 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             raise HTTPException(409, f"acik pozisyon var ({n}) - {detail}")
 
     @app.post("/api/holdout/capture")
-    def holdout_capture() -> dict[str, Any]:
+    def holdout_capture(body: dict[str, Any] | None = None) -> dict[str, Any]:
         """Pin holdout bars through the live client. Night restart calls this.
 
         A second process calling initialize() would drop the trading bind.
         Optimizer busy is a 409: the search already holds the terminal for
         tens of thousands of bars per combo.
+
+        Optional JSON ``{"timeframes": ["M5"]}`` pins every enabled name at
+        those TFs (Claude M5 bake-off) instead of each row's live timeframe.
         """
         if optimizer.busy:
             raise HTTPException(409, "optimizasyon calisirken holdout capture yok")
         if not client.connected:
             raise HTTPException(409, "MT5 baglantisi yok")
         _refuse_if_bot_open("holdout capture yok")
+        tfs = None
+        if isinstance(body, dict):
+            raw = body.get("timeframes")
+            if raw is not None:
+                if not isinstance(raw, list) or not raw:
+                    raise HTTPException(400, "timeframes bos olamaz")
+                from micofx.models import TIMEFRAMES
+                bad = [str(t) for t in raw if str(t) not in TIMEFRAMES]
+                if bad:
+                    raise HTTPException(
+                        400, f"bilinmeyen timeframe: {', '.join(bad)}")
+                tfs = [str(t) for t in raw]
         if not _holdout_capture_lock.acquire(blocking=False):
             raise HTTPException(409, "holdout capture zaten calisiyor")
         try:
-            return capture_book(client=client, store=store)
+            return capture_book(client=client, store=store, timeframes=tfs)
         finally:
             _holdout_capture_lock.release()
 

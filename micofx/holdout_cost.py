@@ -154,32 +154,45 @@ def capture(*, client: Any, store: Any, symbol: str, timeframe: str,
     return dest
 
 
-def capture_book(*, client: Any, store: Any) -> dict[str, Any]:
+def capture_book(*, client: Any, store: Any,
+                 timeframes: list[str] | None = None) -> dict[str, Any]:
     """Pin every enabled symbol through the already-connected client.
 
     Does not initialize or shutdown. One symbol's failure is a WARN row, not
     a stop: a thin histogram on one name must not leave the rest of the book
     without a pin for the night.
+
+    ``timeframes`` overrides each symbol's live TF (e.g. ``["M5"]`` for a
+    cross-book M5 costed bake-off). None = each name's configured timeframe.
     """
     rows: list[dict[str, Any]] = []
     symbols = getattr(store, "symbols", None) or {}
     if not isinstance(symbols, dict):
         symbols = {}
+    override = [str(t) for t in (timeframes or []) if str(t).strip()]
     for cfg in list(symbols.values()):
         if not getattr(cfg, "enabled", False):
             continue
         symbol = str(cfg.symbol)
-        timeframe = str(cfg.timeframe)
-        try:
-            path = capture(client=client, store=store, symbol=symbol,
-                           timeframe=timeframe)
-            rows.append({"symbol": symbol, "ok": True, "path": str(path)})
-            LOG.emit(f"Holdout snapshot yazildi | {symbol} {timeframe} | {path}", "OPT")
-        except Exception as exc:
-            rows.append({
-                "symbol": symbol, "ok": False,
-                "error": f"{type(exc).__name__}: {exc}",
-            })
-            LOG.emit(f"Holdout snapshot atlandi | {symbol}: {exc}", "WARN")
+        tfs = override or [str(cfg.timeframe)]
+        for timeframe in tfs:
+            try:
+                path = capture(client=client, store=store, symbol=symbol,
+                               timeframe=timeframe)
+                rows.append({
+                    "symbol": symbol, "timeframe": timeframe,
+                    "ok": True, "path": str(path),
+                })
+                LOG.emit(
+                    f"Holdout snapshot yazildi | {symbol} {timeframe} | {path}",
+                    "OPT")
+            except Exception as exc:
+                rows.append({
+                    "symbol": symbol, "timeframe": timeframe, "ok": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+                LOG.emit(
+                    f"Holdout snapshot atlandi | {symbol} {timeframe}: {exc}",
+                    "WARN")
     n_ok = sum(1 for r in rows if r.get("ok"))
     return {"ok": True, "captured": n_ok, "results": rows}
