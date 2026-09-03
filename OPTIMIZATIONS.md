@@ -1,10 +1,10 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 00:55** — JPN WFO RED (aday yok; sl0.7 +146.7R). XAU SL BIRAK.
-XAU seans **01:01-23:59→00:00-23:59** (olu gece saati; charged +256R ayni).
-NAS burst/sl0.9 +103.5R LAND. Hours #3 RETRACT. Spread recheck canlida.
-**SABAH:** SpotBrent fill; XAU premature izle; operator EK22 brifing.
+**04.09 00:57** — F6-all-fragile refuse log (`F6 kirilgan: pr=…`); **US30 WFO**
+kosuyor. JPN RED; XAU seans 00-23; NAS sl0.9 LAND. Hours RETRACT.
+**04.09 00:55** — JPN RED; XAU seans gap close. **SABAH:** US30 sonucu;
+SpotBrent fill; XAU premature izle.
 
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
