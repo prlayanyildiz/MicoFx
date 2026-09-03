@@ -465,6 +465,34 @@ def test_the_autopsy_report_counts_after_stop_shakeouts():
     assert report["after_1h_recovery_ge_0_5r"] == 1
 
 
+def test_autopsy_report_lists_premature_by_symbol():
+    """Morning watch: hybrid gate threshold is per-symbol premature_n >= 5."""
+    eng = _engine()
+    rows = []
+    for _ in range(5):
+        rows.append({
+            "symbol": "JPN225", "exit_reason": "sl", "held_min": 10.0,
+            "after_1h_bars": 8, "after_1h_through_entry": True,
+            "after_1h_recovery_r": 1.0, "r_realised": -1.0,
+        })
+    rows.append({
+        "symbol": "XAUUSD", "exit_reason": "sl", "held_min": 10.0,
+        "after_1h_bars": 8, "after_1h_through_entry": False,
+        "after_1h_recovery_r": 0.9, "r_realised": -1.0,
+    })
+    rows.append({
+        "symbol": "US30", "exit_reason": "sl", "held_min": 10.0,
+        "after_1h_bars": 8, "after_1h_through_entry": False,
+        "after_1h_recovery_r": 0.2, "r_realised": -1.0,
+    })
+    eng._trade_autopsies = rows
+    report = eng.trade_autopsy_report()
+    by = {r["symbol"]: r["premature_n"] for r in report["premature_by_symbol"]}
+    assert by["JPN225"] == 5
+    assert by["XAUUSD"] == 1
+    assert "US30" not in by
+
+
 def _priced_row(*, exit_time: int) -> dict:
     return {
         "symbol": "GER40", "side": "buy", "ticket": 1,

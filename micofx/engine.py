@@ -2155,9 +2155,33 @@ class Engine:
             "after_1h_through_entry": through_n,
             "after_1h_extra_ge_0_5r": extra_ge,
             "after_1h_recovery_ge_0_5r": recov_ge,
+            "premature_by_symbol": self._premature_by_symbol(rows),
             "summary": summary,
             "rows": rows,
         }
+
+    @staticmethod
+    def _premature_by_symbol(rows: list) -> list[dict[str, Any]]:
+        """Per-symbol premature-SL counts (hybrid gate / morning watch)."""
+        from .optimizer import premature_sl_count_from_autopsy
+        symbols: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            sym = str(row.get("symbol") or "")
+            if not sym or sym in seen:
+                continue
+            seen.add(sym)
+            symbols.append(sym)
+        out: list[dict[str, Any]] = []
+        for sym in symbols:
+            n = premature_sl_count_from_autopsy(rows, sym)
+            if n <= 0:
+                continue
+            out.append({"symbol": sym, "premature_n": n})
+        out.sort(key=lambda r: (-int(r["premature_n"]), str(r["symbol"])))
+        return out
 
     # ------------------------------------------------------------ evaluation
 

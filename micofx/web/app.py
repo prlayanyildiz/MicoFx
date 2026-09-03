@@ -1505,12 +1505,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         data = engine.trade_autopsy_report()
         n = int(data.get("n") or 0)
         left = data.get("left_on_table_r")
+        prem = data.get("premature_by_symbol") or []
+        top_prem = ""
+        if prem:
+            lead = prem[0]
+            top_prem = (f"; premature lider {lead.get('symbol')} "
+                        f"n={lead.get('premature_n')}")
         data["note"] = (
             "Henuz kapanis otopisi yok - sayac bu surumle basladi."
             if not n else
             f"{n} kapanis"
             + (f"; kazananlarda masada birakilan {left:.2f} R"
                if left is not None else "")
+            + top_prem
         )
         return {"ok": True, **data}
 
