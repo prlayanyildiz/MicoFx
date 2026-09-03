@@ -1802,7 +1802,38 @@ class Optimizer:
             # label that read as the search's proposal. Apply never took it
             # (it already requires validated), but the report did, and that
             # report is what got written down. No candidate, no name.
+            # When F6 emptied ``usable``, surface the fragile holdout ratios
+            # so a night log is not an opaque "kapidan gecmedi" (JPN 04.09).
+            fragile_bits: list[str] = []
+            for a in attempts:
+                if not (a.get("ok") and a.get("validated")):
+                    continue
+                best_a = a.get("best") or {}
+                if best_a.get("selection_positive_ratio") is None:
+                    continue
+                if best_a.get("positive_ratio") is None:
+                    continue
+                try:
+                    pr = float(best_a.get("positive_ratio") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if best_a.get("min_positive_ratio") is not None:
+                    try:
+                        floor = float(best_a["min_positive_ratio"])
+                    except (TypeError, ValueError):
+                        floor = min_positive
+                else:
+                    floor = min_positive
+                if pr + 1e-12 >= floor or _f6_holdout_waiver(best_a):
+                    continue
+                fragile_bits.append(
+                    f"{a.get('timeframe')}/{a.get('strategy')}:pr={pr:.2f}")
+                if len(fragile_bits) >= 3:
+                    break
             reason = "hicbir aday kapidan gecmedi"
+            if fragile_bits:
+                reason = (f"hicbir aday kapidan gecmedi "
+                          f"(F6 kirilgan: {', '.join(fragile_bits)})")
             incumbent = self._incumbent_guard_holdout(cfg)
             report = {
                 "symbol": cfg.symbol,
