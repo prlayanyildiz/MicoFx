@@ -242,8 +242,34 @@ class Store:
                 continue
             loaded[cfg.symbol] = cfg
         self.symbols = loaded
+        from .strategy import opt_fields_read
+        dirty: list[SymbolConfig] = []
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT symbol, payload FROM symbols").fetchall()
+        known = set(SymbolConfig.__dataclass_fields__)
+        for row in rows:
+            try:
+                raw = json.loads(row["payload"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            extra = set(raw) - known if isinstance(raw, dict) else set()
+            cfg = loaded.get(row["symbol"])
+            unread_cost = (
+                cfg is not None
+                and float(getattr(cfg, "cost_rank_max", 0.0) or 0.0)
+                and "cost_rank_max" not in opt_fields_read(cfg.strategy)
+            )
+            if cfg is not None and (extra or unread_cost):
+                dirty.append(cfg)
+        for cfg in dirty:
+            self.save_symbol(cfg)
 
     def save_symbol(self, cfg: SymbolConfig, position: int | None = None) -> None:
+        from .strategy import opt_fields_read
+        if (float(getattr(cfg, "cost_rank_max", 0.0) or 0.0)
+                and "cost_rank_max" not in opt_fields_read(cfg.strategy)):
+            cfg.cost_rank_max = 0.0
         blob = json.dumps(cfg.to_dict(), ensure_ascii=False)
         with self._lock:
             if position is None:

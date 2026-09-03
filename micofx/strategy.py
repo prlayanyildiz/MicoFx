@@ -85,10 +85,12 @@ class Params:
         # A real apply stamp lists the OPT axes that search chose. Leftover
         # htf/adx from a previous family must not start gating the new one
         # (28.08 Brent stoch_flip still carried dual_t3's 15-25 ADX).
+        family = str(base.get("strategy") or "")
         stamped = (getattr(cfg, "opt_summary", None) or {}).get("params")
         if isinstance(stamped, dict) and stamped:
-            base.update(absent_regime_gates_to_zero(
-                str(base.get("strategy") or ""), stamped))
+            base.update(absent_regime_gates_to_zero(family, stamped))
+        if "cost_rank_max" not in opt_fields_read(family):
+            base["cost_rank_max"] = 0.0
         base.update({k: v for k, v in overrides.items() if k in cls.__dataclass_fields__})
         return cls(**base)
 
