@@ -1988,8 +1988,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
 
     @app.post("/api/opt/params/reset")
     def reset_opt_params() -> dict[str, Any]:
-        # HTML button is gone; JS is gated on #btn-opt-reset. Store.reset
-        # still exists for tests / a future operator restore.
+        # Panel reset removed. Store.reset_opt_params deleted (schema cleanup).
         raise HTTPException(400, "opt izgara varsayilani panelden yazilamaz")
 
     @app.post("/api/opt/run")

@@ -771,10 +771,6 @@ class Store:
             if isinstance(blob, dict):
                 base[key] = {fam: val for fam, val in blob.items() if fam in known}
 
-    def reset_opt_params(self) -> dict[str, Any]:
-        self.set_setting("opt_params", {})
-        return self.opt_params()
-
     def stamp_opt_run_apply(self, run_id: int, force: bool, previous: dict[str, Any] | None,
                             applied_at: float) -> bool:
         """Merge G11's apply-path fields into an existing search row.
