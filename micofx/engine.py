@@ -32,7 +32,13 @@ from .mt5client import (
     live_stop_level,
     timeframe_seconds,
 )
-from .risk import RiskManager, shakeout_size_note, shakeout_sl_atr_mult
+from .risk import (
+    AUTOPSY_R_ABS_MAX,
+    RiskManager,
+    sanitize_autopsy_r,
+    shakeout_size_note,
+    shakeout_sl_atr_mult,
+)
 from .store import Store, as_dict, as_list, as_number
 from .strategy import IndicatorCache, Params, Signals, compute, required_bars
 from .supervisor import Supervisor
@@ -1756,7 +1762,7 @@ class Engine:
                 row = dict(item)
                 row["symbol"] = symbol
                 row["ticket"] = ticket
-                rows.append(row)
+                rows.append(sanitize_autopsy_r(row))
             self._trade_autopsies = rows[-limit:]
             # The stored stamp is not the table. It was written when the
             # feature first started (empty ring, 19.08 09:43) and then
@@ -1793,7 +1799,7 @@ class Engine:
         if events is None:
             self._trade_autopsies = []
             events = self._trade_autopsies
-        events.append(dict(row))
+        events.append(sanitize_autopsy_r(dict(row)))
         limit = int(getattr(self, "_trade_autopsy_limit", TRADE_AUTOPSY_LIMIT)
                     or TRADE_AUTOPSY_LIMIT)
         if len(events) > limit:
@@ -2091,6 +2097,9 @@ class Engine:
             })
             cell["n"] += 1
             realised = self._autopsy_float(row.get("r_realised"))
+            # |R| past AUTOPSY_R_ABS_MAX is a denominator artifact (NAS −195).
+            if realised is not None and abs(realised) > AUTOPSY_R_ABS_MAX:
+                realised = None
             if realised is not None:
                 cell["r_sum"] += realised
                 cell["r_n"] += 1
@@ -2683,7 +2692,8 @@ class Engine:
         # minimum distance is a floor on it, never a reason to skip it.
         sl_mult = shakeout_sl_atr_mult(
             cfg.sl_atr_mult, cfg.symbol,
-            getattr(self, "_trade_autopsies", None))
+            getattr(self, "_trade_autopsies", None),
+            since_ts=float(getattr(cfg, "opt_updated_at", 0.0) or 0.0))
         sl_dist = max(atr * sl_mult, min_stop)
         # Size the lot against the stop that is actually sent. Using the raw
         # cfg.sl_atr_mult distance while shakeout widened sl_dist overstated
@@ -3801,7 +3811,8 @@ class Engine:
             atr_use = float(getattr(st, "atr", 0.0) or 0.0) if st else 0.0
         sl_mult = shakeout_sl_atr_mult(
             cfg.sl_atr_mult, cfg.symbol,
-            getattr(self, "_trade_autopsies", None))
+            getattr(self, "_trade_autopsies", None),
+            since_ts=float(getattr(cfg, "opt_updated_at", 0.0) or 0.0))
         risk_dist = self._fill_time_risk(pos, cfg, atr_use, min_stop)
         if risk_dist <= 0 and atr_use > 0:
             risk_dist = max(atr_use * sl_mult, min_stop)

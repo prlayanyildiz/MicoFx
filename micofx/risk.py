@@ -25,14 +25,49 @@ _SHAKEOUT_SL_WINDOW = 10
 _SHAKEOUT_SL_DEATHS = 3
 _SHAKEOUT_SL_FLOOR = 2.0
 
+# Soft-restart / tiny original_sl stamped NAS flatten at r≈−195. Cash is
+# truth; |R| past this is not a trade outcome (F FLAG1 / autopsy stats).
+AUTOPSY_R_ABS_MAX = 20.0
+
+
+def autopsy_r_usable(row: dict[str, Any] | None) -> bool:
+    """False when r_realised is an absurd denominator artifact."""
+    if not row:
+        return True
+    raw = row.get("r_realised")
+    if raw is None:
+        return True
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return True
+    if not math.isfinite(value):
+        return True
+    return abs(value) <= AUTOPSY_R_ABS_MAX
+
+
+def sanitize_autopsy_r(row: dict[str, Any]) -> dict[str, Any]:
+    """Null absurd R; keep cash. Input is not mutated."""
+    if autopsy_r_usable(row):
+        return row
+    out = dict(row)
+    out["r_realised"] = None
+    out["r_outlier"] = True
+    return out
+
 
 def shakeout_sl_atr_mult(base: float, symbol: str,
-                         autopsies: list[dict[str, Any]] | None) -> float:
+                         autopsies: list[dict[str, Any]] | None,
+                         since_ts: float = 0.0) -> float:
     """Hard-stop ATR multiple for the NEXT entry, not an open ticket.
 
     Counts original-SL losers in the last ``_SHAKEOUT_SL_WINDOW`` closes
     for ``symbol``. Trail / flatten / weekend do not count. A searched
     stop already at or above the floor is left alone.
+
+    ``since_ts`` (usually ``cfg.opt_updated_at``) drops closes from before
+    the config now running — a fresh apply does not inherit the previous
+    family's SL streak (F7). 0 keeps the legacy full-window count.
 
     While the floor is live the next entry's hard stop may not match the
     searched trio: trail stays at the searched values. When the window
@@ -45,12 +80,28 @@ def shakeout_sl_atr_mult(base: float, symbol: str,
         floor_base = 0.0
     if floor_base <= 0:
         return floor_base
-    mine = [row for row in (autopsies or [])
-            if str((row or {}).get("symbol") or "") == symbol]
+    try:
+        since = float(since_ts or 0.0)
+    except (TypeError, ValueError):
+        since = 0.0
+    mine = []
+    for row in (autopsies or []):
+        if not row or str(row.get("symbol") or "") != symbol:
+            continue
+        if since > 0:
+            try:
+                exit_t = float(row.get("exit_time") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if exit_t < since:
+                continue
+        mine.append(row)
     window = mine[-_SHAKEOUT_SL_WINDOW:]
     deaths = 0
     for row in window:
         if str(row.get("exit_reason") or "") != "sl":
+            continue
+        if not autopsy_r_usable(row):
             continue
         try:
             realised = float(row.get("r_realised") or 0.0)
@@ -653,7 +704,8 @@ class RiskManager:
             # not accept, so raw comes out larger and the overshoot smaller
             # than the order will actually take.
             sl_mult = shakeout_sl_atr_mult(
-                cfg.sl_atr_mult, cfg.symbol, autopsies)
+                cfg.sl_atr_mult, cfg.symbol, autopsies,
+                since_ts=float(getattr(cfg, "opt_updated_at", 0.0) or 0.0))
             sl_distance = max(atr_now * max(sl_mult, 0.01),
                               self.client.min_stop_distance(cfg.symbol))
             floor = float(info["volume_min"])
@@ -894,7 +946,8 @@ class RiskManager:
             open_now = [p for p in mine if p["symbol"] == broker]
             atr = float(atr_by_symbol.get(cfg.symbol, 0.0))
             sl_mult = shakeout_sl_atr_mult(
-                cfg.sl_atr_mult, cfg.symbol, autopsies)
+                cfg.sl_atr_mult, cfg.symbol, autopsies,
+                since_ts=float(getattr(cfg, "opt_updated_at", 0.0) or 0.0))
             sl_dist = size_sl_distance(cfg, atr, self.client)
             lot, lot_note = self.lot_for(cfg, sl_dist, balance, account=account,
                                          positions=mine)

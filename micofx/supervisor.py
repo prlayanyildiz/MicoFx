@@ -214,6 +214,24 @@ class Supervisor:
                     known.get("hour_risk_scales"))
                 self.verdicts[symbol] = SymbolVerdict(**known)
         self.risk_scale = float(saved.get("risk_scale", 1.0) or 1.0)
+        # Drop names that left the book (delete_symbol forgets one; a leftover
+        # FRA40/UK100/US2000 blob from an older book still restored otherwise).
+        self.prune_orphans()
+
+    def prune_orphans(self) -> list[str]:
+        """Drop verdicts for symbols that are not in the live book.
+
+        ``forget()`` covers a deliberate delete. This covers leftovers that
+        still sit in ``supervisor_state`` after a prior book shrank.
+        """
+        live = set((getattr(self.store, "symbols", None) or {}).keys())
+        with self._lock:
+            dropped = [name for name in list(self.verdicts) if name not in live]
+            for name in dropped:
+                self.verdicts.pop(name, None)
+        if dropped:
+            self._persist()
+        return dropped
 
     @staticmethod
     def _coerce_hour_map(raw: Any) -> dict[int, float]:
