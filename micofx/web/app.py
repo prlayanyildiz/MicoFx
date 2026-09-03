@@ -473,6 +473,9 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
 })
 _OPERATOR_OPT_FIELDS = frozenset({
     "lookback_days", "refine_rounds", "max_combos", "timeframes",
+    # Charged expectancy ranking (Claude Fix B / 03.09). gap_freq stayed
+    # legal; costed_e prefers validation E once n clears min_trades.
+    "selection_metric",
     # Cost axes only - see _validate_cost_axis_grid. The rest of the grid,
     # and all of strategy_grids, stay hands-off.
     "grid",

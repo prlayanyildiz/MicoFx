@@ -381,7 +381,7 @@
     "segments": 5,
     "min_trades": 40,
     "min_positive_ratio": 0.6,
-    "selection_metric": "score",
+    "selection_metric": "costed_e",
     "plateau_weight": 0.5,
     "refine_rounds": 5,
     "timeframes": [
