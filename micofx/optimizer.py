@@ -1356,7 +1356,15 @@ class Optimizer:
         previous = {"strategy": cfg.strategy, "timeframe": cfg.timeframe}
         applied = False
         closed = not bool(getattr(cfg, "enabled", True))
-        if closed and apply_best and report.get("validated") and not reason:
+        job_src = str((self.job or {}).get("source") or "manual")
+        never_stamped = float(getattr(cfg, "opt_updated_at", 0.0) or 0.0) <= 0
+        # Onboarding / first stamp: write the searched config onto a closed
+        # name so enable_requires_optimised can later open it. A closed name
+        # that already carries a stamp stays report-only (operator closed it
+        # after a prior search - do not silently rewrite).
+        stamp_closed = closed and (never_stamped or job_src == "onboarding")
+        if (closed and apply_best and report.get("validated") and not reason
+                and not stamp_closed):
             # Report-only: the candidate is real, the live book is not theirs
             # to rewrite, and enabled stays False. Opening is the operator's.
             reason = "kapali sembol icin aday bulundu"
@@ -1376,6 +1384,9 @@ class Optimizer:
                         "combos": report.get("combos")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok")) and not apply_result.get("deferred")
+            if stamp_closed and applied:
+                report["closed_stamped"] = True
+                # Keep disabled — autopilot onboarding (or the panel) opens.
             if apply_result.get("deferred"):
                 # Winner is stored on the symbol as pending_primary_patch;
                 # live family/TF stay until this magic is next seen flat.

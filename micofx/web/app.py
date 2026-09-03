@@ -1109,6 +1109,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         if updated is None:
             raise HTTPException(404, f"{symbol} bulunamadi")
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
+        if "enabled" in patch:
+            from micofx.autopilot import mark_operator_disabled
+            mark_operator_disabled(store, symbol, disabled=not bool(updated.enabled))
         if updated.enabled and not was_enabled:
             _on_symbol_newly_enabled(symbol)
         # Every other mutation endpoint forces the cache fresh; this one didn't,
@@ -1654,6 +1657,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     getattr(current, k, None) != body.patch[k]
                     for k in body.patch if hasattr(current, k))
                 updated = store.update_symbol(symbol, body.patch, source="panel toplu")
+                if updated is not None and "enabled" in body.patch:
+                    from micofx.autopilot import mark_operator_disabled
+                    mark_operator_disabled(store, symbol, disabled=not bool(updated.enabled))
                 if updated is not None and material:
                     changed += 1
                 if updated is not None and updated.enabled and not was_enabled:

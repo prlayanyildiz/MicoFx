@@ -2,7 +2,8 @@
 
 Runs on a side thread kicked from ``Engine._cycle`` (same shape as the
 supervisor review). Safe fixes + evidence-only spread widen + kasa/cost-free
-knobs. Does not start searches, enable disabled symbols, or run research.
+knobs + opt onboarding (never-searched → WFO stamp → enable gate). Does not
+run age-based / weekly reopt (AGENTS: auto-search is quarantine-only).
 """
 from __future__ import annotations
 
@@ -12,10 +13,14 @@ from pathlib import Path
 from typing import Any
 
 from .logbus import LOG
+from .supervisor import Supervisor
 
 _SPREAD_AUTO_MIN = 10
 _ENTRY_BLOCKS_MAX_AGE_SEC = 7 * 86400
 _ROOT = Path(__file__).resolve().parents[1]
+# Holdout net R floor before autopilot flips enabled on a stamped newcomer.
+ENABLE_MIN_HOLD_NET_R = 20.0
+_OPERATOR_DISABLED_KEY = "operator_disabled_symbols"
 
 
 def kasa_leverage(sys: Any, account: dict[str, Any] | None) -> float:
@@ -97,6 +102,23 @@ def _load_compute_kasa():
         return None
 
 
+def mark_operator_disabled(store: Any, symbol: str, disabled: bool) -> None:
+    """Panel disable must block autopilot re-enable until the operator opens it."""
+    getter = getattr(store, "get_setting", None)
+    setter = getattr(store, "set_setting", None)
+    if not callable(getter) or not callable(setter):
+        return
+    raw = getter(_OPERATOR_DISABLED_KEY, {}) or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    blob = dict(raw)
+    if disabled:
+        blob[str(symbol)] = True
+    else:
+        blob.pop(str(symbol), None)
+    setter(_OPERATOR_DISABLED_KEY, blob)
+
+
 class AutoPilot:
     """Periodic book-health tick owned by the live Engine process."""
 
@@ -169,6 +191,7 @@ class AutoPilot:
         # Spread before cost_free: turning charge_costs off would skip widen.
         done.extend(self._apply_spread())
         done.extend(self._apply_cost_free())
+        done.extend(self._apply_opt_lifecycle())
         if not done:
             done.append("autopilot: degisiklik yok")
         return done
@@ -295,4 +318,103 @@ class AutoPilot:
                 done.append(f"{sym} spread {before:g}->{after:g}")
             else:
                 done.append(f"{sym} spread degismedi")
+        return done
+
+    # -------------------------------------------------------- opt lifecycle
+
+    def _operator_disabled(self) -> set[str]:
+        raw = {}
+        getter = getattr(self.store, "get_setting", None)
+        if callable(getter):
+            raw = getter(_OPERATOR_DISABLED_KEY, {}) or {}
+        if not isinstance(raw, dict):
+            return set()
+        return {str(k) for k, v in raw.items() if v}
+
+    def _onboarding_candidates(self) -> list[Any]:
+        skip = self._operator_disabled()
+        out: list[Any] = []
+        for cfg in list(self.store.symbols.values()):
+            if getattr(cfg, "enabled", False):
+                continue
+            if cfg.symbol in skip:
+                continue
+            if float(getattr(cfg, "opt_updated_at", 0.0) or 0.0) > 0:
+                continue
+            out.append(cfg)
+        return out
+
+    def _enable_candidates(self) -> list[Any]:
+        """Stamped, still disabled, not operator-blocked, holdout clears floor."""
+        skip = self._operator_disabled()
+        out: list[Any] = []
+        for cfg in list(self.store.symbols.values()):
+            if getattr(cfg, "enabled", False):
+                continue
+            if cfg.symbol in skip:
+                continue
+            if float(getattr(cfg, "opt_updated_at", 0.0) or 0.0) <= 0:
+                continue
+            hold = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
+            try:
+                net_r = float(hold.get("net_r") or 0.0)
+            except (TypeError, ValueError):
+                net_r = 0.0
+            if net_r < ENABLE_MIN_HOLD_NET_R:
+                continue
+            try:
+                pr = float((getattr(cfg, "opt_summary", None) or {}).get(
+                    "positive_ratio") or 0.0)
+            except (TypeError, ValueError):
+                pr = 0.0
+            if pr > 0 and pr < 0.6:
+                continue
+            # Prefer holdout expectancy when present (same yardstick as budget).
+            exp = float(Supervisor.holdout_expectancy(cfg) or 0.0)
+            if exp < 0:
+                continue
+            out.append(cfg)
+        return out
+
+    def _apply_opt_lifecycle(self) -> list[str]:
+        """Queue one never-searched WFO; enable stamped newcomers that clear the floor."""
+        done: list[str] = []
+        done.extend(self._lifecycle_enable())
+        done.extend(self._lifecycle_queue_onboarding())
+        return done
+
+    def _lifecycle_queue_onboarding(self) -> list[str]:
+        opt = self.optimizer
+        if opt is None:
+            return []
+        if bool(getattr(opt, "busy", False)):
+            return []
+        cands = self._onboarding_candidates()
+        if not cands:
+            return []
+        # Stable order: one symbol per tick.
+        cands.sort(key=lambda c: str(c.symbol))
+        sym = cands[0].symbol
+        starter = getattr(opt, "start", None)
+        if not callable(starter):
+            return []
+        started = starter([sym], apply_best=True, source="onboarding")
+        if isinstance(started, dict) and not started.get("ok", True):
+            err = started.get("error") or "red"
+            return [f"onboarding {sym} WFO red: {err}"]
+        return [f"onboarding {sym} WFO kuyruk"]
+
+    def _lifecycle_enable(self) -> list[str]:
+        done: list[str] = []
+        for cfg in self._enable_candidates():
+            hold = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
+            net_r = float(hold.get("net_r") or 0.0)
+            pr = float((getattr(cfg, "opt_summary", None) or {}).get(
+                "positive_ratio") or 0.0)
+            self.store.update_symbol(
+                cfg.symbol, {"enabled": True}, source="autopilot onboarding")
+            msg = (f"onboarding {cfg.symbol} acildi "
+                   f"(hold {net_r:+.1f}R, pr {pr:.2f})")
+            done.append(msg)
+            LOG.emit(msg, "INFO", cfg.symbol)
         return done
