@@ -1,10 +1,10 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 00:57** — F6-all-fragile refuse log (`F6 kirilgan: pr=…`); **US30 WFO**
-kosuyor. JPN RED; XAU seans 00-23; NAS sl0.9 LAND. Hours RETRACT.
-**04.09 00:55** — JPN RED; XAU seans gap close. **SABAH:** US30 sonucu;
-SpotBrent fill; XAU premature izle.
+**04.09 01:03** — **US30 WFO RED** (kapidan; +25R/adx20 korundu). F6 refuse-log
+fix restart'ta (`82b5160`). Gece WFO turu: NAS LAND; XAU/JPN/US30 incumbent.
+XAU seans 00-23. Hours RETRACT. BTC re-adopt.
+**SABAH:** SpotBrent fill; XAU premature izle; operator EK22.
 
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
