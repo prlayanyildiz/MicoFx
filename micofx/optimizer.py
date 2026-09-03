@@ -114,6 +114,40 @@ def blocked_hour_search_axis(
     return out
 
 
+def floor_sl_atr_search_axis(
+        values: list | None,
+        floor: float = 0.9,
+        *,
+        fallback: list[float] | None = None) -> list[float]:
+    """Drop sub-floor SL multiples that bar-WFO flatters and live autopsy rejects.
+
+    Stored opt_params keep 0.5 via widen-merge, so editing defaults.json alone
+    cannot retire them on a live book (Claude 03.09 premature-stop −58R).
+    """
+    try:
+        floor_f = float(floor)
+    except (TypeError, ValueError):
+        floor_f = 0.9
+    out: list[float] = []
+    seen: set[float] = set()
+    for raw in values or []:
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if v + 1e-12 < floor_f:
+            continue
+        key = round(v, 4)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(v)
+    if out:
+        return out
+    fb = fallback if fallback is not None else [0.9, 1.2, 1.5, 2.0]
+    return [float(x) for x in fb]
+
+
 def spread_cap_search_axis(bars: Any, point: float, live_cap: float,
                            percentiles: tuple[float, ...] = (40.0, 55.0, 70.0)
                            ) -> list[float]:
@@ -1328,6 +1362,13 @@ class Optimizer:
                             getattr(cfg, "blocked_entry_hours", None) or []))
                     if hour_axis:
                         grid = {**grid, "blocked_entry_hours": hour_axis}
+                    # Premature-stop: bar-WFO still loves 0.5; live does not.
+                    if "sl_atr_mult" in grid:
+                        grid = {
+                            **grid,
+                            "sl_atr_mult": floor_sl_atr_search_axis(
+                                grid.get("sl_atr_mult")),
+                        }
                     bars_dir = self._ensure_sweep_bars_dir()
                     safe = "".join(
                         ch if ch.isalnum() else "_" for ch in f"{cfg.symbol}_{tf}")
