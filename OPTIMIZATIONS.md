@@ -1,15 +1,16 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
+**04.09 00:20** — NAS100 manual WFO (force+apply_best) kosuyor: seans fan-out
+[15-21,08-16,14-22], SL floor≥0.9 + hours axis. Force SL widen artik
+**otopsi premature≥5 + charged non-regress** (WFO damgasi muaf). Ledger.
 **04.09 00:10 (gece kapanis)** — restart×3 ile gece stack canlida; hour-block
 regresyon revert; charged-beat apply gate. Detay EK22 sonu.
 Canli: JPN bh[14,15] +146.7R; NAS/XAU/US30 bh[]; US30 adx20 +25R; BTC ticket
 re-adopt. Landed ek: partial-apply regime keep (`c14e82f`), blocked/SL charged
-gerileme refuse (`40b7d1f`+). Search floor sl≥0.9 / hours WFO axis diskte —
-live SL widen sabah (charged+autopsy kapisi; bare force SL cokuyor).
-HEAD ~`40b7d1f`.
-**SABAH:** per-symbol hours WFO (book-wide degil) + live SL (charged+autopsy) +
-XAU trail_start capture bakisi + SpotBrent ilk fill.
+gerileme refuse (`40b7d1f`+). Search floor sl≥0.9 / hours WFO axis diskte.
+**SABAH:** NAS WFO sonucu + XAU/JPN WFO kuyrugu; XAU trail_start capture;
+SpotBrent ilk fill. Bare force SL yok.
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
 NAS/XAU mtf, JPN burst/M30, US30 channel re-stamp hold +43, GER/BTC

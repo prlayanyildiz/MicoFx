@@ -169,6 +169,45 @@ def blocked_hour_search_axis(
     return out
 
 
+def premature_sl_count_from_autopsy(
+        rows: list | None,
+        symbol: str,
+        *,
+        min_recovery_r: float = 0.8) -> int:
+    """Count stop fills that look like premature SL on this symbol.
+
+    ``through_entry`` or strong ``after_1h_recovery_r`` — same signal Claude
+    used for the −58R premature ledger. Thin / missing after-1h windows skip.
+    """
+    want = str(symbol or "")
+    if not want or not isinstance(rows, list):
+        return 0
+    try:
+        floor_rec = float(min_recovery_r)
+    except (TypeError, ValueError):
+        floor_rec = 0.8
+    n = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("symbol") or "") != want:
+            continue
+        try:
+            bars = float(row.get("after_1h_bars") or 0)
+        except (TypeError, ValueError):
+            continue
+        if bars <= 0:
+            continue
+        through = bool(row.get("after_1h_through_entry"))
+        try:
+            rec = float(row.get("after_1h_recovery_r") or 0.0)
+        except (TypeError, ValueError):
+            rec = 0.0
+        if through or rec + 1e-12 >= floor_rec:
+            n += 1
+    return n
+
+
 def floor_sl_atr_search_axis(
         values: list | None,
         floor: float = 0.9,
@@ -3030,6 +3069,11 @@ class Optimizer:
                     (detail.get("holdout") or {}).get("net_r") or 0.0)
             except (TypeError, ValueError):
                 new_net = 0.0
+            try:
+                live_sl = float(getattr(cfg, "sl_atr_mult", 0) or 0)
+                new_sl = float(applied_params.get("sl_atr_mult", live_sl))
+            except (TypeError, ValueError):
+                live_sl, new_sl = 0.0, 0.0
             if live_net > 0 and new_net + 1e-9 < live_net:
                 changed: list[str] = []
                 live_bh = _norm_entry_hours(
@@ -3038,16 +3082,35 @@ class Optimizer:
                     applied_params.get("blocked_entry_hours"))
                 if live_bh != new_bh:
                     changed.append("blocked_entry_hours")
-                try:
-                    live_sl = float(getattr(cfg, "sl_atr_mult", 0) or 0)
-                    new_sl = float(applied_params.get("sl_atr_mult", live_sl))
-                except (TypeError, ValueError):
-                    live_sl, new_sl = 0.0, 0.0
                 if abs(live_sl - new_sl) > 1e-9:
                     changed.append("sl_atr_mult")
                 if changed:
                     msg = (f"{'+'.join(changed)} charged holdout geriledi "
                            f"({live_net:+.1f}R -> {new_net:+.1f}R)")
+                    LOG.emit(f"{symbol}: {msg} - uygulanmadi.", "OPT", symbol)
+                    return {"ok": False, "error": msg}
+            # Force measured SL widen: autopsy premature + charged together.
+            # WFO stamps (keep_reason != force charged measure) stay exempt —
+            # search already paid the >=0.9 floor / F6 path.
+            force_measured = (
+                getattr(self, "_force_apply", False)
+                and str((detail or {}).get("keep_reason") or "")
+                == "force charged measure"
+            )
+            if force_measured and new_sl > live_sl + 1e-9:
+                raw_auto = []
+                try:
+                    getter = getattr(self.store, "get_setting", None)
+                    raw = getter("trade_autopsies", []) if callable(getter) else []
+                    if isinstance(raw, list):
+                        raw_auto = raw
+                except Exception:
+                    raw_auto = []
+                prem = premature_sl_count_from_autopsy(raw_auto, symbol)
+                min_prem = 5
+                if prem < min_prem:
+                    msg = (f"sl_atr_mult genisletme otopsi premature yetersiz "
+                           f"({prem}<{min_prem}); WFO floor kullan")
                     LOG.emit(f"{symbol}: {msg} - uygulanmadi.", "OPT", symbol)
                     return {"ok": False, "error": msg}
         # Charged same-slice look stamps holdout_costed / costed_negative
