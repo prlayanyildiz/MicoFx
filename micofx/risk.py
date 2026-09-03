@@ -24,6 +24,9 @@ class Verdict:
 _SHAKEOUT_SL_WINDOW = 10
 _SHAKEOUT_SL_DEATHS = 3
 _SHAKEOUT_SL_FLOOR = 2.0
+# F8: widen by 1.5× the searched stop, never past the absolute floor, and
+# never pull a wider searched stop inward.
+_SHAKEOUT_SL_REL = 1.5
 
 # Soft-restart / tiny original_sl stamped NAS flatten at r≈−195. Cash is
 # truth; |R| past this is not a trade outcome (F FLAG1 / autopsy stats).
@@ -73,6 +76,9 @@ def shakeout_sl_atr_mult(base: float, symbol: str,
     searched trio: trail stays at the searched values. When the window
     cools, stored sl/trail are the scored set again — do not scale trail
     with the floor, and do not drop a pending trail because SL was floored.
+
+    F8: the bump is ``max(base, min(base * 1.5, 2.0))`` — relative, not an
+    absolute jump to 2.0 ATR (mtf 0.5 stayed sizeable on a small account).
     """
     try:
         floor_base = float(base or 0.0)
@@ -111,8 +117,8 @@ def shakeout_sl_atr_mult(base: float, symbol: str,
             deaths += 1
     if deaths < _SHAKEOUT_SL_DEATHS:
         return floor_base
-    return max(floor_base, _SHAKEOUT_SL_FLOOR)
-
+    bumped = min(floor_base * _SHAKEOUT_SL_REL, _SHAKEOUT_SL_FLOOR)
+    return round(max(floor_base, bumped), 4)
 
 def size_sl_distance(cfg: SymbolConfig, atr: float, client: MT5Client) -> float:
     """SL distance for lot sizing — searched multiple, not shakeout floor."""

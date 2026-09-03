@@ -520,8 +520,10 @@ function renderTop() {
     + `</div>`
   ).join("");
 
-  $("#btn-start").disabled = !!bot.running;
-  $("#btn-stop").disabled = !bot.running;
+  const sysStart = $("#sys-start");
+  const sysStop = $("#sys-stop");
+  if (sysStart) sysStart.disabled = !!bot.running;
+  if (sysStop) sysStop.disabled = !bot.running;
 
   const clockWarn = (mt5.session_clock_warning || "").trim();
   const banner = $("#clock-warn");
@@ -1669,11 +1671,14 @@ async function saveAI(patch, flashNode) {
 
 const SYS_FIELDS = [
   { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
+  { k: "max_concurrent_risk_pct", label: "Es-zamanli risk % (likidite, 0=kapali)", t: "num", step: 1, min: 0, max: 100 },
+  { k: "daily_loss_pct", label: "Gunluk zarar freni % (0=kapali)", t: "num", step: 0.5, min: 0, max: 100 },
   { k: "autopilot_enabled", label: "Gelir autopilot (sistem ici)", t: "bool" },
   { k: "autopilot_interval_sec", label: "Autopilot aralik (sn)", t: "num", step: 60, min: 0, max: 86400 },
 ];
 
-// Plumbing and settled valves left the panel 27.08. Values stay on
+// Plumbing and settled valves left the panel 27.08. Concurrent + daily
+// brake returned 03.09 (operator liquidity box). Other values stay on
 // SystemConfig; search and _try_entry still read them.
 const SYS_FIELDS_ADVANCED = [];
 
@@ -2357,15 +2362,10 @@ function wire() {
     } catch (e) { toast(e.message, "err"); }
   };
 
-  $("#btn-start").onclick = () => call("/api/bot/start");
+  $("#sys-start").onclick = () => call("/api/bot/start");
   // No `close` field: let the backend default to Sistem > "Durdurunca
   // pozisyonlari kapat" instead of hardcoding it off - sending `close: false`
   // here made that setting permanently inert no matter how it was set.
-  $("#btn-stop").onclick = () => call("/api/bot/stop");
-  $("#btn-panic").onclick = confirmThen("Bot durdurulacak ve TUM pozisyonlar kapatilacak. Onayliyor musunuz?",
-    () => call("/api/bot/panic"));
-
-  $("#sys-start").onclick = () => call("/api/bot/start");
   $("#sys-stop").onclick = () => call("/api/bot/stop");
   $("#sys-stop-close").onclick = confirmThen("Bot durdurulup pozisyonlar kapatilacak. Onayliyor musunuz?",
     () => call("/api/bot/stop", { close: true }));

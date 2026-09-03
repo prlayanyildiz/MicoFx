@@ -10,22 +10,15 @@
 
 <header class="topbar">
   <div class="brand">
-    <span class="logo">MicoFX</span>
+    <div class="brand-line">
+      <span class="logo">MicoFX</span>
+      <span class="pulse" id="pulse" title="Son guncelleme"></span>
+    </div>
     <span class="sub">MT5 Trading Terminal</span>
   </div>
 
   <div class="topstats" id="topstats"></div>
-
-  <!-- Operator 27.08: the daily-loss and position chips left the strip, so the
-       top bar has room again. The run controls and the freshness dot moved
-       back here from the tab row (where they went on 26.08 when the chips still
-       needed the width). topstats' flex-grow pushes them to the right edge. -->
-  <div class="topctl">
-    <button class="btn btn-sm btn-go" id="btn-start">Bot Baslat</button>
-    <button class="btn btn-sm btn-stop" id="btn-stop">Durdur</button>
-    <button class="btn btn-sm btn-danger" id="btn-panic" title="Botu durdur ve tum pozisyonlari kapat">Acil</button>
-  </div>
-  <span class="pulse" id="pulse" title="Son guncelleme"></span>
+  <!-- Bot Baslat/Durdur/Acil only on Sistem (sys-*). Pulse stays by the brand. -->
 </header>
 <div id="clock-warn" class="warn-text" hidden></div>
 <div id="lock-warn" class="warn-text neg" hidden></div>

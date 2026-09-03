@@ -11,10 +11,8 @@ HELP = (ROOT / "micofx" / "web" / "static" / "field_help.js").read_text(encoding
 # dump the old paragraph back into a hint: blob.
 OFF_PANEL = {
     "symbol_daily_loss_pct": "sadece bu sembolde yeni giris",
-    "daily_loss_pct": "yeni giris durur",
     "daily_loss_flatten": "acik pozisyonlar da kapanir",
     "size_by_edge": "holdout net R",
-    "max_concurrent_risk_pct": "artik okunmaz",
     "sl_atr_mult": "Stop mesafesi",
     "trail_start_atr": "trail baslamaz",
     "trail_step_atr": "Trail",

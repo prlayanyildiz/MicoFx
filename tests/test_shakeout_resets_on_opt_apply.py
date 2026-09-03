@@ -31,13 +31,14 @@ def test_post_apply_sl_deaths_still_raise_the_floor():
     apply_ts = 1_000_000.0
     rows = (_sl("XAUUSD", 2, exit_time=apply_ts - 60)
             + _sl("XAUUSD", 3, exit_time=apply_ts + 60))
-    assert shakeout_sl_atr_mult(0.5, "XAUUSD", rows, since_ts=apply_ts) == 2.0
+    # F8 relative: 0.5 → 0.75, not absolute 2.0.
+    assert shakeout_sl_atr_mult(0.5, "XAUUSD", rows, since_ts=apply_ts) == 0.75
 
 
 def test_zero_since_keeps_legacy_full_window():
     rows = _sl("GER40", 3, exit_time=100.0)
-    assert shakeout_sl_atr_mult(1.0, "GER40", rows) == 2.0
-    assert shakeout_sl_atr_mult(1.0, "GER40", rows, since_ts=0.0) == 2.0
+    assert shakeout_sl_atr_mult(1.0, "GER40", rows) == 1.5
+    assert shakeout_sl_atr_mult(1.0, "GER40", rows, since_ts=0.0) == 1.5
 
 
 def test_entry_path_passes_opt_updated_at():

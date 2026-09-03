@@ -16,6 +16,8 @@ HTML = (ROOT / "micofx" / "web" / "templates" / "index.html").read_text(encoding
 
 KEEP_SYS = (
     "max_margin_usage_pct",
+    "max_concurrent_risk_pct",
+    "daily_loss_pct",
 )
 
 HANDS_OFF_SYS = (
@@ -24,13 +26,12 @@ HANDS_OFF_SYS = (
     "max_lot",
     "lot_multiplier", "trade_all_hours", "day_end_flatten_min",
     "close_on_stop", "autostart_bot", "daily_profit_pct",
-    "max_concurrent_risk_pct",
     "max_scalp_positions", "max_swing_positions",
     "min_free_margin", "slippage_points",
     "poll_interval_sec", "opt_max_workers",
     "autostart_mt5_wait_sec",
     "backup_enabled",
-    "size_by_edge", "daily_loss_pct", "daily_loss_flatten",
+    "size_by_edge", "daily_loss_flatten",
 )
 
 KEEP_BACKUP = ("backup_dir", "backup_dir_secondary", "backup_keep")

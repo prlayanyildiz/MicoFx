@@ -27,7 +27,8 @@ def test_a_quiet_book_keeps_the_searched_stop():
 
 
 def test_three_original_sl_deaths_raise_the_floor():
-    assert shakeout_sl_atr_mult(1.0, "GER40", _sl("GER40", 3)) == 2.0
+    # F8: relative 1.5× (capped at 2.0), not absolute 2.0.
+    assert shakeout_sl_atr_mult(1.0, "GER40", _sl("GER40", 3)) == 1.5
 
 
 def test_another_symbols_deaths_do_not_stain():

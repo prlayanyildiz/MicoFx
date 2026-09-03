@@ -73,6 +73,7 @@ h3 { font-size: 12px; margin: var(--d-h3); color: var(--muted); text-transform: 
   position: sticky; top: 0; z-index: 40;
 }
 .brand { display: flex; flex-direction: column; min-width: 130px; }
+.brand-line { display: flex; align-items: center; gap: 8px; }
 .logo { font-size: 17px; font-weight: 700; letter-spacing: .06em; color: #fff; }
 .logo::after { content: ""; }
 .sub { font-size: 10px; color: var(--dim); letter-spacing: .12em; text-transform: uppercase; }
@@ -107,8 +108,6 @@ h3 { font-size: 12px; margin: var(--d-h3); color: var(--muted); text-transform: 
 
 /* Back in the top bar (27.08). flex:none so the buttons keep their width;
    topstats' flex-grow to its left pushes this group to the right edge. */
-.topctl { display: flex; gap: 4px; flex: none; }
-
 /* Phone: the chips' secondary text (leverage, used margin, free slots) is
    context for a number, not the number - dropping it on a small screen fits
    four chips per row instead of three and takes the bar from 307px to well

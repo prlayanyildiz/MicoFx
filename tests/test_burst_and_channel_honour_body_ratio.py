@@ -9,7 +9,13 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import SymbolConfig
-from micofx.strategy import IndicatorCache, Params, absent_regime_gates_to_zero, compute, opt_fields_read
+from micofx.strategy import (
+    IndicatorCache,
+    Params,
+    absent_regime_gates_to_zero,
+    compute,
+    opt_fields_read,
+)
 
 
 def _cache(n: int = 900) -> IndicatorCache:
