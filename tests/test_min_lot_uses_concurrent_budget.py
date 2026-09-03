@@ -83,11 +83,21 @@ def test_min_lot_opens_near_live_us30_overshoot():
     assert "eszamanli" in note.lower()
 
 
+def test_min_lot_opens_at_live_us30_4x_equity_floor():
+    """Live ~$232 / sl2.5: 1R tavan ~0.024 → floor/r_cap ≈ 4.1 — was lot-0 at 3.5."""
+    rm = _rm(concurrent=50.0)
+    acc = {"equity": 232.0, "margin": 0.0, "margin_free": 232.0, "leverage": 500}
+    # r_cap = 232*0.02 / (sl*5) = 0.024 → sl*5 = 193.333 → sl ≈ 38.67
+    lot, note = rm.lot_for(rm.store.symbols["US30"], 38.67, 232.0, account=acc)
+    assert lot == pytest.approx(0.1), note
+    assert "eszamanli" in note.lower()
+
+
 def test_extreme_overshoot_still_skips_even_with_concurrent_room():
-    """Hard ceiling (3.5x) — do not unlock 10% book fills."""
+    """Hard ceiling — do not unlock absurd broker-min fills (~6x)."""
     rm = _rm(concurrent=50.0)
     acc = {"equity": 200.0, "margin": 0.0, "margin_free": 200.0, "leverage": 500}
-    # r_cap = 4/(50*5) = 0.016; floor/r_cap = 6.25 > 3.5
+    # r_cap = 4/(50*5) = 0.016; floor/r_cap = 6.25 > ceiling
     lot, note = rm.lot_for(rm.store.symbols["US30"], 50.0, 200.0, account=acc)
     assert lot == 0.0, note
     assert "atlandi" in note
