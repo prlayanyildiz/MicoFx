@@ -252,50 +252,16 @@ class AutoPilot:
         return ["cost_free: charge_costs=false (komisyon 0)"]
 
     def _apply_kasa(self) -> list[str]:
-        """Slow-tick margin only. Lot / concurrent are inline in RiskManager."""
+        """Slow tick: no lot/conc/margin patches. Dial is max_margin_usage_pct."""
         sys = self.store.system
         if not bool(getattr(sys, "kasa_auto_enabled", True)):
             return ["kasa: operator kapali"]
-        compute = _load_compute_kasa()
-        if compute is None:
-            return ["kasa: compute yuklenemedi"]
-        acc = dict(getattr(self.engine, "_account", None) or {})
-        cap = dict(getattr(self.engine, "_capacity_cache", None) or {})
-        rows = [r for r in (cap.get("rows") or []) if r.get("enabled")]
-        zero_lot = sum(1 for r in rows if float(r.get("lot") or 0) <= 0)
-        try:
-            broker_lev = float(acc.get("leverage") or 1.0)
-        except (TypeError, ValueError):
-            broker_lev = 1.0
-        plan = compute(
-            equity=float(acc.get("equity") or 0),
-            leverage=kasa_leverage(sys, acc),
-            n_enabled=max(1, len(self._enabled_symbols()) or len(rows) or 1),
-            global_free_slots=int(cap.get("global_free_slots") or 0),
-            margin_usage_pct=float(cap.get("margin_usage_pct") or 0),
-            max_margin_usage_pct=float(
-                getattr(sys, "max_margin_usage_pct", 0)
-                or cap.get("max_margin_usage_pct") or 85),
-            lot_multiplier=float(
-                getattr(sys, "lot_multiplier", 1) or cap.get("lot_multiplier") or 1),
-            max_concurrent_risk_pct=float(
-                getattr(sys, "max_concurrent_risk_pct", 0)
-                or cap.get("max_concurrent_risk_pct") or 50),
-            zero_lot=zero_lot,
-            broker_leverage=broker_lev,
-        )
-        patch = dict(plan.get("patch") or {})
-        # Inline sizing owns lot + concurrent; only soft-margin may patch here.
-        allowed = {"max_margin_usage_pct", "autostart_bot"}
-        patch = {k: v for k, v in patch.items() if k in allowed}
-        if not patch:
-            return []
-        self.store.update_system(patch, source="autopilot")
-        reasons = [
-            r for r in (plan.get("reasons") or [])
-            if "lot_mult" not in str(r) and "conc_risk" not in str(r)
-        ] or [str(patch)]
-        return [f"kasa {r}" for r in reasons[:4]]
+        # Lot + concurrent are inline in RiskManager; margin% is the operator
+        # dial. Autopilot only keeps autostart_bot if somehow off.
+        if not bool(getattr(sys, "autostart_bot", True)):
+            self.store.update_system({"autostart_bot": True}, source="autopilot")
+            return ["kasa autostart_bot ac"]
+        return []
 
     def _apply_spread(self) -> list[str]:
         opt = self.optimizer

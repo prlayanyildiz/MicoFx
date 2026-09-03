@@ -1670,7 +1670,7 @@ async function saveAI(patch, flashNode) {
 /* ---------------------------------------------------------------- system */
 
 const SYS_FIELDS = [
-  { k: "target_leverage", label: "Hedef kaldirac (tek dial)", t: "lev" },
+  { k: "max_margin_usage_pct", label: "Marjin kullanimi % (tek dial)", t: "num", step: 1, min: 0, max: 100 },
   { k: "kasa_auto_enabled", label: "Kasa auto (inline lot+concurrent)", t: "bool" },
   { k: "daily_loss_pct", label: "Gunluk zarar freni % (0=kapali)", t: "num", step: 0.5, min: 0, max: 100 },
   { k: "autopilot_enabled", label: "Gelir autopilot (sistem ici)", t: "bool" },
@@ -1681,7 +1681,6 @@ const SYS_FIELDS = [
 const SYS_FIELDS_ADVANCED = [
   { k: "lot_multiplier", label: "Lot carpani", t: "num", step: 0.05, min: 0.1, max: 3, live: "lot" },
   { k: "max_concurrent_risk_pct", label: "Es-zamanli risk %", t: "num", step: 1, min: 0, max: 100, live: "conc" },
-  { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
 ];
 
 // Broker path lives on the connection card, not in Sistem Ayarlari -

@@ -1,4 +1,4 @@
-"""target_leverage feeds kasa but never exceeds the live broker leverage."""
+"""target_leverage is retired from the panel; kasa_leverage helper stays capped."""
 from __future__ import annotations
 
 import re
@@ -16,12 +16,16 @@ APP_JS = (ROOT / "micofx" / "web" / "static" / "app.js").read_text(encoding="utf
 
 def _sys_keys() -> set[str]:
     start = APP_JS.index("const SYS_FIELDS")
-    end = APP_JS.index("const SYS_FIELDS_ADVANCED")
+    end = APP_JS.index("const MT5_PATH_FIELDS")
     return set(re.findall(r'\{ k:\s*"([^"]+)"', APP_JS[start:end]))
 
 
-def test_target_leverage_is_on_the_system_panel():
-    assert "target_leverage" in _sys_keys()
+def test_target_leverage_is_not_on_the_system_panel():
+    assert "target_leverage" not in _sys_keys()
+
+
+def test_margin_pct_is_primary_dial():
+    assert "max_margin_usage_pct" in _sys_keys()
 
 
 def test_zero_target_uses_broker_leverage():
@@ -32,8 +36,3 @@ def test_zero_target_uses_broker_leverage():
 def test_target_is_capped_to_broker_ceiling():
     sys = MagicMock(target_leverage=1000.0)
     assert kasa_leverage(sys, {"leverage": 200}) == 200.0
-
-
-def test_target_below_broker_is_honoured():
-    sys = MagicMock(target_leverage=100.0)
-    assert kasa_leverage(sys, {"leverage": 200}) == 100.0

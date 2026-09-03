@@ -1,17 +1,16 @@
-"""Leverage-driven kasa targets — shared by inline sizing and autopilot margin.
+"""Margin%-driven kasa targets — shared by inline sizing and autopilot.
 
-Dial ``target_leverage`` (broker-capped) chooses buying power. Pure function;
-no Store / MT5. ``lot_for`` / ``can_open`` call this live; autopilot may still
-patch ``max_margin_usage_pct`` on its slow tick.
+Operator dial is ``max_margin_usage_pct`` only. Broker leverage comes from
+``order_calc_margin`` inside ``_margin_lot_ceiling``. Pure function; no MT5.
 """
 from __future__ import annotations
 
 from typing import Any
 
-DEPLOY_FRAC = 0.80
 LOT_MULT_MIN = 0.3
 LOT_MULT_MAX = 1.6
-LOT_REF_LEV = 40.0
+# Equity-tier lot at this margin% reads as 1.0× aggression.
+MARGIN_REF_PCT = 80.0
 RISK_PCT = 2.0
 CONC_MIN = 5.0
 CONC_HARD_MAX = 50.0
@@ -42,58 +41,54 @@ def quantize_lot_mult(value: float, step: float = 0.02) -> float:
 def compute_kasa_targets(
     *,
     equity: float,
-    leverage: float,
     n_enabled: int,
-    global_free_slots: int = 1,
-    margin_usage_pct: float = 0.0,
-    max_margin_usage_pct: float = 85.0,
+    max_margin_usage_pct: float,
     lot_multiplier: float = 1.0,
     max_concurrent_risk_pct: float = 10.0,
+    global_free_slots: int = 1,
+    margin_usage_pct: float = 0.0,
     zero_lot: int = 0,
     lot_blocks: int = 0,
+    # Unused leftovers kept so older call sites (leverage=) do not TypeError.
+    leverage: float = 0.0,
     broker_leverage: float = 0.0,
     base_notional_at_1x: float = 0.0,
 ) -> dict[str, Any]:
-    """Return recommended knobs. ``leverage`` is already dial-capped."""
+    """Derive lot_mult + concurrent from margin% (and equity / n)."""
     eq = max(0.0, float(equity or 0.0))
-    eff_lev = max(1.0, float(leverage or 1.0))
-    broker = max(eff_lev, float(broker_leverage or 0.0) or eff_lev)
     n = max(1, int(n_enabled or 1))
     lot_cur = float(lot_multiplier or 1.0)
-    aggression = min(1.0, eff_lev / broker)
-    buying_power = eq * eff_lev
-    target_deploy = DEPLOY_FRAC * buying_power
+    try:
+        pct = float(max_margin_usage_pct or 0.0)
+    except (TypeError, ValueError):
+        pct = MARGIN_REF_PCT
+    pct = max(0.0, min(100.0, pct))
+    # 0 = uncapped margin path in the engine → treat as full aggression.
+    if pct <= 0:
+        aggression = 1.0
+        pct = MARGIN_REF_PCT
+    else:
+        aggression = min(1.25, pct / MARGIN_REF_PCT)
 
     tier = equity_lot_base(eq)
-    if base_notional_at_1x > 1e-6:
-        lot_target = max(LOT_MULT_MIN, min(LOT_MULT_MAX,
-                                           target_deploy / base_notional_at_1x))
-    else:
-        lot_target = max(
-            LOT_MULT_MIN,
-            min(LOT_MULT_MAX, tier * (eff_lev / LOT_REF_LEV)),
-        )
-    lot_target = quantize_lot_mult(lot_target)
+    lot_target = quantize_lot_mult(tier * max(aggression, LOT_MULT_MIN / max(tier, 0.01)))
 
-    margin_target = round(min(85.0, max(
-        40.0,
-        DEPLOY_FRAC * 100.0 * (0.45 + 0.55 * aggression),
-    )), 1)
-    if aggression >= 0.8 and eq < 500:
-        margin_target = max(margin_target, 78.0)
+    # Autopilot may still nudge margin% toward a soft band; with the dial as
+    # the operator source of truth, targets.margin mirrors the dial (no rewrite
+    # unless heal / flat-growth rules fire).
+    margin_target = round(pct, 1) if pct > 0 else 80.0
 
     per_trade = RISK_PCT * lot_target
     conc_max = min(CONC_HARD_MAX, 15.0 + aggression * 40.0)
     conc_target = round(min(conc_max, max(CONC_MIN, n * per_trade * 1.1)), 1)
 
-    if global_free_slots == 0 and margin_usage_pct >= max_margin_usage_pct * 0.9:
+    if global_free_slots == 0 and margin_usage_pct >= pct * 0.9 and pct > 0:
         lot_target = quantize_lot_mult(max(LOT_MULT_MIN, lot_cur * 0.85))
 
     heal_notes: list[str] = []
     if zero_lot > 0:
-        margin_target = round(min(85.0, margin_target + 5.0 + zero_lot * 2.0), 1)
         lot_target = quantize_lot_mult(min(1.2, lot_target + 0.05 * zero_lot))
-        heal_notes.append(f"lot=0 sembol {zero_lot} -> marj/lot artir")
+        heal_notes.append(f"lot=0 sembol {zero_lot} -> lot artir")
 
     patch: dict[str, Any] = {}
     reasons: list[str] = list(heal_notes)
@@ -103,19 +98,14 @@ def compute_kasa_targets(
         and zero_lot == 0
     )
 
-    if abs(margin_target - float(max_margin_usage_pct or 0)) >= 1.0:
-        if not (flat_growth and margin_target < float(max_margin_usage_pct or 0)):
-            patch["max_margin_usage_pct"] = margin_target
-            reasons.append(
-                f"marj %{max_margin_usage_pct:g}->%{margin_target:g} "
-                f"(alim gucu ${buying_power:.0f})")
-
+    # Do not PATCH margin% — it is the operator dial. Only lot/conc targets
+    # are computed for inline use; autopilot may ignore lot/conc patches.
     if abs(lot_target - lot_cur) >= 0.05:
         if not (flat_growth and lot_target < lot_cur):
             patch["lot_multiplier"] = lot_target
             reasons.append(
                 f"lot_mult {lot_cur}->{lot_target} "
-                f"(1:{int(eff_lev)} / eq ${eq:.0f})")
+                f"(marj %{pct:g} / eq ${eq:.0f})")
 
     if abs(conc_target - float(max_concurrent_risk_pct or 0)) >= 2.0:
         patch["max_concurrent_risk_pct"] = conc_target
@@ -132,11 +122,13 @@ def compute_kasa_targets(
         },
         "reasons": reasons,
         "equity": eq,
-        "leverage": eff_lev,
-        "broker_leverage": broker,
+        "margin_pct": pct,
         "aggression": round(aggression, 4),
-        "buying_power": round(buying_power, 2),
         "n_enabled": n,
         "global_free_slots": global_free_slots,
         "margin_usage_pct": margin_usage_pct,
+        # Compat keys for older log lines / tests.
+        "leverage": float(leverage or broker_leverage or 0.0),
+        "broker_leverage": float(broker_leverage or leverage or 0.0),
+        "buying_power": round(eq * (pct / 100.0), 2),
     }

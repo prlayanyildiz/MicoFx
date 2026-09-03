@@ -1,4 +1,4 @@
-"""kasa_auto must not shrink lot/margin on a flat book with headroom."""
+"""kasa_auto must not shrink lot on a flat book with headroom."""
 from __future__ import annotations
 
 import importlib.util
@@ -17,30 +17,26 @@ def _load():
     return mod
 
 
-def test_flat_growth_mode_skips_downward_patch():
+def test_flat_growth_mode_skips_downward_lot_patch():
     mod = _load()
-    # Current knobs already ABOVE leverage-driven targets → no shrink on flat.
     plan = mod.compute_kasa_targets(
         equity=200.0,
-        leverage=50.0,
         n_enabled=4,
         global_free_slots=1,
         margin_usage_pct=0.0,
-        max_margin_usage_pct=81.0,
+        max_margin_usage_pct=80.0,
         lot_multiplier=1.5,
         max_concurrent_risk_pct=46.0,
         zero_lot=0,
-        broker_leverage=500.0,
     )
-    assert "max_margin_usage_pct" not in plan["patch"]
     assert "lot_multiplier" not in plan["patch"]
+    assert "max_margin_usage_pct" not in plan["patch"]
 
 
-def test_high_leverage_small_account_gets_higher_margin_floor():
+def test_compute_does_not_rewrite_operator_margin_dial():
     mod = _load()
     plan = mod.compute_kasa_targets(
         equity=200.0,
-        leverage=500.0,
         n_enabled=4,
         global_free_slots=1,
         margin_usage_pct=0.0,
@@ -48,7 +44,6 @@ def test_high_leverage_small_account_gets_higher_margin_floor():
         lot_multiplier=0.7,
         max_concurrent_risk_pct=46.0,
         zero_lot=0,
-        broker_leverage=500.0,
     )
-    assert plan["targets"]["max_margin_usage_pct"] >= 78.0
-    assert plan["patch"].get("max_margin_usage_pct", 0) >= 78.0
+    assert "max_margin_usage_pct" not in plan["patch"]
+    assert plan["targets"]["max_margin_usage_pct"] == 55.0

@@ -1,4 +1,4 @@
-"""Inline kasa: lot_for / can_open use live dial, not 15m patches."""
+"""Inline kasa: lot_for uses margin%-driven live dial."""
 from __future__ import annotations
 
 import math
@@ -23,7 +23,7 @@ class _System:
     max_total_positions = 100
     daily_loss_pct = 0.0
     kasa_auto_enabled = True
-    target_leverage = 50.0
+    target_leverage = 0.0
 
 
 class _Store:
@@ -70,15 +70,15 @@ def _cfg(i: int) -> SymbolConfig:
     return c
 
 
-def test_live_lot_mult_follows_leverage_dial():
+def test_live_lot_mult_follows_margin_pct():
     store = _Store([_cfg(i) for i in range(6)])
     rm = RiskManager(store, _Client())
     acc = {"equity": 247.0, "margin_free": 247.0, "margin": 0.0, "leverage": 500}
     lo = rm.live_lot_multiplier(acc, [])
-    store.system.target_leverage = 500.0
+    store.system.max_margin_usage_pct = 95.0
     hi = rm.live_lot_multiplier(acc, [])
     assert hi >= lo
-    assert lo >= 0.8  # ~1.15 at lev 50
+    assert lo >= 0.8
 
 
 def test_live_lot_mult_pin_keeps_stored():

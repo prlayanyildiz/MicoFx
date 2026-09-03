@@ -20,7 +20,6 @@ KEEP_SYS = (
     "daily_loss_pct",
     "lot_multiplier",
     "kasa_auto_enabled",
-    "target_leverage",
 )
 
 HANDS_OFF_SYS = (

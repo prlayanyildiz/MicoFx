@@ -1,4 +1,4 @@
-"""target_leverage=50 must not zero index lots via N/broker margin shrink."""
+"""Margin% dial sizes the book; index min-lots are not starved."""
 from __future__ import annotations
 
 import math
@@ -22,7 +22,7 @@ class _System:
     max_total_positions = 100
     daily_loss_pct = 0.0
     kasa_auto_enabled = True
-    target_leverage = 50.0
+    target_leverage = 50.0  # unread leftover
 
 
 class _Store:
@@ -35,8 +35,6 @@ class _Store:
 
 
 class _IndexClient:
-    """US30-like: 0.1 min lot needs ~$80 margin (not 1:500 forex)."""
-
     def info(self, symbol):
         return {"volume_min": 0.1, "volume_max": 50.0, "volume_step": 0.1,
                 "point": 1.0, "tick_size": 1.0, "tick_value": 1.0}
@@ -56,7 +54,7 @@ class _IndexClient:
         return round(max(0.0, min(50.0, vol)), 1)
 
     def margin_for(self, symbol, lot, side="buy"):
-        return 800.0 * float(lot)  # $80 per 0.1
+        return 800.0 * float(lot)
 
 
 def _cfg(i: int) -> SymbolConfig:
@@ -67,14 +65,22 @@ def _cfg(i: int) -> SymbolConfig:
     return c
 
 
-def test_lev50_does_not_zero_index_min_lot():
-    """Old bug: equity*(50/500)=$25 / 6 < $80 min → lot 0.00."""
+def test_margin80_does_not_zero_index_min_lot():
     store = _Store([_cfg(i) for i in range(6)])
     rm = RiskManager(store, _IndexClient())
     acc = {"equity": 247.0, "margin_free": 247.0, "margin": 0.0, "leverage": 500}
-    # Wide stop so 1R does not bind under min lot overshoot skip wrongly —
-    # use tight stop so r_cap is large vs margin share.
     lot, note = rm.lot_for(
         _cfg(0), sl_distance=1.0, balance=247.0,
         account=acc, positions=[])
     assert lot >= 0.1, f"expected min lot, got {lot} ({note})"
+
+
+def test_margin40_smaller_or_equal_than_margin80():
+    store = _Store([_cfg(i) for i in range(6)])
+    rm = RiskManager(store, _IndexClient())
+    acc = {"equity": 247.0, "margin_free": 247.0, "margin": 0.0, "leverage": 500}
+    store.system.max_margin_usage_pct = 80.0
+    hi, _ = rm.lot_for(_cfg(0), sl_distance=1.0, balance=247.0, account=acc, positions=[])
+    store.system.max_margin_usage_pct = 40.0
+    lo, _ = rm.lot_for(_cfg(0), sl_distance=1.0, balance=247.0, account=acc, positions=[])
+    assert lo <= hi + 1e-9

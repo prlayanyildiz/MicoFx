@@ -396,86 +396,64 @@ class RiskManager:
             return False
         return until > time.time()
 
-    def _broker_leverage(self, account: dict[str, Any] | None) -> float:
-        try:
-            lev = float((account or {}).get("leverage") or 0.0)
-        except (TypeError, ValueError):
-            lev = 0.0
-        return max(1.0, lev)
-
-    def _effective_book_leverage(self, account: dict[str, Any] | None) -> float:
-        """Dial capped to broker. 0 dial = full broker leverage."""
-        broker = self._broker_leverage(account)
-        try:
-            want = float(getattr(self.store.system, "target_leverage", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            want = 0.0
-        if want <= 0:
-            return broker
-        return min(want, broker)
-
     def live_lot_multiplier(self, account: dict[str, Any] | None = None,
                             positions: list[dict[str, Any]] | None = None) -> float:
-        """Inline kasa lot dial, or stored value when OFF / pinned."""
+        """Inline kasa lot dial from margin%, or stored when OFF / pinned."""
         sys_cfg = self.store.system
         stored = max(0.1, float(getattr(sys_cfg, "lot_multiplier", 1.0) or 1.0))
         if not bool(getattr(sys_cfg, "kasa_auto_enabled", True)):
             return stored
         if self._setting_pin_active(self._KASA_PIN_LOT):
             return stored
-        # No broker leverage in the account picture (unit tests, warm boot)
-        # → keep stored rather than inventing 1:1 aggression.
-        if account is None or not (account.get("leverage") or 0):
-            return stored
-        n = self._vacant_enabled_count(positions)
         try:
             equity = float((account or {}).get("equity") or 0.0)
         except (TypeError, ValueError):
             equity = 0.0
         if equity <= 0:
             return stored
+        try:
+            margin_pct = float(getattr(sys_cfg, "max_margin_usage_pct", 0) or 0)
+        except (TypeError, ValueError):
+            margin_pct = 0.0
+        # Uncapped margin (0) → keep stored mult for the 1R cap identity.
+        if margin_pct <= 0:
+            return stored
+        n = self._vacant_enabled_count(positions)
         plan = compute_kasa_targets(
             equity=equity,
-            leverage=self._effective_book_leverage(account),
             n_enabled=n,
-            broker_leverage=self._broker_leverage(account),
+            max_margin_usage_pct=margin_pct,
             lot_multiplier=stored,
             max_concurrent_risk_pct=float(
                 getattr(sys_cfg, "max_concurrent_risk_pct", 0) or 0),
-            max_margin_usage_pct=float(
-                getattr(sys_cfg, "max_margin_usage_pct", 0) or 0),
         )
         return float(plan["targets"]["lot_multiplier"])
 
     def live_concurrent_pct(self, account: dict[str, Any] | None = None,
                             positions: list[dict[str, Any]] | None = None,
                             lot_mult: float | None = None) -> float:
-        """Inline concurrent risk %, or stored when OFF / pinned / 0=off."""
+        """Inline concurrent risk %, or stored when OFF / pinned."""
         sys_cfg = self.store.system
         stored = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
         if not bool(getattr(sys_cfg, "kasa_auto_enabled", True)):
             return stored
         if self._setting_pin_active(self._KASA_PIN_CONC):
             return stored
-        if account is None or not (account.get("leverage") or 0):
-            return stored
-        n = self._vacant_enabled_count(positions)
         try:
             equity = float((account or {}).get("equity") or 0.0)
         except (TypeError, ValueError):
             equity = 0.0
         if equity <= 0:
             return stored
+        n = self._vacant_enabled_count(positions)
         plan = compute_kasa_targets(
             equity=equity,
-            leverage=self._effective_book_leverage(account),
             n_enabled=n,
-            broker_leverage=self._broker_leverage(account),
+            max_margin_usage_pct=float(
+                getattr(sys_cfg, "max_margin_usage_pct", 0) or 0),
             lot_multiplier=float(lot_mult if lot_mult is not None else
                                  self.live_lot_multiplier(account, positions)),
             max_concurrent_risk_pct=stored,
-            max_margin_usage_pct=float(
-                getattr(sys_cfg, "max_margin_usage_pct", 0) or 0),
         )
         return float(plan["targets"]["max_concurrent_risk_pct"])
 
@@ -573,9 +551,8 @@ class RiskManager:
         """Lots that still fit this name's share of remaining margin.
 
         Book budget is equity × max_margin_usage_pct minus used, split across
-        vacant enabled names, then × denetci ``ai_scale``. Dial aggression is
-        ``live_lot_multiplier`` (not a second shrink of this margin budget —
-        N/broker as margin starved index min-lots at target_leverage=50).
+        vacant enabled names, then × denetci ``ai_scale``. Broker leverage is
+        inside ``margin_for`` (per-instrument). Soft %95 lid when kasa is ON.
         Leftover ``cfg.max_margin_pct`` is unread (operator 28.08). None = no
         extra cap.
         """
@@ -621,104 +598,6 @@ class RiskManager:
         if share + 1e-12 < need and whole + 1e-12 >= need:
             share = whole
         return min(broker_ceiling, unit * (share / need))
-
-    def _mid_price(self, symbol: str) -> float:
-        tick = None
-        try:
-            tick = self.client.tick(symbol)
-        except (TypeError, ValueError, AttributeError):
-            tick = None
-        if not tick:
-            return 0.0
-        try:
-            bid = float(tick.get("bid") or 0.0)
-            ask = float(tick.get("ask") or 0.0)
-        except (TypeError, ValueError, AttributeError):
-            return 0.0
-        if bid > 0 and ask > 0:
-            return (bid + ask) / 2.0
-        return bid or ask or 0.0
-
-    def _notional_per_lot(self, symbol: str, price: float | None = None) -> float:
-        """Approx position value of 1.0 lot (mppu × mid)."""
-        px = float(price or 0.0) or self._mid_price(symbol)
-        try:
-            mppu = float(self.client.money_per_price_unit(symbol, 1.0) or 0.0)
-        except (TypeError, ValueError, AttributeError):
-            return 0.0
-        if px <= 0 or mppu <= 0:
-            return 0.0
-        return mppu * px
-
-    def _open_book_notional(self, positions: list[dict[str, Any]] | None) -> float:
-        total = 0.0
-        for pos in positions or ():
-            sym = str(pos.get("symbol") or "")
-            try:
-                vol = float(pos.get("volume") or 0.0)
-            except (TypeError, ValueError):
-                continue
-            if not sym or vol <= 0:
-                continue
-            try:
-                px = float(pos.get("price_current") or 0.0)
-            except (TypeError, ValueError):
-                px = 0.0
-            if px <= 0:
-                px = self._mid_price(sym)
-            try:
-                mppu = float(self.client.money_per_price_unit(sym, vol) or 0.0)
-            except (TypeError, ValueError, AttributeError):
-                continue
-            if mppu > 0 and px > 0:
-                total += mppu * px
-        return total
-
-    def _notional_lot_ceiling(self, cfg: SymbolConfig,
-                              account: dict[str, Any] | None,
-                              broker_ceiling: float,
-                              positions: list[dict[str, Any]] | None = None,
-                              ) -> float | None:
-        """Lots that fit this name's share of equity×N notional (kasa ON).
-
-        Budget is true notional (equity × dial), not margin-at-account-leverage.
-        Conversion uses mppu×price so index min-lots are not starved by mixing
-        1:500 account math with 1:20 instrument margin.
-        """
-        if not account:
-            return None
-        if not bool(getattr(self.store.system, "kasa_auto_enabled", True)):
-            return None
-        if not (account.get("leverage") or 0):
-            return None
-        try:
-            equity = float(account.get("equity") or 0.0)
-        except (TypeError, ValueError):
-            return None
-        if equity <= 0:
-            return None
-        N = self._effective_book_leverage(account)
-        target = equity * N
-        remaining = max(0.0, target - self._open_book_notional(positions))
-        n = self._vacant_enabled_count(positions)
-        share = remaining / n
-        per_lot = self._notional_per_lot(cfg.symbol)
-        if per_lot <= 0:
-            return None
-        # Same small-book escape as margin: if one share cannot fund min lot
-        # but the whole notional budget can, size on the whole remainder so
-        # N=50 on a 6-name index book still opens one ticket instead of
-        # zeroing every name.
-        need_lots = 0.0
-        try:
-            info = self.client.info(cfg.symbol) or {}
-            need_lots = float(info.get("volume_min") or 0.0)
-        except (TypeError, ValueError, AttributeError):
-            need_lots = 0.0
-        if need_lots > 0 and share + 1e-12 < need_lots * per_lot:
-            if remaining + 1e-12 >= need_lots * per_lot:
-                share = remaining
-        return min(broker_ceiling, share / per_lot)
 
     def lot_for(self, cfg: SymbolConfig, sl_distance: float, balance: float,
                ai_scale: float = 1.0, account: dict[str, Any] | None = None,
@@ -782,8 +661,6 @@ class RiskManager:
         auto = self._margin_lot_ceiling(
             cfg, account, side, floor, ceiling, positions=positions,
             ai_scale=ai_scale)
-        notion = self._notional_lot_ceiling(
-            cfg, account, ceiling, positions=positions)
         if auto is not None:
             try:
                 stored = float(getattr(cfg, "risk_percent", 0.0) or 0.0)
@@ -807,12 +684,7 @@ class RiskManager:
             if auto + 1e-12 < floor:
                 return 0.0, (f"lot sifir ({note}, marj payi {auto:g} "
                              f"< min {floor:g}), islem atlandi")
-            if notion is not None and notion + 1e-12 < floor:
-                return 0.0, (f"lot sifir ({note}, notional pay {notion:g} "
-                             f"< min {floor:g}), islem atlandi")
             lot = min(auto, r_cap, ceiling)
-            if notion is not None:
-                lot = min(lot, notion)
             if lot + 1e-12 < floor:
                 # Min lot may overshoot the 1R cap by a broker-granularity
                 # factor. Past that, skip — do NOT fall through to the full
@@ -820,8 +692,6 @@ class RiskManager:
                 # book per index fill).
                 if floor <= r_cap * self.MAX_MIN_LOT_OVERSHOOT + 1e-12:
                     lot = min(floor, auto, ceiling)
-                    if notion is not None:
-                        lot = min(lot, notion)
                 else:
                     return 0.0, (f"lot sifir ({note}, 1R tavan {r_cap:g} "
                                  f"< min {floor:g}), islem atlandi")
@@ -830,11 +700,8 @@ class RiskManager:
                              f"< min {floor:g}), islem atlandi")
             if abs(lot - auto) <= abs(lot - r_cap) + 1e-12:
                 note += f" | marj pay {auto:.3f}"
-            if r_cap + 1e-12 < auto and (notion is None or r_cap <= notion + 1e-12):
+            if r_cap + 1e-12 < auto:
                 note += f" | 1R tavan {r_cap:.3f}"
-            if notion is not None and notion + 1e-12 < auto and notion + 1e-12 < r_cap:
-                note += (f" | notional N={self._effective_book_leverage(account):g} "
-                         f"pay {notion:.3f}")
             try:
                 lev = int((account or {}).get("leverage") or 0)
             except (TypeError, ValueError):
@@ -1326,5 +1193,4 @@ class RiskManager:
             "max_concurrent_risk_pct_stored": float(
                 getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0),
             "conc_pinned": self._setting_pin_active(self._KASA_PIN_CONC),
-            "effective_leverage": self._effective_book_leverage(account),
         }
