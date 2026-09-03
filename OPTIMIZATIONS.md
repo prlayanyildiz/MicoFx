@@ -1,7 +1,17 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
+**03.09 23:xx (gece oturumu)** — weak-symbol kampanyasi + 3 bleed kaynagi. Detay EK22.
+Kisa: JPN225 (7/24 +143.7R), NAS100 (sess 15-21 +101R), US30 (msa0.08+adx20 +25R),
+SpotBrent re-enabled (msa0.05+mtf+NY 13-21 +21.8R), XAUUSD/BTC/GER dokunulmadi.
+Agg charged score ~609, proj costed ~%80-108 (620'lik sayi holdout_days=36 bug'iydi,
+FIX'li). Landed: F6 waiver, `_beats_incumbent` paper->charged, seans pre-step +
+fan-out (WFO axis) + sticky, `max_spread_atr` WFO axis, spread send-recheck,
+sl_atr_mult search floor >=0.9, adx grid [0,12,18,25], holdout_days fix, proj
+min-window guard, min-lot 4.5x, priority idle-weight, MIN_COSTED_N. HEAD ~`b3d9070`.
+**SABAH:** live SL patch (NAS/JPN/XAU) + restart (spread/hours/SL-floor PID) +
+XAUUSD trail_start charged sweep + operator onaylari.
+Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
 NAS/XAU mtf, JPN burst/M30, US30 channel re-stamp hold +43, GER/BTC
 incumbent max (no-candidate), SpotBrent **disabled FINAL**. Concurrent
 **10%**, daily_loss **3%**, channel trail grid DB through **2.8**.
@@ -7324,3 +7334,60 @@ Arama gürültüsünü kesmek icin cikarildi.
 
 Gelir icin kural: **stoch WF skoru kovalama** (overfit); sembol basina bu
 dort aileden olculen en iyiyi uygula.
+
+---
+
+### EK22 — GECE OTURUMU (03.09 ~15:00–24:00, Claude ölçüm + Cursor implement)
+
+**A. Weak-symbol kampanyası — "ölü" sanılan semboller yanlış-seans/yanlış-spread-cap'ti**
+`holdout_cost.charged_holdout` (apply-gate modeli) ile ölçüldü:
+
+| sembol | eski | düzeltme | charged sonuç |
+|---|---|---|---|
+| US30 | msa 0.02 (bayat), seans 08-16 | msa 0.08 + adx_min 20 | +25R n240 PF1.20 (applied) |
+| NAS100 | seans yok, msa 0.06 | sess 15:00-21:00 patch | PF1.05→1.19, +57→+101R |
+| JPN225 | burst/M30 gündüz seans | 7/24 (session filtresi ZARAR veriyordu) | +143.7R n373 PF1.56 |
+| SpotBrent | "disabled FINAL", msa 0.25 | msa **0.05** + mtf/M30 + NY 13-21 | +21.8R PF1.16, re-enabled (probe) |
+| XAUUSD | mtf/M15 7/24 | dokunulmadı (zaten en iyi) | +246R PF1.31 |
+| GER40 | channel_break/M30 adx0 | adx_min 15 (rutin) | +72.8R PF1.34 |
+
+Agg charged score ~609. Kalıp: spread'i seans-bağımlı equity index'ler (US30/NAS100)
+→ dar pencere kazandırır; seanslar arası trend / 7-24 enstrüman (JPN225/XAUUSD/BTC)
+→ tüm-saat optimal, kısıtlamak zarar.
+
+**B. Altyapı fix'leri (Cursor, `52eef9e`/`def4682`/`3ce1513`/`58af8a9`)**
+- `_beats_incumbent`: charged aday paper incumbent skoruyla yarışıyordu (NAS bar 116
+  vs gerçek charged 32) → `holdout_costed` kullan.
+- F6 `positive_ratio` binary → `_f6_holdout_waiver` (net_r>40, PF≥1.15, dd<net).
+- Seans pre-step → WFO fan-out ekseni (`_session_search_shortlist`, max 3) + sticky
+  (`_session_sticky_eligible` n≥25+net>0, DD-escape near-tie).
+- `max_spread_atr` WFO ekseni (`spread_cap_search_axis` p40/p55/p70 + 0.04 floor).
+- `sl_atr_mult` search floor ≥0.9 (`floor_sl_atr_search_axis`); shipped grid
+  `[0.9,1.2,1.5,2.0,2.5]`.
+- adx_min grid `[0,12,18,25]`.
+- **holdout_days bug**: force-measure path `lookback_days/segments`=36 yazıyordu →
+  gerçek segment span (`bars.time[hi-1]-bars.time[lo]`). Projeksiyon %202→%80-108.
+- Projeksiyon min-window guard (MIN_PROJ_DAYS 90) + plausibility note + hover.
+- min-lot concurrent overshoot 3.5→4.5; priority idle-weight 0.55→0.9 + expectancy
+  ×2→×3; MIN_COSTED_N 40 (thin costed stamp bloğu).
+- pr=None (force restamp'lerde score_consistency yanlış ölçekti → None).
+
+**C. 3 realised-P&L bleed kaynağı (329 otopsi, never-favorable −95R ayrıştırıldı)**
+1. **PREMATURE STOP** — 59 işlem, −58.2R. Stop sonrası 1 saat içinde fiyat entry'yi
+   geçip ≥0.8R toparlıyor (yön doğruydu). Sebep: sl_atr_mult < 1.0 (NAS100 0.5,
+   JPN225 0.7, XAU 0.5) — M30 gürültüsü içinde stop. + US30 (sl 2.0) spread-gate leak.
+   Fix: SL search floor ≥0.9 (landed); **live NAS/JPN/XAU SL patch = SABAH** (bar-backtest
+   sub-1.0 stop'u ödüllendiriyor, canlı otopsi çürütüyor — çelişki).
+2. **SPREAD-GATE leak** — 152 işlem spread_atr>0.04'te −52.5R (US30 −24.4, JPN225 −14.4).
+   `max_spread_atr` gate'in ÜSTÜNDE giriyor. Kök: (i) autopsy ATR-basis vs gate ATR
+   uyumsuzluğu, (ii) gate ile order_send arası spread genişlemesi. Fix: `def4682`
+   send-öncesi fresh-tick re-check → abort. Restart'ta iner.
+3. **CHOP-DEATH entry** — 43 işlem, −36.7R. Gerçek false-breakout değil (0/43'ü sert
+   ters gitti), yön-belirsiz chop'ta öldü. Kök: book-wide saat kalitesi —
+   9h/11h/14h = −29.5R PF<0.25; 23h EN İYİ (PF 4.44). Lever: `blocked_entry_hours`
+   (mekanizma + WFO axis `backtest.py:1263` ZATEN VAR, hiç populate edilmemiş).
+   Öneri: WFO axis olarak aktifleştir (A2 kalıbı, per-symbol hourly-PF'den aday).
+
+**SABAH KUYRUĞU:** (1) live SL patch NAS/JPN/XAU + restart (spread + A1/hours PID'e
+iner), (2) `blocked_entry_hours` WFO axis, (3) operator onayları (SL grid tabanı,
+patch), (4) SpotBrent probe + realised vs ~%80 eğri izleme.
