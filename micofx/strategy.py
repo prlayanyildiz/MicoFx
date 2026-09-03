@@ -589,7 +589,9 @@ _FAMILIES = {
 
 # Exit / live-entry axes the family function never names. The search and the
 # panel still own them: they are enforced in simulate/engine, not in compute().
-ENGINE_OPT_FIELDS = frozenset(EXIT_RISK_FIELDS) | {"max_spread_atr", "min_atr_ratio"}
+ENGINE_OPT_FIELDS = frozenset(EXIT_RISK_FIELDS) | {
+    "max_spread_atr", "min_atr_ratio", "blocked_entry_hours",
+}
 
 
 def _p_fields_reachable(fn, seen: set | None = None) -> set[str]:

@@ -55,6 +55,64 @@ SEARCH_SESSION_WINDOWS: list[list[dict[str, str]]] = [
 # Cap how many clocks one symbol fans into. Pre-step filters; WFO+F6 picks.
 _SESSION_SEARCH_MAX = 3
 
+# Book-wide weak entry hours, worst-first (Claude 03.09 23:36 autopsy PF).
+# Per-symbol WFO still chooses which prefix (if any) to land; [] is always on.
+_DEFAULT_WEAK_ENTRY_HOURS: tuple[int, ...] = (11, 9, 14, 6, 3, 17)
+
+
+def _norm_entry_hours(raw: Any) -> list[int]:
+    out: list[int] = []
+    if not isinstance(raw, (list, tuple)):
+        return out
+    for h in raw:
+        try:
+            ih = int(h)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= ih <= 23 and ih not in out:
+            out.append(ih)
+    return sorted(out)
+
+
+def blocked_hour_search_axis(
+        weak_hours: list[int] | tuple[int, ...] | None = None,
+        live_blocked: list[int] | None = None,
+        *,
+        max_sets: int = 4) -> list[list[int]]:
+    """Discrete blocked-hour sets for the sweep. Always includes [].
+
+    Nested prefixes of ``weak_hours`` (worst-first) give the plateau walker
+    an ordered neighbourhood; live blocks stay in the bag so a prior apply
+    is not searched away by omission.
+    """
+    ordered: list[int] = []
+    src = (list(weak_hours) if weak_hours is not None
+           else list(_DEFAULT_WEAK_ENTRY_HOURS))
+    for h in src:
+        try:
+            ih = int(h)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= ih <= 23 and ih not in ordered:
+            ordered.append(ih)
+    live = _norm_entry_hours(live_blocked)
+    out: list[list[int]] = [[]]
+    seen: set[tuple[int, ...]] = {()}
+    if live:
+        key = tuple(live)
+        if key not in seen:
+            seen.add(key)
+            out.append(list(key))
+    for n in range(1, len(ordered) + 1):
+        if len(out) >= max_sets:
+            break
+        key = tuple(sorted(ordered[:n]))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(list(key))
+    return out
+
 
 def spread_cap_search_axis(bars: Any, point: float, live_cap: float,
                            percentiles: tuple[float, ...] = (40.0, 55.0, 70.0)
@@ -1264,6 +1322,12 @@ class Optimizer:
                         bars, float(info["point"]), live_cap)
                     if axis:
                         grid = {**grid, "max_spread_atr": axis}
+                    # Hour blocks: unused [] book-wide (Claude 23:36 #3).
+                    hour_axis = blocked_hour_search_axis(
+                        live_blocked=list(
+                            getattr(cfg, "blocked_entry_hours", None) or []))
+                    if hour_axis:
+                        grid = {**grid, "blocked_entry_hours": hour_axis}
                     bars_dir = self._ensure_sweep_bars_dir()
                     safe = "".join(
                         ch if ch.isalnum() else "_" for ch in f"{cfg.symbol}_{tf}")
@@ -2717,6 +2781,10 @@ class Optimizer:
             if not hasattr(cfg, key):
                 return False
             cur = getattr(cfg, key)
+            if key == "blocked_entry_hours":
+                if _norm_entry_hours(cur) != _norm_entry_hours(value):
+                    return False
+                continue
             try:
                 if abs(float(cur) - float(value)) > 1e-9:
                     return False
@@ -2755,6 +2823,9 @@ class Optimizer:
             or (timeframe in TIMEFRAMES and timeframe != cfg.timeframe)
         )
         applied_params = {k: v for k, v in params.items() if k in OPT_FIELDS}
+        if "blocked_entry_hours" in applied_params:
+            applied_params["blocked_entry_hours"] = _norm_entry_hours(
+                applied_params.get("blocked_entry_hours"))
         applied_params.update(absent_regime_gates_to_zero(next_strat, applied_params))
         # Last gate before this reaches a live symbol. The API checks the same
         # bounds on its own request bodies, but auto-apply (Optimizer.start

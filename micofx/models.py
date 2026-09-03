@@ -495,6 +495,9 @@ OPT_FIELDS = [
     # the search is allowed to tune the spread/ATR entry gate per symbol rather
     # than leaving it disabled at the group default.
     "max_spread_atr",
+    # Broker-hour entry blocks (Claude 03.09 bleed #3). Already enforced in
+    # session_mask / walk_forward; OPT so apply can land a WFO-chosen set.
+    "blocked_entry_hours",
 ]
 
 # Keys Optimizer.apply() may stage onto pending_primary_patch, and the only
