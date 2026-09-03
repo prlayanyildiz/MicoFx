@@ -1,18 +1,16 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**03.09 10:03** — operator launcher `MICOFX.bat`; GELIR_DONGUSU + start_income_loop deleted.
-Live: daily_loss 3, concurrent 8, lot_mult 0.92; 3 families; trail grid on PID.
+**03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
+NAS/XAU mtf, JPN burst/M30, US30 channel re-stamp hold +43, GER/BTC
+incumbent max (no-candidate), SpotBrent **disabled FINAL**. Concurrent
+**10%**, daily_loss **3%**, channel trail grid DB through **2.8**.
+Holdout sum on stamped configs ~**+698R** / 6. HEAD `9c70438` (US30
+session defaults). Watch: NAS/XAU mtf live, C1/T1 first fill.
+Prior **03.09 10:03** — `MICOFX.bat`; income-loop launchers deleted.
 Prior **03.09 09:52 EK21+** — F4 closed; JPN 01–15.
-Prior **27.08 22:36** operator income-max + **00:06 opt** (armed, not started).
-Prior **22:10** A–Z. Shakeout floor stays; do not teach search it.
-GER40 #367727827 still open **plus** JPN/XAU/NAS fills → no restart.
-Public WFO/TP/pyramid GitHub does not change the exit model. Yellow
-levers (`size_by_edge`, `daily_loss_pct=0`) stay HTTP 400. HEAD
-`681022d`. 00:06 POST is `apply_best=true` `force=true` six symbols
-(NAS first), saved 8 families (arsiv): GER/NAS/XAU ages 6–18 h < 48 h gate;
-`stoch_flip` 28800 is ~2.07 M of the 3.08 M wall. 20:21 died on
-restart-with-tickets, not duration.
+Prior **27.08 22:36** operator income-max. Shakeout floor stays; do not
+teach search it. Public WFO/TP/pyramid does not change the exit model.
 
 ---
 
