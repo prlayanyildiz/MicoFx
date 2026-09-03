@@ -272,7 +272,22 @@ class Store:
                 and float(getattr(cfg, "cost_rank_max", 0.0) or 0.0)
                 and "cost_rank_max" not in opt_fields_read(cfg.strategy)
             )
-            if cfg is not None and (extra or unread_cost):
+            thin_costed = False
+            if cfg is not None:
+                costed = (getattr(cfg, "opt_summary", None) or {}).get(
+                    "holdout_costed")
+                try:
+                    cn = int((costed or {}).get("trades") or 0)
+                except (TypeError, ValueError):
+                    cn = 0
+                from .supervisor import Supervisor
+                if cn and cn < Supervisor.MIN_COSTED_N:
+                    thin_costed = True
+                    summary = dict(getattr(cfg, "opt_summary", None) or {})
+                    summary.pop("holdout_costed", None)
+                    summary.pop("costed_negative", None)
+                    cfg.opt_summary = summary
+            if cfg is not None and (extra or unread_cost or thin_costed):
                 dirty.append(cfg)
         for cfg in dirty:
             self.save_symbol(cfg)

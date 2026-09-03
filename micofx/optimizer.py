@@ -2430,6 +2430,21 @@ class Optimizer:
         # Search regime is the stamp above. Same charged look that
         # already gated the apply; force still stamps the flag.
         if costed is not None:
+            try:
+                costed_n = int(costed.get("trades") or 0)
+            except (TypeError, ValueError):
+                costed_n = 0
+            # Thin charged replay must not land next to a solid paper stamp
+            # (US30 n=17 after revert — Claude 03.09). Same floor as
+            # Supervisor.holdout_expectancy.
+            from .supervisor import Supervisor
+            if costed_n < Supervisor.MIN_COSTED_N:
+                LOG.emit(
+                    f"{symbol}: holdout_costed {costed_n} islem "
+                    f"(<{Supervisor.MIN_COSTED_N}) - damgalanmadi.",
+                    "OPT", symbol)
+                costed = None
+        if costed is not None:
             patch["opt_summary"]["holdout_costed"] = costed
             paper = float((detail.get("holdout") or {}).get("expectancy") or 0.0)
             charged = float(costed.get("expectancy") or 0.0)
@@ -2440,6 +2455,18 @@ class Optimizer:
                     f"maliyetli ayni dilim {charged:+.3f} - "
                     f"canli bu konfigi odeyerek isletecek.",
                     "OPT", symbol)
+        else:
+            # Drop a prior thin costed overlay so readers fall back to paper.
+            prev = ((getattr(cfg, "opt_summary", None) or {})
+                    .get("holdout_costed"))
+            try:
+                prev_n = int((prev or {}).get("trades") or 0)
+            except (TypeError, ValueError):
+                prev_n = 0
+            from .supervisor import Supervisor
+            if prev_n and prev_n < Supervisor.MIN_COSTED_N:
+                patch["opt_summary"].pop("holdout_costed", None)
+                patch["opt_summary"].pop("costed_negative", None)
         # Held across the open-position check + the write so the engine's
         # own entry path (same lock; see Engine.entry_lock) cannot land a
         # fresh fill under cfg.magic in the gap between "nothing open yet"
