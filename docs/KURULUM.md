@@ -99,14 +99,14 @@ emir gonderilmez.
 
 ## 5) MicoFX'i baslat
 
-`start.bat` dosyasina cift tiklayin.
+`MICOFX.bat start` (veya `start.bat`) dosyasina cift tiklayin.
 
 - Hicbir konsol penceresi acik kalmaz (arka planda sessizce calisir).
 - Birkac saniye icinde tarayicinizda otomatik olarak
   `http://127.0.0.1:8900` acilir - bu MicoFX'in web terminalidir.
 - Konsol/log gormek isterseniz onun yerine `start_console.bat`'i kullanin;
   o pencereyi kapatirsaniz uygulama durur.
-- Uygulamayi durdurmak icin `stop.bat`'i kullanin.
+- Uygulamayi durdurmak icin `MICOFX stop` veya `stop.bat` kullanin.
 
 Uygulama ilk acildiginda **izleme modundadir**: fiyatlari, gostergeleri ve
 seans durumunu gunceller ama emir acmaz. Emir acmasi icin Panel sekmesinden

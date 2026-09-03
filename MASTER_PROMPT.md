@@ -126,11 +126,12 @@ Local **MetaTrader 5** multi-symbol autotrader with a **FastAPI + browser termin
 ### Launchers (root — do not move)
 | File | Behavior |
 |---|---|
+| `MICOFX.bat` → `scripts/micofx.ps1` | Operator command: install/start/console/stop/restart/sync/bridge |
 | `start.bat` | Silent background start + open browser + short console then exit |
 | `start_silent.vbs` | Prefer `pythonw.exe` / minimized python `run.py` |
 | `start_console.bat` | Foreground; closing window kills app |
-| `stop.bat` / `restart.bat` | Kill port listener / silent restart |
-| `KUR.bat` → `KUR.ps1` | **The** installer, single entry point: Python + venv at `C:\MicoFX-venv` + pip + desktop shortcuts. Idempotent, re-runnable after `git pull`. |
+| `stop.bat` / `restart.bat` | Kill port listener / silent restart (`app.py` calls `restart.bat`) |
+| `KUR.bat` → `KUR.ps1` | **The** installer (`MICOFX install`) |
 | `run.py` | Real entry |
 
 Env: `MICO_HOST`, `MICO_PORT`, `MICO_OPEN_BROWSER`.
@@ -150,6 +151,7 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
   README.md / MASTER_PROMPT.md
   docs/KULLANIM.md / docs/KURULUM.md
   run.py / backup.py / requirements.txt
+  MICOFX.bat                                # operator: start/stop/restart/sync/bridge
   KUR.bat / KUR.ps1                         # the only installer
   start.bat / start_silent.vbs / start_console.bat / stop.bat / restart.bat
   config/defaults.json
