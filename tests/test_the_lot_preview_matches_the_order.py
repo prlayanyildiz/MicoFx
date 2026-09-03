@@ -98,7 +98,7 @@ class _Client:
 
 # Sized so the raw lot lands either side of the 0.10 broker floor: at the ATR
 # stop (2.0) raw is 0.10 and nothing is flagged; at a 6.0 broker minimum stop it
-# is 0.033, a 3x overshoot, which is what the order would actually take.
+# is 0.033, a 3x overshoot - past MAX_MIN_LOT_OVERSHOOT (1.5) the order skips.
 BALANCE = 100.0
 
 
@@ -161,7 +161,14 @@ def test_the_preview_and_lot_for_agree_on_the_same_symbol():
         lot, _ = rm.lot_for(cfg, sl, BALANCE)
         row = _row(rm)
         floor = 0.10
-        expected = max(floor, row["raw_lot"])
+        raw = float(row["raw_lot"])
+        overshoot = (floor / raw) if raw > 0 else 0.0
+        # T1: past MAX_MIN_LOT_OVERSHOOT the order skips; preview must not
+        # invent a rounded-up fill the live path refuses.
+        if overshoot > RiskManager.MAX_MIN_LOT_OVERSHOOT:
+            expected = 0.0
+        else:
+            expected = max(floor, raw)
         assert abs(lot - round(expected, 2)) < 0.011, (
             f"min_stop={min_stop}: onizleme {expected:.4f}, gercek emir {lot:.4f}")
 

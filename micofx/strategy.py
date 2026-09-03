@@ -13,20 +13,10 @@ from . import indicators as ind
 from .logbus import LOG
 from .models import EXIT_RISK_FIELDS, OPT_FIELDS, SymbolConfig
 
-# Optional compute gates. 0 disables each. When a family starts reading them,
-# leftover panel values from a previous family must not bind unless the last
-# apply stamp named them (see Params.from_config).
-_UNSTAMPED_GATES = (
-    "htf_factor", "adx_min", "adx_max", "min_body_ratio", "atr_pct_min",
-    "cost_rank_max",
-)
+# Regime gates a family reads: if the apply stamp omitted them, zero so a
+# previous family's leftover (SpotBrent adx_max=25 on a burst win) cannot bind.
 _ABSENT_GATE_ZERO = frozenset(
     ("adx_min", "adx_max", "min_body_ratio", "atr_pct_min"))
-# These three just started reading HTF/ADX. Leftover numbers from a previous
-# family were never in their apply stamp (28.08 Brent/NAS). dual_t3/burst
-# already read the same dials; an omitted stamp key there is the live row
-# (GER40 adx_min=15), not a leftover to wipe.
-_GATED_FLIPS = frozenset()
 
 # mtf_pullback: a shallower dip is index noise, not a pullback. Search used
 # to offer 0.3; NAS100 live (27.08) paid 22 SL of 34 closes on that value.
@@ -66,7 +56,6 @@ class Params:
     stoch_length: int = 9
     smooth_k: int = 3
     smooth_d: int = 3
-    stoch_extreme: float = 80.0
     htf_factor: int = 6
     htf_mode: str = "t3"
     atr_period: int = 14
@@ -98,7 +87,7 @@ class Params:
         # (28.08 Brent stoch_flip still carried dual_t3's 15-25 ADX).
         stamped = (getattr(cfg, "opt_summary", None) or {}).get("params")
         if isinstance(stamped, dict) and stamped:
-            base.update(unstamped_gates_to_zero(
+            base.update(absent_regime_gates_to_zero(
                 str(base.get("strategy") or ""), stamped))
         base.update({k: v for k, v in overrides.items() if k in cls.__dataclass_fields__})
         return cls(**base)
@@ -114,7 +103,7 @@ class Params:
         """
         return (self.strategy, self.t3_length, self.t3_volume_factor, self.rsi_length,
                 self.stoch_length, self.smooth_k, self.smooth_d,
-                self.stoch_extreme, self.atr_period, self.adx_period, self.adx_min,
+                self.atr_period, self.adx_period, self.adx_min,
                 self.adx_max, self.htf_factor, self.htf_mode, self.min_body_ratio,
                 self.atr_pct_min,
                 self.pull_fast, self.pull_depth_atr, self.pull_max_bars,
@@ -632,20 +621,6 @@ def opt_fields_read(family: str) -> frozenset[str]:
     if fn is None:
         return frozenset()
     return frozenset(_p_fields_reachable(fn) & set(OPT_FIELDS))
-
-
-def unstamped_gates_to_zero(family: str, stamped: dict[str, Any]) -> dict[str, Any]:
-    """Gates a newly-gated flip reads that the apply stamp never named.
-
-    0 disables each. Search that earned a value puts it in ``stamped``.
-    dual_t3 leftover ADX on a stoch_flip card must not survive; the same
-    ADX sitting on a dual_t3 card is the live dial and must.
-    """
-    if family not in _GATED_FLIPS or not isinstance(stamped, dict):
-        return {}
-    read = opt_fields_read(family)
-    return {name: 0 for name in _UNSTAMPED_GATES
-            if name in read and name not in stamped}
 
 
 def absent_regime_gates_to_zero(family: str, stamped: dict[str, Any]) -> dict[str, Any]:

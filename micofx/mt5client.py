@@ -475,6 +475,32 @@ class MT5Client:
                 continue
         return raw.decode("utf-8", errors="replace")
 
+    def _terminal_day_log(self, exe: Path) -> Path | None:
+        """Today's MT5 day log, or the newest prior day if midnight has not
+        opened a new file yet.
+
+        A long-lived ``terminal64`` often keeps writing yesterday's
+        ``YYYYMMDD.log`` across 00:00. Gece restart then boots a new bot
+        that saw no today file and refused initialize forever (03.09:
+        ``20260903.log`` missing while the process was still on the 02.09
+        synchronized boot).
+        """
+        data_dir = self._data_dir_for_exe(exe)
+        if data_dir is None:
+            return None
+        logs_dir = data_dir / "logs"
+        today = time.strftime("%Y%m%d")
+        log = logs_dir / f"{today}.log"
+        if log.is_file():
+            return log
+        prior = sorted(
+            (p for p in logs_dir.glob("????????.log") if p.stem.isdigit()
+             and p.stem < today),
+            key=lambda p: p.stem,
+            reverse=True,
+        )
+        return prior[0] if prior else None
+
     def _ipc_ready(self, exe: Path) -> bool:
         """True when initialize() is unlikely to sit on the 60s pipe wait.
 
@@ -484,11 +510,8 @@ class MT5Client:
         synchronized, or until today's log has no fresh start line (the
         process has been up since yesterday).
         """
-        data_dir = self._data_dir_for_exe(exe)
-        if data_dir is None:
-            return False
-        log = data_dir / "logs" / time.strftime("%Y%m%d.log")
-        if not log.is_file():
+        log = self._terminal_day_log(exe)
+        if log is None:
             return False
         try:
             text = self._read_text_guess(log)
@@ -505,11 +528,8 @@ class MT5Client:
 
     def _boot_key(self, exe: Path) -> str:
         """Identity of the current terminal process boot, from its log."""
-        data_dir = self._data_dir_for_exe(exe)
-        if data_dir is None:
-            return ""
-        log = data_dir / "logs" / time.strftime("%Y%m%d.log")
-        if not log.is_file():
+        log = self._terminal_day_log(exe)
+        if log is None:
             return ""
         try:
             text = self._read_text_guess(log)
@@ -518,7 +538,7 @@ class MT5Client:
         for line in reversed(text.splitlines()):
             if "started for" in line.lower():
                 return line.strip()
-        return f"ready:{time.strftime('%Y%m%d')}" if text.strip() else ""
+        return f"ready:{log.stem}" if text.strip() else ""
 
     def _ipc_latched(self, exe: Path | None = None) -> bool:
         """True after a pipe timeout on this terminal boot; no more initialize()."""

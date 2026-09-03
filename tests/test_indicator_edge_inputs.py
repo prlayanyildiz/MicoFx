@@ -121,8 +121,10 @@ def test_the_public_surface_is_what_this_file_thinks_it_is():
     Twenty-two since ``aroon`` went with ``aroon_flip`` (28.08): its only
     reader was ``IndicatorCache.aroon`` for that one family.
     """
-    assert len(PUBLIC) >= 22, PUBLIC
-    for expected in ("atr", "rsi", "adx", "wilder", "true_range", "supertrend"):
+    # supertrend / parabolic_sar / stochastic_slow left with dual_t3 /
+    # parabolic_flip / slow-stoch retirement (02.09 cleanup).
+    assert len(PUBLIC) >= 18, PUBLIC
+    for expected in ("atr", "rsi", "adx", "wilder", "true_range", "ema"):
         assert expected in PUBLIC
 
 

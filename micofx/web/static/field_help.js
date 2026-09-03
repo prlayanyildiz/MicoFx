@@ -18,7 +18,6 @@ const FIELD_HELP = {
   "stoch_length": "StochRSI stoch periyodu.",
   "smooth_k": "%K yumusatma. Buyutmek kesisimleri geciktirir.",
   "smooth_d": "%D yumusatma.",
-  "stoch_extreme": "Asiri bolge esigi. Dusuk = daha erken, daha cok sinyal.",
   "htf_factor": "Ust TF carpani (or. 6 x M5 = M30). 0 = ust TF kapisi kapali.",
 
   "atr_period": "ATR periyodu. SL, trail ve bircok filtre bu seriye bakar.",
@@ -95,6 +94,8 @@ const FIELD_HELP = {
   "day_end_flatten_min": "Broker 00:00'ina bu kadar dakika kala giris yok, aciklar kapanir. 0 = kapali. Seansdan bagimsiz, kripto dahil.",
   "close_on_stop": "Bot durunca acik pozisyonlari kapatir.",
   "autostart_bot": "Uygulama acilinca botu kendisi baslatir.",
+  "autopilot_enabled": "Gelir dongusu bot icinde (PowerShell yok). Safe fix, kanitli spread, kasa.",
+  "autopilot_interval_sec": "Autopilot tick araligi saniye. 900=15dk. 0=kapali.",
 
   "max_scalp_positions": "burst icin ayri kova, boylece bir scalp serisi swing yerini doldurmaz. 0 = kova kapali.",
   "max_swing_positions": "Scalp olmayan aileler icin ayri kova. 0 = kova kapali.",

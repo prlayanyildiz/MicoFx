@@ -29,6 +29,10 @@ RETIRED_FAMILIES = (
     "t3_flip",
     "parabolic_flip",
     "ichimoku",
+    "nr_break",
+    "keltner_break",
+    "roc_pace",
+    "band_fade",
 )
 
 RETIRED_TIMEFRAMES = ("H1", "H4", "M10", "M1", "M3")

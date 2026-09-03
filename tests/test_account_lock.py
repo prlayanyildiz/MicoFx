@@ -135,8 +135,10 @@ def test_cycle_allow_entry_is_gated_on_the_lock_reason():
     body = src.split("def _cycle(", 1)[1].split("\n    def ", 1)[0]
     assert "lock_reason" in body
     assert "not lock_reason" in body
-    assert "self.manage_positions(server_now)" in body
-    assert body.index("self.manage_positions(server_now)") < body.index("not lock_reason")
+    # H2: flatten uses broker/server fallback when decision clock is stale.
+    assert "self.manage_positions(self._flatten_clock(server_now))" in body
+    assert body.index("self.manage_positions(self._flatten_clock(server_now))") < body.index(
+        "not lock_reason")
 
 
 class _WebStore:

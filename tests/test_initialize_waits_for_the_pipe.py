@@ -57,6 +57,26 @@ def test_a_fresh_start_line_without_sync_is_not_ready(tmp_path, monkeypatch):
     assert client._ipc_ready(exe) is False
 
 
+def test_missing_today_log_falls_back_to_yesterdays_sync(tmp_path, monkeypatch):
+    """03.09 gece restart: calendar rolled, terminal still on yesterday's file."""
+    exe, today_log = _install(tmp_path, monkeypatch)
+    logs = today_log.parent
+    yesterday = (time.time() - 86400)
+    prior = logs / time.strftime("%Y%m%d.log", time.localtime(yesterday))
+    if prior == today_log:
+        prior = logs / "19990101.log"
+    prior.write_text(
+        "GQ\t0\t01:17:51.000\tTerminal\tMetaTrader 5 x64 build 1 started for MetaQuotes Ltd.\n"
+        "HI\t0\t01:17:54.000\tNetwork\t'1': terminal synchronized with Broker\n",
+        encoding="utf-8",
+    )
+    if today_log.is_file():
+        today_log.unlink()
+    client = MT5Client(str(exe))
+    assert client._ipc_ready(exe) is True
+    assert client._boot_key(exe)
+
+
 def test_connect_does_not_call_initialize_before_ipc_ready(tmp_path, monkeypatch):
     exe, log = _install(tmp_path, monkeypatch)
     log.write_text(

@@ -1,7 +1,12 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**27.08 22:36** operator income-max + **00:06 opt** (armed, not started).
+**03.09 09:52 EK21+** — F4 closed: do not reweight `Result.score`; F1 (holdout×1.15) is
+the historically best flip rule (42-flip backtest). No degrade penalty. No R4 yet.
+WFO ranking must **not** peek holdout. JPN225 session live+defaults **01:00–15:00**
+(charged 6/6 +66 vs all-day 3/6). PID checklist waits on GER40 flat.
+Prior **03.09 09:40 EK21** — F6 stamped `positive_ratio` = holdout 6-slice.
+Prior **27.08 22:36** operator income-max + **00:06 opt** (armed, not started).
 Prior **22:10** A–Z. Shakeout floor stays; do not teach search it.
 GER40 #367727827 still open **plus** JPN/XAU/NAS fills → no restart.
 Public WFO/TP/pyramid GitHub does not change the exit model. Yellow
@@ -10,6 +15,61 @@ levers (`size_by_edge`, `daily_loss_pct=0`) stay HTTP 400. HEAD
 (NAS first), saved 8 families (arsiv): GER/NAS/XAU ages 6–18 h < 48 h gate;
 `stoch_flip` 28800 is ~2.07 M of the 3.08 M wall. 20:21 died on
 restart-with-tickets, not duration.
+
+---
+
+## 03.09 00:50 — MASTER AKSIYON LİSTESİ (EK1-EK18 konsolide, öncelik sırası)
+
+Bu oturumun tüm bulguları. Detay: aşağıdaki EK bloklar. Uygulama = Cursor (kod+commit) +
+operatör (red). Claude = ölçüm/doğrulama (yapıldı).
+
+### P0 — GÜVENLİK (canlı $ risk, hemen)
+- [ ] **C1-shakeout** `engine.py:2651` (+2638): `sl_size` → `sl_dist`. 3stop/10 sonrası
+      %4 risk. 1 satır. (EK14, 3× doğrulandı)
+- [ ] **T1-minlot** `risk.py:556-558`: broker min-lot > 2% cap iken 3×cap'e yukarı
+      sized. Clamp-up dalını sil (işlem atla) veya 1.5×'e indir + testi güncelle. (EK15)
+- [ ] **C3** `pnl_pct` payda = `start_balance + max(0,cash_flow)` VEYA UTC-rollover bekle
+      — `daily_loss_pct>0` YAPILMADAN ÖNCE. (EK12-C3; UTC-gece geçti mi kontrol et)
+- [ ] **operatör red:** `daily_loss_pct` %3-4? `max_concurrent_risk_pct` 50→~15?
+
+### P1 — EXIT GÜVENLİĞİ (EK14 HIGH)
+- [ ] H2 `engine.py:3299,3349`: stale-clock'ta flatten ölü → `broker_now()` fallback.
+- [ ] H1 `engine.py:2754`: fill-verify mid-stop kaybı → send'de persist+`_mark_bar_filled`.
+- [ ] H3 `close_all` → tracked close (autopsy/sample).
+
+### P2 — KOD SAĞLIK (EK15 — ağaç kendi pytest+ruff kapısını geçmiyor: 4 fail/3 ruff)
+- [ ] `app.js:930` ichimoku label sil (2 test) + `test_indicator_edge_inputs.py:124` bound→21.
+- [ ] ruff: `scripts/apply_trail_step_queue.py:9` unused sys + 2 test import-sort.
+- [ ] ölü fn sil: `indicators.py` parabolic_sar/stochastic_slow/supertrend (~114 sat).
+- [ ] `stoch_extreme` C4 kalıntısı (SymbolConfig+Params+key()+defaults.json 5 blok).
+- [ ] bayat DB: `settings.opt` orphan key sil; `supervisor_state` PLTR-24 verdict sil.
+
+### P3 — CONFIG (robust-doğrulanmış, EK17/EK18 — EK16 curve-fit'ti)
+- [ ] **NAS100**: `cost_rank_max` 0.7→0, `adx_min` 0→15 (burst/M30). 5/6 robust +168R.
+      WFO teyit sonra apply. **TEK net config değişikliği.**
+- [ ] **NAS pending `trail_step=1.6` İPTAL** (burst'e −24R).
+- [ ] GER40: burst mi channel_break mi → WFO regime-gate (3/6 mixed).
+- [ ] US30 / XAUUSD / JPN225 / BTCUSD: **DOKUNMA** (robust 5-6/6).
+- [ ] SpotBrent: burst FRAGILE (2/6) → roc_pace ADAYI veya disabled.
+- [ ] GOLD-PERP add: **mtf_pullback** (5/6 +255R; burst/channel_break < bu). mtf_pullback
+      aramadan DÜŞÜRÜLMESİN.
+
+### P4 — YAPISAL (EK12/EK13, operatör +2 aile onaylı)
+- [ ] `band_fade` (mean-reversion) — 4 indeks, ÖNCE. Kod: Params+OPT_FIELDS+key()+
+      _FAMILIES+STRATEGIES+grid+test. WFO gate + kill-criteria.
+- [ ] `roc_pace` (TSMOM) — SpotBrent + BTC/XAU, #2.
+- [ ] **48s churn brake → compound gate** (margin+sample+plato+regime-spread≥60-70%+dwell)
+      + kill-switch (canlı exp<−0.30R/40tr → sideline). = P1'in asıl parçası, WFO'nun
+      overfit seçmesini durduran şey.
+- [ ] Evrensel pooled param yönü (sembol-başına tuning değil) — research #2, büyük karar.
+- [ ] burst 5 kural: kasılma ön-koşulu (NR7/BB-squeeze) + eğim gate + tetik-bar sertleştir
+      + seans + cost-edge. Yeni OPT eksenleri.
+
+### DURUM (03.09 00:50)
+Kitap FLAT, opt idle. Cursor ~1s sessiz (commit 73591b3, board 22:58). Canlı config'ler
+çoğunlukla robust (Cursor'un apply'ları oturdu). Beklenen aylık panel +%98 = fantezi;
+gerçekçi hedef P0-P3 sonrası +$150-250/ay (EK7). Asıl kalan alpha config tuning'de değil,
+P0 bug fix'lerinde.
 
 ---
 
@@ -583,6 +643,127 @@ ama YENİ kod (`_burst` + OPT_FIELDS + grid + test). C (churn gate) = P1'in par�
 overfit seçmesini durdurur. A/B (aile+param sadeleşme) = operatör onaylı yön. Sıralama
 Cursor + operatör.
 
+### EK13 — 2 YENİ AİLE TASARIMI (agent, operatör +2 aile onayı, 03.09 00:00)
+
+Tam pseudocode + grid + kanıt + kill-criteria: FOR_CURSOR.md 00:0X bloğu.
+
+**#1 `band_fade` — MEAN-REVERSION (kitabın eksik edge'i):**
+- Tez: indeks kendi vol bandını (Bollinger N-σ) delip HEMEN kendi ekstremine karşı
+  kapanırsa (IBS ≤ 0.15 = alt banda delip barın DİBİNE kapandı) → ortalamaya doğru fade.
+- Gate: ADX ≤ 25 (trend yok) + vol RANK ≤ 0.7 (kasılmış, genişleyen değil) + ortalamaya
+  mesafe ≥ min_atr (lagging trail'in kâr yazması için) + seans + cost + HTF hizası.
+- 5 param: `bf_ma_len, bf_band_k, bf_ibs, bf_vol_rank_max, bf_min_room_atr` + reuse `adx_max`.
+- **burst ile MEKANİK ANTİ-KORELE:** burst barın üst %30'una kapanır; band_fade IBS≤0.15
+  (dibe). Aynı büyüklüğün ters işareti. burst'ün en iyi barlarını gate B blokluyor.
+- **Deploy: YALNIZ GER40/NAS100/US30/JPN225** (indeksler; gold/kripto intraday az revert).
+- Kanıt: Pagonidis IBS effect (indeks ETF), Connors RSI2, IBS çalışmaları — spesifik
+  olarak equity indeks. GitHub ref'ler mevcut.
+
+**#2 `roc_pace` — TIME-SERIES MOMENTUM (breakout DEĞİL):**
+- Tez: yerleşik çok-bar drift'i sür, ROC rank sağlıklı bandda (0.55-0.97) iken TREND
+  ORTASINDA gir — yeni ekstremde asla, tek barda asla, parabolikte dur.
+- Trigger: ROC(24-96 bar) rank sağlıklı band + T3 eğim uyumu + ADX ≥ 15 + HTF hizası +
+  L-bar hareket ≥ min_atr. `rp_rank_hi` = exhaustion cap (blow-off barı reddet).
+- 5 param: `rp_roc_len, rp_rank_win, rp_rank_lo, rp_rank_hi, rp_min_move_atr` + reuse
+  `adx_min, htf_factor`.
+- **Deploy: BTCUSD/XAUUSD/SpotBrent/NAS100** — burst sembollerinden enstrüman-ayrışması.
+  → **SpotBrent'in cevabı olabilir** (burst costed −27, roc_pace trend-takip).
+- #2 çünkü momentum SINIFI'nı burst kümesiyle paylaşıyor; "momentum çalışmadı" rejiminde
+  aynı şoka açık. Slot'u enstrüman-ayrışması + exhaustion cap ile hak ediyor.
+- Kanıt: Moskowitz/Ooi/Pedersen "Time Series Momentum" 2012 (58 futures, indeks+emtia,
+  Sharpe ~1.3), Quantpedia, AQR, Kıvanç Özbilgiç PMax/MOST (TR).
+
+**Öneri:** `band_fade` ÖNCE (en yüksek çeşitlendirme, en düşük korelasyon riski) → 4
+indekste WFO gate'inden geçir. `roc_pace` #2, band_fade sonucuna göre + SpotBrent testi.
+İkisi de aynı WFO/validation kapısından; validate etmezse otomatik retire (kill-criteria
+EK13 blok). Kod: `Params` + `OPT_FIELDS` + `Params.key()` + `_FAMILIES` + `STRATEGIES` +
+grid + test — Cursor lane.
+
+### EK14 — SL / TAKİP-SL / GİRİŞ / ÇIKIŞ MEKANİK DERİN AUDIT (agent, 03.09 00:01)
+
+**[CRITICAL] C1-shakeout — HÂLÂ CANLI, üçlü-doğrulandı, 1 satır fix.**
+`engine.py:2626-2678`: shakeout floor stop'u 2×ATR'ye açıyor ama `lot_for`'a `sl_size`
+(1×ATR) geçiliyor → 3 stop/10 sonrası (kayıp serisi 10-16, rutin) **gerçek risk %4**
+(en kötü anda). `r_cap` de dar mesafeye bölüyor → o da 2×. `can_open` GENİŞ mesafeyi
+görüyor (iç çelişki). `shakeout_size_note` operatöre "risk ayni" DİYOR (artık yanlış).
+Commit `fe26ace` bunu getirdi. **FIX: `engine.py:2651` (+2638) `sl_size` → `sl_dist`**
+(shakeout yokken zaten eşit). Bu, RE-fleet F2/F8 + bu agent = 3. kez. Cursor'un C1 commit'i
+sizing'i düzeltti ama BU ayrı ve hâlâ açık.
+
+**[HIGH] H2 — stale-clock'ta flatten yolları ÖLÜ.**
+`engine.py:3299,3349`: weekend/session/day-end flatten `if server_now is not None`
+guard'lı; `decision_now()` 600s stale tick'te None döner. Cuma akşamı feed stall →
+pozisyon weekend gap'e biner. `_weekend_pending` de yalnız `server_now` varken eklenebiliyor.
+FIX: flatten kararları için `broker_now()`/`server_now()` fallback (yanlış-saatte flatten
+güvenli; flatten-etmemek değil). Girişler strict `decision_now()`'da kalsın.
+
+**[HIGH] H1 — fill-verify sonucu engine mid-verify durursa kaybolur.**
+`_try_entry` daemon thread spawn ediyor (~2.1s sleep); sonuç yalnız `_cycle` içinde
+drain. Verify sırasında stop → `_mark_bar_filled` çağrılmıyor → restart'ta `_filled_bars`
+kaydı yok → pozisyon downtime'da kapandıysa aynı bar sinyali tekrar ateşler (çift giriş).
+FIX: send anında pending-verify persist + `_mark_bar_filled`; startup'ta re-drain.
+
+**[HIGH] H3 — daily-loss + panic flatten (`close_all`) autopsy/sample/log BIRAKMIYOR.**
+`close_all` → `close_position` doğrudan, `fill=` yok, autopsy yok. `_reap_execution` de
+atlıyor (`DEAL_REASON_EXPERT` `_CLOSED_ELSEWHERE` dışında). En yüksek-riskli çıkışın en
+zayıf adli izi. FIX: `close_all`'ı tracked close'dan geçir.
+
+**[MED]** M4 ilk `breakeven_at_r` sub-entry stop koyabilir (guard `breakeven_locked`'a
+gated, ilk BE'de false) · M5 `_fill_time_risk` fallback dar `sl_atr_mult` (shakeout
+görmezden) · M6 48h ileri-tick toleransı seans kararlarını zehirliyor (fix: ~300s) ·
+M7 stale sinyal should_flatten/cooldown pencerelerinde tutuluyor · M8 `min_stop_distance`
+spread ile şişiyor, SL-mesafe gate'i yok.
+
+**[LOW — İYİ HABER]** Trail geri gidemiyor ✓ · gap-past-trail doğru ✓ · BE(1.5)/
+trail_start(2.5) tutarlı, bu config'te trail sub-entry stop koymaz ✓ · giriş-timing
+bug'ı (21-30s stale timer) DÜZELMİŞ ✓ · netting/disconnect sağlam ✓.
+
+**[LOW-ama-önemli] L8:** Hesap-seviyesi zarar freni YOK (`daily_loss_pct=0`). C1-shakeout
+(%4 risk) + 10-16 kayıp serisi ile: kötü NAS100 serisi ile hesap arasında tek şey
+per-trade hard stop. Operatör kararı ama C1 ile birlikte kritik.
+
+**Ranked fix (Critical/High):** C1 `engine.py:2651` sl_size→sl_dist · H2 `engine.py:3299,
+3349` broker_now fallback · H1 `engine.py:2754/1015` persist+mark_bar_filled at send ·
+H3 `close_all` tracked. Hepsi Cursor lane, pytest+ruff.
+
+### EK15 — KOD SAĞLIK SWEEP (agent, 03.09 00:0X) — çalışma ağacı KENDİ gate'ini geçmiyor
+
+`pytest`: **4 fail / 2717 pass**. `ruff`: **3 finding**. `import micofx`: temiz.
+
+**[TEST FAIL #1 — 3. CANLI SIZING BUG, en yüksek]:** `risk.py:555-558`: broker `volume_min`
+> `r_cap` (2% 1R cap) iken kod işlemi ATLAMAK yerine `volume_min`'e **YUKARI sized ediyor**
+(`MAX_MIN_LOT_OVERSHOOT=3.0` → 3× cap'e kadar). $230 hesapta 2% cap sık sık broker
+min-lot'un altında → **işlemler ~3× hedeflenen riskle açılıyor**. Commit `fe26ace`
+getirdi; C1/C3 fix'i (`8855d65`) DOKUNMADI. C1-shakeout (EK14) + bu = iki ayrı canlı
+sizing bug'ı hâlâ açık. FIX seçenek: (a) `risk.py:556-558` clamp-up dalını sil → hep
+`return 0.0` (işlem atla), testi geri getir; (b) overshoot'u 1.5×'e indir + testi güncelle.
+Araştırma (EK12 F7): "min-lot riski hedefin >1.5×'i ise işlemi atla" → (a) veya (b@1.5).
+
+**[TEST FAIL #2-4]:** `web/static/app.js:930` hâlâ `ichimoku` label (2 test); `test_
+indicator_edge_inputs.py:124` bayat bound `21>=22` (ichimoku_lines silindi). → 3 satır fix.
+
+**[RUFF]:** `scripts/apply_trail_step_queue.py:9` unused `sys`; 2 test import-sort. Trivial.
+
+**[ÖLÜ KOD — production'da 0 referans]:** `indicators.py` `parabolic_sar()` (~54 sat),
+`stochastic_slow()` (~20), `supertrend()` (~40). RE-fleet'te de flag'lendi, hâlâ duruyor.
+`_GATED_FLIPS = frozenset()` boş → `unstamped_gates_to_zero()` garantili no-op (ölü plumbing).
+
+**[EMEKLI KALINTI — load-bearing]:** `stoch_extreme` — C4 temizliğini KAÇIRDI. `SymbolConfig`
++ `Params` + `Params.key()` + `defaults.json` 5 preset bloğu. Hiçbir aile okumuyor;
+optimizer signal-cache'i boşuna bölüyor. → C4 tamamla.
+
+**[BAYAT DB]:** `settings.opt = {"strategy_max_combos":{"stoch_flip":28800}}` — **tam ölü
+orphan key, OKUYAN YOK** (reader `opt_params` kullanıyor, `opt` değil). Sil. ·
+`supervisor_state.verdicts["PLTR.US-24"]` — süresi dolmuş CFD orphan verdict, sil.
+`opt_params` blob'u artık temiz.
+
+**[DOCS]:** AGENTS.md pytest+ruff'ı bitiş kapısı yapıyor; ağaç şu an kendi kapısını
+geçmiyor (4 test + 3 ruff). Cursor commit öncesi yeşile çekmeli.
+
+**Sıra:** TEST#1 (sizing bug karar) → app.js+test bound (3 sat) → ruff (2 sat) → 3 ölü
+indikatör fn (~114 sat) → stoch_extreme (C4 tamamla) → orphan `opt` key + PLTR verdict.
+Hepsi Cursor lane.
+
 Uyarı: tek pencere ~18k bar son segment; GER40 M30 proxy (canlı M5); apply = full WFO.
 
 ### EK3 — burst gates (cost_rank_max / atr_pct_min) costed sweep (02.09 20:40, salt-okur)
@@ -647,6 +828,100 @@ floor'dan fayda görüyor, commodity (GOLD) görmüyor. trail_step 1.6 marjinal 
 ayarı gerekmiyor.**
 
 ---
+
+
+### EK16 — PER-SEMBOL BEST-CONFIG SWEEP (03.09 00:14) — US30/GER40 YANLIS AILEDE, SpotBrent DUZELIYOR
+
+~400 costed replay, sabit burst/channel base × adx{0,15} × step{0.8,1.6,2.5} × cost_rank{0,0.3,0.5} × close_pct{0.7,0.8,0.9} / chan_lookback{40,60,100}. Tek-pencere, curve-fit riski var -> WFO ADAY tohumu, apply degeri DEGIL.
+
+| sembol | CANLI (aile / costed) | BEST-FOUND | best costed | fark |
+|--------|------------------------|------------|-------------|------|
+| **US30** | channel_break/M30 adx15 step0.8 / **+42** | **burst** adx0 step0.8 cr0.5 cp0.7 | **+113** | **+71R** aile degisimi |
+| **GER40** | channel_break/M30 adx15 / **+8** | **burst** adx0 step2.5 cr0.3 cp0.7 | **+58** | **+50R** aile degisimi |
+| **SpotBrent** | burst/M30 adx0 step1.8 cr0.5 / **−27** | burst adx0 **step2.5 cr0** cp0.7 | **+50** | **+77R** -> POZITIF FLIP (roc_pace gerekmez) |
+| NAS100 | burst/M30 adx0 step2.5 cr0.7 / +46 | burst **adx15** step2.5 **cr0** cp0.7 | +72 | +26R (adx15 iyi ama cr0.7 zarar) |
+| JPN225 | burst/M15 adx0 step2.5 / +61 | burst adx0 step2.5 **cr0.5 cp0.9** | +66 | +5R (marjinal) |
+| BTCUSD | burst/M30 adx0 step2.5 cr0.7 / ~+62 | burst adx0 step2.5 **cr0.3 cp0.9** | +56 (exp .31) | cp0.9+cr0.3 |
+| XAUUSD | burst/M15 tuned / **~+91** | sweep base +42 | +42 | CANLI DAHA IYI -> sabit tut |
+| GOLD-PERP | (add adayi) | **channel_break** adx0 step2.5 chan60 | +102 (exp .345, pf 1.52) | burst +98 de var |
+
+**Olculen desen:** kitabin neredeyse tamami **burst + GENIS trail_step (2.5)** istiyor.
+adx sembol-spesifik (NAS100 15, digerleri 0). cost_rank DUSUK (0-0.3; 0.5-0.7 cogunlukla
+zarar). **US30 ve GER40 su an channel_break'te = her biri +50-70R masada.** SpotBrent
+"calismiyor" degil -- step 1.8 + cr 0.5 yanlisti; step 2.5 + cr 0 ile +50R.
+
+**Cursor'a:** US30 / GER40 / SpotBrent'i **burst/M30** ile WFO'la (channel_break yerine).
+NAS100 cr 0.7->0, adx15 test. XAUUSD sabit. GOLD-PERP add = channel_break veya burst.
+Curve-fit uyarisi: bu tablo tek-pencere; WFO plato + regime-spread + DSR ile teyit et.
+
+
+
+### EK17 — ROBUSTLUK KONTROLU (03.09 00:22) — EK16'nın US30/SpotBrent ÖNERİLERİ CURVE-FIT, GERİ ALINIYOR
+
+EK16 tek-pencere costed (yalnız son segment). 6 alt-pencereye böldüm (her ~15k bar,
+rolling-OOS proxy). Research #2 kriteri: config ≥4/6 pencerede pozitif olmalı.
+
+| config | 6 alt-pencere net_r | pozitif | verdict |
+|--------|---------------------|---------|---------|
+| **US30 burst "BEST"** (EK16 +113) | +46 +30 **−61 −59 −35** +93 | 3/6 | **MIXED — +113 TAMAMEN son pencere. REJİM ARTEFAKTI.** |
+| **US30 channel_break CANLI** | −5 +14 +6 +1 +6 +57 | 5/6 | **ROBUST — mevcut config zaten doğru.** |
+| GER40 burst "BEST" (EK16 +58) | −14 −30 −15 +4 +61 +31 | 3/6 | MIXED — ilk yarı negatif, rejim-bağımlı |
+| **SpotBrent burst "BEST"** (EK16 +50 "flip") | **−230 −124 −9 −93** +14 +20 | 2/6 | **FRAGILE — "flip" son 2 pencere şansı. burst SpotBrent'i ÇÖZMÜYOR.** |
+| SpotBrent burst LIVE-ish | −173 −83 −17 −83 +13 −16 | 1/6 | FRAGILE |
+| **NAS100 burst adx15 cr0** | −15 +11 +1 +25 +90 +56 | 5/6 | **ROBUST (+168R) — bu GERÇEK.** |
+
+**DÜZELTME (EK16 geri alınıyor):**
+- **US30 → burst YAPMA.** +113 son-pencere rejim artefaktıydı; burst US30 3/6 pencerede
+  derin negatif. **Mevcut channel_break config ROBUST (5/6). US30'a DOKUNMA.**
+- **SpotBrent burst'te ÇALIŞMIYOR.** "+50R flip" 6'da 2 şanslı pencere; 4/6 pencere
+  −9..−230R. SpotBrent → `roc_pace` (TSMOM) ADAYI ya da disabled kalsın. burst DEĞİL.
+- **GER40 burst: temkinli** (3/6). Son rejim lehte ama ilk yarı negatif — WFO'nun
+  regime-spread gate'i karar versin, tek-pencere "aday" yeterli değil.
+- **NAS100 burst + adx_min=15 + cost_rank_max=0: ROBUST (5/6), +168R.** Bu uygulanabilir.
+  cr 0.7→0 + adx 0→15.
+
+**Ders:** EK2-EK16 tek-pencere costed sweep'lerim multiple-comparisons tuzağı. "En iyi"
+diye bulduğum çoğu config son rejime fit olmuş. **Robustluk kontrolü (≥4/6 alt-pencere)
+apply-öncesi ZORUNLU** (research #2, P1). Bundan sonra sweep sonuçlarını sub-window ile
+teyit ediyorum.
+
+
+
+### EK18 — ROBUSTLUK: kalan semboller (03.09 00:35) — KİTAP ÇOĞUNLUKLA ZATEN İYİ
+
+| config | 6 alt-pencere | pozitif | verdict |
+|--------|--------------|---------|---------|
+| **XAUUSD CANLI** | +14 +113 +68 +44 +49 +48 | **6/6** | **ROBUST +335R — dokunma** |
+| **JPN225 CANLI** | +4 +5 +11 −27 +27 +60 | **5/6** | **ROBUST +79R — dokunma** |
+| JPN225 +cr0.5+cp0.9 | ~aynı | 5/6 | +2R marjinal — değişmeye değmez |
+| **BTCUSD CANLI** | +36 +2 +13 +47 +20 +42 | **6/6** | **ROBUST +161R — dokunma** |
+| BTCUSD cr0.3+cp0.9 | 6/6 ama +101R | 6/6 | canlıdan KÖTÜ — değiştirme |
+| GOLD channel_break | +31 +23 −27 −15 +62 +65 | 4/6 | ROBUST +140R |
+| GOLD burst | +29 −4 +27 −38 +86 +75 | 4/6 | ROBUST +175R |
+| **GOLD mtf_pullback (as-is)** | +18 −2 +43 +16 +76 +104 | **5/6** | **ROBUST +255R — GOLD için EN İYİ + en tutarlı** |
+
+**Robust-doğrulanmış NİHAİ tablo (EK17 + EK18):**
+
+| sembol | verdict | AKSIYON |
+|--------|---------|---------|
+| **NAS100** | burst adx15 cr0 = ROBUST 5/6 +168R | **UYGULA: cost_rank_max 0.7→0, adx_min 0→15** |
+| US30 | channel_break CANLI = ROBUST 5/6 | **dokunma** (EK16 "burst" curve-fitti) |
+| GER40 | burst 3/6 MIXED | WFO regime-gate karar versin |
+| JPN225 | CANLI = ROBUST 5/6 | dokunma |
+| XAUUSD | CANLI = ROBUST 6/6 +335R | dokunma |
+| BTCUSD | CANLI = ROBUST 6/6 +161R | dokunma |
+| SpotBrent | burst FRAGILE 2/6 | roc_pace (#2 aile) VEYA disabled |
+| GOLD-PERP | mtf_pullback ROBUST 5/6 +255R | add = **mtf_pullback** (aile aramada KALMALI) |
+
+**Ölçülen sonuç:** Cursor'un apply'ları oturdu; kitap **çoğunlukla zaten robust config'te**.
+"Tüm sembolleri en iyi hale getir" cevabı EK16'nın sandığından çok DAR:
+- Tek net config değişikliği: **NAS100** (cr 0.7→0, adx 0→15).
+- 4 sembol zaten robust — bırak.
+- GER40 → WFO. SpotBrent → roc_pace. GOLD-PERP add → mtf_pullback.
+- **mtf_pullback aramadan DÜŞÜRÜLMEMELİ** (GOLD-PERP'in tek robust ailesi).
+Asıl kalan alpha config tuning'de değil: **sizing/exit bug fix'leri** (C1-shakeout, T1-minlot,
+3 exit HIGH) downside'ı upside tuning'den daha çok etkiliyor.
+
 
 ## 02.09 19:35 — Claude A–Z hard/stres tarama (ölçümlü, kod YOK)
 

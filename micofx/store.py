@@ -610,6 +610,17 @@ class Store:
 
     # ------------------------------------------------------------- optimizer
 
+    @staticmethod
+    def _widen_grid_lists(shipped_val: Any, stored_val: Any) -> Any:
+        """Stored list wins order; shipped-only values append (grid widen)."""
+        if isinstance(shipped_val, list) and isinstance(stored_val, list):
+            out = list(stored_val)
+            for item in shipped_val:
+                if item not in out:
+                    out.append(item)
+            return out
+        return stored_val
+
     def opt_params(self) -> dict[str, Any]:
         """Shipped optimizer defaults with the user's saved overrides on top.
 
@@ -634,7 +645,35 @@ class Store:
         for key in ("strategy_grids", "grid", "strategy_timeframes"):
             ship_map, have = shipped.get(key), base.get(key)
             if isinstance(ship_map, dict) and isinstance(have, dict):
-                base[key] = {**ship_map, **have}
+                if key == "strategy_grids":
+                    # Per-family axis merge: stored axes win, shipped-only axes
+                    # back-fill. List values widen (shipped extras append) so
+                    # editing defaults.json trail_step 2.8 reaches a live blob.
+                    merged_fams: dict[str, Any] = dict(ship_map)
+                    for fam, axes in have.items():
+                        if isinstance(axes, dict) and isinstance(merged_fams.get(fam), dict):
+                            merged = dict(merged_fams[fam])
+                            for axis, val in axes.items():
+                                if axis in merged:
+                                    merged[axis] = self._widen_grid_lists(
+                                        merged[axis], val)
+                                else:
+                                    merged[axis] = val
+                            merged_fams[fam] = merged
+                        else:
+                            merged_fams[fam] = axes
+                    base[key] = merged_fams
+                elif key == "grid":
+                    merged_grid = dict(ship_map)
+                    for axis, val in have.items():
+                        if axis in merged_grid:
+                            merged_grid[axis] = self._widen_grid_lists(
+                                merged_grid[axis], val)
+                        else:
+                            merged_grid[axis] = val
+                    base[key] = merged_grid
+                else:
+                    base[key] = {**ship_map, **have}
 
         # A saved blob outlives the code that wrote it. Because the merge above
         # lets the stored copy win, a grid axis that has since been REMOVED from

@@ -35,7 +35,7 @@ from .models import (
 from .mt5client import Bars, MT5Client, timeframe_seconds
 from .spread_calibration import calibrate
 from .store import Store
-from .strategy import absent_regime_gates_to_zero, searchable_axes, unstamped_gates_to_zero
+from .strategy import absent_regime_gates_to_zero, searchable_axes
 
 APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
 
@@ -1326,7 +1326,13 @@ class Optimizer:
         score = float(best["score"])
         # Named up front so the UI can explain a red number instead of leaving
         # it looking like the symbol's live setup is the thing losing money.
-        reason = self.reject_reason(cfg, best)
+        # Candidate family/TF live on the attempt (report), not inside best —
+        # churn F1 needs them to raise the bar on a primary flip.
+        reason = self.reject_reason(
+            cfg, best,
+            strategy=str(report.get("strategy") or ""),
+            timeframe=str(report.get("timeframe") or ""),
+        )
         if self._cancel.is_set():
             # Harvest still close_out()s symbols whose last sweep already
             # returned. Cancel means stop writing the live book, not "finish
@@ -1590,7 +1596,36 @@ class Optimizer:
                  "OPT", symbol)
         return False
 
-    def reject_reason(self, cfg, best: dict[str, Any]) -> str:
+    # Family/TF flip must beat the live holdout by this factor (Claude F1).
+    # Same-family param nudges keep using score via _beats_incumbent.
+    PRIMARY_FLIP_HOLDOUT_MULT = 1.15
+    # Within this many hours of the last apply, only a holdout jump of at
+    # least PRIMARY_FLIP_DWELL_NET_R_FRAC may rewrite the live row (F2).
+    # Complements reopt_min_age_hours (hard settle) with a softer early window.
+    PRIMARY_FLIP_DWELL_HOURS = 12.0
+    PRIMARY_FLIP_DWELL_NET_R_FRAC = 0.25
+    # F5: on family/TF flip, charged holdout must keep at least this fraction
+    # of the (often cost-free) paper holdout net_r. Wrong-family traps show
+    # ~5% retention (GER+burst); healthy assignments keep ~70%+. Same-family
+    # nudges skip — JPN225 burst sits ~45% and stays legal to re-tune.
+    PRIMARY_FLIP_MIN_CHARGED_PAPER = 0.5
+
+    @staticmethod
+    def cost_drag_reject(paper_net_r: float, charged_net_r: float,
+                         *, ratio: float = 0.5) -> str:
+        """Why a primary flip fails the cost-drag gate; "" means it may apply."""
+        paper = float(paper_net_r or 0.0)
+        charged = float(charged_net_r or 0.0)
+        if paper <= 0:
+            return ""
+        kept = charged / paper
+        if kept < float(ratio):
+            return (f"maliyet drag asiri ({charged:.1f}R / {paper:.1f}R "
+                    f"= %{kept * 100:.0f}, en az %{float(ratio) * 100:.0f})")
+        return ""
+
+    def reject_reason(self, cfg, best: dict[str, Any],
+                      strategy: str = "", timeframe: str = "") -> str:
         """Why this candidate may not replace the live config; "" means it may.
 
         Same gates as before in the same order - this only names them, so the UI
@@ -1616,7 +1651,14 @@ class Optimizer:
             min_positive = float(self.store.opt_params().get("min_positive_ratio", 0.6))
         else:
             min_positive = 0.6
-        if best.get("positive_ratio", 0) < min_positive:
+        # Sweep still gates on selection-segment consistency. After F6 the
+        # stamped ``positive_ratio`` is holdout sub-window robustness; prefer
+        # the preserved selection figure when present so min_positive_ratio
+        # keeps its original meaning.
+        sel_positive = best.get("selection_positive_ratio")
+        if sel_positive is None:
+            sel_positive = best.get("positive_ratio", 0)
+        if float(sel_positive or 0) < min_positive:
             return "secim segmentleri arasinda tutarsiz"
         # A configuration gets the settling time the system already says it
         # should get. ``reopt_min_age_hours`` states the policy and
@@ -1656,6 +1698,45 @@ class Optimizer:
                             f"{min_age_h:.0f} saat calismali "
                             f"(churn freni - gecmek icin 'zorla uygula', "
                             f"veya Sistem > reopt_min_age_hours)")
+                # F2: inside 12h, even past a lowered reopt_min_age, refuse a
+                # material holdout jump before rewriting the live row.
+                if age_h < self.PRIMARY_FLIP_DWELL_HOURS:
+                    prev_net = float(
+                        ((getattr(cfg, "opt_summary", None) or {})
+                         .get("holdout") or {}).get("net_r", 0.0) or 0.0)
+                    new_net = float(hold.get("net_r", 0.0) or 0.0)
+                    if prev_net > 0:
+                        jump = (new_net - prev_net) / prev_net
+                        if jump < self.PRIMARY_FLIP_DWELL_NET_R_FRAC:
+                            return (f"son apply {age_h:.1f}s once, holdout "
+                                    f"artisi %{jump * 100:.0f} "
+                                    f"(en az %{self.PRIMARY_FLIP_DWELL_NET_R_FRAC * 100:.0f} "
+                                    f"gerek - churn dwell)")
+            # F1: family or TF flip needs holdout net_r >= 1.15x incumbent
+            # and positive_ratio at least as good. Same-family nudges skip.
+            cand_strat = strategy or str(best.get("strategy") or "")
+            cand_tf = timeframe or str(best.get("timeframe") or "")
+            primary_flip = (
+                (cand_strat in STRATEGIES and cand_strat != cfg.strategy)
+                or (cand_tf in TIMEFRAMES and cand_tf != cfg.timeframe)
+            )
+            if primary_flip:
+                prev = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
+                prev_net = float(prev.get("net_r", 0.0) or 0.0)
+                new_net = float(hold.get("net_r", 0.0) or 0.0)
+                if prev_net > 0 and new_net < prev_net * self.PRIMARY_FLIP_HOLDOUT_MULT:
+                    return (f"aile/TF flip icin holdout yetersiz "
+                            f"({new_net:.1f}R < {prev_net * self.PRIMARY_FLIP_HOLDOUT_MULT:.1f}R)")
+                prev_pos = float(
+                    (getattr(cfg, "opt_summary", None) or {})
+                    .get("positive_ratio", 0.0) or 0.0)
+                new_pos = float(best.get("positive_ratio", 0.0) or 0.0)
+                # Legacy stamps are selection-era 1.0 (non-discriminating).
+                # Only compare when the incumbent carries a real robustness
+                # fraction from F6 holdout sub-windows.
+                if 0.0 < prev_pos < 0.999 and new_pos + 1e-12 < prev_pos:
+                    return (f"aile/TF flip icin tutarlilik zayif "
+                            f"({new_pos:.2f} < {prev_pos:.2f})")
         # Same shape as min_positive_ratio above, for the same reason. The
         # engine refuses an entry when its live cost exceeds
         # system.max_cost_pct_of_risk, and that setting ships at 25.0 to agree
@@ -2045,6 +2126,22 @@ class Optimizer:
             return "uygulama damgasi eksik: validated"
         return ""
 
+    @staticmethod
+    def _apply_params_match_live(cfg: SymbolConfig,
+                                 applied_params: dict[str, Any]) -> bool:
+        """True when every OPT axis in the candidate already equals the live row."""
+        for key, value in applied_params.items():
+            if not hasattr(cfg, key):
+                return False
+            cur = getattr(cfg, key)
+            try:
+                if abs(float(cur) - float(value)) > 1e-9:
+                    return False
+            except (TypeError, ValueError):
+                if cur != value:
+                    return False
+        return True
+
     def apply(self, symbol: str, params: dict[str, Any], score: float,
               detail: dict[str, Any] | None = None,
               timeframe: str | None = None, strategy: str | None = None) -> dict[str, Any]:
@@ -2075,7 +2172,6 @@ class Optimizer:
             or (timeframe in TIMEFRAMES and timeframe != cfg.timeframe)
         )
         applied_params = {k: v for k, v in params.items() if k in OPT_FIELDS}
-        applied_params.update(unstamped_gates_to_zero(next_strat, applied_params))
         applied_params.update(absent_regime_gates_to_zero(next_strat, applied_params))
         # Last gate before this reaches a live symbol. The API checks the same
         # bounds on its own request bodies, but auto-apply (Optimizer.start
@@ -2089,6 +2185,15 @@ class Optimizer:
         if bad:
             LOG.emit(f"Cikis parametresi reddedildi: {bad}", "OPT", symbol)
             return {"ok": False, "error": f"cikis parametresi gecersiz: {bad}"}
+        # No-op apply (Claude churn F3): same family/TF/OPT axes as live must
+        # not rewrite opt_updated_at or re-stamp an identical config. force
+        # still rewrites (operator / measured retune).
+        if (not getattr(self, "_force_apply", False)
+                and not primary_changed
+                and self._apply_params_match_live(cfg, applied_params)):
+            LOG.emit(f"{symbol}: aday canli konfigurasyonla ayni - uygulanmadi "
+                     f"(degismedi).", "OPT", symbol)
+            return {"ok": False, "error": "degismedi", "unchanged": True}
         missing = self._apply_stamp_missing(detail)
         if missing:
             return {"ok": False, "error": missing}
@@ -2111,6 +2216,19 @@ class Optimizer:
                     and not getattr(self, "_force_apply", False)):
                 return {"ok": False,
                         "error": f"maliyetli holdout negatif ({charged:+.3f})"}
+            # F5: family/TF flip only — refuse when costs eat most of paper edge.
+            if (primary_changed and costed is not None
+                    and not getattr(self, "_force_apply", False)):
+                paper_net = float(
+                    (detail.get("holdout") or {}).get("net_r") or 0.0)
+                charged_net = float(costed.get("net_r") or 0.0)
+                drag = self.cost_drag_reject(
+                    paper_net, charged_net,
+                    ratio=self.PRIMARY_FLIP_MIN_CHARGED_PAPER)
+                if drag:
+                    LOG.emit(f"{symbol}: {drag} - aile/TF flip reddedildi.",
+                             "OPT", symbol)
+                    return {"ok": False, "error": drag}
         patch = dict(applied_params)
         if timeframe in TIMEFRAMES:
             patch["timeframe"] = timeframe
@@ -2128,6 +2246,7 @@ class Optimizer:
             "selection": detail.get("selection", {}),
             "holdout_days": float(detail["holdout_days"]),
             "positive_ratio": detail.get("positive_ratio", 0.0),
+            "selection_positive_ratio": detail.get("selection_positive_ratio"),
             "params": applied_params,
                 # The spread scale this candidate was measured under. Every
                 # number beside it - score, expectancy, cost_per_trade_r - is

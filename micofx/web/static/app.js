@@ -927,7 +927,6 @@ function renderLive() {
 const STRATEGY_LABEL = {
   mtf_pullback: "Ust TF Trend Geri Cekilmesi",
   burst: "Momentum Patlamasi Devami",
-  ichimoku: "Ichimoku (emekli - aranmaz)",
   channel_break: "N barlik kanal kirilimi (Donchian)",
 };
 
@@ -1670,6 +1669,8 @@ async function saveAI(patch, flashNode) {
 
 const SYS_FIELDS = [
   { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
+  { k: "autopilot_enabled", label: "Gelir autopilot (sistem ici)", t: "bool" },
+  { k: "autopilot_interval_sec", label: "Autopilot aralik (sn)", t: "num", step: 60, min: 0, max: 86400 },
 ];
 
 // Plumbing and settled valves left the panel 27.08. Values stay on

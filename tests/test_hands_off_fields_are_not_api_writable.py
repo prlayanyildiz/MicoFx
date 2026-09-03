@@ -188,19 +188,24 @@ def test_concurrent_risk_is_writable():
     store.update_system({"max_concurrent_risk_pct": before}, source="test restore")
 
 
-def test_daily_loss_and_edge_sizing_are_not_writable():
+def test_daily_loss_pct_is_writable_to_arm_the_brake():
+    """Operator 03.09: daily brake may be armed at the shipped 3% default."""
     tc, store, _ = _client()
-    before_pct = store.system.daily_loss_pct
+    res = tc.post("/api/system", json={"daily_loss_pct": 3.0})
+    assert res.status_code == 200, res.text
+    assert store.system.daily_loss_pct == 3.0
+
+
+def test_daily_flatten_and_edge_sizing_are_not_writable():
+    tc, store, _ = _client()
     before_flat = store.system.daily_loss_flatten
     before_edge = store.system.size_by_edge
     for key, value in (
-        ("daily_loss_pct", 4.0),
         ("daily_loss_flatten", False),
         ("size_by_edge", False),
     ):
         res = tc.post("/api/system", json={key: value})
         assert res.status_code == 400, (key, res.text)
-    assert store.system.daily_loss_pct == before_pct
     assert store.system.daily_loss_flatten == before_flat
     assert store.system.size_by_edge == before_edge
 

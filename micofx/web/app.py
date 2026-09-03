@@ -221,6 +221,8 @@ _SYSTEM_RISK_BOUNDS = {
     "max_total_positions": (1, 200, True),
     # Panel-writable with UI-only bounds; backup.py prunes to this count.
     "backup_keep": (1, 365, True),
+    # 0 disables due(); upper bound one day.
+    "autopilot_interval_sec": (0.0, 86400.0, True),
 }
 
 
@@ -451,11 +453,13 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
     "max_margin_usage_pct",
     "lot_multiplier",
     "max_concurrent_risk_pct",
+    "daily_loss_pct",
     "charge_costs",
     "block_high_cost",
     "max_cost_pct_of_risk",
     "backup_dir", "backup_dir_secondary", "backup_keep",
     "mt5_terminal_path", "autostart_mt5", "autostart_bot",
+    "autopilot_enabled", "autopilot_interval_sec",
 })
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",
@@ -2227,6 +2231,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def ai_clear(symbol: str | None = None) -> dict[str, Any]:
         engine.supervisor.clear(symbol)
         return {"ok": True, "ai": engine.supervisor.status()}
+
+    @app.post("/api/autopilot/tick")
+    def autopilot_tick() -> dict[str, Any]:
+        """Manual one-shot income tick (same code as the engine side thread)."""
+        ap = getattr(engine, "autopilot", None)
+        if ap is None:
+            raise HTTPException(503, "autopilot yok")
+        summary = ap.tick()
+        return {"ok": True, "summary": summary, "autopilot": ap.status()}
 
     # ---------------------------------------------------------------- logs
 

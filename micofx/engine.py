@@ -8,6 +8,7 @@ from typing import Any
 
 from . import account_lock, backtest, execution, sessions
 from . import indicators as ind
+from .autopilot import AutoPilot
 from .execution import ExecutionMonitor
 from .exits import harvest_trail_step, overlay_stop
 from .logbus import LOG
@@ -397,6 +398,8 @@ class Engine:
         # names. A quarantined name cannot open, so leaving it in that split
         # sized every real entry down by the number of suspended symbols.
         self.risk.supervisor_blocked = self.supervisor.is_suspended
+        # In-process income loop (replaces scripts/start_income_loop.ps1).
+        self.autopilot = AutoPilot(self)
         # Requested-vs-filled bookkeeping. Purely diagnostic: it never gates a
         # trade, it makes the one cost the backtest cannot model visible.
         self.execution = ExecutionMonitor(store)
@@ -412,6 +415,7 @@ class Engine:
         # trail/BE the moment it exists.
         self.entry_lock = threading.Lock()
         self._supervisor_gate = threading.Lock()
+        self._autopilot_gate = threading.Lock()
         self._verify_inflight: set[str] = set()
         self._fill_verify_done: list[dict[str, Any]] = []
         self._fill_verify_lock = threading.Lock()
@@ -918,7 +922,7 @@ class Engine:
         # trailing, no breakeven, no forced flatten near session/day close.
         # Only the broker-native stop kept protecting it. New entries are
         # still gated separately below via allow_entry.
-        self.manage_positions(server_now)
+        self.manage_positions(self._flatten_clock(server_now))
 
         guard = self.risk.daily.check(
             account.get("equity", 0.0), self.store.system,
@@ -957,6 +961,8 @@ class Engine:
             except Exception:
                 pnl = 0.0
             self._kick_supervisor_review(pnl)
+        if getattr(self, "autopilot", None) is not None and self.autopilot.due():
+            self._kick_autopilot()
 
         # Every position-count guard here (max_positions, weekend/secondary)
         # ticket tracking, partial-TP ladder bookkeeping) assumes one ticket
@@ -1073,6 +1079,29 @@ class Engine:
                 gate.release()
 
         threading.Thread(target=_run, name="micofx-supervisor", daemon=True).start()
+
+    def _kick_autopilot(self) -> None:
+        """Income tick must not sit in front of evaluate/entry."""
+        gate = getattr(self, "_autopilot_gate", None)
+        if gate is None:
+            self._autopilot_gate = threading.Lock()
+            gate = self._autopilot_gate
+        if not gate.acquire(blocking=False):
+            return
+        ap = getattr(self, "autopilot", None)
+        if ap is None:
+            gate.release()
+            return
+
+        def _run() -> None:
+            try:
+                ap.tick()
+            except Exception as exc:
+                LOG.emit(f"Autopilot hatasi: {exc}", "ERROR")
+            finally:
+                gate.release()
+
+        threading.Thread(target=_run, name="micofx-autopilot", daemon=True).start()
 
     def _run_fill_verify(self, pending: dict[str, Any]) -> None:
         kwargs = dict(pending.get("verify_kwargs") or {})
@@ -1661,6 +1690,35 @@ class Engine:
         if now > 0:
             return int(now)
         return int(time.time())
+
+    def _flatten_clock(self, decision_now: float | None) -> float | None:
+        """Clock for weekend/session/day-end flatten.
+
+        Entries stay on strict ``decision_now()`` (None when the tick is
+        stale). Flatten must not: a Friday feed stall that blanks
+        decision_now used to skip ``weekend_closed`` / ``should_flatten``
+        entirely and ride the gap (H2). Prefer decision_now when fresh;
+        else broker_now, else server_now.
+        """
+        if decision_now is not None:
+            try:
+                value = float(decision_now)
+            except (TypeError, ValueError):
+                value = 0.0
+            if value > 0:
+                return value
+        client = getattr(self, "client", None)
+        for name in ("broker_now", "server_now"):
+            getter = getattr(client, name, None) if client is not None else None
+            if not callable(getter):
+                continue
+            try:
+                value = float(getter() or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+        return None
 
     def _autopsy_window_start(self, rows: list[dict[str, Any]] | None = None) -> float:
         """Oldest exit stamp still in the ring, or now if the ring is empty.
@@ -2627,7 +2685,9 @@ class Engine:
             cfg.sl_atr_mult, cfg.symbol,
             getattr(self, "_trade_autopsies", None))
         sl_dist = max(atr * sl_mult, min_stop)
-        sl_size = max(atr * float(cfg.sl_atr_mult or 0), min_stop)
+        # Size the lot against the stop that is actually sent. Using the raw
+        # cfg.sl_atr_mult distance while shakeout widened sl_dist overstated
+        # 1R risk on every widened fill (Claude C1).
         # No take-profit, ever. A trailing system decides when a move is over by
         # watching the move, not by naming a price in advance.
         tp_dist = 0.0
@@ -2636,7 +2696,7 @@ class Engine:
         sys = self.store.system
         if sys.block_high_cost and sys.max_cost_pct_of_risk > 0:
             lot_probe, _ = self.risk.lot_for(
-                cfg, sl_size, account.get("balance", 0.0),
+                cfg, sl_dist, account.get("balance", 0.0),
                 account=account, side=side, positions=self._positions)
             if lot_probe > 0:
                 r_value = sl_dist * self.client.money_per_price_unit(cfg.symbol, lot_probe)
@@ -2649,7 +2709,7 @@ class Engine:
                     return
 
         lot, note = self.risk.lot_for(
-            cfg, sl_size, account.get("balance", 0.0), ai_scale=scale,
+            cfg, sl_dist, account.get("balance", 0.0), ai_scale=scale,
             account=account, side=side, positions=self._positions)
         if sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
             logged = getattr(self, "_sl_floor_logged", None)
@@ -4737,4 +4797,9 @@ class Engine:
             "harvest": self._harvest_view(),
             "states": self._states_view(),
             "ai": self.supervisor.status(),
+            "autopilot": (
+                self.autopilot.status()
+                if getattr(self, "autopilot", None) is not None
+                else {"enabled": False}
+            ),
         }

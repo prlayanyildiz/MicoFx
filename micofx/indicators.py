@@ -162,26 +162,6 @@ def rolling_sum(src: np.ndarray, length: int) -> np.ndarray:
     return out
 
 
-def stochastic_slow(high: np.ndarray, low: np.ndarray, close: np.ndarray,
-                    k_period: int, k_smooth: int, d_smooth: int) -> tuple[np.ndarray, np.ndarray]:
-    """Classic slow Stochastic: %K = close's position in its own H/L range,
-    smoothed twice (raw %K -> slow %K -> slow %D).
-
-    Not the same read as ``stoch_rsi`` (Stochastic applied to RSI, which
-    ``_common`` reports for every family) - this measures where price sits inside its own
-    recent high/low range directly, RSI is never computed. A distinct
-    basis alongside T3 (price smoothing) and MACD (EMA spread).
-    """
-    period = max(1, int(k_period))
-    hi = rolling_min_max(high, period)[1]
-    lo = rolling_min_max(low, period)[0]
-    span = hi - lo
-    raw_k = np.where(span > 1e-12, (close - lo) / np.where(span > 1e-12, span, 1.0) * 100.0, 50.0)
-    slow_k = sma(raw_k, max(1, int(k_smooth)))
-    slow_d = sma(slow_k, max(1, int(d_smooth)))
-    return slow_k, slow_d
-
-
 def t3_source(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> np.ndarray:
     return (high + low + 2.0 * close) / 4.0
 
@@ -305,98 +285,6 @@ def atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, length: int) -> np
     seed = max(1, min(length, tr.size))
     return wilder(tr, length, seed=float(tr[:seed].mean()) if tr.size else 0.0)
 
-
-def supertrend(high: np.ndarray, low: np.ndarray, close: np.ndarray,
-               period: int, multiplier: float) -> np.ndarray:
-    """SuperTrend direction: +1 while the band sits below price, -1 above it.
-
-    The construction is an ATR envelope around the bar midpoint ``(H+L)/2``:
-    ``hl2 +/- multiplier * ATR(period)``. Each band is then allowed to ratchet
-    only *toward* price - the upper band may fall but never rise while the trend
-    is down, and the mirror for the lower band - which is what turns a pair of
-    bands into a single trailing line. Direction flips when a **close** breaks
-    the currently active band, so the flip bar is a closed-bar fact and carries
-    no intrabar lookahead.
-
-    This is deliberately the only confirmation layer offered to ``dual_t3``: it
-    is built from nothing but ATR, so it stays inside the same vocabulary as the
-    T3 lines and the ATR exits rather than importing a second indicator family.
-    """
-    n = close.size
-    if n == 0:
-        return np.zeros(0, dtype=np.int8)
-    atr_s = atr(high, low, close, max(1, int(period)))
-    mult = max(0.1, float(multiplier))
-    hl2 = (high + low) * 0.5
-    up_raw = hl2 + mult * atr_s
-    dn_raw = hl2 - mult * atr_s
-    upper = up_raw.tolist()
-    lower = dn_raw.tolist()
-    c = close.tolist()
-    direction = np.ones(n, dtype=np.int8)
-    dirs = direction.tolist()
-    for i in range(1, n):
-        if not (up_raw[i] < upper[i - 1] or c[i - 1] > upper[i - 1]):
-            upper[i] = upper[i - 1]
-        if not (dn_raw[i] > lower[i - 1] or c[i - 1] < lower[i - 1]):
-            lower[i] = lower[i - 1]
-        if c[i] > upper[i - 1]:
-            dirs[i] = 1
-        elif c[i] < lower[i - 1]:
-            dirs[i] = -1
-        else:
-            dirs[i] = dirs[i - 1]
-    return np.asarray(dirs, dtype=np.int8)
-
-
-def parabolic_sar(high: np.ndarray, low: np.ndarray,
-                  af_step: float, af_max: float) -> np.ndarray:
-    """Wilder's Parabolic SAR direction (+1/-1), the dot flip as a signed line.
-
-    Neither a smoothed price (T3), an MA spread (MACD), nor a range-position
-    oscillator (Stochastic) - the SAR walks toward price at an *accelerating*
-    rate that resets to the slow
-    step every time a new extreme is made, and flips side the instant price
-    crosses it. Same trailing-band shape as SuperTrend, different construction
-    entirely: SuperTrend's band width is ATR, SAR's is its own acceleration
-    factor times the distance to the last extreme.
-    """
-    n = high.size
-    if n == 0:
-        return np.zeros(0, dtype=np.int8)
-    step = max(0.001, float(af_step))
-    cap = max(step, float(af_max))
-    hi = high.tolist()
-    lo = low.tolist()
-    direction = [1] * n
-    trend = 1
-    sar = lo[0]
-    ep = hi[0]
-    af = step
-    for i in range(1, n):
-        sar = sar + af * (ep - sar)
-        if trend == 1:
-            sar = min(sar, lo[i - 1], lo[i - 2] if i >= 2 else lo[i - 1])
-            if lo[i] < sar:
-                trend = -1
-                sar = ep
-                ep = lo[i]
-                af = step
-            elif hi[i] > ep:
-                ep = hi[i]
-                af = min(af + step, cap)
-        else:
-            sar = max(sar, hi[i - 1], hi[i - 2] if i >= 2 else hi[i - 1])
-            if hi[i] > sar:
-                trend = 1
-                sar = ep
-                ep = hi[i]
-                af = step
-            elif lo[i] < ep:
-                ep = lo[i]
-                af = min(af + step, cap)
-        direction[i] = trend
-    return np.asarray(direction, dtype=np.int8)
 
 
 

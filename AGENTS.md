@@ -1,7 +1,7 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
-`MASTER_PROMPT.md` §19. Do not port remaining `D:\MicoAi` extras
+`MASTER_PROMPT.md` Â§19. Do not port remaining `D:\MicoAi` extras
 (`orb_retest`, Ai score formula, `autostart_mt5`) unasked.
 `trail_mode` / `hour_risk_scales` / `max_combos=2000` are already here.
 
@@ -19,19 +19,19 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Exit model is hard ATR stop + ATR trail. Do not bring back
   `tp_atr_mult`, `partial_tp_r` ladders, `max_bars_in_trade`,
   `stale_exit_ratio`, `breakeven_atr`. Overlays (0 = off):
- `breakeven_at_r` (live 1.5, not 0.5 — BE-2 GER40 −32 R), one-shot
- `partial_at_r` (ticket lot × 1/3, broker min/step; costed loser at every
- rung, F44 — POST accepts **0 only**, no writer can turn it back on), and
+ `breakeven_at_r` (live 1.5, not 0.5 â€” BE-2 GER40 âˆ’32 R), one-shot
+ `partial_at_r` (ticket lot Ã— 1/3, broker min/step; costed loser at every
+ rung, F44 â€” POST accepts **0 only**, no writer can turn it back on), and
  `harvest_at_r` / `harvest_step_atr` (tighten trail_step once paid;
- live off book-wide — costed across 10 windows 31.08 (F41): off
- +86.4 R, every setting far worse (−129 to −498 R). It lifts win rate
+ live off book-wide â€” costed across 10 windows 31.08 (F41): off
+ +86.4 R, every setting far worse (âˆ’129 to âˆ’498 R). It lifts win rate
  and trade count while crushing payoff, i.e. it cuts winners and
  re-enters. A give-back chart makes switching this on look obvious;
  do not). None is an `OPT_FIELDS` axis.
 - `exits.overlay_stop` is the closed-bar trail/BE level. Live still owns
   broker clamp + modify. Change the helper or both callers. Cover
   identity tests.
-- A forming candle never signals. Buy ∧ sell on one bar → neither.
+- A forming candle never signals. Buy âˆ§ sell on one bar â†’ neither.
 - Opt apply writes `OPT_FIELDS` only (plus documented secondary fields).
   Never silently enable `ensemble_enabled`. Apply gates are `_slice_ok`,
   `reject_reason` and `_beats_incumbent`. Calendar reopt is gone.
@@ -39,13 +39,13 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   `POST /api/opt/run` still starts a search. Family/TF apply while this
   magic has a ticket queues `pending_primary_patch` (same door as
   `pending_exit_patch`); engine lands it when flat. Do not drop the winner.
-- `EXIT_RISK_FIELDS` mid-trade → **409**. `breakeven_at_r`,
+- `EXIT_RISK_FIELDS` mid-trade â†’ **409**. `breakeven_at_r`,
   `partial_at_r`, `harvest_at_r` and `harvest_step_atr` are
   deliberately **not** in that set.
-- Watch mode never opens. Wrong `broker_symbol` → unavailable, no fuzzy
+- Watch mode never opens. Wrong `broker_symbol` â†’ unavailable, no fuzzy
  fallback.
 - `spread_calibration.cap_from_bands` is **one-way: it widens, never
- narrows** — a qualifying band below the live cap returns `daraltilmadi`.
+ narrows** â€” a qualifying band below the live cap returns `daraltilmadi`.
  With the old 0.05 grid floor that made the cost gate a ratchet toward
  loose, which is where F49 measured the loss. The grid side is fixed
  (F50); this side is still one-way on purpose. Do not flip it without
@@ -64,8 +64,10 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
 - **3 families.** `ichimoku` retired 02.09 (no symbol/TF holdout win).
   `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` retired 01.09
-  (flip/zero-win class). Live set: `burst`, `mtf_pullback`, `channel_break`.
-  Leftover DB names fail closed.
+  (flip/zero-win class). `nr_break` / `roc_pace` **fully deleted** 03.09
+  (matrix: never best; operator full-delete). `band_fade` /
+  `keltner_break` not shipped. Live set: `burst`, `mtf_pullback`,
+  `channel_break`. Leftover DB names fail closed.
 - **No restart while positions are open.** `POST /api/app/restart` and
   `/api/app/shutdown` are **409** while this process's magics still have
   tickets (MT5 down still allowed so a wedged bind can recover).
@@ -92,22 +94,26 @@ Fail-first: write the test, watch it fail, then implement.
 - New search axis: add to `OPT_FIELDS` **and** pay the grid cost, or
  `Store.opt_params()` drops it. Editing a shipped grid axis in
  `config/defaults.json` does **not** reach a live book: the merge is
- `{**shipped, **stored}` per axis, so a stored axis keeps its values.
- Only a brand-new axis back-fills.
+ `{**shipped, **stored}` per axis, so a stored axis keeps its values
+ unless the shipped list has extras (those append: trail_step 2.8).
+ Only a brand-new axis back-fills the whole list.
 - **Yellow** (ask): supervisor. **Red** (explicit):
   leverage, account lock, daily brake, live flatten-all.
 - HTTP writes match the panel. Symbol POST: sessions +
   `enabled` / `group` / `broker_symbol`.
   `partial_at_r` (0 only, F44).
  System POST: `max_margin_usage_pct`
-  / `mt5_terminal_path` / `autostart_mt5`.
+ / `mt5_terminal_path` / `autostart_mt5` /
+ `autopilot_enabled` / `autopilot_interval_sec` /
+ `lot_multiplier` / `max_concurrent_risk_pct` / `daily_loss_pct` /
+ cost toggles (`charge_costs` / `block_high_cost` / `max_cost_pct_of_risk`).
  Opt POST: `lookback_days` /
  `refine_rounds` / `max_combos` / `timeframes`, plus the shared grid's
- **cost axes only** (`max_spread_atr`, `cost_rank_max`, F50 — the write
+ **cost axes only** (`max_spread_atr`, `cost_rank_max`, F50 â€” the write
  merges onto the stored grid; a whole-value assign would delete the other
  axes). Family / TF / exits / magic / rest-of-grid /
   lot_mode /
-  daily_loss_* / size_by_edge / max_concurrent_risk_pct /
+  `daily_loss_flatten` / size_by_edge /
   `max_total_positions` / `risk_percent` / system `max_lot` /
   system `max_positions` / symbol `max_lot` / `max_margin_pct` /
   `max_positions` are 400. `POST .../reset` is
@@ -131,10 +137,10 @@ Fail-first: write the test, watch it fail, then implement.
   writes `claude/FOR_CURSOR.md`. Shared wake `.bridge/WAKE.txt`.
   Cursor arms `cursor/ARM.bat` (watches Claude inbox). Claude arms
   `claude/ARM.bat` (watches Cursor inbox). Do not watch a file you write.
-- Installer: `KUR.bat` → `KUR.ps1`. Launchers stay at repo root.
+- Installer: `KUR.bat` â†’ `KUR.ps1`. Launchers stay at repo root.
 - Audit notes (not executable): `OPTIMIZATIONS.md`. Trust the closed
   ledger at the top.
-- `graft/` is a stale dump — its line numbers are not live.
+- `graft/` is a stale dump â€” its line numbers are not live.
 
 ## Change safety rules
 
@@ -149,19 +155,19 @@ Fail-first: write the test, watch it fail, then implement.
   apply()s on flat either way. Family/TF winners queue in
   `pending_primary_patch` (this PID needs the new engine to land them).
   Do not add `/exit-override` unasked.
-- Day cuts use `gmtime(naive broker epoch)` — "do not shift a second
-  time", not "convert to UTC". A 00:00–03:00 local close is **today**.
+- Day cuts use `gmtime(naive broker epoch)` â€” "do not shift a second
+  time", not "convert to UTC". A 00:00â€“03:00 local close is **today**.
   Hour buckets on autopsy `fill_time` are the same clock. Do not
   `fromtimestamp`/`localtime` those stamps (invents a 00:00 SL bucket).
 - `_flush_entry_blocks` 45s window covers counters **and**
   `entry_block_events`. Do not restore `not events_dirty` skip.
   `reset` / symbol-delete / `shutdown` (after the worker joins) pass
   `force=True`. `execution.flush()` sits on the same side of `join`.
-  Do not flush either blob before `_stop.set()` — the last in-flight
+  Do not flush either blob before `_stop.set()` â€” the last in-flight
   cycle then hits a fresh window and drops its rows.
 - Live count is **1 ticket per name** (leftover `max_positions` 5/10
-  unread — the 13.08 stack). Lot is remaining book margin split across
-  vacant enabled names, clipped by auto 1R `max(risk_percent, 2%)` ×
+  unread â€” the 13.08 stack). Lot is remaining book margin split across
+  vacant enabled names, clipped by auto 1R `max(risk_percent, 2%)` Ã—
   denetci. Leftover `max_lot` / `max_margin_pct` unread. System
  `max_positions` / `max_lot` unread. Leftover `max_total_positions`
  stays unread. `max_concurrent_risk_pct` **binds again** (operator
@@ -175,16 +181,16 @@ Fail-first: write the test, watch it fail, then implement.
   looks cursed in-sample; threshold scan is a curve-fit; unverifiable.
 - `GET /api/ai` and `POST /api/logs/clear` are gone. Panel reads
   `STATE.ai`; Temizle is DOM-only. Do not restore the ring-wipe POST.
-- Autopsy R divides by `|entry − original_sl|`. Do not rewrite pre-fix
+- Autopsy R divides by `|entry âˆ’ original_sl|`. Do not rewrite pre-fix
   `sl`+`r=+1.0` rows; cash is the truth. Flatten rows before
-  `fill["profit"]` have empty `profit` — **R is still valid**; do not
-  sum autopsy `kar` across those 27. Panel/report “masada” is **winners
+  `fill["profit"]` have empty `profit` â€” **R is still valid**; do not
+  sum autopsy `kar` across those 27. Panel/report â€œmasadaâ€ is **winners
   only**; stored `left_on_table_r` still includes losers. `mfe_r` is an
   intrabar peak, not harvestable.
 - Scale-out TRADE `kar=` is computed (`tick_value/tick_size` or
   `money_per_price_unit`), not `_closing_deal_pnl`. Pre-fix lines were
   `NxATR` with no cash.
-- Keep-line is `(taze test …R)` or `(damga …R, dd.mm)`, not a live
+- Keep-line is `(taze test â€¦R)` or `(damga â€¦R, dd.mm)`, not a live
   replay. A pre-fix `test net` figure is not current.
 - Short MFE uses coverable ask (`bar_low + pad`); pre-26.08 shorts used
   the print low.
@@ -204,19 +210,19 @@ Fail-first: write the test, watch it fail, then implement.
 - Fill verifier `sleep`s on a **side thread** (`defer_verify`). Do not
   delete the sleeps; do not return `verified_unfilled` early. Drain
   books the **send-time** `signal_source` + `last_bar`. Do not mark or
-  clear live `state.last_bar` after the verifier sleeps — that wipes a
+  clear live `state.last_bar` after the verifier sleeps â€” that wipes a
   T+1 signal and files `filled_bars` under `""`.
 - `_BAR_INTEGRITY_REFRESH = 900s` pins window ends (two small
   `copy_rates`) and full-fetches only on mismatch. `due` uses **broker**
   clock. Do not re-add a stale-bar 45s refresh. Pins are
-  `(bars.time[0], bars.last_closed_time)` — **not** `forming_time`.
+  `(bars.time[0], bars.last_closed_time)` â€” **not** `forming_time`.
   `Bars` ctor 2nd arg is the forming candle. A middle-bar hole with
   both ends unchanged is the remaining miss.
 - Calendar `_maybe_reoptimize` is gone. Apply age is `reject_reason`
   + `reopt_min_age_hours`. Quarantine still queues via
   `_queue_reoptimization` (retry cooldown). Do not resurrect a
   weekly/decay auto-search.
-- `_MAX_SIGNAL_BAR_AGE_BARS = 2` × timeframe. Search default is M15/M30
+- `_MAX_SIGNAL_BAR_AGE_BARS = 2` Ã— timeframe. Search default is M15/M30
   (`SEARCH_TIMEFRAMES`); M5 stays legal to trade (SpotBrent stoch/M5) and
   a one-off `POST /api/opt/run` can still name it. US30 live is M30; an
   M5 name's 600 s `bar_bosluk` on overnight drought is normal.

@@ -304,7 +304,7 @@ class RiskManager:
     # when no account picture is present. With an account, remaining-margin
     # share × auto 1R (max stored risk%, 2%) is the size — do not skip a
     # micro raw that the kasa can actually carry.
-    MAX_MIN_LOT_OVERSHOOT = 3.0
+    MAX_MIN_LOT_OVERSHOOT = 1.5
     # Floor of the live 1R cap when the account picture is present. Stored
     # risk% still wins if it is already higher. Shakeout SL × full-kasa lots
     # without this bound would blow the account.

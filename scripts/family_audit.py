@@ -10,7 +10,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
-FAM = frozenset({"burst", "mtf_pullback", "ichimoku", "channel_break"})
+FAM = frozenset({"burst", "mtf_pullback", "channel_break"})
 
 
 def session() -> dict[str, str]:

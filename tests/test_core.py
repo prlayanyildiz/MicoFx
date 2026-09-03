@@ -292,17 +292,16 @@ def test_lot_for_ai_scale_skips_trade_past_overshoot_guard():
 def test_lot_for_ai_scale_within_overshoot_forces_floor():
     risk = RiskManager(_FakeStore(), _FakeClient())
     cfg = _cfg(risk_percent=0.1)
-    lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.5)
+    # floor/r_cap = 0.1/0.066... ≈ 1.5 → at the 1.5x ceiling, force floor
+    lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.67)
     assert lot == pytest.approx(0.1)
 
 
-def test_lot_for_overshoot_guard_uses_tightened_3x_ceiling():
-    # Regression pin for the B1 tightening (10.0x -> 3.0x): an overshoot that
-    # the old, looser ceiling would have tolerated (silently sizing a trade at
-    # ~5x its configured risk) must now be refused instead.
+def test_lot_for_overshoot_guard_uses_tightened_1_5x_ceiling():
+    # T1: 3.0x → 1.5x. An overshoot the old ceiling tolerated (~2x) must skip.
     risk = RiskManager(_FakeStore(), _FakeClient())
     cfg = _cfg(risk_percent=0.1)
-    lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.2)  # 5x overshoot
+    lot, note = risk.lot_for(cfg, sl_distance=1.0, balance=1000.0, ai_scale=0.5)  # 2x
     assert lot == 0.0
     assert "atlandi" in note
 

@@ -121,6 +121,10 @@ def test_the_registry_is_the_whole_book():
     # 8 -> 4 on 01.09: stoch_flip, dual_t3, t3_flip, parabolic_flip retired
     # (F39 null forward edge; live book ~-40R on stoch). Leftover DB names
     # fail closed.
+    # 4 -> 3 briefly after ichimoku (02.09), then nr_break landed 03.09
+    # (keltner rolled back). Same day matrix: nr_break never best on any
+    # symbol, roc_pace never best either → live set back to 3
+    # (burst / mtf_pullback / channel_break).
     assert len(FAMILIES) == 3, f"aile sayisi degisti: {FAMILIES}"
 
 

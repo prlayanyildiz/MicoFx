@@ -1114,6 +1114,38 @@ def _slice_ok(slice_dict: dict[str, Any]) -> bool:
                 and slice_dict.get("profit_factor", 0) >= MIN_OOS_PF)
 
 
+# Holdout is one contiguous OOS window; splitting it shows whether the edge
+# is concentrated in one lucky stretch (Claude F6). Stamped ``positive_ratio``
+# on the winner is this fraction, not the selection-segment ratio (which
+# survivors almost always push to 1.0 after min_positive_ratio filtering).
+HOLDOUT_ROBUST_PARTS = 6
+
+
+def subwindow_positive_ratio(run_one, window: tuple[int, int],
+                             parts: int = HOLDOUT_ROBUST_PARTS) -> float:
+    """Fraction of equal sub-windows with ``net_r > 0``.
+
+    ``run_one`` takes an ``(lo, hi)`` bar index window and returns an object
+    with ``net_r``. Short windows fall back to a single binary call so a thin
+    holdout cannot invent six empty slices.
+    """
+    lo, hi = int(window[0]), int(window[1])
+    n = hi - lo
+    if n <= 0:
+        return 0.0
+    parts = max(2, int(parts))
+    if n < parts * 40:
+        return 1.0 if float(getattr(run_one((lo, hi)), "net_r", 0.0) or 0.0) > 0 else 0.0
+    width = n // parts
+    wins = 0
+    for i in range(parts):
+        a = lo + i * width
+        b = hi if i == parts - 1 else a + width
+        if float(getattr(run_one((a, b)), "net_r", 0.0) or 0.0) > 0:
+            wins += 1
+    return wins / float(parts)
+
+
 def commission_in_price(commission_per_lot: float, tick_value: float, tick_size: float) -> float:
     """Convert round-turn commission per lot into price units.
 
@@ -1515,7 +1547,20 @@ def walk_forward(cfg: SymbolConfig, bars, point: float, tf_seconds: int, grid: d
         top, selection_metric, validation_days,
         risk_dollar=risk_dollar, min_trades=min_trades)
     for candidate in top:
-        candidate["holdout"] = measure(candidate["params"], holdout).as_dict(MIN_TEST_TRADES)
+        params = candidate["params"]
+        candidate["holdout"] = measure(params, holdout).as_dict(MIN_TEST_TRADES)
+        # F6: selection positive_ratio is near-always 1.0 among survivors.
+        # Stamp holdout sub-window robustness so F1/apply can discriminate.
+        candidate["selection_positive_ratio"] = float(
+            candidate.get("positive_ratio") or 0.0)
+        candidate["positive_ratio"] = round(
+            subwindow_positive_ratio(
+                lambda w, _p=params: measure(_p, w),
+                holdout,
+                HOLDOUT_ROBUST_PARTS,
+            ),
+            2,
+        )
     top = top[:10]
 
     best = top[0]

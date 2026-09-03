@@ -103,11 +103,20 @@ def test_normal_sizing_is_untouched():
 def test_a_small_but_nonzero_lot_still_takes_the_overshoot_path():
     """Below the floor but within MAX_MIN_LOT_OVERSHOOT: rounded up, not skipped.
 
-    Guards the boundary the zero-check sits next to - `raw` of 0.05 against a
-    0.1 floor is a 2x overshoot, under the 3.0x limit, so it still trades.
+    Guards the boundary the zero-check sits next to - `raw` of ~0.08 against a
+    0.1 floor is a 1.25x overshoot, under the 1.5x limit, so it still trades.
     """
-    # 10_000 * 0.005% / 10 = 0.05 lot vs 0.1 floor
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=0.005)
+    # 10_000 * 0.008% / 10 = 0.08 lot vs 0.1 floor
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=0.008)
     lot, note = _risk(cfg).lot_for(cfg, sl_distance=1.0, balance=10_000.0)
     assert lot == pytest.approx(0.1)
     assert "atlandi" not in note
+
+
+def test_overshoot_past_1_5x_skips_instead_of_rounding_up():
+    """T1: 2x min-lot vs raw must skip (was allowed under the old 3.0x ceiling)."""
+    # 10_000 * 0.005% / 10 = 0.05 lot vs 0.1 floor = 2x
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, risk_percent=0.005)
+    lot, note = _risk(cfg).lot_for(cfg, sl_distance=1.0, balance=10_000.0)
+    assert lot == 0.0
+    assert "atlandi" in note

@@ -1,98 +1,51 @@
-"""MicoFx auto-pilot — one tick: audit, fix, research, bridge.
+"""Manual autopilot tick via the live panel (no second DB writer).
 
-Fully automatic income + R&D loop entry point. Safe to run from Task Scheduler
-or start_income_loop.ps1 every 15 minutes.
+In-process autopilot owns the income loop. This CLI only POSTs
+``/api/autopilot/tick`` so writes stay in the running bot.
 
 Usage:
     C:\\MicoFX-venv\\Scripts\\python.exe scripts/auto_pilot.py
 """
 from __future__ import annotations
 
-import subprocess
+import json
 import sys
-from datetime import datetime
-from pathlib import Path
+import urllib.error
+import urllib.request
 
-ROOT = Path(__file__).resolve().parents[1]
-PYTHON = sys.executable
-LOG_DIR = ROOT / "logs"
-BRIDGE = ROOT / "cursor" / "FOR_CLAUDE.md"
-AUTOPILOT_BEGIN = "<!-- autopilot:begin -->"
-AUTOPILOT_END = "<!-- autopilot:end -->"
-
-
-def _run(script: str, *args: str) -> tuple[int, str]:
-    cmd = [PYTHON, str(ROOT / "scripts" / script), *args]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=str(ROOT))
-        out = (proc.stdout or "") + (proc.stderr or "")
-        return proc.returncode, out[-4000:]
-    except subprocess.TimeoutExpired:
-        return 1, f"{script} timeout"
-    except OSError as exc:
-        return 1, str(exc)
-
-
-def _write_bridge(body: str) -> None:
-    """Replace only the autopilot section; never wipe Cursor↔Claude brief.
-
-    Also mirrors the tick to cursor/AUTO_PILOT.md so the brief file is not
-    the only dump target.
-    """
-    BRIDGE.parent.mkdir(parents=True, exist_ok=True)
-    mirror = BRIDGE.parent / "AUTO_PILOT.md"
-    mirror.write_text(body, encoding="utf-8")
-    block = f"{AUTOPILOT_BEGIN}\n{body.rstrip()}\n{AUTOPILOT_END}\n"
-    existing = ""
-    if BRIDGE.exists():
-        existing = BRIDGE.read_text(encoding="utf-8")
-    if AUTOPILOT_BEGIN in existing:
-        head = existing.split(AUTOPILOT_BEGIN, 1)[0].rstrip()
-        text = f"{head}\n\n{block}" if head else block
-    elif existing.strip():
-        # Keep whatever was there (task board, ack, etc.) — never full replace.
-        text = f"{existing.rstrip()}\n\n{block}"
-    else:
-        text = block
-    BRIDGE.write_text(text, encoding="utf-8")
+PANEL = "http://127.0.0.1:8900"
 
 
 def main() -> int:
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    sections: list[str] = [f"# Auto-pilot {ts}", ""]
-
-    code, out = _run("income_dev_loop.py", "--auto")
-    sections.append("## Gelir dongusu")
-    sections.append(f"- exit: {code}")
-    sections.append("```")
-    sections.append(out.strip()[-2500:] or "(bos)")
-    sections.append("```")
-    sections.append("")
-
-    rcode, rout = _run("research_scanner.py")
-    sections.append("## AR-GE taramasi")
-    sections.append(f"- exit: {rcode}")
-    sections.append("- detay: `logs/research_latest.md`, `cursor/RESEARCH_QUEUE.md`")
-    if rout.strip():
-        sections.append("```")
-        sections.append(rout.strip()[-1200:])
-        sections.append("```")
-
-    body = "\n".join(sections) + "\n"
-    _write_bridge(body)
-
-    pilot_log = LOG_DIR / "auto_pilot.log"
-    with pilot_log.open("a", encoding="utf-8") as fh:
-        fh.write(f"\n{'=' * 50}\n")
-        fh.write(body)
-
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except AttributeError:
-        pass
-    print(body)
-    return 0 if code == 0 else code
+        req = urllib.request.Request(f"{PANEL}/", method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            cookies = resp.headers.get_all("Set-Cookie") or []
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        print(f"panel kapali ({PANEL}): {exc}", file=sys.stderr)
+        print("Autopilot bot icinde — once paneli acin (Sistem > Gelir autopilot).")
+        return 1
+    headers = {"Origin": PANEL, "Content-Type": "application/json"}
+    if cookies:
+        headers["Cookie"] = "; ".join(c.split(";")[0] for c in cookies)
+    try:
+        req = urllib.request.Request(
+            f"{PANEL}/api/autopilot/tick",
+            data=b"{}",
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            body = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        print(exc.read().decode()[:400], file=sys.stderr)
+        return 1
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    for line in body.get("summary") or []:
+        print(line)
+    return 0
 
 
 if __name__ == "__main__":

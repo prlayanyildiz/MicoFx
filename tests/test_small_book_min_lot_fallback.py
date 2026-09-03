@@ -75,8 +75,8 @@ def _acct(**kw):
 def test_four_vacant_names_still_get_min_lot_on_small_account():
     cfgs = [_cfg(s) for s in ("GER40", "JPN225", "NAS100", "US30")]
     rm = RiskManager(_Store(cfgs), _IndexClient())
-    # sl tight enough that min lot stays within MAX_MIN_LOT_OVERSHOOT of 1R
-    lot, note = rm.lot_for(cfgs[0], 20.0, 200.0, account=_acct())
+    # sl=12 -> raw ~0.067 vs floor 0.1 (~1.49x), inside the 1.5x T1 ceiling
+    lot, note = rm.lot_for(cfgs[0], 12.0, 200.0, account=_acct())
     assert lot >= 0.1, note
     assert lot == 0.1, note  # floor, not full margin share
 
@@ -84,7 +84,7 @@ def test_four_vacant_names_still_get_min_lot_on_small_account():
 def test_high_leverage_allows_min_lot_when_margin_fits():
     cfgs = [_cfg("GER40")]
     rm = RiskManager(_Store(cfgs), _IndexClient())
-    lot, note = rm.lot_for(cfgs[0], 20.0, 200.0, account=_acct())
+    lot, note = rm.lot_for(cfgs[0], 12.0, 200.0, account=_acct())
     assert lot >= 0.1, note
 
 

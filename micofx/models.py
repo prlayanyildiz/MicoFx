@@ -153,7 +153,6 @@ class SymbolConfig:
     stoch_length: int = 9
     smooth_k: int = 3
     smooth_d: int = 3
-    stoch_extreme: float = 80.0      # block entries into an exhausted move
 
     # ---- higher timeframe trend agreement ----
     htf_factor: int = 6              # base timeframe multiple; 0/1 disables
@@ -526,6 +525,7 @@ PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
 # same SAR-flip shape as retired stoch_flip. Leftover names fail closed.
 # ichimoku retired 02.09: Claude+Cursor matrix - no symbol/TF holdout win;
 # leftover DB names fail closed; ichimoku_lines went with it.
+# nr_break retired 03.09 (matrix: never best). roc_pace not shipped (EK19 lock).
 STRATEGIES = ["mtf_pullback", "burst", "channel_break"]
 
 # True scalps: cost-scaled micro entries that only make sense on fast bars.
@@ -736,6 +736,13 @@ class SystemConfig:
     # mid-cycle relaunch is ensure().
     autostart_mt5: bool = True
     autostart_mt5_wait_sec: int = 90
+
+    # ---- in-process income autopilot (replaces start_income_loop.ps1) ----
+    # Side-thread tick from Engine: safe fixes, evidence spread widen, kasa.
+    # Off disables due(); interval 0 also disables. Default on — the external
+    # PowerShell loop is retired.
+    autopilot_enabled: bool = True
+    autopilot_interval_sec: float = 900.0
 
     # Expected MT5 login + server. 0 / "" means unset: the first connected
     # account is written here (logged, not silent). A mismatch blocks new

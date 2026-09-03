@@ -30,8 +30,10 @@ def _read(name: str) -> str:
 
 
 def test_the_family_count_matches_the_code():
+    """Live docs only — OPTIMIZATIONS.md is a dated ledger full of historical
+    "N aile" counts that intentionally disagree with today's STRATEGIES."""
     n = len(STRATEGIES)
-    for name in COUNTED:
+    for name in DOCS:
         for i, line in enumerate(_read(name).splitlines(), start=1):
             if "(arsiv)" in line.lower():
                 continue
