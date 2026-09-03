@@ -764,7 +764,7 @@ class RiskManager:
                 # book per index fill).
                 if floor <= r_cap * self.MAX_MIN_LOT_OVERSHOOT + 1e-12:
                     lot = min(floor, auto, ceiling)
-                elif floor <= r_cap * self.MAX_MIN_LOT_CONCURRENT_OVERSHOOT + 1e-12:
+                elif floor + 1e-12 < r_cap * self.MAX_MIN_LOT_CONCURRENT_OVERSHOOT:
                     # Equity-floor names (wide SL × $200 book): 1R wants
                     # sub-min lot. If the operator's concurrent dial still
                     # has room for this fill's dollar 1R, take broker min —
