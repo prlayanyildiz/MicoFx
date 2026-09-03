@@ -1680,6 +1680,15 @@ class Optimizer:
             sel_positive = best.get("positive_ratio", 0)
         if float(sel_positive or 0) < min_positive:
             return "secim segmentleri arasinda tutarsiz"
+        # F6: when selection_positive_ratio is preserved, ``positive_ratio`` is
+        # holdout sub-window robustness (3/6 = 0.5). US30 costed_e M5 (id662)
+        # applied with selection 1.0 / holdout 0.5 because only the selection
+        # figure was gated. Force does not waive this (Claude 03.09).
+        if best.get("selection_positive_ratio") is not None:
+            hold_robust = float(best.get("positive_ratio", 0) or 0)
+            if hold_robust + 1e-12 < min_positive:
+                return (f"holdout dilimleri kirilgan "
+                        f"({hold_robust:.2f} < {min_positive:g})")
         # A configuration gets the settling time the system already says it
         # should get. ``reopt_min_age_hours`` states the policy and
         # ``reject_reason`` enforces it on apply. Calendar auto-queue is gone
@@ -2246,8 +2255,10 @@ class Optimizer:
                 "selection": {},
                 "holdout_days": days,
                 "validated": True,
-                "positive_ratio": 1.0,
-                "selection_positive_ratio": 1.0,
+                # No selection_positive_ratio: F6 gate only binds WFO stamps.
+                # External charged robustness (Claude GER40 6/6) is the force
+                # caller’s responsibility; inventing 1.0 here hid fragility.
+                "positive_ratio": float(measured.get("score_consistency") or 0.0),
                 "charge_costs": True,
                 "spread_scale": self._spread_scale(symbol),
                 "keep_reason": "force charged measure",
@@ -2293,6 +2304,21 @@ class Optimizer:
                     LOG.emit(f"{symbol}: {drag} - aile/TF flip reddedildi.",
                              "OPT", symbol)
                     return {"ok": False, "error": drag}
+            # F6 holdout robustness — same bar as reject_reason; force cannot
+            # land a 3/6 stamp (US30 id662).
+            if detail.get("selection_positive_ratio") is not None:
+                try:
+                    min_positive = float(detail.get("min_positive_ratio")) \
+                        if detail.get("min_positive_ratio") is not None else float(
+                            (self.store.opt_params() or {}).get(
+                                "min_positive_ratio", 0.6) or 0.6)
+                except (TypeError, ValueError):
+                    min_positive = 0.6
+                hold_robust = float(detail.get("positive_ratio", 0) or 0)
+                if hold_robust + 1e-12 < min_positive:
+                    return {"ok": False,
+                            "error": (f"holdout dilimleri kirilgan "
+                                      f"({hold_robust:.2f} < {min_positive:g})")}
         patch = dict(applied_params)
         if timeframe in TIMEFRAMES:
             patch["timeframe"] = timeframe
