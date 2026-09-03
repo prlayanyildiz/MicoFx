@@ -252,27 +252,15 @@ class AutoPilot:
         return [f"AI trust {patch}"]
 
     def _apply_cost_free(self) -> list[str]:
-        enabled = list(self._enabled_symbols().values())
-        if not enabled:
-            return []
-        all_zero = all(
-            float(getattr(c, "commission_per_lot", 0) or 0) <= 0 for c in enabled)
-        if not all_zero:
-            return []
-        sys = self.store.system
-        already = (
-            not bool(getattr(sys, "charge_costs", True))
-            and not bool(getattr(sys, "block_high_cost", True))
-            and float(getattr(sys, "max_cost_pct_of_risk", 0) or 0) <= 0
-        )
-        if already:
-            return []
-        self.store.update_system({
-            "charge_costs": False,
-            "block_high_cost": False,
-            "max_cost_pct_of_risk": 0.0,
-        }, source="autopilot")
-        return ["cost_free: charge_costs=false (komisyon 0)"]
+        """No longer auto-disables ``charge_costs`` when commission is 0.
+
+        CFD rows often ship ``commission_per_lot=0`` while spread is the real
+        fill cost. Autopilot used to flip ``charge_costs``/``block_high_cost``
+        off in that case; WFO then ranked paper-optimal SL and the live book
+        mis-tuned (Claude 03.09 autopsy: GER40/BTC; cost-free force-WFO kept
+        both incumbents). Operator owns the cost toggles.
+        """
+        return []
 
     def _apply_kasa(self) -> list[str]:
         """Slow tick: no lot/conc/margin patches. Dial is max_margin_usage_pct."""
