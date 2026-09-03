@@ -734,7 +734,20 @@ class Store:
                 if fam in known_fam and isinstance(tfs, list)
             }
         if isinstance(base.get("timeframes"), list):
-            base["timeframes"] = [t for t in base["timeframes"] if t in TIMEFRAMES]
+            # Same class as strategies: a stored bag outlives a newly shipped
+            # TF. Without a ship-union, soft-restart keeps M5 invisible forever
+            # after a park-era blob (Claude 03.09). Prefer shipped order; keep
+            # any still-legal stored-only extras after.
+            ship_tfs = shipped.get("timeframes") if isinstance(
+                shipped.get("timeframes"), list) else []
+            stored_tfs = [t for t in base["timeframes"] if t in TIMEFRAMES]
+            ordered: list[str] = []
+            seen: set[str] = set()
+            for t in list(ship_tfs) + stored_tfs:
+                if t in TIMEFRAMES and t not in seen:
+                    seen.add(t)
+                    ordered.append(t)
+            base["timeframes"] = ordered
         # Same class as the TF/axis filters: a saved strategies list outlives
         # the families it named. Drop here so GET and the next merge stay
         # honest; save_opt_params applies the same drop so a POST cannot
