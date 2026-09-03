@@ -1,12 +1,12 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 00:37** — **XAU WFO RED:** aday burst/M15 +81R < incumbent **+256R**
-(mtf/M15 sl0.5 korundu). **JPN225** SL-floor WFO basladi. NAS burst/sl0.9
-+103.5R LAND ✓ (Claude teyit: dd 57→30).
-**04.09 00:27** — NAS LAND + restart. **04.09 00:22** — #3 hours RETRACT.
-**SABAH:** JPN WFO sonucu; XAU premature (WFO esdeger yok — guclu stamp);
-SpotBrent fill.
+**04.09 00:52** — Gece SL sweep kapandi: **NAS LAND** burst/sl0.9 +103.5R;
+**XAU BIRAK** +256R (Claude: Agustos premature blip, force yok); **JPN WFO
+RED** (kapidan aday yok, sl0.7 +146.7R korundu). Spread recheck + hybrid
+force-SL gate canlida. Hours #3 RETRACT.
+**SABAH:** SpotBrent fill; XAU premature izle; operator EK22 brifing.
+
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
 NAS/XAU mtf, JPN burst/M30, US30 channel re-stamp hold +43, GER/BTC
