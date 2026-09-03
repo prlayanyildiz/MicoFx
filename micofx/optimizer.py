@@ -78,13 +78,15 @@ def weak_entry_hours_from_autopsy(
         rows: list | None,
         symbol: str,
         *,
-        min_n: int = 6,
+        min_n: int = 5,
         max_pf: float = 0.7,
         max_hours: int = 6) -> list[int]:
     """Worst-first broker hours where this symbol's autopsy fills bleed.
 
     Uses ``fill_time`` (naive broker epoch) — same clock as day cuts. Empty
     when the ring is too thin; caller then keeps the book-wide default seed.
+    ``min_n`` is 5 so NAS/JPN cells that already show clear negative R are
+    not dropped for being one trade short of a round six.
     """
     want = str(symbol or "")
     if not want or not isinstance(rows, list):
