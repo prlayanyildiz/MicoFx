@@ -362,7 +362,10 @@ class RiskManager:
     # when no account picture is present. With an account, remaining-margin
     # share × auto 1R (max stored risk%, 2%) is the size — do not skip a
     # micro raw that the kasa can actually carry.
+    # Soft overshoot: broker min vs 1R (granularity). Hard ceiling even when
+    # concurrent budget would fund a fatter min-lot fill (C1 / T1).
     MAX_MIN_LOT_OVERSHOOT = 1.5
+    MAX_MIN_LOT_CONCURRENT_OVERSHOOT = 3.0
     # Floor of the live 1R cap when the account picture is present. Stored
     # risk% still wins if it is already higher. Shakeout SL × full-kasa lots
     # without this bound would blow the account.
@@ -761,6 +764,33 @@ class RiskManager:
                 # book per index fill).
                 if floor <= r_cap * self.MAX_MIN_LOT_OVERSHOOT + 1e-12:
                     lot = min(floor, auto, ceiling)
+                elif floor <= r_cap * self.MAX_MIN_LOT_CONCURRENT_OVERSHOOT + 1e-12:
+                    # Equity-floor names (wide SL × $200 book): 1R wants
+                    # sub-min lot. If the operator's concurrent dial still
+                    # has room for this fill's dollar 1R, take broker min —
+                    # can_open() re-checks the same sum. Concurrent 0 = off
+                    # → do not unlock here.
+                    try:
+                        eq = float((account or {}).get("equity") or 0.0)
+                    except (TypeError, ValueError):
+                        eq = 0.0
+                    fill_r = floor * sl_distance * money_per_unit
+                    cap_pct = self.live_concurrent_pct(account, positions)
+                    if eq > 0 and cap_pct > 0 and fill_r > 0:
+                        magics = {c.magic for c in list(self.store.symbols.values())}
+                        mine = [p for p in (positions or ())
+                                if p.get("magic") in magics]
+                        book = sum(self.remaining_position_risk(p) for p in mine)
+                        if math.isfinite(book) and book + fill_r <= eq * cap_pct / 100.0 + 1e-9:
+                            lot = min(floor, auto, ceiling)
+                            note += (f" | min lot eszamanli "
+                                     f"({fill_r / eq * 100:.1f}% / %{cap_pct:g})")
+                        else:
+                            return 0.0, (f"lot sifir ({note}, 1R tavan {r_cap:g} "
+                                         f"< min {floor:g}), islem atlandi")
+                    else:
+                        return 0.0, (f"lot sifir ({note}, 1R tavan {r_cap:g} "
+                                     f"< min {floor:g}), islem atlandi")
                 else:
                     return 0.0, (f"lot sifir ({note}, 1R tavan {r_cap:g} "
                                  f"< min {floor:g}), islem atlandi")
