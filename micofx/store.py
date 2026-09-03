@@ -10,6 +10,15 @@ from .logbus import LOG
 from .models import OPT_FIELDS, STRATEGIES, TIMEFRAMES, SymbolConfig, SystemConfig
 from .paths import DB_PATH, ensure_dirs, load_defaults
 
+# Retired family knobs that may still sit in old symbol payloads. Load
+# rewrites them out (same door as unknown extras). Not SymbolConfig fields.
+RETIRED_PAYLOAD_KEYS = frozenset({
+    "nr_lookback", "nr_buffer_atr", "nr_min_range_atr",
+    "rp_lookback", "rp_threshold", "rp_smooth",
+    "kelt_mult", "kelt_lookback", "kelt_atr_mult",
+    "stoch_extreme", "stoch_k", "stoch_d", "stoch_smooth",
+})
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -253,7 +262,10 @@ class Store:
                 raw = json.loads(row["payload"])
             except (json.JSONDecodeError, TypeError):
                 continue
+            # Unknown keys and the named retired-family set both force a rewrite.
             extra = set(raw) - known if isinstance(raw, dict) else set()
+            if isinstance(raw, dict):
+                extra |= set(raw) & RETIRED_PAYLOAD_KEYS
             cfg = loaded.get(row["symbol"])
             unread_cost = (
                 cfg is not None

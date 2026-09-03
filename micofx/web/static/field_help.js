@@ -135,7 +135,7 @@ const FIELD_HELP = {
   "card.Serbest Marj": "Yeni isleme acik teminat. Dipnot: su an kullanilan marj.",
   "card.Marj Kullanimi": "Kullanilan marj / ozkaynak. Limit asilirsa yeni giris durur.",
   "card.Gunluk Sonuc": "Bugun kapanan islemlerin neti. Canli acik K/Z dahil degil.",
-  "card.Gunluk Limit": "Gunluk net zarar bakiyenin daily_loss_pct'sini asinca yeni giris durur; flatten her zaman acik. Sistem kartindaki Gunluk Limit alani.",
+  "card.Gunluk Limit": "Gunluk net zarar bakiyenin daily_loss_pct'sini asinca yeni giris durur. daily_loss_flatten her zaman acik (HTTP yazilmaz). Sistem kartindaki Gunluk Limit alani.",
   "card.Acilabilir Islem": "Kalan marj / bu sembolun lot marji. Leftover max_total_positions baglamaz.",
   "card.Beklenen Aylik": "OPT holdout diliminden turetilen aylik projeksiyon; canli sonuc degil. Rejim ve maliyetli karsilik kapasite satirinda.",
 
