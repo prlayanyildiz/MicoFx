@@ -1,10 +1,10 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 01:09** — SL floor keep: live + mid-step below 0.9 (JPN 0.8 cliff)
-WFO'da aranabilir; floor global **0.9 kalir**. JPN force sl0.8 +148.3R LAND.
-NAS WFO sl0.9 ✓; XAU BIRAK; US30 RED. Hours RETRACT.
-**04.09 01:07** — JPN hybrid force. **SABAH:** SpotBrent; XAU izle.
+**04.09 01:22** — **GECE KAPANDI** (Claude sabah brifingi). Agg charged
+**+773R** (+164 vs oturum ortasi 609). SpotBrent WFO RED (+21.8R). Premature:
+NAS sl0.9 + JPN sl0.8 done; XAU BIRAK (canli ticket izleniyor). Hours RETRACT.
+**SABAH izle:** XAU premature; SpotBrent NY fill; realised→charged yakinsama.
 
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
@@ -7389,7 +7389,8 @@ Agg charged score ~609. Kalıp: spread'i seans-bağımlı equity index'ler (US30
    varyans. Hours WFO kampanyasi yok; kod idle kalabilir (`[]` hep aday).
    JPN[14,15] charged +3.1R — temizlik icin [] demek gerileme, **kalir**.
 
-**SABAH KUYRUĞU:** (1) live SL / NAS WFO — **charged + autopsy** (bare force yok;
-floor ≥0.9), (2) ~~hours WFO~~ RETRACT, (3) XAUUSD trail_start capture
-(18:57 mfe 3.87→−0.01), (4) SpotBrent probe. Adreslenebilir bleed ~−96R
-(premature+spread).
+**SABAH KUYRUĞU (04.09 01:13 gece kapandi):** Premature kampanya bitti —
+NAS WFO sl0.9 +103.5R; JPN force sl0.8 +148.3R; XAU BIRAK +256R; US30 RED
++25R. Hours #3 RETRACT. Spread send-recheck canlida. SL floor keep
+(live+mid). SpotBrent WFO gece kosuyor (NY oncesi). Izle: XAU premature
+blip mi; SpotBrent ilk fill; operator EK22 brifing.
