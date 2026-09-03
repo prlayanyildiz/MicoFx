@@ -1,16 +1,15 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 00:20** — NAS100 manual WFO (force+apply_best) kosuyor: seans fan-out
-[15-21,08-16,14-22], SL floor≥0.9 + hours axis. Force SL widen artik
-**otopsi premature≥5 + charged non-regress** (WFO damgasi muaf). Ledger.
-**04.09 00:10 (gece kapanis)** — restart×3 ile gece stack canlida; hour-block
-regresyon revert; charged-beat apply gate. Detay EK22 sonu.
-Canli: JPN bh[14,15] +146.7R; NAS/XAU/US30 bh[]; US30 adx20 +25R; BTC ticket
-re-adopt. Landed ek: partial-apply regime keep (`c14e82f`), blocked/SL charged
-gerileme refuse (`40b7d1f`+). Search floor sl≥0.9 / hours WFO axis diskte.
-**SABAH:** NAS WFO sonucu + XAU/JPN WFO kuyrugu; XAU trail_start capture;
-SpotBrent ilk fill. Bare force SL yok.
+**04.09 00:22** — Claude **#3 RETRACT**: per-symbol charged'da 6/6 "none"
+(kotu-saat yok); chop-death hour mirage. Hours WFO kampanyasi yok. JPN
+[14,15] kalir (+3.1R charged; [] gerileme). NAS100 WFO devam (SL floor
+asıl hedef). Hybrid force-SL gate `b992d67`. Gercek bleed ~−96R
+(premature+spread).
+**04.09 00:20** — NAS100 WFO + force SL autopsy≥5 gate. Detay asagida.
+**04.09 00:10** — hour-block regresyon revert; charged-beat gate. EK22.
+Canli: JPN bh[14,15]; NAS/XAU/US30 []; US30 adx20; BTC re-adopt.
+**SABAH:** NAS WFO sonucu (SL); XAU trail; SpotBrent fill. Hours axis idle.
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
 NAS/XAU mtf, JPN burst/M30, US30 channel re-stamp hold +43, GER/BTC
@@ -7389,11 +7388,12 @@ Agg charged score ~609. Kalıp: spread'i seans-bağımlı equity index'ler (US30
    (mekanizma + WFO axis `backtest.py:1263` ZATEN VAR, hiç populate edilmemiş).
    **LAND:** OPT_FIELDS + `blocked_hour_search_axis` + otopsi `fill_time` seed
    (`7f00f38`/`b3d9070`). Canlı `[]` — restart+WFO apply bekliyor.
+   **RETRACT 04.09 00:22 (Claude):** per-symbol charged backtest'te 6/6 sembol
+   PF<0.8 & n≥15 aday **yok** — book-wide saat sinyali karisim artefakti / 15g
+   varyans. Hours WFO kampanyasi yok; kod idle kalabilir (`[]` hep aday).
+   JPN[14,15] charged +3.1R — temizlik icin [] demek gerileme, **kalir**.
 
-**SABAH KUYRUĞU:** (1) live SL patch NAS/JPN/XAU — **charged + autopsy birlikte**
-(bare force SL→1.0 charged çöker; search floor ≥0.9 sonraki WFO için hazır),
-(2) blocked_entry_hours **per-symbol WFO only** (book-wide canlı apply
-regresyon: NAS[17] −11.9R / XAU[16] −22.3R → revert; JPN[14,15] +3.1R kaldı;
-apply gate charged gerilemede refuse), (3) XAUUSD trail_start capture bakışı
-(18:57 mfe 3.87→−0.01; holdout net_r trail’e duyarsız), (4) SpotBrent probe +
-realised vs ~%80 eğri.
+**SABAH KUYRUĞU:** (1) live SL / NAS WFO — **charged + autopsy** (bare force yok;
+floor ≥0.9), (2) ~~hours WFO~~ RETRACT, (3) XAUUSD trail_start capture
+(18:57 mfe 3.87→−0.01), (4) SpotBrent probe. Adreslenebilir bleed ~−96R
+(premature+spread).
