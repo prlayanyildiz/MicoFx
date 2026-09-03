@@ -851,6 +851,11 @@ class Supervisor:
     # Uncapped, a 10% wr / 1.05 PF stamp would demand hundreds of trades
     # before a genuinely broken book could be suspended.
     QUARANTINE_N_CAP = 150
+    # Charged holdout stamp must clear this before it overrides paper
+    # expectancy (Claude 03.09). US30 force-apply left holdout_costed n=17
+    # (e=0.099 noise) over a solid n=276 paper e=0.156 — slot/budget/autopilot
+    # all read the thin sample. ~min_trades (40) is the floor.
+    MIN_COSTED_N = 40
 
     @staticmethod
     def holdout_expectancy(cfg: SymbolConfig) -> float:
@@ -863,14 +868,17 @@ class Supervisor:
         the field. The number is ``net_r / trades`` either way; use the
         stored key when it is a real number, otherwise derive it.
 
-        When ``holdout_costed`` is stamped (apply path under charge_costs),
-        prefer that expectancy for slot races — Fix B ranks search on
-        costed_e; paper flattery must not win the last concurrent seat
-        (US30 paper 0.156 vs charged 0.099 at $232 / ~2 seats).
+        When ``holdout_costed`` is stamped with enough trades, prefer that
+        expectancy for slot races — Fix B ranks search on costed_e. A thin
+        charged replay (US30 n=17) must not override a solid paper stamp.
         """
         summary = getattr(cfg, "opt_summary", None) or {}
         costed = summary.get("holdout_costed")
-        if isinstance(costed, dict) and int(costed.get("trades") or 0) > 0:
+        try:
+            costed_n = int((costed or {}).get("trades") or 0) if isinstance(costed, dict) else 0
+        except (TypeError, ValueError):
+            costed_n = 0
+        if isinstance(costed, dict) and costed_n >= Supervisor.MIN_COSTED_N:
             hold = costed
         else:
             hold = summary.get("holdout") or {}
