@@ -404,6 +404,9 @@ class Engine:
         # names. A quarantined name cannot open, so leaving it in that split
         # sized every real entry down by the number of suspended symbols.
         self.risk.supervisor_blocked = self.supervisor.is_suspended
+        self.risk.supervisor_edge_health = (
+            lambda sym: float(getattr(self.supervisor.verdicts.get(sym),
+                                      "edge_health", 0.0) or 0.0))
         # In-process income loop (replaces scripts/start_income_loop.ps1).
         self.autopilot = AutoPilot(self)
         # Requested-vs-filled bookkeeping. Purely diagnostic: it never gates a

@@ -686,6 +686,7 @@ function renderCapacity() {
       <td><span class="pill ${r.enabled ? "on" : "off"}">${r.enabled ? "aktif" : "kapali"}</span></td>
       <td class="num ${Number(r.lot) > 0 ? "" : "neg"}">${num(r.lot, 2)}</td>
       <td class="num ${r.edge_scale > 1 ? "pos" : (r.edge_scale < 1 ? "neg" : "dim")}" title="holdout net R / maxDD, karekok medyan, 0.6-2.2">${r.edge_scale != null ? "x" + num(r.edge_scale, 2) : "-"}</td>
+      <td class="num dim" title="budget_weight=${esc(r.budget_weight)}">${r.budget_share_pct != null ? num(r.budget_share_pct, 1) + "%" : "-"}</td>
       <td class="num ${Number(r.lot) > 0 ? "dim" : "neg"}" title="${esc(r.lot_note || "")}">${esc(r.lot_note || "risk %")}</td>
       <td class="num ${r.open_positions ? "pos" : "dim"}">${r.open_positions}</td>
       <td class="num ${r.free_slots > 0 ? "pos" : "neg"}"><b>${r.free_slots}</b></td>
@@ -696,7 +697,7 @@ function renderCapacity() {
       <td class="num ${cls(r.open_profit)}">${r.open_positions ? signed(r.open_profit) : "-"}</td>`;
     return tr;
   });
-  rowsInto($("#capacity-table"), rows, "Sembol yok", 13);
+  rowsInto($("#capacity-table"), rows, "Sembol yok", 14);
 
   // Deliberately does NOT repeat the cards above it. Open/total positions, free
   // slots and the monthly projection all have their own card; saying them twice

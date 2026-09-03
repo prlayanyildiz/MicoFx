@@ -396,6 +396,71 @@ class RiskManager:
             return False
         return until > time.time()
 
+    _MIN_BUDGET_WEIGHT_FLOOR = 0.02
+
+    def _supervisor_edge_health(self, symbol: str) -> float:
+        hook = getattr(self, "supervisor_edge_health", None)
+        if not callable(hook):
+            return 0.0
+        try:
+            return max(0.0, float(hook(symbol) or 0.0))
+        except Exception:
+            return 0.0
+
+    def _vacant_enabled_cfgs(
+            self, positions: list[dict[str, Any]] | None) -> list[SymbolConfig]:
+        magics = {c.magic for c in list(self.store.symbols.values())}
+        occupied: set[str] = set()
+        for pos in positions or ():
+            if pos.get("magic") not in magics:
+                continue
+            name = pos.get("symbol")
+            if name:
+                occupied.add(str(name))
+        out: list[SymbolConfig] = []
+        for cfg in list(self.store.symbols.values()):
+            if not getattr(cfg, "enabled", True):
+                continue
+            broker = self.client.resolve(cfg.symbol) or cfg.symbol
+            if broker in occupied:
+                continue
+            if self._cannot_open(cfg.symbol):
+                continue
+            out.append(cfg)
+        return out
+
+    def _min_budget_weight(self, vacant: list[SymbolConfig]) -> float:
+        exps = [max(0.0, float(Supervisor.holdout_expectancy(c) or 0.0))
+                for c in vacant]
+        pos = [e for e in exps if e > 0]
+        if not pos:
+            return self._MIN_BUDGET_WEIGHT_FLOOR
+        return max(self._MIN_BUDGET_WEIGHT_FLOOR, statistics.median(pos) * 0.15)
+
+    def _symbol_budget_weight(self, cfg: SymbolConfig,
+                              vacant: list[SymbolConfig] | None = None) -> float:
+        """Holdout expectancy (+ optional live edge_health) for budget share."""
+        exp = max(0.0, float(Supervisor.holdout_expectancy(cfg) or 0.0))
+        eh = self._supervisor_edge_health(cfg.symbol)
+        core = exp
+        if eh > 0 and exp > 0:
+            core = 0.7 * exp + 0.3 * (eh * exp)
+        elif eh > 0:
+            core = eh * self._MIN_BUDGET_WEIGHT_FLOOR
+        floor = self._min_budget_weight(vacant or [cfg])
+        return core + floor
+
+    def _budget_share_frac(self, cfg: SymbolConfig,
+                           positions: list[dict[str, Any]] | None) -> float:
+        vacant = self._vacant_enabled_cfgs(positions)
+        if not vacant:
+            return 1.0
+        weights = {c.symbol: self._symbol_budget_weight(c, vacant) for c in vacant}
+        total = sum(weights.values()) or 1e-9
+        if cfg.symbol not in weights:
+            return 0.0
+        return float(weights[cfg.symbol]) / total
+
     def live_lot_multiplier(self, account: dict[str, Any] | None = None,
                             positions: list[dict[str, Any]] | None = None) -> float:
         """Inline kasa lot dial from margin%, or stored when OFF / pinned."""
@@ -550,9 +615,10 @@ class RiskManager:
                             ai_scale: float = 1.0) -> float | None:
         """Lots that still fit this name's share of remaining margin.
 
-        Book budget is equity × max_margin_usage_pct minus used, split across
-        vacant enabled names, then × denetci ``ai_scale``. Broker leverage is
-        inside ``margin_for`` (per-instrument). Soft %95 lid when kasa is ON.
+        Book budget is equity × max_margin_usage_pct minus used, then split
+        across vacant enabled names by holdout-expectancy weight (not equal
+        1/n), then × denetci ``ai_scale``. Broker leverage is inside
+        ``margin_for`` (per-instrument). Soft %95 lid when kasa is ON.
         Leftover ``cfg.max_margin_pct`` is unread (operator 28.08). None = no
         extra cap.
         """
@@ -577,13 +643,12 @@ class RiskManager:
             soft = equity * NOTIONAL_MARGIN_SOFT_PCT / 100.0 - used
             margin_budget = max(0.0, min(margin_budget, soft))
         budget = max(0.0, min(margin_budget, free - float(sys_cfg.min_free_margin or 0.0)))
-        n = self._vacant_enabled_count(positions)
         try:
             scale = max(0.0, float(ai_scale))
         except (TypeError, ValueError):
             scale = 1.0
         whole = budget * scale
-        share = whole / n
+        share = whole * self._budget_share_frac(cfg, positions)
         unit = floor if floor > 0 else 0.01
         try:
             need = float(self.client.margin_for(cfg.symbol, unit, side) or 0.0)
@@ -1066,6 +1131,9 @@ class RiskManager:
             expectancy_r = float(Supervisor.holdout_expectancy(cfg) or 0.0)
             # Long-run cost per trade in R, straight from the holdout slice.
             expectancy_cost = float(hold.get("cost_per_trade_r", 0.0) or 0.0)
+            vacant = self._vacant_enabled_cfgs(mine)
+            b_weight = self._symbol_budget_weight(cfg, vacant) if cfg.enabled else 0.0
+            b_share = self._budget_share_frac(cfg, mine) if cfg.enabled else 0.0
             rows.append({
                 "symbol": cfg.symbol,
                 "broker_symbol": broker,
@@ -1098,6 +1166,8 @@ class RiskManager:
                 "expectancy_r": round(expectancy_r, 3),
                 "expected_per_trade": round(expectancy_r * r_value, 3),
                 "edge_scale": round(self.edge_scale(cfg), 2),
+                "budget_weight": round(b_weight, 4),
+                "budget_share_pct": round(b_share * 100.0, 1),
             })
 
         # Project holdout net R onto dollars. A missing expectancy key is not

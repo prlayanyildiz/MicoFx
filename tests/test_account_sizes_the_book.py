@@ -67,6 +67,7 @@ class _LotStore:
             max_total_positions=20, max_scalp_positions=0, max_swing_positions=0,
             min_free_margin=0.0, max_margin_usage_pct=0.0,
             max_concurrent_risk_pct=8.0,
+            kasa_auto_enabled=False,
         )
 
     def get_setting(self, key, default=None):

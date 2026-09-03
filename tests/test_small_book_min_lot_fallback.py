@@ -13,6 +13,7 @@ from micofx.risk import RiskManager
 class _System:
     size_by_edge = False
     lot_multiplier = 1.0
+    kasa_auto_enabled = False
     max_margin_usage_pct = 85.0
     min_free_margin = 0.0
     max_concurrent_risk_pct = 50.0
