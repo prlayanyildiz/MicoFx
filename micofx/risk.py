@@ -705,6 +705,19 @@ class RiskManager:
         per_lot = self._notional_per_lot(cfg.symbol)
         if per_lot <= 0:
             return None
+        # Same small-book escape as margin: if one share cannot fund min lot
+        # but the whole notional budget can, size on the whole remainder so
+        # N=50 on a 6-name index book still opens one ticket instead of
+        # zeroing every name.
+        need_lots = 0.0
+        try:
+            info = self.client.info(cfg.symbol) or {}
+            need_lots = float(info.get("volume_min") or 0.0)
+        except (TypeError, ValueError, AttributeError):
+            need_lots = 0.0
+        if need_lots > 0 and share + 1e-12 < need_lots * per_lot:
+            if remaining + 1e-12 >= need_lots * per_lot:
+                share = remaining
         return min(broker_ceiling, share / per_lot)
 
     def lot_for(self, cfg: SymbolConfig, sl_distance: float, balance: float,

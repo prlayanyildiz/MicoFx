@@ -101,3 +101,38 @@ def test_lot_for_lev50_not_zero_on_heavy_margin_index():
         account=acc, positions=[])
     assert lot >= 0.01, f"got {lot} ({note})"
     assert "notional" in note or lot > 0
+
+
+def test_notional_whole_budget_fallback_funds_min_lot():
+    """Equal split may be < min notional; whole book still opens one ticket."""
+    store = _Store([_cfg(i) for i in range(VACANT)])
+
+    class _Fat(_Client):
+        def info(self, symbol):
+            return {"volume_min": 0.1, "volume_max": 100.0, "volume_step": 0.1,
+                    "point": 1.0, "tick_size": 1.0, "tick_value": 1.0}
+
+        def normalize_volume(self, symbol, lot):
+            step = 0.1
+            vol = math.floor(float(lot) / step + 1e-9) * step
+            return round(max(0.0, min(100.0, vol)), 1)
+
+        def tick(self, symbol):
+            # share $2058 < 0.1*$40k; whole $12350 >= 0.1*$40k
+            return {"bid": 40000.0, "ask": 40000.0, "spread": 0.0}
+
+        def money_per_price_unit(self, symbol, volume):
+            return 1.0 * float(volume)
+
+        def margin_for(self, symbol, lot, side="buy"):
+            return 800.0 * float(lot)  # $80 / 0.1 — whole margin can fund min
+
+    rm = RiskManager(store, _Fat())
+    acc = {"equity": EQUITY, "margin_free": EQUITY, "margin": 0.0,
+           "leverage": BROKER}
+    cap = rm._notional_lot_ceiling(_cfg(0), acc, 100.0, positions=[])
+    assert cap is not None and cap + 1e-12 >= 0.1
+    lot, note = rm.lot_for(
+        _cfg(0), sl_distance=0.5, balance=EQUITY,
+        account=acc, positions=[])
+    assert lot >= 0.1, f"got {lot} ({note})"
