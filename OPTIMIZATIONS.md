@@ -1,10 +1,9 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 01:25** — Autopsy `premature_by_symbol` readout (sabah izleme).
-Gece kapandi agg **+773R**. XAU canli ticket premature watch.
-**04.09 01:22** — Claude sabah brifingi. SpotBrent WFO RED. Hours RETRACT.
-**SABAH:** XAU premature; SpotBrent NY fill; realised yakinsama.
+**04.09 01:28** — Restart-gap broker close reconcile (XAU #324655544 sessiz
+SL). Autopsy `premature_by_symbol`. Gece +773R kapandi.
+**SABAH:** XAU premature izle; SpotBrent NY fill; realised yakinsama.
 
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
