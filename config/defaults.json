@@ -329,8 +329,8 @@
       "magic": 990120,
       "sessions": [
         {
-          "start": "01:00",
-          "end": "23:55"
+          "start": "08:00",
+          "end": "15:59"
         }
       ],
       "max_spread_atr": 0.07,
