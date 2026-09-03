@@ -1,15 +1,13 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 00:22** — Claude **#3 RETRACT**: per-symbol charged'da 6/6 "none"
-(kotu-saat yok); chop-death hour mirage. Hours WFO kampanyasi yok. JPN
-[14,15] kalir (+3.1R charged; [] gerileme). NAS100 WFO devam (SL floor
-asıl hedef). Hybrid force-SL gate `b992d67`. Gercek bleed ~−96R
-(premature+spread).
-**04.09 00:20** — NAS100 WFO + force SL autopsy≥5 gate. Detay asagida.
-**04.09 00:10** — hour-block regresyon revert; charged-beat gate. EK22.
-Canli: JPN bh[14,15]; NAS/XAU/US30 []; US30 adx20; BTC re-adopt.
-**SABAH:** NAS WFO sonucu (SL); XAU trail; SpotBrent fill. Hours axis idle.
+**04.09 00:27** — **NAS100 WFO LAND:** burst/M30 **sl0.9**, charged **+103.5R**
+n560 PF1.27 (onceki mtf ~+101R). Restart OK; BTC re-adopt; hybrid gate bu PID.
+**XAUUSD WFO** kosuyor (fan-out 01-23/00-23/23-08). #3 hours RETRACT; JPN[14,15]
+kalir. Gercek bleed hedefi: premature SL (+ spread recheck).
+**04.09 00:22** — #3 RETRACT (hours mirage). **04.09 00:10** — hour revert +
+charged-beat. EK22.
+**SABAH:** XAU sonucu; JPN WFO (sl0.7); SpotBrent fill. Hours idle.
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
 NAS/XAU mtf, JPN burst/M30, US30 channel re-stamp hold +43, GER/BTC
