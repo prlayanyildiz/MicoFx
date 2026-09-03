@@ -85,7 +85,7 @@ const FIELD_HELP = {
 
   "max_total_positions": "Anahtar artik okunmaz. Sayim tavani yok; tavan marj / ters yon / STOPSUZ.",
   "lot_multiplier": "Butun lotlara carpilan global carpan. 2 = her sey iki kat. Kasa auto-tune aciksa 15 dkda merdivene ceker; kapatinca panel degeri kalir.",
-  "target_leverage": "Tek dial. 0 = brokerin tam kaldiraci (onerilen). Pozitif = daha muhafazakar lot carpani (inline). Dusuk N (orn. 50 @ 1:500) lotu kucultur ama artik marj butcesini 10x kirpmaz. Broker hesabini degistirmez.",
+  "target_leverage": "Tek dial = toplam notional tavani: varlik x N (broker tavanina kirpilir), vacant sembollere esit; lot = min(2% risk, notional pay, marj, margin_free). 0 = brokerin tam kaldiraci. Dusuk N artik marji yanlis kirpmaz — notional mppu×fiyat ile cevrilir.",
   "kasa_auto_enabled": "Acik: lot+concurrent inline (15dk patch yok). Kapali: Gelismis kutulardaki elle degerler. Spread/safe-fix autopilot ayri calisir.",
   "lot_multiplier": "Gelismis. Kasa ON: motor canli hesabi kullanir (auto rozeti). Elle yazmak 6 saat pinler. Kasa OFF: bu deger gecerli.",
   "max_concurrent_risk_pct": "Gelismis. Kasa ON: canli hesap. Elle yazmak 6 saat pin. 0 = freni kapatmaz (kasa OFF iken).",

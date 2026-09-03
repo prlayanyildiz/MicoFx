@@ -622,6 +622,91 @@ class RiskManager:
             share = whole
         return min(broker_ceiling, unit * (share / need))
 
+    def _mid_price(self, symbol: str) -> float:
+        tick = None
+        try:
+            tick = self.client.tick(symbol)
+        except (TypeError, ValueError, AttributeError):
+            tick = None
+        if not tick:
+            return 0.0
+        try:
+            bid = float(tick.get("bid") or 0.0)
+            ask = float(tick.get("ask") or 0.0)
+        except (TypeError, ValueError, AttributeError):
+            return 0.0
+        if bid > 0 and ask > 0:
+            return (bid + ask) / 2.0
+        return bid or ask or 0.0
+
+    def _notional_per_lot(self, symbol: str, price: float | None = None) -> float:
+        """Approx position value of 1.0 lot (mppu × mid)."""
+        px = float(price or 0.0) or self._mid_price(symbol)
+        try:
+            mppu = float(self.client.money_per_price_unit(symbol, 1.0) or 0.0)
+        except (TypeError, ValueError, AttributeError):
+            return 0.0
+        if px <= 0 or mppu <= 0:
+            return 0.0
+        return mppu * px
+
+    def _open_book_notional(self, positions: list[dict[str, Any]] | None) -> float:
+        total = 0.0
+        for pos in positions or ():
+            sym = str(pos.get("symbol") or "")
+            try:
+                vol = float(pos.get("volume") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if not sym or vol <= 0:
+                continue
+            try:
+                px = float(pos.get("price_current") or 0.0)
+            except (TypeError, ValueError):
+                px = 0.0
+            if px <= 0:
+                px = self._mid_price(sym)
+            try:
+                mppu = float(self.client.money_per_price_unit(sym, vol) or 0.0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if mppu > 0 and px > 0:
+                total += mppu * px
+        return total
+
+    def _notional_lot_ceiling(self, cfg: SymbolConfig,
+                              account: dict[str, Any] | None,
+                              broker_ceiling: float,
+                              positions: list[dict[str, Any]] | None = None,
+                              ) -> float | None:
+        """Lots that fit this name's share of equity×N notional (kasa ON).
+
+        Budget is true notional (equity × dial), not margin-at-account-leverage.
+        Conversion uses mppu×price so index min-lots are not starved by mixing
+        1:500 account math with 1:20 instrument margin.
+        """
+        if not account:
+            return None
+        if not bool(getattr(self.store.system, "kasa_auto_enabled", True)):
+            return None
+        if not (account.get("leverage") or 0):
+            return None
+        try:
+            equity = float(account.get("equity") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if equity <= 0:
+            return None
+        N = self._effective_book_leverage(account)
+        target = equity * N
+        remaining = max(0.0, target - self._open_book_notional(positions))
+        n = self._vacant_enabled_count(positions)
+        share = remaining / n
+        per_lot = self._notional_per_lot(cfg.symbol)
+        if per_lot <= 0:
+            return None
+        return min(broker_ceiling, share / per_lot)
+
     def lot_for(self, cfg: SymbolConfig, sl_distance: float, balance: float,
                ai_scale: float = 1.0, account: dict[str, Any] | None = None,
                side: str = "buy",
@@ -684,6 +769,8 @@ class RiskManager:
         auto = self._margin_lot_ceiling(
             cfg, account, side, floor, ceiling, positions=positions,
             ai_scale=ai_scale)
+        notion = self._notional_lot_ceiling(
+            cfg, account, ceiling, positions=positions)
         if auto is not None:
             try:
                 stored = float(getattr(cfg, "risk_percent", 0.0) or 0.0)
@@ -707,24 +794,34 @@ class RiskManager:
             if auto + 1e-12 < floor:
                 return 0.0, (f"lot sifir ({note}, marj payi {auto:g} "
                              f"< min {floor:g}), islem atlandi")
+            if notion is not None and notion + 1e-12 < floor:
+                return 0.0, (f"lot sifir ({note}, notional pay {notion:g} "
+                             f"< min {floor:g}), islem atlandi")
             lot = min(auto, r_cap, ceiling)
-            if lot + 1e-12 < floor and auto + 1e-12 >= floor:
+            if notion is not None:
+                lot = min(lot, notion)
+            if lot + 1e-12 < floor:
                 # Min lot may overshoot the 1R cap by a broker-granularity
                 # factor. Past that, skip — do NOT fall through to the full
                 # margin share (old ``lev >= 100`` path sized ~10% of a $225
                 # book per index fill).
                 if floor <= r_cap * self.MAX_MIN_LOT_OVERSHOOT + 1e-12:
                     lot = min(floor, auto, ceiling)
+                    if notion is not None:
+                        lot = min(lot, notion)
                 else:
                     return 0.0, (f"lot sifir ({note}, 1R tavan {r_cap:g} "
                                  f"< min {floor:g}), islem atlandi")
             if lot + 1e-12 < floor:
-                return 0.0, (f"lot sifir ({note}, 1R tavan {lot:g} "
+                return 0.0, (f"lot sifir ({note}, tavan {lot:g} "
                              f"< min {floor:g}), islem atlandi")
             if abs(lot - auto) <= abs(lot - r_cap) + 1e-12:
                 note += f" | marj pay {auto:.3f}"
-            if r_cap + 1e-12 < auto:
+            if r_cap + 1e-12 < auto and (notion is None or r_cap <= notion + 1e-12):
                 note += f" | 1R tavan {r_cap:.3f}"
+            if notion is not None and notion + 1e-12 < auto and notion + 1e-12 < r_cap:
+                note += (f" | notional N={self._effective_book_leverage(account):g} "
+                         f"pay {notion:.3f}")
             try:
                 lev = int((account or {}).get("leverage") or 0)
             except (TypeError, ValueError):
