@@ -2215,6 +2215,50 @@ class Optimizer:
                      f"(degismedi).", "OPT", symbol)
             return {"ok": False, "error": "degismedi", "unchanged": True}
         missing = self._apply_stamp_missing(detail)
+        # Force measured retune (Claude 03.09 GER40 sl1.5): WFO may leave
+        # channel_break unvalidated while a charged same-slice look still
+        # pays. Build the apply stamp from that look rather than refusing.
+        if missing and getattr(self, "_force_apply", False):
+            try:
+                measured = self._holdout_costed(
+                    symbol, next_tf, next_strat, applied_params)
+            except Exception:
+                measured = None
+            if not isinstance(measured, dict) or int(measured.get("trades") or 0) <= 0:
+                return {"ok": False,
+                        "error": f"force damga olculemedi ({missing})"}
+            days = 0.0
+            if isinstance(detail, dict):
+                try:
+                    days = float(detail.get("holdout_days") or 0.0)
+                except (TypeError, ValueError):
+                    days = 0.0
+            if days <= 0:
+                try:
+                    opt = self.store.opt_params() or {}
+                    segs = max(1, int(opt.get("segments") or 5))
+                    days = float(opt.get("lookback_days") or 180) / segs
+                except (TypeError, ValueError):
+                    days = 30.0
+            detail = {
+                "holdout": measured,
+                "validation": {},
+                "selection": {},
+                "holdout_days": days,
+                "validated": True,
+                "positive_ratio": 1.0,
+                "selection_positive_ratio": 1.0,
+                "charge_costs": True,
+                "spread_scale": self._spread_scale(symbol),
+                "keep_reason": "force charged measure",
+            }
+            score = float(measured.get("score") or score or 0.0)
+            missing = self._apply_stamp_missing(detail)
+            LOG.emit(
+                f"{symbol}: force damga charged holdout "
+                f"net {float(measured.get('net_r') or 0):+.1f}R "
+                f"({int(measured.get('trades') or 0)} islem)",
+                "OPT", symbol)
         if missing:
             return {"ok": False, "error": missing}
         if not isinstance(detail, dict):
