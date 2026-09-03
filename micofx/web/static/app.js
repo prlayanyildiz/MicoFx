@@ -474,7 +474,8 @@ function renderTop() {
       sub: `${signed(day.pnl_pct, 2)}%`,
       tip: `${day.closed_trades || 0} islem %${num(day.win_rate, 0)} basari`
         + ` | lot x${num(ai.risk_scale ?? 1, 2)}`
-        + (ai.risk_scale_enforced === false ? " (carpan uygulanmiyor)" : "") },
+        + (ai.risk_scale_enforced === false ? " (carpan uygulanmiyor)" : "")
+        + (Number(projDaily) ? ` | beklenen gunluk ${signed(projDaily)}` : "") },
     { lbl: "Acik K/Z", val: signed(acc.profit),
       cls: unbounded ? "neg" : cls(acc.profit),
       sub: unbounded ? "STOPSUZ" : "",
@@ -499,8 +500,10 @@ function renderTop() {
         : costed >= 0 ? "pos" : "neg",
       sub: "kagit",
       tip: `holdout kagidi, canli sonuc degil | %${num(projPct, 2)} | gunluk ${signed(projDaily)}`
+        + ` | bugun gerceklesen ${signed(day.realised)} vs beklenen gunluk ${signed(projDaily)}`
         + ` | maliyet odenmeden ${signed(paper)}`
-        + (projGap > 0.25 ? ` | kagit/maliyetli fark %${num(projGap * 100, 0)}` : "") },
+        + (projGap > 0.25 ? ` | kagit/maliyetli fark %${num(projGap * 100, 0)}` : "")
+        + (cap.projected_note ? ` | ${cap.projected_note}` : "") },
   ];
   if (acc.netting) {
     items.push({ lbl: "Hesap modu", val: "NETTING - ISLEM DURDU", cls: "neg" });
@@ -660,9 +663,10 @@ function overlayMonthlyProjection(cap) {
       if (es > 0) risk *= es;
     }
     if (!(risk > 0)) continue;
-    paper += net * risk / days;
+    const daysEff = Math.max(days, 90);
+    paper += net * risk / daysEff;
     const cnet = Number((osu.holdout_costed || {}).net_r || 0);
-    costed += (cnet || net) * risk / days;
+    costed += (cnet || net) * risk / daysEff;
   }
   const monthly = paper * 21;
   const costedM = costed * 21;

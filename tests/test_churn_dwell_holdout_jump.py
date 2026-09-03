@@ -73,3 +73,25 @@ def test_force_bypasses_dwell():
     reason = opt.reject_reason(cfg, _best(105.0), strategy="mtf_pullback",
                                timeframe="M30")
     assert reason == ""
+
+
+def test_dwell_uses_costed_bar_on_paper_stamp():
+    """NAS100 03.09: paper net 172 vs charged +180 looks like a 4% jump.
+
+    Live search is charging; stamp is cost-free. F2 must compare against
+    holdout_costed (72) so a same-family msa/session nudge can land.
+    """
+    cfg = SymbolConfig(symbol="NAS100", magic=1, strategy="mtf_pullback",
+                       timeframe="M30")
+    cfg.opt_updated_at = time.time() - 3 * 3600
+    cfg.opt_summary = {
+        "charge_costs": False,
+        "holdout": {"net_r": 172.58, "score": 116.06},
+        "holdout_costed": {"net_r": 72.36, "score": 32.13},
+        "positive_ratio": 0.67,
+    }
+    opt = _opt(cfg)
+    opt.store.system = MagicMock(charge_costs=True, block_high_cost=False)
+    reason = opt.reject_reason(cfg, _best(180.6), strategy="mtf_pullback",
+                               timeframe="M30")
+    assert reason == "", reason

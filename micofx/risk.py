@@ -33,6 +33,13 @@ _SHAKEOUT_SL_REL = 1.5
 # truth; |R| past this is not a trade outcome (F FLAG1 / autopsy stats).
 AUTOPSY_R_ABS_MAX = 20.0
 
+# Panel projection only. A 36-day GER40 stamp was 51% of a +$379/mo chip
+# while the rest of the book used 280-555 day windows (Claude 03.09). Floor
+# the divisor so a short slice cannot annualise a lucky month.
+MIN_PROJ_DAYS = 90.0
+# Headline chip turns "optimistic" when monthly % of balance exceeds this.
+_PROJ_PLAUSIBLE_MONTHLY_PCT = 40.0
+
 
 def autopsy_r_usable(row: dict[str, Any] | None) -> bool:
     """False when r_realised is an absurd denominator artifact."""
@@ -535,17 +542,37 @@ class RiskManager:
     # ------------------------------------------------------------- lot sizing
 
     @staticmethod
+    def _live_holdout_block(cfg: SymbolConfig) -> dict:
+        """Holdout numbers comparable to live charging: thick costed, else paper.
+
+        Same n floor as ``Supervisor.holdout_expectancy``. Thin charged
+        replays (US30 n=17) must not rewrite size or typical-cost readout.
+        """
+        summary = cfg.opt_summary if isinstance(getattr(cfg, "opt_summary", None), dict) else {}
+        hold = summary.get("holdout") or {}
+        costed = summary.get("holdout_costed")
+        try:
+            costed_n = int((costed or {}).get("trades") or 0) if isinstance(costed, dict) else 0
+        except (TypeError, ValueError):
+            costed_n = 0
+        if isinstance(costed, dict) and costed_n >= Supervisor.MIN_COSTED_N:
+            return costed
+        return hold if isinstance(hold, dict) else {}
+
+    @staticmethod
     def _edge_metric(cfg: SymbolConfig) -> float:
         """Validated edge productivity: holdout net R per unit of holdout DD.
 
-        Window length used to sit in the denominator (R per calendar day), so
-        an M5 symbol whose bar cap filled ~92 days looked six times more
-        productive than an M30 symbol with the same total R over ~610 days.
-        Net R and max_dd_r are earned on the same slice, so the ratio does not
-        care how long the cap happened to run. Unmeasurable input (no DD,
-        non-positive DD, non-positive net R) and an unvalidated stamp
-        (``validated is False``) return 0 so edge_scale stays the 1.0
-        neutral — not EDGE_MIN.
+        Prefers ``holdout_costed`` when it clears ``Supervisor.MIN_COSTED_N``
+        (same rule as slot/budget expectancy). Paper-only stamps stay on
+        ``holdout``. Window length used to sit in the denominator (R per
+        calendar day), so an M5 symbol whose bar cap filled ~92 days looked
+        six times more productive than an M30 symbol with the same total R
+        over ~610 days. Net R and max_dd_r are earned on the same slice, so
+        the ratio does not care how long the cap happened to run.
+        Unmeasurable input (no DD, non-positive DD, non-positive net R) and
+        an unvalidated stamp (``validated is False``) return 0 so edge_scale
+        stays the 1.0 neutral — not EDGE_MIN.
         """
         summary = cfg.opt_summary or {}
         # Docstring says validated. GAP-5 wrote validated=false and a +93 R
@@ -555,7 +582,7 @@ class RiskManager:
             return 0.0
         if summary.get("validated") is False:
             return 0.0
-        hold = summary.get("holdout") or {}
+        hold = RiskManager._live_holdout_block(cfg)
         net_r = float(hold.get("net_r", 0.0) or 0.0)
         max_dd = float(hold.get("max_dd_r", 0.0) or 0.0)
         if net_r > 0 and max_dd > 0:
@@ -1059,6 +1086,8 @@ class RiskManager:
         projected_costed_daily = 0.0
         stamps: list[bool] = []
         projected_costed_negative = False
+        short_windows: list[str] = []
+        fat_1r: list[str] = []
         sys_cfg = self.store.system
         for cfg in list(self.store.symbols.values()):
             if not getattr(cfg, "enabled", False):
@@ -1086,28 +1115,46 @@ class RiskManager:
                 risk = self._configured_r_dollars(cfg, balance)
             if risk <= 0:
                 continue
-            projected_daily += net * risk / days
+            # Live min-lot concurrent can make 1R 3-4x the 2% auto cap
+            # (US30 $16 on $222). The chip uses that 1R because fills do;
+            # name it so "%99 iyimser" is not read as another days bug.
+            plain_r = balance * float(self.AUTO_R_PCT) / 100.0
+            if plain_r > 0 and risk > plain_r * 3.0 + 1e-12:
+                fat_1r.append(cfg.symbol)
+            if days + 1e-12 < MIN_PROJ_DAYS:
+                short_windows.append(f"{cfg.symbol} {days:.0f}g")
+            days_eff = max(days, MIN_PROJ_DAYS)
+            projected_daily += net * risk / days_eff
             costed = summary.get("holdout_costed") or {}
             try:
                 cnet = float(costed.get("net_r") or 0.0)
             except (TypeError, ValueError):
                 cnet = 0.0
-            projected_costed_daily += (cnet or net) * risk / days
+            projected_costed_daily += (cnet or net) * risk / days_eff
         projected_charge_costs = all(stamps) if stamps else bool(
             getattr(sys_cfg, "charge_costs", True))
         monthly = projected_daily * 21.0
         costed_m = projected_costed_daily * 21.0
+        monthly_pct = round(monthly / balance * 100.0, 2) if balance > 0 else 0.0
+        costed_pct = round(costed_m / balance * 100.0, 2) if balance > 0 else 0.0
+        note_bits: list[str] = []
+        if short_windows:
+            note_bits.append("kisa holdout penceresi: " + ", ".join(short_windows))
+        if fat_1r:
+            note_bits.append("canli 1R min-lot sisirme: " + ", ".join(fat_1r))
+        headline_pct = costed_pct if costed_m else monthly_pct
+        if headline_pct > _PROJ_PLAUSIBLE_MONTHLY_PCT:
+            note_bits.append(f"projeksiyon %{headline_pct:.0f}/ay (iyimser)")
         return {
             "projected_daily": round(projected_daily, 2),
             "projected_monthly": round(monthly, 2),
-            "projected_monthly_pct": round(monthly / balance * 100.0, 2)
-            if balance > 0 else 0.0,
+            "projected_monthly_pct": monthly_pct,
             "projected_charge_costs": projected_charge_costs,
             "projected_costed_daily": round(projected_costed_daily, 2),
             "projected_costed_monthly": round(costed_m, 2),
-            "projected_costed_monthly_pct": round(costed_m / balance * 100.0, 2)
-            if balance > 0 else 0.0,
+            "projected_costed_monthly_pct": costed_pct,
             "projected_costed_negative": projected_costed_negative,
+            "projected_note": " | ".join(note_bits),
         }
 
     def capacity(self, positions: list[dict[str, Any]], account: dict[str, Any],
@@ -1163,8 +1210,7 @@ class RiskManager:
             tick = self.client.tick(cfg.symbol)
             if tick:
                 cost += tick["spread"] * self.client.money_per_price_unit(cfg.symbol, lot)
-            summary = cfg.opt_summary if isinstance(cfg.opt_summary, dict) else {}
-            hold = summary.get("holdout") or {}
+            hold = self._live_holdout_block(cfg)
             expectancy_r = float(Supervisor.holdout_expectancy(cfg) or 0.0)
             # Long-run cost per trade in R, straight from the holdout slice.
             expectancy_cost = float(hold.get("cost_per_trade_r", 0.0) or 0.0)
@@ -1215,6 +1261,7 @@ class RiskManager:
         projected_costed_daily = proj["projected_costed_daily"]
         projected_costed_negative = proj["projected_costed_negative"]
         projected_charge_costs = proj["projected_charge_costs"]
+        projected_note = str(proj.get("projected_note") or "")
 
         total_risk = sum(r["risk_per_trade"] for r in rows if r["enabled"])
         live_mult = self.live_lot_multiplier(account, mine)
@@ -1289,6 +1336,7 @@ class RiskManager:
                 projected_costed_daily * 21.0 / balance * 100.0, 2)
             if balance > 0 else 0.0,
             "projected_costed_negative": projected_costed_negative,
+            "projected_note": projected_note,
             # Leftover ticket-count ceiling. Unread by can_open; GET honesty.
             "max_total_positions": sys_cfg.max_total_positions,
             "max_cost_pct_of_risk": float(sys_cfg.max_cost_pct_of_risk or 0.0),

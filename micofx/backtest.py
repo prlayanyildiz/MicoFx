@@ -1010,7 +1010,57 @@ def combos_from_grid(grid: dict[str, list], max_combos: int,
     while len(seen) < max_combos and attempts < max_combos * 40:
         attempts += 1
         seen.add(tuple(int(rng.integers(0, s)) for s in sizes))
+    seen = _cover_short_axes(sizes, seen, max_combos)
     return keys, sorted(seen)
+
+
+# Axes with this many values or fewer must appear in a sampled search.
+# adx_min is 3; family max_spread_atr is 5 after the 0.04 floor. A 2000-draw
+# on a million-cell grid can still skip one of those (US30 adx 20, NAS100 0.04).
+_SHORT_AXIS_COVER = 6
+
+
+def _cover_short_axes(
+        sizes: list[int], seen: set[tuple[int, ...]],
+        max_combos: int) -> set[tuple[int, ...]]:
+    """Guarantee every index of a short axis is in the sample, budget-capped."""
+    if not seen:
+        return seen
+    combos = set(seen)
+    for ki, size in enumerate(sizes):
+        if size > _SHORT_AXIS_COVER:
+            continue
+        present = {row[ki] for row in combos}
+        for missing in range(size):
+            if missing in present:
+                continue
+            cand_t = None
+            for template in sorted(combos):
+                cand = list(template)
+                cand[ki] = missing
+                trial = tuple(cand)
+                if trial not in combos:
+                    cand_t = trial
+                    break
+            if cand_t is None:
+                continue
+            if len(combos) < max_combos:
+                combos.add(cand_t)
+            else:
+                victim = None
+                counts: dict[int, int] = {}
+                for row in combos:
+                    counts[row[ki]] = counts.get(row[ki], 0) + 1
+                for row in sorted(combos):
+                    if counts.get(row[ki], 0) > 1:
+                        victim = row
+                        break
+                if victim is None:
+                    continue
+                combos.remove(victim)
+                combos.add(cand_t)
+            present.add(missing)
+    return combos
 
 
 def grid_total_of(grid: dict[str, Any]) -> int:

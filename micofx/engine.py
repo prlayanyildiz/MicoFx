@@ -2194,6 +2194,7 @@ class Engine:
                   account: dict[str, Any], allow_entry: bool) -> bool:
         """Refresh state; return True when this symbol wants an entry this bar."""
         state.note = ""
+        state.entry_block = ""
         if self.client.resolve(cfg.symbol) is None:
             state.note = (f"broker sembolu bulunamadi"
                           f"{f' ({cfg.broker_symbol})' if cfg.broker_symbol else ''}"

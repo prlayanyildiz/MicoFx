@@ -20,6 +20,8 @@ def test_the_v1_fields_survived_the_move_to_the_top_bar():
     body = JS
     for needle in (
         "Beklenen Aylik",
+        "bugun gerceklesen",
+        "beklenen gunluk",
         "maliyetsiz",
         "maliyetli",
         "projected_costed_monthly",

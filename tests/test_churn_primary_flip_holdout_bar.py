@@ -72,3 +72,42 @@ def test_same_family_nudge_skips_the_flip_bar():
     reason = opt.reject_reason(cfg, _best(101.0), strategy="channel_break",
                                timeframe="M30")
     assert reason == ""
+
+
+def test_family_flip_uses_costed_incumbent_net_when_stamp_was_paper():
+    """A charged family flip must clear the incumbent's charged bar, not paper."""
+    cfg = SymbolConfig(symbol="NAS100", magic=1, strategy="mtf_pullback",
+                       timeframe="M30")
+    cfg.opt_updated_at = time.time() - 86400
+    cfg.opt_summary = {
+        "holdout": {"net_r": 172.58, "score": 116.06},
+        "holdout_costed": {"net_r": 72.36, "score": 32.13},
+        "positive_ratio": 1.0,
+        "validated": True,
+        "charge_costs": False,
+    }
+    opt = _opt(cfg)
+    opt.store.system.charge_costs = True
+    # 84 >= 72.36 * 1.15 ~= 83.2, but far below the inflated paper 198.5 bar.
+    reason = opt.reject_reason(cfg, _best(84.0), strategy="burst", timeframe="M30")
+    assert reason == ""
+
+
+def test_none_candidate_pr_is_not_selection_inconsistency():
+    """Force stamp / unmeasured holdout pr must not read as 0% of windows."""
+    cfg = SymbolConfig(symbol="NAS100", magic=1, strategy="mtf_pullback",
+                       timeframe="M30")
+    cfg.opt_updated_at = time.time() - 86400
+    cfg.opt_summary = {
+        "holdout": {"net_r": 100.0, "score": 40.0},
+        "positive_ratio": None,
+        "selection_positive_ratio": None,
+        "validated": True,
+    }
+    opt = _opt(cfg)
+    best = _best(101.0, pos=None)
+    best["selection_positive_ratio"] = None
+    reason = opt.reject_reason(cfg, best, strategy="mtf_pullback",
+                               timeframe="M30")
+    assert reason != "secim segmentleri arasinda tutarsiz"
+    assert reason == ""

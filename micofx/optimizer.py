@@ -39,6 +39,195 @@ from .strategy import absent_regime_gates_to_zero, searchable_axes
 
 APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
 
+# Not an OPT_FIELDS axis: apply() still does not write sessions. The search
+# pre-step scores live family/TF under these windows (charged holdout) and
+# overlays the winner onto sweep jobs. A later persist is a documented
+# secondary write so the live book matches the stamp (NAS100 03.09 14-22).
+SEARCH_SESSION_WINDOWS: list[list[dict[str, str]]] = [
+    [{"start": "00:00", "end": "23:59"}],
+    [{"start": "00:00", "end": "09:00"}],
+    [{"start": "08:00", "end": "16:00"}],
+    [{"start": "14:00", "end": "22:00"}],
+    [{"start": "15:00", "end": "21:00"}],
+    [{"start": "23:00", "end": "08:00"}],
+]
+
+
+def _sessions_key(windows: list | None) -> tuple[tuple[str, str], ...]:
+    out: list[tuple[str, str]] = []
+    for row in windows or []:
+        if isinstance(row, dict):
+            out.append((str(row.get("start") or ""), str(row.get("end") or "")))
+    return tuple(out)
+
+
+def _session_holdout_ok(hold: dict | None) -> bool:
+    if not isinstance(hold, dict) or not hold:
+        return False
+    return (int(hold.get("trades") or 0) >= 25
+            and float(hold.get("profit_factor") or 0) >= 1.10
+            and float(hold.get("net_r") or 0) > 0)
+
+
+def _session_sticky_eligible(hold: dict | None) -> bool:
+    """Live window earns sticky even when PF sits just under the ok gate.
+
+    Pre-step scores the *current* params under each mask. A live clock the
+    operator (or a prior apply) already set can miss PF 1.10 by a hair while
+    still printing positive charged R; waiving sticky then lets another
+    window win the sweep clock even though those live params were never
+    tuned for it (NAS100 03.09 20:44: 15-21 -> 08-16, then zero validated
+    candidates under 08-16).
+    """
+    if not isinstance(hold, dict) or not hold:
+        return False
+    return (int(hold.get("trades") or 0) >= 25
+            and float(hold.get("net_r") or 0) > 0)
+
+
+def _live_search_sessions(cfg) -> list:
+    """Window the engine actually trades, not the leftover sessions list.
+
+    ``use_sessions=false`` ignores ``cfg.sessions`` (JPN225 03.09 kept 23-08
+    on disk after the all-hours patch). Pre-step sticky compare must use
+    the live mask, else 00-24 looks like a switch away from an unread night
+    window.
+    """
+    if not bool(getattr(cfg, "use_sessions", True)):
+        return [{"start": "00:00", "end": "23:59"}]
+    return list(getattr(cfg, "sessions", None) or [])
+
+
+def _is_all_hours_sessions(windows: list | None) -> bool:
+    """The 00:00-23:59 candidate is not the same as use_sessions=False.
+
+    session_mask with start<end uses minutes < end, so 23:59 itself is
+    dropped. Persist that window with use_sessions=True would skip the last
+    minute of every day; False uses weekday minutes in full (Claude 03.09).
+    """
+    return _sessions_key(windows) == (("00:00", "23:59"),)
+
+
+def _holdout_span_days(bars, lo: int, hi: int) -> float:
+    """Calendar span of the charged holdout slice, not lookback/segments.
+
+    Force-apply used ``lookback_days/segments`` (0 → 180/5 = 36) and then
+    projection annualized GER40/JPN225/NAS100 as if +70–140 R accrued in
+    36 days (Claude 03.09 22:05). The slice is the last 1/N of the bar
+    window — hundreds of days.
+    """
+    times = getattr(bars, "time", None)
+    if times is None:
+        return 0.0
+    n = len(times)
+    if n <= 0 or int(hi) <= int(lo):
+        return 0.0
+    hi_i = min(int(hi) - 1, n - 1)
+    lo_i = max(0, int(lo))
+    if hi_i <= lo_i:
+        return 0.0
+    return round((float(times[hi_i]) - float(times[lo_i])) / 86400.0, 1)
+
+
+def _session_rank(hold: dict | None) -> float:
+    """Same yardstick as the sweep: score (DD/thin-n), else net_r."""
+    if not isinstance(hold, dict) or not hold:
+        return 0.0
+    raw = hold.get("score")
+    if raw is not None:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = float("nan")
+        if value == value:  # finite, not NaN
+            return value
+    return float(hold.get("net_r") or 0)
+
+
+def _choose_search_sessions(
+        current: list,
+        scored: list[tuple[list, dict | None]]) -> list | None:
+    """Best charged window for the sweep, or None to keep the live sessions.
+
+    Ranked on holdout ``score`` (not raw net_r) so a fat 24h book with a thin
+    edge cannot beat a tighter window the rest of the optimizer would prefer.
+    Measured on the live family/TF only; a later family flip still inherits
+    the window (JPN 23-08 held on burst and channel_break).
+
+    A +25% score sticky keeps a healthy live clock (full ok gate) from
+    flipping on a mild pre-step bump. Pre-step scores the *current* params
+    under each mask — that is not the same as "search will find a validated
+    winner there" (NAS100 03.09 21:19: live 15-21 sc63.7/PF1.18 → 08-16
+    sc73.8 looked +16% better, then every OOS candidate under 08-16 failed).
+    Soft-eligible live (positive R, PF just under 1.10) keeps the older
+    +15% bar. Near-ties inside the sticky band still switch when the
+    challenger has a clearly tighter max_dd_r *and* live clears full ok
+    (NAS100 14-22 dd91 vs 15-21 dd57 — Claude 03.09).
+    """
+    cur_key = _sessions_key(current)
+    current_hold: dict | None = None
+    best_ok: tuple[float, list, dict | None] | None = None
+    for windows, hold in scored:
+        if _sessions_key(windows) == cur_key:
+            current_hold = hold
+        if not _session_holdout_ok(hold):
+            continue
+        rank = _session_rank(hold)
+        if best_ok is None or rank > best_ok[0]:
+            best_ok = (rank, windows, hold)
+    if best_ok is None:
+        return None
+    if _sessions_key(best_ok[1]) == cur_key:
+        return None
+    # Sticky keys off a softer live bar than challenger ok — see
+    # ``_session_sticky_eligible``. Challengers still need full ok.
+    # Near-tie DD escape only when the live window itself clears the full
+    # ok gate; a soft-eligible live clock needs a clear score jump
+    # (NAS100 15-21 PF-miss must not flip to 08-16 on tighter dd alone).
+    if _session_sticky_eligible(current_hold):
+        cur_rank = _session_rank(current_hold)
+        live_ok = _session_holdout_ok(current_hold)
+        sticky = 1.25 if live_ok else 1.15
+        if best_ok[0] <= cur_rank * sticky:
+            if live_ok:
+                cur_dd = float((current_hold or {}).get("max_dd_r") or 1e9)
+                best_dd = float((best_ok[2] or {}).get("max_dd_r") or 1e9)
+                if (best_ok[0] > cur_rank
+                        and best_dd + 1e-12 < cur_dd * 0.75):
+                    return best_ok[1]
+            return None
+    return best_ok[1]
+
+
+# F6 waiver — a strong full-holdout with controlled drawdown should not be
+# rejected just because some sub-windows are negative. The sub-window gate
+# (positive_ratio) is binary and penalises regime-dependent but genuinely
+# profitable symbols (JPN225 +60R PF1.35, XAUUSD +245R PF1.31).
+# NAS100 24h (+57R PF1.05, dd=110≈2x net) correctly fails.
+# NAS100 15-21 WFO 03.09 21:26: M30/mtf +74R PF1.15 was walk-forward
+# validated then dropped here (PF 1.15 < old 1.25 and dd 57 ≮ net/2).
+_F6_WAIVER_MIN_NET_R = 40.0
+_F6_WAIVER_MIN_PF = 1.15
+# max_dd_r must stay below net_r — 2x-net books stay refused.
+# Claude 03.09 21:36: also require holdout sub-window pr >= 0.5 so a
+# luck-concentrated book cannot squeeze through on net/PF alone.
+_F6_WAIVER_MIN_POSITIVE_RATIO = 0.5
+
+
+def _f6_holdout_waiver(best: dict[str, Any]) -> bool:
+    """True when holdout strength justifies waiving the sub-window gate."""
+    hold = best.get("holdout") or {}
+    net_r = float(hold.get("net_r") or 0)
+    pf = float(hold.get("profit_factor") or 0)
+    dd = float(hold.get("max_dd_r") or 1e9)
+    pr = float(best.get("positive_ratio") or 0)
+    if net_r <= 0:
+        return False
+    return (net_r > _F6_WAIVER_MIN_NET_R
+            and pf >= _F6_WAIVER_MIN_PF
+            and dd < net_r
+            and pr + 1e-12 >= _F6_WAIVER_MIN_POSITIVE_RATIO)
+
 
 def tf_lock_status(tf_allow: Any) -> str:
     """OPT start-line fragment: whether the family→TF map actually restricts.
@@ -971,6 +1160,13 @@ class Optimizer:
             cached_bars[tf] = got
             self._bar_snap[(cfg.symbol, tf)] = got
 
+        search_overlay = cfg.to_dict()
+        picked_sessions = self._pick_search_sessions(cfg)
+        if picked_sessions:
+            search_overlay["sessions"] = picked_sessions
+            search_overlay["use_sessions"] = not _is_all_hours_sessions(picked_sessions)
+            plan["session_override"] = picked_sessions
+
         for tf in timeframes:
             bars = cached_bars.get(tf)
             for variant in variants:
@@ -999,7 +1195,7 @@ class Optimizer:
                 plan["jobs"].append({
                     "symbol": cfg.symbol, "timeframe": tf, "strategy": family,
                     "order": len(plan["jobs"]) + len(plan["attempts"]),
-                    "cfg": {**cfg.to_dict(), "timeframe": tf, "strategy": family},
+                    "cfg": {**search_overlay, "timeframe": tf, "strategy": family},
                     "bars_path": str(bars_path),
                     "point": float(info["point"]), "tf_seconds": timeframe_seconds(tf),
                     "spread_scale": spread_scale,
@@ -1267,6 +1463,12 @@ class Optimizer:
              if a.get("ok") else None,
              "hold_n": ((a.get("best") or {}).get("holdout") or {}).get("trades")
              if a.get("ok") else None,
+             "hold_dd": ((a.get("best") or {}).get("holdout") or {}).get("max_dd_r")
+             if a.get("ok") else None,
+             "hold_pr": (a.get("best") or {}).get("positive_ratio")
+             if a.get("ok") else None,
+             "sel_pr": (a.get("best") or {}).get("selection_positive_ratio")
+             if a.get("ok") else None,
              "error": a.get("error", "")}
             for a in attempts
         ]
@@ -1294,8 +1496,11 @@ class Optimizer:
             if best_a.get("selection_positive_ratio") is None:
                 robust.append(a)
                 continue
-            hold_pr = float(best_a.get("positive_ratio", 0) or 0)
-            if hold_pr + 1e-12 >= floor:
+            if best_a.get("positive_ratio") is None:
+                robust.append(a)
+                continue
+            hold_pr = float(best_a.get("positive_ratio") or 0)
+            if hold_pr + 1e-12 >= floor or _f6_holdout_waiver(best_a):
                 robust.append(a)
         usable = robust
         if not usable:
@@ -1313,7 +1518,7 @@ class Optimizer:
             # (it already requires validated), but the report did, and that
             # report is what got written down. No candidate, no name.
             reason = "hicbir aday kapidan gecmedi"
-            incumbent = ((getattr(cfg, "opt_summary", None) or {}).get("holdout") or {})
+            incumbent = self._incumbent_guard_holdout(cfg)
             report = {
                 "symbol": cfg.symbol,
                 "ok": True,
@@ -1377,7 +1582,7 @@ class Optimizer:
                 reason = "iptal - uygulanmadi"
         report["keep_reason"] = reason
         report["holdout_retention"] = round(self.holdout_retention(best), 3)
-        incumbent = ((getattr(cfg, "opt_summary", None) or {}).get("holdout") or {})
+        incumbent = self._incumbent_guard_holdout(cfg)
         report["incumbent"] = {
             "net_r": incumbent.get("net_r"), "score": incumbent.get("score"),
             "profit_factor": incumbent.get("profit_factor"),
@@ -1419,6 +1624,9 @@ class Optimizer:
                         "combos": report.get("combos")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok")) and not apply_result.get("deferred")
+            override = plan.get("session_override")
+            if override and (applied or apply_result.get("deferred")):
+                self._persist_search_sessions(cfg.symbol, override)
             if stamp_closed and applied:
                 report["closed_stamped"] = True
                 # Keep disabled — autopilot onboarding (or the panel) opens.
@@ -1702,19 +1910,27 @@ class Optimizer:
         # the preserved selection figure when present so min_positive_ratio
         # keeps its original meaning.
         sel_positive = best.get("selection_positive_ratio")
-        if sel_positive is None:
-            sel_positive = best.get("positive_ratio", 0)
-        if float(sel_positive or 0) < min_positive:
-            return "secim segmentleri arasinda tutarsiz"
-        # F6: when selection_positive_ratio is preserved, ``positive_ratio`` is
-        # holdout sub-window robustness (3/6 = 0.5). US30 costed_e M5 (id662)
-        # applied with selection 1.0 / holdout 0.5 because only the selection
-        # figure was gated. Force does not waive this (Claude 03.09).
-        if best.get("selection_positive_ratio") is not None:
-            hold_robust = float(best.get("positive_ratio", 0) or 0)
-            if hold_robust + 1e-12 < min_positive:
-                return (f"holdout dilimleri kirilgan "
-                        f"({hold_robust:.2f} < {min_positive:g})")
+        hold_pr = best.get("positive_ratio")
+        # Force-refresh stamps pr=None (no sub-window count). That is not
+        # 0% robust — skip, same as a missing selection_positive_ratio on
+        # the F6 pre-filter (Claude 22:51).
+        if sel_positive is None and hold_pr is None:
+            pass
+        else:
+            if sel_positive is None:
+                sel_positive = hold_pr
+            if float(sel_positive or 0) < min_positive:
+                return "secim segmentleri arasinda tutarsiz"
+            # F6: when selection_positive_ratio is preserved, ``positive_ratio`` is
+            # holdout sub-window robustness (3/6 = 0.5). US30 costed_e M5 (id662)
+            # applied with selection 1.0 / holdout 0.5 because only the selection
+            # figure was gated. Force does not waive this (Claude 03.09).
+            if best.get("selection_positive_ratio") is not None:
+                hold_robust = float(hold_pr or 0)
+                if hold_robust + 1e-12 < min_positive:
+                    if not _f6_holdout_waiver(best):
+                        return (f"holdout dilimleri kirilgan "
+                                f"({hold_robust:.2f} < {min_positive:g})")
         # A configuration gets the settling time the system already says it
         # should get. ``reopt_min_age_hours`` states the policy and
         # ``reject_reason`` enforces it on apply. Calendar auto-queue is gone
@@ -1757,8 +1973,8 @@ class Optimizer:
                 # material holdout jump before rewriting the live row.
                 if age_h < self.PRIMARY_FLIP_DWELL_HOURS:
                     prev_net = float(
-                        ((getattr(cfg, "opt_summary", None) or {})
-                         .get("holdout") or {}).get("net_r", 0.0) or 0.0)
+                        self._incumbent_guard_holdout(cfg).get("net_r", 0.0)
+                        or 0.0)
                     new_net = float(hold.get("net_r", 0.0) or 0.0)
                     if prev_net > 0:
                         jump = (new_net - prev_net) / prev_net
@@ -1776,20 +1992,27 @@ class Optimizer:
                 or (cand_tf in TIMEFRAMES and cand_tf != cfg.timeframe)
             )
             if primary_flip:
-                prev = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
+                prev = self._incumbent_guard_holdout(cfg)
                 prev_net = float(prev.get("net_r", 0.0) or 0.0)
                 new_net = float(hold.get("net_r", 0.0) or 0.0)
                 if prev_net > 0 and new_net < prev_net * self.PRIMARY_FLIP_HOLDOUT_MULT:
                     return (f"aile/TF flip icin holdout yetersiz "
                             f"({new_net:.1f}R < {prev_net * self.PRIMARY_FLIP_HOLDOUT_MULT:.1f}R)")
-                prev_pos = float(
-                    (getattr(cfg, "opt_summary", None) or {})
-                    .get("positive_ratio", 0.0) or 0.0)
-                new_pos = float(best.get("positive_ratio", 0.0) or 0.0)
+                prev_raw = (getattr(cfg, "opt_summary", None) or {}).get(
+                    "positive_ratio")
+                new_raw = best.get("positive_ratio")
+                if prev_raw is None or new_raw is None:
+                    prev_pos = None
+                    new_pos = None
+                else:
+                    prev_pos = float(prev_raw or 0.0)
+                    new_pos = float(new_raw or 0.0)
                 # Legacy stamps are selection-era 1.0 (non-discriminating).
-                # Only compare when the incumbent carries a real robustness
-                # fraction from F6 holdout sub-windows.
-                if 0.0 < prev_pos < 0.999 and new_pos + 1e-12 < prev_pos:
+                # Force-refresh None is unmeasured, not 0%. Only compare when
+                # both sides carry a real robustness fraction from F6 windows.
+                if (prev_pos is not None and new_pos is not None
+                        and 0.0 < prev_pos < 0.999
+                        and new_pos + 1e-12 < prev_pos):
                     return (f"aile/TF flip icin tutarlilik zayif "
                             f"({new_pos:.2f} < {prev_pos:.2f})")
         # Same shape as min_positive_ratio above, for the same reason. The
@@ -1846,7 +2069,7 @@ class Optimizer:
         replays; this line is what operators and the other agent actually
         read, so it has to say taze vs damga.
         """
-        stamp = ((getattr(cfg, "opt_summary", None) or {}).get("holdout") or {})
+        stamp = self._incumbent_guard_holdout(cfg)
         fresh = self._fresh_incumbent_holdout(cfg) or {}
         if fresh.get("net_r") is not None:
             return (
@@ -1895,6 +2118,40 @@ class Optimizer:
         except Exception:
             return None
 
+    def _live_search_charging(self) -> bool:
+        system = getattr(self.store, "system", None) if self.store is not None else None
+        return bool(getattr(system, "charge_costs", True)) if system is not None else True
+
+    def _incumbent_guard_holdout(self, cfg) -> dict[str, Any]:
+        """Stored incumbent block comparable to the current search regime.
+
+        Validated paper stamps can carry a much larger ``holdout`` score than the
+        same config's already-stored charged ``holdout_costed``. Comparing an
+        honest charged candidate against that paper number freezes the symbol
+        (NAS100/JPN225/XAUUSD 03.09). When the live search is charging and the
+        stamp says the incumbent was measured cost-free, prefer the charged
+        sub-block if it exists; otherwise fall back to the original holdout and
+        let the existing fresh-replay path tighten the bar when it can.
+        """
+        summary = getattr(cfg, "opt_summary", None) or {}
+        previous = summary.get("holdout") or {}
+        if not self._live_search_charging():
+            return previous
+        if bool(summary.get("charge_costs", True)):
+            return previous
+        costed = summary.get("holdout_costed")
+        return costed if isinstance(costed, dict) and costed else previous
+
+    def _incumbent_guard_was_charging(self, cfg, previous: dict[str, Any]) -> bool:
+        """Whether the chosen incumbent benchmark was measured with costs on."""
+        summary = getattr(cfg, "opt_summary", None) or {}
+        if bool(summary.get("charge_costs", True)):
+            return True
+        costed = summary.get("holdout_costed")
+        if isinstance(costed, dict) and costed and previous is costed:
+            return True
+        return False
+
     def _beats_incumbent(self, cfg, hold: dict[str, Any]) -> bool:
         """Is this holdout at least as good as the live config's own holdout?
 
@@ -1926,7 +2183,7 @@ class Optimizer:
                      f"(test skoru {new_score:.2f} < {old_score:.2f}), uygulanmadi.",
                      "OPT", cfg.symbol)
             return False
-        previous = summary.get("holdout") or {}
+        previous = self._incumbent_guard_holdout(cfg)
         age_days = (time.time() - float(getattr(cfg, "opt_updated_at", 0.0) or 0.0)) / 86400.0
         if not previous or age_days > self.INCUMBENT_GUARD_DAYS:
             return True
@@ -1982,8 +2239,7 @@ class Optimizer:
         # drops the one guard standing between a weaker candidate and a live
         # symbol. XAUUSD reached exactly that state - stamp 1.25, measured
         # 1.15 - and the escape fired at 13:20 with costs already off.
-        system = getattr(self.store, "system", None) if self.store is not None else None
-        charging = bool(getattr(system, "charge_costs", True)) if system is not None else True
+        charging = self._live_search_charging()
         # The cost assumption itself moving is the same class of break, and a
         # sharper one: a cost-free score is strictly the larger number, so an
         # incumbent stamped under one can never be beaten by a candidate priced
@@ -1996,7 +2252,7 @@ class Optimizer:
         #   incumbent charged, now cost-free -> the CANDIDATE is inflated, and
         #     the incumbent's honest score is the stricter bar. Keep comparing;
         #     skipping here would wave the inflated one through.
-        was_charging = bool(summary.get("charge_costs", True))
+        was_charging = self._incumbent_guard_was_charging(cfg, previous)
         if was_charging and not charging:
             pass
         elif was_charging != charging:
@@ -2090,9 +2346,67 @@ class Optimizer:
         want = int(opt.get("max_bars") or 0) or 20000
         return self.client.bars(symbol, timeframe, want)
 
+    def _persist_search_sessions(self, symbol: str, windows: list) -> None:
+        """Secondary write: live sessions match the window the sweep used."""
+        self.store.update_symbol(
+            symbol,
+            {"sessions": windows,
+             "use_sessions": not _is_all_hours_sessions(windows)},
+            source="arama seans penceresi")
+
+    def _pick_search_sessions(self, cfg) -> list | None:
+        """Charged pre-step on the live family/TF. Does not multiply the grid.
+
+        The window is chosen once, then inherited by every family/TF sweep.
+        That is v1: JPN 23-08 held on both burst and channel_break; a family
+        that wants a different clock still gets this symbol's live hours.
+        """
+        if not self._live_search_charging():
+            return None
+        current = _live_search_sessions(cfg)
+        windows_list = list(SEARCH_SESSION_WINDOWS)
+        if current and _sessions_key(current) not in {
+                _sessions_key(w) for w in windows_list}:
+            windows_list = [current, *windows_list]
+        scored: list[tuple[list, dict | None]] = []
+        seen: set[tuple[tuple[str, str], ...]] = set()
+        for windows in windows_list:
+            key = _sessions_key(windows)
+            if key in seen:
+                continue
+            seen.add(key)
+            hold = self._holdout_costed(
+                cfg.symbol, cfg.timeframe, cfg.strategy, {},
+                allow_fetch=False, sessions=windows)
+            scored.append((windows, hold))
+        ranked = []
+        for windows, hold in scored:
+            if not windows:
+                continue
+            row = windows[0] if isinstance(windows[0], dict) else {}
+            ranked.append(
+                f"{row.get('start')}-{row.get('end')}:"
+                f"sc={_session_rank(hold):.1f}/"
+                f"n={int((hold or {}).get('trades') or 0)}/"
+                f"pf={float((hold or {}).get('profit_factor') or 0):.2f}/"
+                f"dd={float((hold or {}).get('max_dd_r') or 0):.1f}")
+        if ranked:
+            LOG.emit(
+                f"{cfg.symbol}: seans pre-step [{', '.join(ranked)}]",
+                "OPT", cfg.symbol)
+        picked = _choose_search_sessions(current, scored)
+        if picked:
+            row = picked[0] if picked else {}
+            LOG.emit(
+                f"{cfg.symbol}: arama seans {row.get('start')}-{row.get('end')} "
+                f"(charged holdout, canli pencereden daha iyi)",
+                "OPT", cfg.symbol)
+        return picked
+
     def _holdout_costed(self, symbol: str, timeframe: str, strategy: str,
                         params: dict[str, Any], *,
-                        allow_fetch: bool = True) -> dict[str, Any] | None:
+                        allow_fetch: bool = True,
+                        sessions: list | None = None) -> dict[str, Any] | None:
         """One charged replay of the winner on the holdout slice. Not a search.
 
         Search may still run with ``charge_costs=False`` (#50). Live still
@@ -2122,13 +2436,16 @@ class Optimizer:
         overlay["timeframe"] = timeframe
         overlay["strategy"] = strategy
         overlay.update(params)
+        if sessions is not None:
+            overlay["sessions"] = sessions
+            overlay["use_sessions"] = not _is_all_hours_sessions(sessions)
         tmp = SymbolConfig.from_dict(overlay)
         try:
             min_stop = self.client.min_stop_distance(symbol)
         except Exception:
             min_stop = None
         system = getattr(self.store, "system", None)
-        res, _, _ = charged_holdout(
+        res, lo, hi = charged_holdout(
             bars=bars, cfg=tmp, point=float(info["point"]),
             tick_value=float(info.get("tick_value") or 0),
             tick_size=float(info.get("tick_size") or 0),
@@ -2137,7 +2454,73 @@ class Optimizer:
             trade_all_hours=bool(getattr(system, "trade_all_hours", False)),
             day_end_flatten_min=int(getattr(system, "day_end_flatten_min", 0) or 0),
             tf_seconds=timeframe_seconds(timeframe))
-        return res.as_dict()
+        blob = res.as_dict()
+        span = _holdout_span_days(bars, lo, hi)
+        if span > 0:
+            blob["holdout_days"] = span
+        return blob
+
+    def refresh_live_costed_stamp(self, symbol: str):
+        """Remeasure charged holdout under the live clock. Does not retune.
+
+        Panel session / use_sessions edits used to leave ``holdout_costed``
+        describing the previous window (NAS100 14-22 stamp after a 15-21
+        PATCH; JPN225 23-08 costed after 7/24). Slot/budget then under-weighted
+        the name. This is the 3160e69 force-apply door without rewriting
+        OPT_FIELDS or ``opt_updated_at``.
+        """
+        if self.busy:
+            return None
+        cfg = self.store.symbols.get(symbol) if self.store is not None else None
+        if cfg is None:
+            return None
+        try:
+            measured = self._holdout_costed(
+                cfg.symbol, cfg.timeframe, cfg.strategy, {},
+                allow_fetch=True)
+        except Exception:
+            measured = None
+        if not isinstance(measured, dict):
+            return None
+        try:
+            n = int(measured.get("trades") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        from .supervisor import Supervisor
+        if n < Supervisor.MIN_COSTED_N:
+            LOG.emit(
+                f"{symbol}: seans damga tazeleme {n} islem "
+                f"(<{Supervisor.MIN_COSTED_N}) - yazilmadi.",
+                "OPT", symbol)
+            return None
+        summary = dict(getattr(cfg, "opt_summary", None) or {})
+        summary["holdout_costed"] = measured
+        charging = bool(getattr(getattr(self.store, "system", None),
+                                "charge_costs", True))
+        if charging:
+            summary["holdout"] = measured
+            summary["charge_costs"] = True
+        try:
+            span = float(measured.get("holdout_days") or 0.0)
+        except (TypeError, ValueError):
+            span = 0.0
+        if span > 0:
+            summary["holdout_days"] = span
+        try:
+            score = float(measured.get("score") or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        patch: dict[str, Any] = {"opt_summary": summary}
+        if score > 0:
+            patch["opt_score"] = score
+        updated = self.store.update_symbol(
+            symbol, patch, source="seans damga tazeleme")
+        LOG.emit(
+            f"{symbol}: seans damgasi charged holdout "
+            f"net {float(measured.get('net_r') or 0):+.1f}R "
+            f"({n} islem)",
+            "OPT", symbol)
+        return updated
 
     def _charge_costs_stamp(self, detail: dict[str, Any] | None) -> bool:
         """What the holdout numbers were actually priced under.
@@ -2263,18 +2646,15 @@ class Optimizer:
                 return {"ok": False,
                         "error": f"force damga olculemedi ({missing})"}
             days = 0.0
-            if isinstance(detail, dict):
+            try:
+                days = float(measured.get("holdout_days") or 0.0)
+            except (TypeError, ValueError):
+                days = 0.0
+            if days <= 0 and isinstance(detail, dict):
                 try:
                     days = float(detail.get("holdout_days") or 0.0)
                 except (TypeError, ValueError):
                     days = 0.0
-            if days <= 0:
-                try:
-                    opt = self.store.opt_params() or {}
-                    segs = max(1, int(opt.get("segments") or 5))
-                    days = float(opt.get("lookback_days") or 180) / segs
-                except (TypeError, ValueError):
-                    days = 30.0
             detail = {
                 "holdout": measured,
                 "validation": {},
@@ -2284,7 +2664,9 @@ class Optimizer:
                 # No selection_positive_ratio: F6 gate only binds WFO stamps.
                 # External charged robustness (Claude GER40 6/6) is the force
                 # caller’s responsibility; inventing 1.0 here hid fragility.
-                "positive_ratio": float(measured.get("score_consistency") or 0.0),
+                # score_consistency is a 0-100+ diagnostic, not a 0-1
+                # sub-window fraction (JPN 61.7 stamped as pr → panel 6170%).
+                "positive_ratio": None,
                 "charge_costs": True,
                 "spread_scale": self._spread_scale(symbol),
                 "keep_reason": "force charged measure",
@@ -2342,9 +2724,20 @@ class Optimizer:
                     min_positive = 0.6
                 hold_robust = float(detail.get("positive_ratio", 0) or 0)
                 if hold_robust + 1e-12 < min_positive:
-                    return {"ok": False,
-                            "error": (f"holdout dilimleri kirilgan "
-                                      f"({hold_robust:.2f} < {min_positive:g})")}
+                    if not _f6_holdout_waiver(detail):
+                        return {"ok": False,
+                                "error": (f"holdout dilimleri kirilgan "
+                                          f"({hold_robust:.2f} < {min_positive:g})")}
+        stamp_days = 0.0
+        try:
+            stamp_days = float((costed or {}).get("holdout_days") or 0.0)
+        except (TypeError, ValueError):
+            stamp_days = 0.0
+        if stamp_days <= 0:
+            try:
+                stamp_days = float(detail.get("holdout_days") or 0.0)
+            except (TypeError, ValueError):
+                stamp_days = 0.0
         patch = dict(applied_params)
         if timeframe in TIMEFRAMES:
             patch["timeframe"] = timeframe
@@ -2360,8 +2753,8 @@ class Optimizer:
             "holdout": detail.get("holdout") or {},
             "validation": detail.get("validation", {}),
             "selection": detail.get("selection", {}),
-            "holdout_days": float(detail["holdout_days"]),
-            "positive_ratio": detail.get("positive_ratio", 0.0),
+            "holdout_days": stamp_days,
+            "positive_ratio": detail.get("positive_ratio"),
             "selection_positive_ratio": detail.get("selection_positive_ratio"),
             "params": applied_params,
                 # The spread scale this candidate was measured under. Every

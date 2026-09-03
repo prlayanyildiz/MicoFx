@@ -158,12 +158,22 @@ def test_family_swap_with_overlapping_opt_fields_writes_the_new_holdout():
     assert (cfg.opt_summary or {}).get("validated") is True
 
 
-def test_edge_scale_reads_holdout_not_holdout_costed():
-    """risk._edge_metric is the number LEV-1 sizes from. Write that field."""
+def test_edge_scale_prefers_thick_holdout_costed():
+    """Live charging stamps paper holdout + costed overlay; size from costed."""
     cfg = _cfg()
     cfg.opt_summary = {
-        "holdout": {"net_r": 10.0, "max_dd_r": 5.0},
-        "holdout_costed": {"net_r": 999.0, "max_dd_r": 1.0},
+        "holdout": {"net_r": 10.0, "max_dd_r": 5.0, "trades": 200},
+        "holdout_costed": {"net_r": 40.0, "max_dd_r": 10.0, "trades": 80},
+    }
+    assert RiskManager._edge_metric(cfg) == 4.0
+
+
+def test_edge_scale_ignores_thin_holdout_costed():
+    """US30-shaped n=17 costed noise must not rewrite the paper edge ratio."""
+    cfg = _cfg()
+    cfg.opt_summary = {
+        "holdout": {"net_r": 10.0, "max_dd_r": 5.0, "trades": 200},
+        "holdout_costed": {"net_r": 999.0, "max_dd_r": 1.0, "trades": 17},
     }
     assert RiskManager._edge_metric(cfg) == 2.0
 

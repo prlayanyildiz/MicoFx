@@ -296,6 +296,18 @@ def _validate_sessions(patch: dict[str, Any]) -> None:
                          f"sifir uzunluklu pencere 7/24 islem anlamina gelir; "
                          f"seansi kapatmak icin use_sessions yerine trade_days kullanin")
 
+
+def _session_clock_changed(cfg, patch: dict[str, Any]) -> bool:
+    """True when the live trade mask (use_sessions / windows) actually moved."""
+    if cfg is None:
+        return False
+    if "use_sessions" in patch and bool(patch["use_sessions"]) != bool(cfg.use_sessions):
+        return True
+    if "sessions" in patch:
+        from ..optimizer import _sessions_key
+        return _sessions_key(patch.get("sessions")) != _sessions_key(cfg.sessions)
+    return False
+
     days = patch.get("trade_days")
     if days is not None:
         if not isinstance(days, list) or not days:
@@ -1041,6 +1053,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         next_tf = patch.get("timeframe", current.timeframe) if current is not None else None
         primary_changing = (current is not None
                             and (next_strat != current.strategy or next_tf != current.timeframe))
+        clock_changed = _session_clock_changed(current, patch)
         # optimizer.apply() holds back exit/risk fields while a position is
         # open (see EXIT_RISK_FIELDS there) because manage_positions()/
         # _update_stop() re-read cfg live every cycle, not a
@@ -1111,6 +1124,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 engine.entry_lock.release()
         if updated is None:
             raise HTTPException(404, f"{symbol} bulunamadi")
+        if clock_changed and optimizer is not None:
+            restamped = optimizer.refresh_live_costed_stamp(symbol)
+            if restamped is not None:
+                updated = restamped
         client.set_overrides({c.symbol: c.broker_symbol for c in list(store.symbols.values())})
         if "enabled" in patch:
             from micofx.autopilot import mark_operator_disabled

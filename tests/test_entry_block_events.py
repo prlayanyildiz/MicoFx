@@ -113,6 +113,8 @@ def test_evaluate_needles_the_two_silent_halts():
     assert '"bar_doldu"' in eval_body
     assert '"seans_disi"' in eval_body
     assert '"piyasa_kapali"' in eval_body
+    assert 'state.entry_block = ""' in eval_body.split("if not sess.open", 1)[0], (
+        "stale seans_disi must not survive a cycle whose session is open")
     # Daily halt means allow_entry is False and ready stays empty. The flush
     # used to live inside that `if`, so halt tallies never reached the store.
     # Cycle-body indent is 8 spaces; the ready-block is 12.

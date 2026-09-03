@@ -116,3 +116,34 @@ def test_inflation_is_the_ratio_of_the_two_reported_numbers():
         row = _row(spread=spread, typical_cost_r=typical)
         expected = (row["cost_pct_of_risk"] / 100.0) / typical
         assert row["cost_inflation"] == pytest.approx(round(expected, 1), abs=0.11)
+
+
+def test_typical_cost_prefers_thick_holdout_costed():
+    """NAS100 paper stamp has cost_r=0; live typical must not read as free."""
+    cfg = SymbolConfig(symbol="NAS100", magic=1, lot_mode="fixed", fixed_lot=0.1,
+                       sl_atr_mult=1.0, commission_per_lot=0.0)
+    cfg.opt_summary = {
+        "holdout": {"cost_per_trade_r": 0.0, "trades": 1643},
+        "holdout_costed": {"cost_per_trade_r": 0.05, "trades": 80},
+    }
+    rm = RiskManager.__new__(RiskManager)
+    rm.store = _Store(cfg)
+    rm.client = _Client(0.05)
+    account = {"equity": 1000.0, "balance": 1000.0, "margin_free": 900.0, "margin": 0.0}
+    row = rm.capacity([], account, atr_by_symbol={"NAS100": 1.0})["rows"][0]
+    assert row["cost_pct_typical"] == pytest.approx(5.0)
+
+
+def test_typical_cost_ignores_thin_holdout_costed():
+    cfg = SymbolConfig(symbol="US30", magic=1, lot_mode="fixed", fixed_lot=0.1,
+                       sl_atr_mult=1.0, commission_per_lot=0.0)
+    cfg.opt_summary = {
+        "holdout": {"cost_per_trade_r": 0.06, "trades": 276},
+        "holdout_costed": {"cost_per_trade_r": 0.99, "trades": 17},
+    }
+    rm = RiskManager.__new__(RiskManager)
+    rm.store = _Store(cfg)
+    rm.client = _Client(0.05)
+    account = {"equity": 1000.0, "balance": 1000.0, "margin_free": 900.0, "margin": 0.0}
+    row = rm.capacity([], account, atr_by_symbol={"US30": 1.0})["rows"][0]
+    assert row["cost_pct_typical"] == pytest.approx(6.0)

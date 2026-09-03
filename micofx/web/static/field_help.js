@@ -125,10 +125,10 @@ const FIELD_HELP = {
   "top.Bakiye": "Hesap bakiyesi (kapali islemler sonrasi).",
   "top.Varlik": "Bakiye + acik K/Z.",
   "top.Acik K/Z": "Su anki acik pozisyonlarin yuzmemis kari/zarari. STOPSUZ = SL yok, yeni giris yok.",
-  "top.Gun": "Bugun kapanan islemlerin gerceklesen neti ve bakiyeye yuzdesi. Hover'daki lot x, AI risk_scale (butun lotlara carpan). AI kapaliysa carpan uygulanmiyor.",
+  "top.Gun": "Bugun kapanan islemlerin gerceklesen neti ve bakiyeye yuzdesi. Hover: lot x (AI risk_scale) ve holdout'tan beklenen gunluk.",
   "top.Pozisyon": "Kaldirildi. Acik sayi marja gore; leftover max_total_positions okunmaz.",
   "top.Hesap": "trade_mode=2 ise GERCEK PARA. Demo ile ayni ekranda karismasin diye.",
-  "top.Beklenen Aylik": "OPT holdout kagidi, canli P/L degil. US30 gibi kisa damgalar islemi canlidan cok daha sik varsayar; yuzde hover'da.",
+  "top.Beklenen Aylik": "OPT holdout kagidi, canli P/L degil. Hover: bugun gerceklesen vs beklenen gunluk (aylik/21). Damga gunu olculen dilim suresi (36g yilliklama 03.09 duzeltildi — onceki buyuk sayi sisikti). 90 gunden kisa damgalar yilliklastirilmaz.",
 
   "card.Bakiye": "Hesap bakiyesi. Dipnot: para birimi ve kaldirac.",
   "card.Varlik": "Bakiye + acik K/Z. Dipnottaki acik k/z canli, gunluk sonuc degil.",
@@ -137,7 +137,7 @@ const FIELD_HELP = {
   "card.Gunluk Sonuc": "Bugun kapanan islemlerin neti. Canli acik K/Z dahil degil.",
   "card.Gunluk Limit": "Gunluk net zarar bakiyenin daily_loss_pct'sini asinca yeni giris durur. daily_loss_flatten her zaman acik (HTTP yazilmaz). Sistem kartindaki Gunluk Limit alani.",
   "card.Acilabilir Islem": "Kalan marj / bu sembolun lot marji. Leftover max_total_positions baglamaz.",
-  "card.Beklenen Aylik": "OPT holdout diliminden turetilen aylik projeksiyon; canli sonuc degil. Rejim ve maliyetli karsilik kapasite satirinda.",
+  "card.Beklenen Aylik": "OPT holdout diliminden turetilen aylik projeksiyon; canli sonuc degil. Damga gunu olculen dilim (36g yilliklama 03.09 duzeltildi). Rejim ve maliyetli karsilik kapasite satirinda.",
 
   "th.pos.Sembol": "Pozisyonun broker sembolu. 'harici' rozeti botun acmadigi emirdir.",
   "th.pos.Yon": "AL = buy, SAT = sell.",
