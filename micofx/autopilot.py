@@ -19,6 +19,26 @@ _ENTRY_BLOCKS_MAX_AGE_SEC = 7 * 86400
 _ROOT = Path(__file__).resolve().parents[1]
 
 
+def kasa_leverage(sys: Any, account: dict[str, Any] | None) -> float:
+    """Leverage kasa should size against: dial capped to the live broker.
+
+    ``target_leverage`` 0 = use ``account.leverage``. A positive dial is an
+    intent knob only — never above what MT5 reports for this login.
+    """
+    try:
+        acc_lev = float((account or {}).get("leverage") or 1.0)
+    except (TypeError, ValueError):
+        acc_lev = 1.0
+    acc_lev = max(1.0, acc_lev)
+    try:
+        want = float(getattr(sys, "target_leverage", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        want = 0.0
+    if want <= 0:
+        return acc_lev
+    return min(want, acc_lev)
+
+
 def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge buy/sell legs per symbol (same shape as income_dev_loop)."""
     by_sym: dict[str, dict[str, Any]] = {}
@@ -235,12 +255,14 @@ class AutoPilot:
         return ["cost_free: charge_costs=false (komisyon 0)"]
 
     def _apply_kasa(self) -> list[str]:
+        sys = self.store.system
+        if not bool(getattr(sys, "kasa_auto_enabled", True)):
+            return ["kasa: operator kapali"]
         compute = _load_compute_kasa()
         if compute is None:
             return ["kasa: compute yuklenemedi"]
         acc = dict(getattr(self.engine, "_account", None) or {})
         cap = dict(getattr(self.engine, "_capacity_cache", None) or {})
-        sys = self.store.system
         rows = [r for r in (cap.get("rows") or []) if r.get("enabled")]
         zero_lot = sum(1 for r in rows if float(r.get("lot") or 0) <= 0)
         lot_blocks = 0
@@ -248,7 +270,7 @@ class AutoPilot:
             lot_blocks += int((row.get("blocks") or {}).get("lot") or 0)
         plan = compute(
             equity=float(acc.get("equity") or 0),
-            leverage=float(acc.get("leverage") or 1),
+            leverage=kasa_leverage(sys, acc),
             n_enabled=max(1, len(self._enabled_symbols()) or len(rows) or 1),
             global_free_slots=int(cap.get("global_free_slots") or 0),
             margin_usage_pct=float(cap.get("margin_usage_pct") or 0),

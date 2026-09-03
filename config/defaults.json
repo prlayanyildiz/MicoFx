@@ -23,6 +23,8 @@
     "autostart_mt5_wait_sec": 90,
     "autopilot_enabled": true,
     "autopilot_interval_sec": 900,
+    "kasa_auto_enabled": true,
+    "target_leverage": 0.0,
     "backup_enabled": true,
     "backup_dir": "C:\\MicoFX_Yedek",
     "backup_dir_secondary": "",

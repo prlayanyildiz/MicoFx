@@ -223,6 +223,8 @@ _SYSTEM_RISK_BOUNDS = {
     "backup_keep": (1, 365, True),
     # 0 disables due(); upper bound one day.
     "autopilot_interval_sec": (0.0, 86400.0, True),
+    # 0 = use live broker leverage; positive intent capped in kasa_leverage().
+    "target_leverage": (0.0, 1000.0, True),
 }
 
 
@@ -459,7 +461,8 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
     "max_cost_pct_of_risk",
     "backup_dir", "backup_dir_secondary", "backup_keep",
     "mt5_terminal_path", "autostart_mt5", "autostart_bot",
-    "autopilot_enabled", "autopilot_interval_sec",
+    "autopilot_enabled", "autopilot_interval_sec", "kasa_auto_enabled",
+    "target_leverage",
 })
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",

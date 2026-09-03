@@ -743,6 +743,12 @@ class SystemConfig:
     # PowerShell loop is retired.
     autopilot_enabled: bool = True
     autopilot_interval_sec: float = 900.0
+    # Kasa auto-tune (lot/margin ladder) is optional inside autopilot. Off
+    # keeps spread/safe-fix ticks but stops rewriting lot_multiplier.
+    kasa_auto_enabled: bool = True
+    # Intent for kasa sizing only — not the broker account leverage. 0 = use
+    # live account.leverage; positive values are capped to that ceiling.
+    target_leverage: float = 0.0
 
     # Expected MT5 login + server. 0 / "" means unset: the first connected
     # account is written here (logged, not silent). A mismatch blocks new

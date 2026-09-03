@@ -1673,6 +1673,9 @@ const SYS_FIELDS = [
   { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
   { k: "max_concurrent_risk_pct", label: "Es-zamanli risk % (likidite, 0=kapali)", t: "num", step: 1, min: 0, max: 100 },
   { k: "daily_loss_pct", label: "Gunluk zarar freni % (0=kapali)", t: "num", step: 0.5, min: 0, max: 100 },
+  { k: "lot_multiplier", label: "Lot carpani (pozisyon buyuklugu)", t: "num", step: 0.05, min: 0.1, max: 3 },
+  { k: "target_leverage", label: "Hedef kaldirac (0=broker)", t: "lev" },
+  { k: "kasa_auto_enabled", label: "Kasa auto-tune (lot/marj merdiveni)", t: "bool" },
   { k: "autopilot_enabled", label: "Gelir autopilot (sistem ici)", t: "bool" },
   { k: "autopilot_interval_sec", label: "Autopilot aralik (sn)", t: "num", step: 60, min: 0, max: 86400 },
 ];
@@ -1695,6 +1698,14 @@ const BACKUP_FIELDS = [
   { k: "backup_keep", label: "Tutulacak yedek sayisi", t: "int", min: 1, max: 30 },
 ];
 
+function leverageSelectOpts(accLev) {
+  const max = Math.max(1, Math.floor(Number(accLev) || 1));
+  const steps = [0, 1, 10, 25, 50, 100, 200, 400, 500, 1000];
+  const vals = steps.filter((v) => v === 0 || v <= max);
+  if (!vals.includes(max)) vals.push(max);
+  return vals.map((v) => [String(v), v === 0 ? `Broker (1:${max})` : `1:${v}`]);
+}
+
 function buildSysField(f) {
   let input;
   if (f.t === "bool") {
@@ -1707,8 +1718,9 @@ function buildSysField(f) {
     input.addEventListener("change", async () => {
       await saveSystem({ [f.k]: input.value.trim() }, input);
     });
-  } else if (f.t === "select") {
-    input = el("select", {}, f.opts.map(([v, l]) => el("option", { value: v, text: l })));
+  } else if (f.t === "select" || f.t === "lev") {
+    const opts = f.t === "lev" ? leverageSelectOpts((STATE.account || {}).leverage) : f.opts;
+    input = el("select", {}, opts.map(([v, l]) => el("option", { value: v, text: l })));
     input.addEventListener("change", () => {
       const value = parseInt(input.value, 10);
       if (!isFinite(value)) return;
@@ -1753,6 +1765,19 @@ function renderSystem() {
 
   $$("[data-sys-key]").forEach((input) => {
     const key = input.dataset.sysKey;
+    if (key === "target_leverage" && input.tagName === "SELECT") {
+      const accLev = (STATE.account || {}).leverage;
+      const want = String(sys.target_leverage ?? 0);
+      const opts = leverageSelectOpts(accLev);
+      const sig = opts.map(([v]) => v).join(",");
+      if (input.dataset.levSig !== sig) {
+        input.innerHTML = "";
+        opts.forEach(([v, l]) => input.appendChild(el("option", { value: v, text: l })));
+        input.dataset.levSig = sig;
+      }
+      if (input !== document.activeElement) input.value = want;
+      return;
+    }
     if (input === document.activeElement || !(key in sys)) return;
     if (input.type === "checkbox") input.checked = !!sys[key];
     else if (String(input.value) !== String(sys[key])) input.value = sys[key];

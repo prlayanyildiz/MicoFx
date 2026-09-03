@@ -52,7 +52,7 @@ def compute_kasa_targets(
         lot_target = min(1.6, 1.3 + (eq - 3000) / 8000.0)
     lot_target = round(lot_target, 2)
 
-    conc_target = round(min(50.0, 25.0 + n * 4.0 + (5.0 if lev >= 200 else 0.0)), 1)
+    conc_target = round(min(25.0, 25.0 + n * 4.0 + (5.0 if lev >= 200 else 0.0)), 1)
 
     if global_free_slots == 0 and margin_usage_pct >= max_margin_usage_pct * 0.9:
         lot_target = round(max(0.5, lot_cur * 0.85), 2)

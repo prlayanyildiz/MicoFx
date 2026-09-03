@@ -18,13 +18,16 @@ KEEP_SYS = (
     "max_margin_usage_pct",
     "max_concurrent_risk_pct",
     "daily_loss_pct",
+    "lot_multiplier",
+    "kasa_auto_enabled",
+    "target_leverage",
 )
 
 HANDS_OFF_SYS = (
     "max_total_positions",
     "max_positions",
     "max_lot",
-    "lot_multiplier", "trade_all_hours", "day_end_flatten_min",
+    "trade_all_hours", "day_end_flatten_min",
     "close_on_stop", "autostart_bot", "daily_profit_pct",
     "max_scalp_positions", "max_swing_positions",
     "min_free_margin", "slippage_points",
