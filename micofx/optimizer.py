@@ -2932,7 +2932,17 @@ class Optimizer:
         if "blocked_entry_hours" in applied_params:
             applied_params["blocked_entry_hours"] = _norm_entry_hours(
                 applied_params.get("blocked_entry_hours"))
-        applied_params.update(absent_regime_gates_to_zero(next_strat, applied_params))
+        # Family/TF flip: zero regime gates the winner omitted (stale adx_max).
+        # Same-family partial retune (blocked hours, one exit dial): fill from
+        # live first so absent_regime cannot wipe adx_min 20->0 (US30 03.09).
+        if primary_changed:
+            applied_params.update(
+                absent_regime_gates_to_zero(next_strat, applied_params))
+        else:
+            for key in OPT_FIELDS:
+                if key in applied_params or not hasattr(cfg, key):
+                    continue
+                applied_params[key] = getattr(cfg, key)
         # Last gate before this reaches a live symbol. The API checks the same
         # bounds on its own request bodies, but auto-apply (Optimizer.start
         # with apply_best) lands here straight off a search result without
