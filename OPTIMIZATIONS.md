@@ -1,10 +1,10 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 01:22** — **GECE KAPANDI** (Claude sabah brifingi). Agg charged
-**+773R** (+164 vs oturum ortasi 609). SpotBrent WFO RED (+21.8R). Premature:
-NAS sl0.9 + JPN sl0.8 done; XAU BIRAK (canli ticket izleniyor). Hours RETRACT.
-**SABAH izle:** XAU premature; SpotBrent NY fill; realised→charged yakinsama.
+**04.09 01:25** — Autopsy `premature_by_symbol` readout (sabah izleme).
+Gece kapandi agg **+773R**. XAU canli ticket premature watch.
+**04.09 01:22** — Claude sabah brifingi. SpotBrent WFO RED. Hours RETRACT.
+**SABAH:** XAU premature; SpotBrent NY fill; realised yakinsama.
 
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
 Prior **03.09 11:20** — per-symbol WFO round closed (monitoring). Live book:
