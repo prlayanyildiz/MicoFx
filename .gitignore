@@ -42,3 +42,8 @@ CLAUDE_ONERILERI.md
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+cookies.txt
+_opt_*.json
+_poll_opt.*
+_restart.json
