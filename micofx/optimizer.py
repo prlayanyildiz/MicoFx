@@ -3014,6 +3014,29 @@ class Optimizer:
             return {"ok": False, "error": missing}
         if not isinstance(detail, dict):
             return {"ok": False, "error": APPLY_STAMP_MISSING}
+        # Same-family blocked_entry_hours retune must not spend charged edge.
+        # Book-wide autopsy hours on NAS[17]/XAU[16] cost −34R vs [] (Claude
+        # 04.09); JPN[14,15] +3R is the shape that may land.
+        if not primary_changed:
+            live_bh = _norm_entry_hours(getattr(cfg, "blocked_entry_hours", None))
+            new_bh = _norm_entry_hours(applied_params.get("blocked_entry_hours"))
+            if live_bh != new_bh:
+                try:
+                    live_net = float(
+                        ((getattr(cfg, "opt_summary", None) or {})
+                         .get("holdout") or {}).get("net_r") or 0.0)
+                except (TypeError, ValueError):
+                    live_net = 0.0
+                try:
+                    new_net = float(
+                        (detail.get("holdout") or {}).get("net_r") or 0.0)
+                except (TypeError, ValueError):
+                    new_net = 0.0
+                if live_net > 0 and new_net + 1e-9 < live_net:
+                    msg = (f"blocked_entry_hours charged holdout geriledi "
+                           f"({live_net:+.1f}R -> {new_net:+.1f}R)")
+                    LOG.emit(f"{symbol}: {msg} - uygulanmadi.", "OPT", symbol)
+                    return {"ok": False, "error": msg}
         # Charged same-slice look stamps holdout_costed / costed_negative
         # beside every apply (#50). Refuse only while the live book actually
         # charges costs — cost-free mode still wants the visibility stamp.
