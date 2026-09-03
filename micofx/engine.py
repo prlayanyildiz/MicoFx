@@ -1234,7 +1234,10 @@ class Engine:
                 fill_vs_signal_close=fill_vs,
                 fill_vs_signal_close_pts=(fill_vs / point if point and fill_vs is not None else None),
                 fill_vs_signal_close_r=(fill_vs / sl_dist if sl_dist and fill_vs is not None else None),
-                spread_atr=float(state.spread_atr or 0),
+                # Send-time stamp from pending — evaluate may have overwritten
+                # state.spread_atr while the verifier slept.
+                spread_atr=float(item["spread_atr"]) if item.get("spread_atr") is not None
+                else float(state.spread_atr or 0),
                 adx=state.adx,
                 atr_pct=atr_pct,
                 tf_seconds=timeframe_seconds(cfg.timeframe),
@@ -2678,6 +2681,12 @@ class Engine:
             state.note = f"spread genis ({tick['spread'] / atr:.2f}xATR)"
             state.entry_block = "spread"
             return
+        # Autopsy used to keep evaluate-time spread_atr while this gate used a
+        # later tick — US30/JPN225 losers then looked over-cap when the gate
+        # had actually passed (Claude 03.09 night). Stamp the gate tick.
+        if atr > 0 and tick.get("spread") is not None:
+            state.spread = float(tick["spread"])
+            state.spread_atr = float(tick["spread"]) / atr
         price_ref = tick["ask"] if side == "buy" else tick["bid"]
         if cfg.min_atr_ratio > 0 and price_ref > 0 and (atr / price_ref) < cfg.min_atr_ratio:
             state.note = "volatilite dusuk"
@@ -2795,6 +2804,25 @@ class Engine:
                 state.note = "sembol silindi/degisti - islem iptal"
                 state.entry_block = "sembol_degisti"
                 return
+            # Fill-time widen: gate passed, then spread blew out before send
+            # (Claude 03.09 US30/JPN225 -38.8R bucket). Refuse; do not send.
+            if cfg.max_spread_atr > 0 and atr > 0:
+                fresh = self.client.tick(cfg.symbol)
+                if fresh is not None:
+                    tick = fresh
+                    state.spread = float(tick["spread"])
+                    state.spread_atr = float(tick["spread"]) / atr
+                    if tick["spread"] > atr * cfg.max_spread_atr:
+                        state.note = (
+                            f"spread genis (gonderim {tick['spread'] / atr:.2f}xATR)")
+                        state.entry_block = "spread"
+                        return
+                    entry = tick["ask"] if side == "buy" else tick["bid"]
+                    sl = entry - sl_dist if side == "buy" else entry + sl_dist
+                    if sl <= 0:
+                        state.note = "stop seviyesi gecersiz"
+                        state.entry_block = "stop"
+                        return
             result = self.client.open_market(
                 cfg.symbol, side, lot, sl, tp, cfg.magic,
                 slippage=self.store.system.slippage_points,
@@ -2815,6 +2843,7 @@ class Engine:
                     "entry": entry,
                     "note": note,
                     "tick": dict(tick),
+                    "spread_atr": float(state.spread_atr or 0),
                     "bar_key": (int(state.last_bar or 0),
                                 int(state.pending_bar_key[1] or 0)
                                 if state.pending_bar_key else 0),
