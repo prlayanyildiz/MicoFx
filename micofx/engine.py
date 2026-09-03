@@ -3546,6 +3546,7 @@ class Engine:
         rest.
         """
         try:
+            self._reconcile_untracked_closes()
             gone = self.execution.track(self._positions)
             if not gone:
                 return
@@ -3566,6 +3567,87 @@ class Engine:
             self.execution.forget(gone)
         except Exception as exc:                  # never let diagnostics stop the loop
             LOG.emit(f"Gerceklesme olcumu hatasi: {exc}", "WARN")
+
+    def _reconcile_untracked_closes(self) -> None:
+        """Log/otopsi broker closes that finished while this process was down.
+
+        ``execution.track`` only notices tickets that left ``_open``. After a
+        restart that dict is empty, so an SL that filled in the shutdown window
+        (XAU #324655544 04.09 01:24) never becomes ``gone`` — balance moves,
+        no TRADE line, no autopsy. One-shot scan of recent OUT deals for our
+        magics fills the gap.
+        """
+        if getattr(self, "_untracked_closes_done", False):
+            return
+        if not self.client.connected:
+            return
+        self._untracked_closes_done = True
+        magics = {c.magic for c in list(self.store.symbols.values())}
+        if not magics:
+            return
+        live = {int(p["ticket"]) for p in self._positions}
+        seen: set[int] = set(live)
+        for row in getattr(self, "_trade_autopsies", []) or []:
+            if not isinstance(row, dict):
+                continue
+            try:
+                t = int(row.get("ticket") or 0)
+            except (TypeError, ValueError):
+                continue
+            if t:
+                seen.add(t)
+        broker_now = self.client.broker_now()
+        since = (broker_now if broker_now > 0.0 else time.time()) - 7200.0
+        try:
+            deals = self.client.deals_since(since)
+        except Exception as exc:
+            LOG.emit(f"restart arasi kapanis taramasi basarisiz: {exc}", "WARN")
+            return
+        closers: dict[int, list[dict[str, Any]]] = {}
+        net: dict[int, float] = {}
+        for deal in deals or []:
+            try:
+                magic = int(deal.get("magic") or 0)
+                reason = int(deal.get("reason", -1))
+                pos = int(deal.get("position") or 0)
+            except (TypeError, ValueError):
+                continue
+            if magic not in magics or pos <= 0:
+                continue
+            net[pos] = (net.get(pos, 0.0)
+                        + float(deal.get("profit", 0.0) or 0.0)
+                        + float(deal.get("commission", 0.0) or 0.0)
+                        + float(deal.get("swap", 0.0) or 0.0))
+            if reason not in execution._CLOSED_ELSEWHERE:
+                continue
+            closers.setdefault(pos, []).append(deal)
+        for pos, chunks in closers.items():
+            if pos in seen:
+                continue
+            deal = chunks[-1]
+            volume = sum(float(d.get("volume", 0.0) or 0.0) for d in chunks)
+            if volume > 0:
+                price = sum(
+                    float(d.get("price", 0.0) or 0.0)
+                    * float(d.get("volume", 0.0) or 0.0)
+                    for d in chunks) / volume
+            else:
+                price = float(deal.get("price") or 0.0)
+            report = {
+                "ticket": pos,
+                "symbol": str(deal.get("symbol") or ""),
+                "magic": int(deal.get("magic") or 0),
+                "reason": int(deal.get("reason") or 0),
+                "label": execution._REASON_LABEL.get(
+                    int(deal.get("reason") or 0), "broker"),
+                "price": price,
+                "volume": volume,
+                "profit": round(net.get(pos, float(deal.get("profit") or 0.0)), 2),
+                "time": int(deal.get("time") or 0),
+                "book": {},
+                "restart_gap": True,
+            }
+            self._log_broker_exit(report)
 
     def _restore_cooldown(self, state: SymbolState) -> None:
         """Carry a still-running post-fill cooldown across a restart.
@@ -3663,7 +3745,8 @@ class Engine:
             comment="",
         )
         profit = report["profit"]
-        detail = (f"{report['label'].capitalize()} ile kapandi #{report['ticket']} "
+        gap = "Restart arasi " if report.get("restart_gap") else ""
+        detail = (f"{gap}{report['label'].capitalize()} ile kapandi #{report['ticket']} "
                   f"@ {report['price']:g} ({report['volume']:g} lot) kar={profit:.2f}")
         if report["reason"] == execution.DEAL_REASON_SO:
             LOG.emit(detail, "WARN", report["symbol"])
