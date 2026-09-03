@@ -35,7 +35,7 @@ READABLE_TIMEFRAMES = ["M5", "M15", "M30"]
 # stoch_flip/M5, 28.08) remains legal and a one-off run can still name it.
 # Overnight 00:06 paid 8 families × M5 plus the 90k-bar fetch retry; operator
 # dropped that retry as unproductive.
-SEARCH_TIMEFRAMES = ["M15", "M30"]
+SEARCH_TIMEFRAMES = ["M5", "M15", "M30"]
 GROUPS = ["forex", "index", "commodity", "crypto", "stock"]
 
 

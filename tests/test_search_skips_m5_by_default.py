@@ -1,11 +1,9 @@
-"""M5 stays legal to trade; the default search bag no longer retries it.
+"""Default WFO bag is M5/M15/M30; operator vision 03.09 restores M5.
 
-Overnight 28.08 spent a third of every symbol's sweeps plus the bar-fetch
-halving loop on M5 (lookback 0 asks 90k M5 bars; the terminal halves until
-something answers). Live Brent is stoch_flip/M5 from that run's weak 4.34
-stamp. Operator 28.08: drop the M5 retry, it is unproductive. A one-off
-``POST /api/opt/run`` can still name M5; Tumu/quarantine inherit the saved
-list.
+Overnight 28.08 dropped M5 from the default bag (bar-fetch cost + weak Brent
+stamps). Operator 03.09 wants WFO to evaluate M5/M15/M30 and keep only what
+beats — M5 stays selectable, not forced. A narrower POST /api/opt/params bag
+or a one-off POST /api/opt/run strategies/timeframes subset is still legal.
 """
 from __future__ import annotations
 
@@ -21,10 +19,9 @@ from micofx.models import SEARCH_TIMEFRAMES, TIMEFRAMES, SymbolConfig, SystemCon
 from micofx.web.app import create_app
 
 
-def test_m5_remains_a_legal_bar():
+def test_m5_is_in_the_default_search_bag():
     assert "M5" in TIMEFRAMES
-    assert SEARCH_TIMEFRAMES == ["M15", "M30"]
-    assert "M5" not in SEARCH_TIMEFRAMES
+    assert SEARCH_TIMEFRAMES == ["M5", "M15", "M30"]
 
 
 def test_shipped_search_bag_matches_search_timeframes():
@@ -39,7 +36,6 @@ def test_empty_opt_blob_does_not_fall_back_to_m5_only():
         encoding="utf-8")
     assert "or SEARCH_TIMEFRAMES" in src
     assert 'or ["M5"]' not in src.split("timeframes =", 1)[1][:400]
-
 
 class _Store:
     def __init__(self):
@@ -92,11 +88,11 @@ def _client():
     return TestClient(app), store
 
 
-def test_opt_params_post_writes_the_search_bag():
+def test_opt_params_post_writes_the_full_search_bag():
     tc, store = _client()
-    res = tc.post("/api/opt/params", json={"timeframes": ["M15", "M30"]})
+    res = tc.post("/api/opt/params", json={"timeframes": ["M5", "M15", "M30"]})
     assert res.status_code == 200, res.text
-    assert store.saved_opt["timeframes"] == ["M15", "M30"]
+    assert store.saved_opt["timeframes"] == ["M5", "M15", "M30"]
 
 
 def test_opt_params_post_refuses_an_empty_or_dead_bag():
@@ -106,9 +102,9 @@ def test_opt_params_post_refuses_an_empty_or_dead_bag():
     assert store.saved_opt is None
 
 
-def test_opt_params_post_can_put_m5_back():
-    """One-off persist is still legal; default shipped bag is what dropped it."""
+def test_opt_params_post_can_narrow_away_from_m5():
+    """Persist may still drop M5; default shipped bag is what restored it."""
     tc, store = _client()
-    res = tc.post("/api/opt/params", json={"timeframes": ["M5", "M15"]})
+    res = tc.post("/api/opt/params", json={"timeframes": ["M15", "M30"]})
     assert res.status_code == 200, res.text
-    assert store.saved_opt["timeframes"] == ["M5", "M15"]
+    assert store.saved_opt["timeframes"] == ["M15", "M30"]
