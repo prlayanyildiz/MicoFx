@@ -36,6 +36,9 @@ class _Store:
     def get_setting(self, key, default=None):
         return default
 
+    def set_setting(self, key, value):
+        pass
+
     def opt_params(self):
         return {}
 

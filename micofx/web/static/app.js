@@ -1697,17 +1697,6 @@ const BACKUP_FIELDS = [
   { k: "backup_keep", label: "Tutulacak yedek sayisi", t: "int", min: 1, max: 30 },
 ];
 
-function leverageSelectOpts(accLev) {
-  const max = Math.max(1, Math.floor(Number(accLev) || 1));
-  const floor = Math.max(1, Math.floor(max / 10));
-  const steps = [0, 1, 10, 25, 50, 100, 200, 400, 500, 1000];
-  // 0 = full broker. Positive picks below ~broker/10 lock small books on
-  // index min-lot (N=50 on 1:500 was lot 0) — keep them out of the dial.
-  const vals = steps.filter((v) => v === 0 || (v >= floor && v <= max));
-  if (!vals.includes(max)) vals.push(max);
-  return vals.map((v) => [String(v), v === 0 ? `Broker (1:${max})` : `1:${v}`]);
-}
-
 function buildSysField(f) {
   let input;
   if (f.t === "bool") {
@@ -1720,9 +1709,8 @@ function buildSysField(f) {
     input.addEventListener("change", async () => {
       await saveSystem({ [f.k]: input.value.trim() }, input);
     });
-  } else if (f.t === "select" || f.t === "lev") {
-    const opts = f.t === "lev" ? leverageSelectOpts((STATE.account || {}).leverage) : f.opts;
-    input = el("select", {}, opts.map(([v, l]) => el("option", { value: v, text: l })));
+  } else if (f.t === "select") {
+    input = el("select", {}, (f.opts || []).map(([v, l]) => el("option", { value: v, text: l })));
     input.addEventListener("change", () => {
       const value = parseInt(input.value, 10);
       if (!isFinite(value)) return;
@@ -1776,19 +1764,6 @@ function renderSystem() {
 
   $$("[data-sys-key]").forEach((input) => {
     const key = input.dataset.sysKey;
-    if (key === "target_leverage" && input.tagName === "SELECT") {
-      const accLev = (STATE.account || {}).leverage;
-      const want = String(sys.target_leverage ?? 0);
-      const opts = leverageSelectOpts(accLev);
-      const sig = opts.map(([v]) => v).join(",");
-      if (input.dataset.levSig !== sig) {
-        input.innerHTML = "";
-        opts.forEach(([v, l]) => input.appendChild(el("option", { value: v, text: l })));
-        input.dataset.levSig = sig;
-      }
-      if (input !== document.activeElement) input.value = want;
-      return;
-    }
     const field = input.closest(".field");
     const adv = SYS_FIELDS_ADVANCED.find((f) => f.k === key);
     if (adv && adv.live && sys.kasa_auto_enabled) {

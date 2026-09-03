@@ -19,8 +19,15 @@ def _sys_keys() -> set[str]:
     return set(re.findall(r'\{ k:\s*"([^"]+)"', APP_JS[start:end]))
 
 
+def _adv_keys() -> set[str]:
+    start = APP_JS.index("const SYS_FIELDS_ADVANCED")
+    end = APP_JS.index("const MT5_PATH_FIELDS")
+    return set(re.findall(r'\{ k:\s*"([^"]+)"', APP_JS[start:end]))
+
+
 def test_concurrent_risk_is_on_the_system_panel():
-    assert "max_concurrent_risk_pct" in _sys_keys()
+    # Gelismis: live under kasa ON; still operator-writable (6h pin).
+    assert "max_concurrent_risk_pct" in _adv_keys()
 
 
 def test_daily_loss_brake_is_on_the_system_panel():

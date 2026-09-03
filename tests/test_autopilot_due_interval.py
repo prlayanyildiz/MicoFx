@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -60,16 +61,17 @@ def test_due_respects_interval():
 
 def test_overlap_skips_second_tick():
     ap = _ap(interval=1.0)
-    held = []
+    entered = threading.Event()
+    release = threading.Event()
+    real_body = ap._tick_body
 
-    def slow_blocks():
-        held.append(1)
-        # Simulate a long tick while a second call tries the gate.
-        time.sleep(0.05)
-        return {"since": 1.0, "rows": []}
+    def slow_body():
+        entered.set()
+        # Hold the gate until the second caller has tried acquire().
+        release.wait(timeout=2.0)
+        return real_body()
 
-    ap.engine.entry_blocks = slow_blocks
-    import threading
+    ap._tick_body = slow_body  # type: ignore[method-assign]
     results: list[list[str]] = []
 
     def run() -> None:
@@ -78,9 +80,10 @@ def test_overlap_skips_second_tick():
     t1 = threading.Thread(target=run)
     t2 = threading.Thread(target=run)
     t1.start()
-    time.sleep(0.01)
+    assert entered.wait(timeout=1.0)
     t2.start()
-    t1.join()
-    t2.join()
+    t2.join(timeout=1.0)
+    release.set()
+    t1.join(timeout=2.0)
     assert any("onceki" in " ".join(r).lower() or "devam" in " ".join(r).lower()
                for r in results)

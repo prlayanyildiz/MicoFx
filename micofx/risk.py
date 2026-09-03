@@ -390,8 +390,11 @@ class RiskManager:
             return False
 
     def _setting_pin_active(self, key: str) -> bool:
+        getter = getattr(self.store, "get_setting", None)
+        if not callable(getter):
+            return False
         try:
-            until = float(self.store.get_setting(key, 0) or 0)
+            until = float(getter(key, 0) or 0)
         except (TypeError, ValueError):
             return False
         return until > time.time()
@@ -468,13 +471,14 @@ class RiskManager:
         stored = max(0.1, float(getattr(sys_cfg, "lot_multiplier", 1.0) or 1.0))
         if not bool(getattr(sys_cfg, "kasa_auto_enabled", True)):
             return stored
-        if self._setting_pin_active(self._KASA_PIN_LOT):
-            return stored
         try:
             equity = float((account or {}).get("equity") or 0.0)
         except (TypeError, ValueError):
             equity = 0.0
+        # No account picture (unit tests, pre-connect) → stored; skip pin I/O.
         if equity <= 0:
+            return stored
+        if self._setting_pin_active(self._KASA_PIN_LOT):
             return stored
         try:
             margin_pct = float(getattr(sys_cfg, "max_margin_usage_pct", 0) or 0)
@@ -502,13 +506,13 @@ class RiskManager:
         stored = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
         if not bool(getattr(sys_cfg, "kasa_auto_enabled", True)):
             return stored
-        if self._setting_pin_active(self._KASA_PIN_CONC):
-            return stored
         try:
             equity = float((account or {}).get("equity") or 0.0)
         except (TypeError, ValueError):
             equity = 0.0
         if equity <= 0:
+            return stored
+        if self._setting_pin_active(self._KASA_PIN_CONC):
             return stored
         n = self._vacant_enabled_count(positions)
         plan = compute_kasa_targets(

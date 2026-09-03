@@ -32,6 +32,7 @@ class _Store:
             max_swing_positions=0,
             min_free_margin=0.0,
             max_margin_usage_pct=0.0,
+            kasa_auto_enabled=False,
         )
         self.system.max_concurrent_risk_pct = 30.0
         self.symbols = {
