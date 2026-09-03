@@ -857,8 +857,18 @@ class Supervisor:
         so a same-cycle slot race preferred the one name that still carried
         the field. The number is ``net_r / trades`` either way; use the
         stored key when it is a real number, otherwise derive it.
+
+        When ``holdout_costed`` is stamped (apply path under charge_costs),
+        prefer that expectancy for slot races — Fix B ranks search on
+        costed_e; paper flattery must not win the last concurrent seat
+        (US30 paper 0.156 vs charged 0.099 at $232 / ~2 seats).
         """
-        hold = (getattr(cfg, "opt_summary", None) or {}).get("holdout") or {}
+        summary = getattr(cfg, "opt_summary", None) or {}
+        costed = summary.get("holdout_costed")
+        if isinstance(costed, dict) and int(costed.get("trades") or 0) > 0:
+            hold = costed
+        else:
+            hold = summary.get("holdout") or {}
         raw = hold.get("expectancy")
         if raw is not None and not isinstance(raw, bool):
             try:
