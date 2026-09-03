@@ -1,3 +1,4 @@
 @echo off
-REM Event-triggered persistent bridge (survives chat close).
-powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File "%~dp0scripts\start_bridge_daemon.ps1"
+REM Shim: ayni daemon MICOFX bridge / start_bridge_daemon.ps1.
+cd /d "%~dp0"
+call "%~dp0MICOFX.bat" bridge

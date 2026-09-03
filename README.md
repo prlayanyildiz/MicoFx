@@ -71,8 +71,9 @@ uygulanir; degilse mevcut ayar korunur.
 | `micofx/` | Kod (motor, strateji, optimizer, risk, web) |
 | `config/defaults.json` | Ilk sablon ve optimizer arama gridi |
 | `data/` · `logs/` | Runtime DB ve log (Git disi) |
-| `KUR.bat` · `KUR.ps1` | Tek kurulum |
-| `start.bat` · `stop.bat` · `start_console.bat` | Baslat / durdur / konsol |
+| `MICOFX.bat` · `scripts/micofx.ps1` | Tek komut: start / stop / restart / sync / bridge |
+| `KUR.bat` · `KUR.ps1` | Tek kurulum (`MICOFX install`) |
+| `start.bat` · `stop.bat` · `start_console.bat` | Kod path'i (restart.bat app.py) |
 | `backup.py` | Aksam yedegi (Windows Gorev Zamanlayici) |
 | `docs/` | [Kullanim](docs/KULLANIM.md) · [Kurulum ayrintilari](docs/KURULUM.md) |
 | `MASTER_PROMPT.md` | Gelistirici / agent kaynagi |

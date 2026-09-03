@@ -1,11 +1,9 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**03.09 09:52 EK21+** — F4 closed: do not reweight `Result.score`; F1 (holdout×1.15) is
-the historically best flip rule (42-flip backtest). No degrade penalty. No R4 yet.
-WFO ranking must **not** peek holdout. JPN225 session live+defaults **01:00–15:00**
-(charged 6/6 +66 vs all-day 3/6). PID checklist waits on GER40 flat.
-Prior **03.09 09:40 EK21** — F6 stamped `positive_ratio` = holdout 6-slice.
+**03.09 10:03** — operator launcher `MICOFX.bat`; GELIR_DONGUSU + start_income_loop deleted.
+Live: daily_loss 3, concurrent 8, lot_mult 0.92; 3 families; trail grid on PID.
+Prior **03.09 09:52 EK21+** — F4 closed; JPN 01–15.
 Prior **27.08 22:36** operator income-max + **00:06 opt** (armed, not started).
 Prior **22:10** A–Z. Shakeout floor stays; do not teach search it.
 GER40 #367727827 still open **plus** JPN/XAU/NAS fills → no restart.
