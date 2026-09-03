@@ -684,9 +684,9 @@ function renderCapacity() {
       <td class="sym">${esc(r.symbol)}</td>
       <td><span class="pill ${esc(r.group)}">${esc(GROUP_LABEL[r.group] || r.group)}</span></td>
       <td><span class="pill ${r.enabled ? "on" : "off"}">${r.enabled ? "aktif" : "kapali"}</span></td>
-      <td class="num">${num(r.lot, 2)}</td>
+      <td class="num ${Number(r.lot) > 0 ? "" : "neg"}">${num(r.lot, 2)}</td>
       <td class="num ${r.edge_scale > 1 ? "pos" : (r.edge_scale < 1 ? "neg" : "dim")}" title="holdout net R / maxDD, karekok medyan, 0.6-2.2">${r.edge_scale != null ? "x" + num(r.edge_scale, 2) : "-"}</td>
-      <td class="num dim">${esc(r.lot_note || "risk %")}</td>
+      <td class="num ${Number(r.lot) > 0 ? "dim" : "neg"}" title="${esc(r.lot_note || "")}">${esc(r.lot_note || "risk %")}</td>
       <td class="num ${r.open_positions ? "pos" : "dim"}">${r.open_positions}</td>
       <td class="num ${r.free_slots > 0 ? "pos" : "neg"}"><b>${r.free_slots}</b></td>
       <td class="num">${num(r.margin_per_trade)}</td>
@@ -1670,20 +1670,19 @@ async function saveAI(patch, flashNode) {
 /* ---------------------------------------------------------------- system */
 
 const SYS_FIELDS = [
-  { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
-  { k: "max_concurrent_risk_pct", label: "Es-zamanli risk % (likidite, 0=kapali)", t: "num", step: 1, min: 0, max: 100 },
+  { k: "target_leverage", label: "Hedef kaldirac (tek dial)", t: "lev" },
+  { k: "kasa_auto_enabled", label: "Kasa auto (inline lot+concurrent)", t: "bool" },
   { k: "daily_loss_pct", label: "Gunluk zarar freni % (0=kapali)", t: "num", step: 0.5, min: 0, max: 100 },
-  { k: "lot_multiplier", label: "Lot carpani (pozisyon buyuklugu)", t: "num", step: 0.05, min: 0.1, max: 3 },
-  { k: "target_leverage", label: "Hedef kaldirac (0=broker)", t: "lev" },
-  { k: "kasa_auto_enabled", label: "Kasa auto-tune (lot/marj merdiveni)", t: "bool" },
   { k: "autopilot_enabled", label: "Gelir autopilot (sistem ici)", t: "bool" },
   { k: "autopilot_interval_sec", label: "Autopilot aralik (sn)", t: "num", step: 60, min: 0, max: 86400 },
 ];
 
-// Plumbing and settled valves left the panel 27.08. Concurrent + daily
-// brake returned 03.09 (operator liquidity box). Other values stay on
-// SystemConfig; search and _try_entry still read them.
-const SYS_FIELDS_ADVANCED = [];
+// Live-computed under kasa ON; editable = 6h pin override.
+const SYS_FIELDS_ADVANCED = [
+  { k: "lot_multiplier", label: "Lot carpani", t: "num", step: 0.05, min: 0.1, max: 3, live: "lot" },
+  { k: "max_concurrent_risk_pct", label: "Es-zamanli risk %", t: "num", step: 1, min: 0, max: 100, live: "conc" },
+  { k: "max_margin_usage_pct", label: "Marj kullanimi % (0=kapali)", t: "num", step: 1, min: 0, max: 100 },
+];
 
 // Broker path lives on the connection card, not in Sistem Ayarlari -
 // Pepperstone/NCM swap is a reconnect, not a risk dial.
@@ -1700,8 +1699,11 @@ const BACKUP_FIELDS = [
 
 function leverageSelectOpts(accLev) {
   const max = Math.max(1, Math.floor(Number(accLev) || 1));
+  const floor = Math.max(1, Math.floor(max / 10));
   const steps = [0, 1, 10, 25, 50, 100, 200, 400, 500, 1000];
-  const vals = steps.filter((v) => v === 0 || v <= max);
+  // 0 = full broker. Positive picks below ~broker/10 lock small books on
+  // index min-lot (N=50 on 1:500 was lot 0) — keep them out of the dial.
+  const vals = steps.filter((v) => v === 0 || (v >= floor && v <= max));
   if (!vals.includes(max)) vals.push(max);
   return vals.map((v) => [String(v), v === 0 ? `Broker (1:${max})` : `1:${v}`]);
 }
@@ -1745,11 +1747,20 @@ function buildSysField(f) {
 
 function renderSystem() {
   const sys = STATE.system || {};
+  const cap = STATE.capacity || {};
   const box = $("#sys-settings");
 
   if (!box.dataset.built) {
     box.innerHTML = "";
     SYS_FIELDS.forEach((f) => box.appendChild(buildSysField(f)));
+    if (SYS_FIELDS_ADVANCED.length) {
+      const details = el("details", { class: "sys-advanced", open: false });
+      details.appendChild(el("summary", { text: "Gelismis (canli okuma / override)" }));
+      const adv = el("div", { class: "sys-advanced-fields" });
+      SYS_FIELDS_ADVANCED.forEach((f) => adv.appendChild(buildSysField(f)));
+      details.appendChild(adv);
+      box.appendChild(details);
+    }
     box.dataset.built = "1";
   }
   const pathBox = $("#sys-mt5-path");
@@ -1777,6 +1788,27 @@ function renderSystem() {
       }
       if (input !== document.activeElement) input.value = want;
       return;
+    }
+    const field = input.closest(".field");
+    const adv = SYS_FIELDS_ADVANCED.find((f) => f.k === key);
+    if (adv && adv.live && sys.kasa_auto_enabled) {
+      const liveVal = adv.live === "lot"
+        ? cap.lot_multiplier_live ?? cap.lot_multiplier
+        : cap.max_concurrent_risk_pct;
+      const pinned = adv.live === "lot" ? !!cap.lot_mult_pinned : !!cap.conc_pinned;
+      let badge = field && field.querySelector(".sys-live-badge");
+      if (field && !badge) {
+        badge = el("span", { class: "sys-live-badge muted" });
+        field.appendChild(badge);
+      }
+      if (badge) {
+        badge.textContent = pinned ? "manuel pin" : `auto ${liveVal ?? "-"}`;
+        badge.classList.toggle("warn", pinned);
+      }
+      if (!pinned && liveVal != null && input !== document.activeElement) {
+        if (String(input.value) !== String(liveVal)) input.value = liveVal;
+        return;
+      }
     }
     if (input === document.activeElement || !(key in sys)) return;
     if (input.type === "checkbox") input.checked = !!sys[key];

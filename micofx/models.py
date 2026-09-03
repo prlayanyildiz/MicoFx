@@ -746,8 +746,9 @@ class SystemConfig:
     # Kasa auto-tune (lot/margin ladder) is optional inside autopilot. Off
     # keeps spread/safe-fix ticks but stops rewriting lot_multiplier.
     kasa_auto_enabled: bool = True
-    # Intent for kasa sizing only — not the broker account leverage. 0 = use
-    # live account.leverage; positive values are capped to that ceiling.
+    # Intent for kasa: dial drives lot_multiplier + concurrent (and marj %).
+    # 0 = use live account.leverage. Positive values capped to broker.
+    # Never changes broker account leverage. Sizing engine stays 2% risk.
     target_leverage: float = 0.0
 
     # Expected MT5 login + server. 0 / "" means unset: the first connected

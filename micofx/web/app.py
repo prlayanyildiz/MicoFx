@@ -223,7 +223,8 @@ _SYSTEM_RISK_BOUNDS = {
     "backup_keep": (1, 365, True),
     # 0 disables due(); upper bound one day.
     "autopilot_interval_sec": (0.0, 86400.0, True),
-    # 0 = use live broker leverage; positive intent capped in kasa_leverage().
+    # 0 = use live broker leverage for kasa; with kasa OFF, positive N is
+    # notional book ceiling (capped to broker). Upper bound is UI/range only.
     "target_leverage": (0.0, 1000.0, True),
 }
 
@@ -1794,6 +1795,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                              f"terminal64.exe veya kurulum klasoru yazilabilir")
             patch["mt5_terminal_path"] = raw
         updated = store.update_system(patch, source="panel sistem")
+        # Manual lot / concurrent edits pin kasa off those knobs for 6h so
+        # the next autopilot tick cannot immediately rewrite the operator.
+        pin_until = time.time() + 6 * 3600
+        if "lot_multiplier" in patch:
+            store.set_setting("kasa_pin_lot_until", pin_until)
+        if "max_concurrent_risk_pct" in patch:
+            store.set_setting("kasa_pin_conc_until", pin_until)
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}
         if "mt5_terminal_path" in patch:
             client.set_terminal_path(updated.mt5_terminal_path)

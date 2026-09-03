@@ -6,7 +6,6 @@ knobs. Does not start searches, enable disabled symbols, or run research.
 """
 from __future__ import annotations
 
-import importlib.util
 import threading
 import time
 from pathlib import Path
@@ -91,13 +90,11 @@ def spread_auto_targets(
 
 
 def _load_compute_kasa():
-    path = _ROOT / "scripts" / "kasa_auto.py"
-    spec = importlib.util.spec_from_file_location("micofx_kasa_auto", path)
-    if spec is None or spec.loader is None:
+    try:
+        from .kasa_sizing import compute_kasa_targets
+        return compute_kasa_targets
+    except Exception:
         return None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return getattr(mod, "compute_kasa_targets", None)
 
 
 class AutoPilot:
@@ -255,6 +252,7 @@ class AutoPilot:
         return ["cost_free: charge_costs=false (komisyon 0)"]
 
     def _apply_kasa(self) -> list[str]:
+        """Slow-tick margin only. Lot / concurrent are inline in RiskManager."""
         sys = self.store.system
         if not bool(getattr(sys, "kasa_auto_enabled", True)):
             return ["kasa: operator kapali"]
@@ -265,9 +263,10 @@ class AutoPilot:
         cap = dict(getattr(self.engine, "_capacity_cache", None) or {})
         rows = [r for r in (cap.get("rows") or []) if r.get("enabled")]
         zero_lot = sum(1 for r in rows if float(r.get("lot") or 0) <= 0)
-        lot_blocks = 0
-        for row in self._entry_rows():
-            lot_blocks += int((row.get("blocks") or {}).get("lot") or 0)
+        try:
+            broker_lev = float(acc.get("leverage") or 1.0)
+        except (TypeError, ValueError):
+            broker_lev = 1.0
         plan = compute(
             equity=float(acc.get("equity") or 0),
             leverage=kasa_leverage(sys, acc),
@@ -283,25 +282,18 @@ class AutoPilot:
                 getattr(sys, "max_concurrent_risk_pct", 0)
                 or cap.get("max_concurrent_risk_pct") or 50),
             zero_lot=zero_lot,
-            lot_blocks=lot_blocks,
+            broker_leverage=broker_lev,
         )
         patch = dict(plan.get("patch") or {})
-        if not patch:
-            return []
-        # Concurrent risk is an operator/book guard. Kasa was ratcheting it
-        # toward 50 on a $220 1:500 book; leave the live dial alone.
-        patch.pop("max_concurrent_risk_pct", None)
-        allowed = {
-            "max_margin_usage_pct", "lot_multiplier",
-            "autostart_bot",
-        }
+        # Inline sizing owns lot + concurrent; only soft-margin may patch here.
+        allowed = {"max_margin_usage_pct", "autostart_bot"}
         patch = {k: v for k, v in patch.items() if k in allowed}
         if not patch:
             return []
         self.store.update_system(patch, source="autopilot")
         reasons = [
             r for r in (plan.get("reasons") or [])
-            if "conc_risk" not in str(r)
+            if "lot_mult" not in str(r) and "conc_risk" not in str(r)
         ] or [str(patch)]
         return [f"kasa {r}" for r in reasons[:4]]
 

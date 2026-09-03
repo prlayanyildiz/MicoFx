@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from .kasa_sizing import NOTIONAL_MARGIN_SOFT_PCT, compute_kasa_targets
 from .logbus import LOG
 from .models import SymbolConfig, SystemConfig, is_scalp_strategy
 from .mt5client import MT5Client, live_stop_level
@@ -366,6 +367,8 @@ class RiskManager:
     # risk% still wins if it is already higher. Shakeout SL × full-kasa lots
     # without this bound would blow the account.
     AUTO_R_PCT = 2.0
+    _KASA_PIN_LOT = "kasa_pin_lot_until"
+    _KASA_PIN_CONC = "kasa_pin_conc_until"
     # Set by the engine to the supervisor's "this name cannot open" predicate.
     # A class attribute rather than an __init__ field so an instance built
     # without running __init__ still answers it.
@@ -385,6 +388,96 @@ class RiskManager:
             return bool(hook(symbol))
         except Exception:
             return False
+
+    def _setting_pin_active(self, key: str) -> bool:
+        try:
+            until = float(self.store.get_setting(key, 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        return until > time.time()
+
+    def _broker_leverage(self, account: dict[str, Any] | None) -> float:
+        try:
+            lev = float((account or {}).get("leverage") or 0.0)
+        except (TypeError, ValueError):
+            lev = 0.0
+        return max(1.0, lev)
+
+    def _effective_book_leverage(self, account: dict[str, Any] | None) -> float:
+        """Dial capped to broker. 0 dial = full broker leverage."""
+        broker = self._broker_leverage(account)
+        try:
+            want = float(getattr(self.store.system, "target_leverage", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            want = 0.0
+        if want <= 0:
+            return broker
+        return min(want, broker)
+
+    def live_lot_multiplier(self, account: dict[str, Any] | None = None,
+                            positions: list[dict[str, Any]] | None = None) -> float:
+        """Inline kasa lot dial, or stored value when OFF / pinned."""
+        sys_cfg = self.store.system
+        stored = max(0.1, float(getattr(sys_cfg, "lot_multiplier", 1.0) or 1.0))
+        if not bool(getattr(sys_cfg, "kasa_auto_enabled", True)):
+            return stored
+        if self._setting_pin_active(self._KASA_PIN_LOT):
+            return stored
+        # No broker leverage in the account picture (unit tests, warm boot)
+        # → keep stored rather than inventing 1:1 aggression.
+        if account is None or not (account.get("leverage") or 0):
+            return stored
+        n = self._vacant_enabled_count(positions)
+        try:
+            equity = float((account or {}).get("equity") or 0.0)
+        except (TypeError, ValueError):
+            equity = 0.0
+        if equity <= 0:
+            return stored
+        plan = compute_kasa_targets(
+            equity=equity,
+            leverage=self._effective_book_leverage(account),
+            n_enabled=n,
+            broker_leverage=self._broker_leverage(account),
+            lot_multiplier=stored,
+            max_concurrent_risk_pct=float(
+                getattr(sys_cfg, "max_concurrent_risk_pct", 0) or 0),
+            max_margin_usage_pct=float(
+                getattr(sys_cfg, "max_margin_usage_pct", 0) or 0),
+        )
+        return float(plan["targets"]["lot_multiplier"])
+
+    def live_concurrent_pct(self, account: dict[str, Any] | None = None,
+                            positions: list[dict[str, Any]] | None = None,
+                            lot_mult: float | None = None) -> float:
+        """Inline concurrent risk %, or stored when OFF / pinned / 0=off."""
+        sys_cfg = self.store.system
+        stored = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
+        if not bool(getattr(sys_cfg, "kasa_auto_enabled", True)):
+            return stored
+        if self._setting_pin_active(self._KASA_PIN_CONC):
+            return stored
+        if account is None or not (account.get("leverage") or 0):
+            return stored
+        n = self._vacant_enabled_count(positions)
+        try:
+            equity = float((account or {}).get("equity") or 0.0)
+        except (TypeError, ValueError):
+            equity = 0.0
+        if equity <= 0:
+            return stored
+        plan = compute_kasa_targets(
+            equity=equity,
+            leverage=self._effective_book_leverage(account),
+            n_enabled=n,
+            broker_leverage=self._broker_leverage(account),
+            lot_multiplier=float(lot_mult if lot_mult is not None else
+                                 self.live_lot_multiplier(account, positions)),
+            max_concurrent_risk_pct=stored,
+            max_margin_usage_pct=float(
+                getattr(sys_cfg, "max_margin_usage_pct", 0) or 0),
+        )
+        return float(plan["targets"]["max_concurrent_risk_pct"])
 
     # ------------------------------------------------------------- lot sizing
 
@@ -480,8 +573,11 @@ class RiskManager:
         """Lots that still fit this name's share of remaining margin.
 
         Book budget is equity × max_margin_usage_pct minus used, split across
-        vacant enabled names, then × denetci ``ai_scale``. Leftover
-        ``cfg.max_margin_pct`` is unread (operator 28.08). None = no extra cap.
+        vacant enabled names, then × denetci ``ai_scale``. Dial aggression is
+        ``live_lot_multiplier`` (not a second shrink of this margin budget —
+        N/broker as margin starved index min-lots at target_leverage=50).
+        Leftover ``cfg.max_margin_pct`` is unread (operator 28.08). None = no
+        extra cap.
         """
         if not account:
             return None
@@ -499,6 +595,10 @@ class RiskManager:
             margin_budget = max(0.0, equity * pct / 100.0 - used)
         else:
             margin_budget = free
+        # Soft lid only — never multiply by N/broker here (lot_mult owns dial).
+        if bool(getattr(sys_cfg, "kasa_auto_enabled", True)) and equity > 0:
+            soft = equity * NOTIONAL_MARGIN_SOFT_PCT / 100.0 - used
+            margin_budget = max(0.0, min(margin_budget, soft))
         budget = max(0.0, min(margin_budget, free - float(sys_cfg.min_free_margin or 0.0)))
         n = self._vacant_enabled_count(positions)
         try:
@@ -552,7 +652,7 @@ class RiskManager:
         if ceiling <= 0:
             ceiling = floor
 
-        multiplier = max(0.1, float(self.store.system.lot_multiplier or 1.0))
+        multiplier = self.live_lot_multiplier(account, positions)
         edge = self.edge_scale(cfg)
         multiplier *= edge
         multiplier *= max(0.0, float(ai_scale))
@@ -577,6 +677,9 @@ class RiskManager:
             note += f" | avantaj x{edge:.2f}"
         if ai_scale != 1.0:
             note += f" | AI x{ai_scale:.2f}"
+        live_mult = self.live_lot_multiplier(account, positions)
+        if bool(getattr(self.store.system, "kasa_auto_enabled", True)):
+            note += f" | kasa x{live_mult:g}"
 
         auto = self._margin_lot_ceiling(
             cfg, account, side, floor, ceiling, positions=positions,
@@ -590,16 +693,15 @@ class RiskManager:
             # Deliberately NOT ``multiplier``: that already carries edge_scale
             # (up to EDGE_MAX 2.2), so scaling the ceiling by the same push it
             # exists to bound made the "auto 1R" cap ~4.4% of balance instead
-            # of 2%. The operator's lot_multiplier stays in - it is the dial
-            # that sets the book's overall size - and ai_scale stays in only
+            # of 2%. The operator's lot_multiplier (or inline kasa dial) stays
+            # in - it sets the book's overall size - and ai_scale stays in only
             # as a throttle, clamped at 1.0 so the supervisor can tighten the
             # ceiling but never lift it.
             try:
                 throttle = min(1.0, max(0.0, float(ai_scale)))
             except (TypeError, ValueError):
                 throttle = 1.0
-            cap_multiplier = max(0.1, float(self.store.system.lot_multiplier or 1.0))
-            cap_multiplier *= throttle
+            cap_multiplier = max(0.1, live_mult) * throttle
             r_cap = (balance * r_pct / 100.0 * cap_multiplier
                      / (sl_distance * money_per_unit))
             if auto + 1e-12 < floor:
@@ -842,7 +944,7 @@ class RiskManager:
         # already open still counts - an unmeasurable entry must not read as
         # free room on top of a book that is over the line.
         # cfg.max_margin_pct stays unread.
-        cap_pct = float(getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0)
+        cap_pct = self.live_concurrent_pct(account, positions)
         if cap_pct > 0 and equity > 0:
             book_risk = sum(self.remaining_position_risk(p) for p in mine)
             book_risk += self.risk_dollars(cfg.symbol, lot, sl_distance)
@@ -942,8 +1044,14 @@ class RiskManager:
         used = float(account.get("margin", 0.0))
         atr_by_symbol = atr_by_symbol or {}
 
-        margin_budget = max(0.0, equity * sys_cfg.max_margin_usage_pct / 100.0 - used) \
-            if (equity > 0 and sys_cfg.max_margin_usage_pct > 0) else free
+        pct = float(sys_cfg.max_margin_usage_pct or 0.0)
+        if equity > 0 and pct > 0:
+            margin_budget = max(0.0, equity * pct / 100.0 - used)
+        else:
+            margin_budget = free
+        if bool(getattr(sys_cfg, "kasa_auto_enabled", True)) and equity > 0:
+            soft = equity * NOTIONAL_MARGIN_SOFT_PCT / 100.0 - used
+            margin_budget = max(0.0, min(margin_budget, soft))
         budget = max(0.0, min(margin_budget, free - sys_cfg.min_free_margin))
 
         rows = []
@@ -1025,7 +1133,9 @@ class RiskManager:
         projected_charge_costs = proj["projected_charge_costs"]
 
         total_risk = sum(r["risk_per_trade"] for r in rows if r["enabled"])
-        multiplier = max(0.1, float(sys_cfg.lot_multiplier or 1.0))
+        live_mult = self.live_lot_multiplier(account, mine)
+        live_conc = self.live_concurrent_pct(account, mine, lot_mult=live_mult)
+        multiplier = live_mult
         global_slots = max((r["free_slots"] for r in rows), default=0)
 
         # No ticket-count ceiling. Worst-case concurrent is every enabled
@@ -1079,6 +1189,9 @@ class RiskManager:
             "concurrent_risk_pct": round(concurrent_risk / equity * 100.0, 2) if equity > 0 else 0.0,
             "concurrent_margin": round(concurrent_margin, 2),
             "lot_multiplier": multiplier,
+            "lot_multiplier_stored": max(0.1, float(sys_cfg.lot_multiplier or 1.0)),
+            "lot_multiplier_live": live_mult,
+            "lot_mult_pinned": self._setting_pin_active(self._KASA_PIN_LOT),
             "size_by_edge": bool(sys_cfg.size_by_edge),
             "safe_multiplier": round(headroom * multiplier, 2),
             "projected_daily": round(projected_daily, 2),
@@ -1099,6 +1212,9 @@ class RiskManager:
             "margin_budget": round(budget, 2),
             "margin_usage_pct": round(used / equity * 100.0, 2) if equity > 0 else 0.0,
             "max_margin_usage_pct": sys_cfg.max_margin_usage_pct,
-            "max_concurrent_risk_pct": float(
+            "max_concurrent_risk_pct": live_conc,
+            "max_concurrent_risk_pct_stored": float(
                 getattr(sys_cfg, "max_concurrent_risk_pct", 0.0) or 0.0),
+            "conc_pinned": self._setting_pin_active(self._KASA_PIN_CONC),
+            "effective_leverage": self._effective_book_leverage(account),
         }

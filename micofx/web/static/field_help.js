@@ -85,8 +85,11 @@ const FIELD_HELP = {
 
   "max_total_positions": "Anahtar artik okunmaz. Sayim tavani yok; tavan marj / ters yon / STOPSUZ.",
   "lot_multiplier": "Butun lotlara carpilan global carpan. 2 = her sey iki kat. Kasa auto-tune aciksa 15 dkda merdivene ceker; kapatinca panel degeri kalir.",
-  "target_leverage": "Kasa boyutlama icin hedef kaldirac. 0 = canli broker kaldiraci. Secilen deger broker tavanini asamaz (su an hesabin 1:N degeri); brokeri degistirince ust sinir da yukselir. Broker kaldiracini degistirmez.",
-  "kasa_auto_enabled": "Autopilot icindeki kasa merdiveni (lot/marj). Kapali = operator lot_multiplier ezilmez; spread/safe-fix autopilot devam eder.",
+  "target_leverage": "Tek dial. 0 = brokerin tam kaldiraci (onerilen). Pozitif = daha muhafazakar lot carpani (inline). Dusuk N (orn. 50 @ 1:500) lotu kucultur ama artik marj butcesini 10x kirpmaz. Broker hesabini degistirmez.",
+  "kasa_auto_enabled": "Acik: lot+concurrent inline (15dk patch yok). Kapali: Gelismis kutulardaki elle degerler. Spread/safe-fix autopilot ayri calisir.",
+  "lot_multiplier": "Gelismis. Kasa ON: motor canli hesabi kullanir (auto rozeti). Elle yazmak 6 saat pinler. Kasa OFF: bu deger gecerli.",
+  "max_concurrent_risk_pct": "Gelismis. Kasa ON: canli hesap. Elle yazmak 6 saat pin. 0 = freni kapatmaz (kasa OFF iken).",
+  "max_margin_usage_pct": "Gelismis. Soft marj tavani; autopilot yavas tick ince ayar yapabilir. margin_free HARD clamp her zaman.",
   "size_by_edge": "Aciksa lot, holdout net R / holdout maxDD oranina gore (karekok medyan, 0.6-2.2). Pencere uzunlugu orana girmez.",
   "daily_loss_pct": "Gunluk gerceklesen zarar bakiyenin bu yuzdesini asinca yeni giris durur. 0 = kapali.",
   "max_concurrent_risk_pct": "Acik pozisyonlarin guncel stoplarina gore kalan 1R toplami bu yuzdeyi asacaksa yeni giris durur. 0 = kapali. Trail ile stop girise cekilince o pozisyon butceyi birakir.",
