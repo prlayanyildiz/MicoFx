@@ -1,10 +1,9 @@
 # OPTIMIZATIONS.md
 
 Read-only notes. **Not executed by the engine.** Latest:
-**04.09 00:52** — Gece SL sweep kapandi: **NAS LAND** burst/sl0.9 +103.5R;
-**XAU BIRAK** +256R (Claude: Agustos premature blip, force yok); **JPN WFO
-RED** (kapidan aday yok, sl0.7 +146.7R korundu). Spread recheck + hybrid
-force-SL gate canlida. Hours #3 RETRACT.
+**04.09 00:55** — JPN WFO RED (aday yok; sl0.7 +146.7R). XAU SL BIRAK.
+XAU seans **01:01-23:59→00:00-23:59** (olu gece saati; charged +256R ayni).
+NAS burst/sl0.9 +103.5R LAND. Hours #3 RETRACT. Spread recheck canlida.
 **SABAH:** SpotBrent fill; XAU premature izle; operator EK22 brifing.
 
 Prior **03.09 23:xx** — weak-symbol + 3 bleed. EK22.
