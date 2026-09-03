@@ -505,6 +505,15 @@ class Optimizer:
                         f"Secim listesi eskimis olabilir - sayfayi yenileyin "
                         f"veya 'Tumu' secip tekrar deneyin.")}
                 return {"ok": False, "error": "Sembol secilmedi."}
+            # Paper WFO must not rewrite live exits (Claude 03.09 autopsy:
+            # cost-free SL mis-tune). Search still runs for analysis.
+            charging = bool(getattr(self.store.system, "charge_costs", True))
+            if apply_best and not charging:
+                apply_best = False
+                LOG.emit(
+                    "Maliyetsiz arama: apply_best kapatildi "
+                    "(canliya yazmaz - charge_costs acikken tekrar deneyin).",
+                    "WARN")
             # One-off restriction of this run to a subset of the configured
             # timeframes (e.g. "just scan M5 today") - None/empty means the
             # saved opt_params selection, same as before this existed.
