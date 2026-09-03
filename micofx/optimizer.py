@@ -33,16 +33,16 @@ from .models import (
     uses_swing_exits,
 )
 from .mt5client import Bars, MT5Client, timeframe_seconds
-from .spread_calibration import calibrate
+from .spread_calibration import ATR_PERIOD, MAX_CAP, MIN_CAP, _atr, calibrate
 from .store import Store
 from .strategy import absent_regime_gates_to_zero, searchable_axes
 
 APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
 
-# Not an OPT_FIELDS axis: apply() still does not write sessions. The search
-# pre-step scores live family/TF under these windows (charged holdout) and
-# overlays the winner onto sweep jobs. A later persist is a documented
-# secondary write so the live book matches the stamp (NAS100 03.09 14-22).
+# Not an OPT_FIELDS axis: apply() still does not write sessions via OPT_FIELDS.
+# Pre-step builds a shortlist (<=3) of charged-ok clocks; each becomes its own
+# WFO sweep. The winning attempt's search_sessions is a documented secondary
+# persist so the live book matches the stamp.
 SEARCH_SESSION_WINDOWS: list[list[dict[str, str]]] = [
     [{"start": "00:00", "end": "23:59"}],
     [{"start": "00:00", "end": "09:00"}],
@@ -51,6 +51,68 @@ SEARCH_SESSION_WINDOWS: list[list[dict[str, str]]] = [
     [{"start": "15:00", "end": "21:00"}],
     [{"start": "23:00", "end": "08:00"}],
 ]
+
+# Cap how many clocks one symbol fans into. Pre-step filters; WFO+F6 picks.
+_SESSION_SEARCH_MAX = 3
+
+
+def spread_cap_search_axis(bars: Any, point: float, live_cap: float,
+                           percentiles: tuple[float, ...] = (40.0, 55.0, 70.0)
+                           ) -> list[float]:
+    """Per-symbol max_spread_atr candidates from this bar window's ratios.
+
+    Stored grid axes are static across the book; US30/JPN225 night bleed was
+    under a cap that did not price this symbol's own admitted range. Search
+    still owns the axis — this only replaces the value list for one sweep.
+    """
+    try:
+        point = float(point)
+    except (TypeError, ValueError):
+        return []
+    if point <= 0:
+        return []
+    try:
+        high = np.asarray(bars.high, dtype=float)
+        low = np.asarray(bars.low, dtype=float)
+        close = np.asarray(bars.close, dtype=float)
+        spread = np.asarray(bars.spread, dtype=float)
+    except Exception:
+        return []
+    if high.size < ATR_PERIOD + 200:
+        return []
+    atr = _atr(high, low, close)
+    n = len(atr)
+    if n < 200:
+        return []
+    start = ATR_PERIOD
+    # bars.spread is points; live gate compares price spread to ATR.
+    ratio = (spread[start:start + n] * point) / np.where(atr > 0, atr, np.nan)
+    ratio = ratio[np.isfinite(ratio) & (ratio > 0)]
+    if ratio.size < 200:
+        return []
+    vals: list[float] = []
+    for pct in percentiles:
+        try:
+            vals.append(float(np.percentile(ratio, pct)))
+        except Exception:
+            continue
+    try:
+        live = float(live_cap or 0.0)
+    except (TypeError, ValueError):
+        live = 0.0
+    if live > 0:
+        vals.append(live)
+    # Keep the shipped floor in the bag so a loose live cap can still tighten.
+    vals.append(0.04)
+    out: list[float] = []
+    seen: set[float] = set()
+    for raw in vals:
+        cap = round(min(MAX_CAP, max(MIN_CAP, float(raw))), 2)
+        if cap in seen:
+            continue
+        seen.add(cap)
+        out.append(cap)
+    return sorted(out)[:5]
 
 
 def _sessions_key(windows: list | None) -> tuple[tuple[str, str], ...]:
@@ -469,6 +531,8 @@ def _sweep_worker(payload: dict[str, Any]) -> dict[str, Any]:
     outcome["timeframe"] = payload["timeframe"]
     outcome["strategy"] = payload["strategy"]
     outcome["order"] = payload.get("order", 0)
+    if payload.get("search_sessions") is not None:
+        outcome["search_sessions"] = payload.get("search_sessions")
     return outcome
 
 
@@ -1160,70 +1224,74 @@ class Optimizer:
             cached_bars[tf] = got
             self._bar_snap[(cfg.symbol, tf)] = got
 
-        search_overlay = cfg.to_dict()
-        picked_sessions = self._pick_search_sessions(cfg)
-        if picked_sessions:
-            search_overlay["sessions"] = picked_sessions
-            search_overlay["use_sessions"] = not _is_all_hours_sessions(picked_sessions)
-            plan["session_override"] = picked_sessions
+        search_base = cfg.to_dict()
+        session_shortlist = self._session_search_shortlist(cfg)
+        if not session_shortlist:
+            session_shortlist = [_live_search_sessions(cfg)]
 
-        for tf in timeframes:
-            bars = cached_bars.get(tf)
-            for variant in variants:
-                family = variant["strategy"]
-                if not strategy_allows_timeframe(family, tf, allow):
-                    continue
-                if bars is None or len(bars) < 600:
-                    plan["attempts"].append(
-                        {"timeframe": tf, "strategy": family,
-                         "ok": False,
-                         "order": len(plan["jobs"]) + len(plan["attempts"]),
-                         "error": f"veri yetersiz ({len(bars) if bars else 0} bar)"})
-                    continue
-                factory = None
-                if self.store is not None:
-                    raw = (self.store.defaults.get("optimizer") or {}).get("grid")
-                    if isinstance(raw, dict) and raw:
-                        factory = raw
-                grid = self._exit_grid_for(
-                    variant["grid"], variant["own"], family, tf,
-                    shared=variant.get("shared"), factory=factory)
-                bars_dir = self._ensure_sweep_bars_dir()
-                safe = "".join(
-                    ch if ch.isalnum() else "_" for ch in f"{cfg.symbol}_{tf}")
-                bars_path = write_sweep_bars(bars_dir / safe, bars)
-                plan["jobs"].append({
-                    "symbol": cfg.symbol, "timeframe": tf, "strategy": family,
-                    "order": len(plan["jobs"]) + len(plan["attempts"]),
-                    "cfg": {**search_overlay, "timeframe": tf, "strategy": family},
-                    "bars_path": str(bars_path),
-                    "point": float(info["point"]), "tf_seconds": timeframe_seconds(tf),
-                    "spread_scale": spread_scale,
-                    "charge_costs": charge_costs,
-                    "grid": grid, "min_trades": min_trades, "segments": segments,
-                    "max_combos": family_max_combos(
-                        opt_blob, family, (alloc or {}).get(family, max_combos)),
-                    "min_positive": min_positive,
-                    # Scheduling only (longest_first). A sweep costs roughly
-                    # "combos evaluated x bars walked", and both vary by orders
-                    # of magnitude across families and timeframes. Never read
-                    # by the worker or by scoring.
-                    "cost_hint": int(family_max_combos(
-                        opt_blob, family,
-                        (alloc or {}).get(family, max_combos)) * len(bars)),
-                    "plateau": plateau, "commission": commission, "min_stop": min_stop,
-                    "refine_rounds": refine_rounds, "all_hours": all_hours,
-                    "day_end_flatten_min": day_end_flatten_min,
-                    # The live entry gate's own ceiling, handed to the search so
-                    # it stops proposing configs the engine will refuse. Read
-                    # from the same setting the engine reads, and only when that
-                    # gate is actually switched on - otherwise 0 leaves the
-                    # search unfiltered, exactly as before.
-                    "max_cost_share": max_cost_share,
-                    "selection_metric": metric,
-                    "risk_dollar": risk_dollar,
-                    "combo_seed": combo_seed,
-                })
+        for sess_windows in session_shortlist:
+            search_overlay = dict(search_base)
+            search_overlay["sessions"] = sess_windows
+            search_overlay["use_sessions"] = not _is_all_hours_sessions(sess_windows)
+            for tf in timeframes:
+                bars = cached_bars.get(tf)
+                for variant in variants:
+                    family = variant["strategy"]
+                    if not strategy_allows_timeframe(family, tf, allow):
+                        continue
+                    if bars is None or len(bars) < 600:
+                        plan["attempts"].append(
+                            {"timeframe": tf, "strategy": family,
+                             "ok": False,
+                             "order": len(plan["jobs"]) + len(plan["attempts"]),
+                             "error": f"veri yetersiz ({len(bars) if bars else 0} bar)",
+                             "search_sessions": sess_windows})
+                        continue
+                    factory = None
+                    if self.store is not None:
+                        raw = (self.store.defaults.get("optimizer") or {}).get("grid")
+                        if isinstance(raw, dict) and raw:
+                            factory = raw
+                    grid = self._exit_grid_for(
+                        variant["grid"], variant["own"], family, tf,
+                        shared=variant.get("shared"), factory=factory)
+                    # Per-symbol spread-cap axis from this TF's bars (Claude 23:10 A2).
+                    try:
+                        live_cap = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        live_cap = 0.0
+                    axis = spread_cap_search_axis(
+                        bars, float(info["point"]), live_cap)
+                    if axis:
+                        grid = {**grid, "max_spread_atr": axis}
+                    bars_dir = self._ensure_sweep_bars_dir()
+                    safe = "".join(
+                        ch if ch.isalnum() else "_" for ch in f"{cfg.symbol}_{tf}")
+                    bars_path = write_sweep_bars(bars_dir / safe, bars)
+                    plan["jobs"].append({
+                        "symbol": cfg.symbol, "timeframe": tf, "strategy": family,
+                        "order": len(plan["jobs"]) + len(plan["attempts"]),
+                        "cfg": {**search_overlay, "timeframe": tf, "strategy": family},
+                        "search_sessions": sess_windows,
+                        "bars_path": str(bars_path),
+                        "point": float(info["point"]), "tf_seconds": timeframe_seconds(tf),
+                        "spread_scale": spread_scale,
+                        "charge_costs": charge_costs,
+                        "grid": grid, "min_trades": min_trades, "segments": segments,
+                        "max_combos": family_max_combos(
+                            opt_blob, family, (alloc or {}).get(family, max_combos)),
+                        "min_positive": min_positive,
+                        "cost_hint": int(family_max_combos(
+                            opt_blob, family,
+                            (alloc or {}).get(family, max_combos)) * len(bars)),
+                        "plateau": plateau, "commission": commission, "min_stop": min_stop,
+                        "refine_rounds": refine_rounds, "all_hours": all_hours,
+                        "day_end_flatten_min": day_end_flatten_min,
+                        "max_cost_share": max_cost_share,
+                        "selection_metric": metric,
+                        "risk_dollar": risk_dollar,
+                        "combo_seed": combo_seed,
+                    })
         return plan
 
     def _run_all(self, targets: list[str], lookback_days: int, bar_cap: int,
@@ -1336,11 +1404,15 @@ class Optimizer:
                     queued.extend(plan_next(symbol))
                 elif plan["outstanding"] > 0:
                     self._set(current=symbol)
-                    measured = {(a.get("timeframe"), a.get("strategy"))
-                                for a in plan["attempts"]}
+                    measured = {
+                        (a.get("timeframe"), a.get("strategy"),
+                         _sessions_key(a.get("search_sessions")))
+                        for a in plan["attempts"]}
                     queued.extend(
                         j for j in plan["jobs"]
-                        if (j["timeframe"], j["strategy"]) not in measured)
+                        if (j["timeframe"], j["strategy"],
+                            _sessions_key(j.get("search_sessions")))
+                        not in measured)
             if queued:
                 LOG.emit(
                     f"Barlar indirildi, tarama basliyor: {len(queued)} tarama",
@@ -1419,9 +1491,12 @@ class Optimizer:
                     except BrokenProcessPool:
                         raise
                     except Exception as exc:
-                        note(job, {"timeframe": job["timeframe"], "strategy": job["strategy"],
-                                   "order": job["order"], "ok": False,
-                                   "error": f"{type(exc).__name__}: {exc}"})
+                        err = {"timeframe": job["timeframe"], "strategy": job["strategy"],
+                               "order": job["order"], "ok": False,
+                               "error": f"{type(exc).__name__}: {exc}"}
+                        if job.get("search_sessions") is not None:
+                            err["search_sessions"] = job.get("search_sessions")
+                        note(job, err)
                 return not self._cancel.is_set()
 
             # Longest sweep first so the tail is short ones, not the reverse.
@@ -1469,6 +1544,7 @@ class Optimizer:
              if a.get("ok") else None,
              "sel_pr": (a.get("best") or {}).get("selection_positive_ratio")
              if a.get("ok") else None,
+             "search_sessions": a.get("search_sessions"),
              "error": a.get("error", "")}
             for a in attempts
         ]
@@ -1624,7 +1700,9 @@ class Optimizer:
                         "combos": report.get("combos")},
                        timeframe=report["timeframe"], strategy=report["strategy"])
             applied = bool(apply_result.get("ok")) and not apply_result.get("deferred")
-            override = plan.get("session_override")
+            # Winning sweep's clock (session fan-out), not the old pre-step
+            # single overlay on the plan.
+            override = report.get("search_sessions")
             if override and (applied or apply_result.get("deferred")):
                 self._persist_search_sessions(cfg.symbol, override)
             if stamp_closed and applied:
@@ -2354,12 +2432,79 @@ class Optimizer:
              "use_sessions": not _is_all_hours_sessions(windows)},
             source="arama seans penceresi")
 
-    def _pick_search_sessions(self, cfg) -> list | None:
-        """Charged pre-step on the live family/TF. Does not multiply the grid.
+    def _session_search_shortlist(self, cfg) -> list[list]:
+        """Pre-step filters clocks; WFO+F6 picks among the shortlist.
 
-        The window is chosen once, then inherited by every family/TF sweep.
-        That is v1: JPN 23-08 held on both burst and channel_break; a family
-        that wants a different clock still gets this symbol's live hours.
+        Always includes the live mask. Up to ``_SESSION_SEARCH_MAX - 1`` other
+        ``_session_holdout_ok`` windows join by charged score. Replaces the
+        old single-window ``_pick_search_sessions`` overlay on the plan.
+        """
+        live = _live_search_sessions(cfg)
+        if not live:
+            live = [{"start": "00:00", "end": "23:59"}]
+        if not self._live_search_charging():
+            return [live]
+        windows_list = list(SEARCH_SESSION_WINDOWS)
+        live_key = _sessions_key(live)
+        if live_key not in {_sessions_key(w) for w in windows_list}:
+            windows_list = [live, *windows_list]
+        scored: list[tuple[list, dict | None]] = []
+        seen: set[tuple[tuple[str, str], ...]] = set()
+        for windows in windows_list:
+            key = _sessions_key(windows)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                hold = self._holdout_costed(
+                    cfg.symbol, cfg.timeframe, cfg.strategy, {},
+                    allow_fetch=False, sessions=windows)
+            except Exception:
+                hold = None
+            scored.append((windows, hold))
+        ranked_log = []
+        for windows, hold in scored:
+            if not windows:
+                continue
+            row = windows[0] if isinstance(windows[0], dict) else {}
+            ranked_log.append(
+                f"{row.get('start')}-{row.get('end')}:"
+                f"sc={_session_rank(hold):.1f}/"
+                f"n={int((hold or {}).get('trades') or 0)}/"
+                f"pf={float((hold or {}).get('profit_factor') or 0):.2f}/"
+                f"dd={float((hold or {}).get('max_dd_r') or 0):.1f}")
+        if ranked_log:
+            LOG.emit(
+                f"{cfg.symbol}: seans shortlist pre-step [{', '.join(ranked_log)}]",
+                "OPT", cfg.symbol)
+        out: list[list] = [live]
+        challengers: list[tuple[float, list]] = []
+        for windows, hold in scored:
+            if _sessions_key(windows) == live_key:
+                continue
+            if not _session_holdout_ok(hold):
+                continue
+            challengers.append((_session_rank(hold), windows))
+        challengers.sort(key=lambda t: t[0], reverse=True)
+        for _, windows in challengers:
+            if len(out) >= _SESSION_SEARCH_MAX:
+                break
+            out.append(windows)
+        if len(out) > 1:
+            labels = []
+            for windows in out:
+                row = windows[0] if windows and isinstance(windows[0], dict) else {}
+                labels.append(f"{row.get('start')}-{row.get('end')}")
+            LOG.emit(
+                f"{cfg.symbol}: seans WFO fan-out [{', '.join(labels)}]",
+                "OPT", cfg.symbol)
+        return out
+
+    def _pick_search_sessions(self, cfg) -> list | None:
+        """Legacy single-window pick (sticky). Prefer ``_session_search_shortlist``.
+
+        Kept for unit coverage of sticky / soft-PF rules; live planning uses
+        the shortlist fan-out so WFO+F6 choose the clock.
         """
         if not self._live_search_charging():
             return None
