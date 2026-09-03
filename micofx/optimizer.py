@@ -74,6 +74,59 @@ def _norm_entry_hours(raw: Any) -> list[int]:
     return sorted(out)
 
 
+def weak_entry_hours_from_autopsy(
+        rows: list | None,
+        symbol: str,
+        *,
+        min_n: int = 6,
+        max_pf: float = 0.7,
+        max_hours: int = 6) -> list[int]:
+    """Worst-first broker hours where this symbol's autopsy fills bleed.
+
+    Uses ``fill_time`` (naive broker epoch) — same clock as day cuts. Empty
+    when the ring is too thin; caller then keeps the book-wide default seed.
+    """
+    want = str(symbol or "")
+    if not want or not isinstance(rows, list):
+        return []
+    wins: dict[int, float] = {}
+    loss: dict[int, float] = {}
+    count: dict[int, int] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("symbol") or "") != want:
+            continue
+        try:
+            t = int(float(row.get("fill_time") or 0))
+            rr = float(row.get("r_realised"))
+        except (TypeError, ValueError):
+            continue
+        if t <= 0 or abs(rr) > 50:
+            continue
+        hour = int((t % 86400) // 3600)
+        count[hour] = count.get(hour, 0) + 1
+        if rr >= 0:
+            wins[hour] = wins.get(hour, 0.0) + rr
+        else:
+            loss[hour] = loss.get(hour, 0.0) + abs(rr)
+    scored: list[tuple[float, float, int]] = []
+    for hour, n in count.items():
+        if n < int(min_n):
+            continue
+        w = float(wins.get(hour, 0.0))
+        lo = float(loss.get(hour, 0.0))
+        net = w - lo
+        if net >= 0:
+            continue
+        pf = (w / lo) if lo > 0 else 99.0
+        if pf >= float(max_pf):
+            continue
+        scored.append((net, pf, hour))
+    scored.sort(key=lambda t: (t[0], t[1], t[2]))
+    return [h for _, _, h in scored[: max(0, int(max_hours))]]
+
+
 def blocked_hour_search_axis(
         weak_hours: list[int] | tuple[int, ...] | None = None,
         live_blocked: list[int] | None = None,
@@ -1356,8 +1409,18 @@ class Optimizer:
                         bars, float(info["point"]), live_cap)
                     if axis:
                         grid = {**grid, "max_spread_atr": axis}
-                    # Hour blocks: unused [] book-wide (Claude 23:36 #3).
+                    # Hour blocks: prefer this symbol's autopsy bleed hours.
+                    weak_hours = None
+                    try:
+                        raw_auto = self.store.get_setting("trade_autopsies")
+                    except Exception:
+                        raw_auto = None
+                    if isinstance(raw_auto, list) and raw_auto:
+                        got = weak_entry_hours_from_autopsy(raw_auto, cfg.symbol)
+                        if got:
+                            weak_hours = got
                     hour_axis = blocked_hour_search_axis(
+                        weak_hours=weak_hours,
                         live_blocked=list(
                             getattr(cfg, "blocked_entry_hours", None) or []))
                     if hour_axis:
