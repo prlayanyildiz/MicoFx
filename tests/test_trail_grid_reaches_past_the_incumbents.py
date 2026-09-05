@@ -16,7 +16,7 @@ holdout retention before it can replace a live config.
 """
 from __future__ import annotations
 
-from micofx.models import OPT_FIELDS
+from micofx.models import OPT_FIELDS, SWING_GRID_OVERLAY
 from micofx.paths import load_defaults
 
 TRAIL_AXES = ("trail_start_atr", "trail_step_atr")
@@ -54,10 +54,28 @@ def test_the_tight_end_is_untouched():
     assert min(shared["trail_step_atr"]) == 0.25
 
 
-def test_the_hard_stop_grid_is_not_widened():
-    # Deliberate: the evidence pointed at the trail, not the stop. sl_atr_mult
-    # also feeds lot sizing, so moving it is a risk change, not a search change.
-    assert max(load_defaults()["optimizer"]["grid"]["sl_atr_mult"]) == 2.0
+def test_the_hard_stop_grid_has_a_floor_and_a_ceiling():
+    """The stop axis is bounded at BOTH ends, and the floor is the point.
+
+    This used to pin ``max(...) == 2.0`` with the note "the evidence pointed at
+    the trail, not the stop". That call was superseded and the reversal is on
+    the record - OPTIMIZATIONS.md: "sl_atr_mult search floor >=0.9
+    (floor_sl_atr_search_axis); shipped grid [0.9,1.2,1.5,2.0,2.5]" - and
+    SWING_GRID_OVERLAY reaches 3.0 for the same reason a multi-hour hold needs a
+    wider stop than a scalp. The old assertion outlived its decision and read as
+    a live rule.
+
+    What still matters, and is what this now guards, is the FLOOR. sl_atr_mult
+    divides into lot size, so a stop tighter than the symbol's own noise is not
+    a smaller loss, it is a bigger position that gets stopped more often. 0.9 is
+    where the search is allowed to start.
+    """
+    axis = load_defaults()["optimizer"]["grid"]["sl_atr_mult"]
+    assert min(axis) >= 0.9, (
+        f"sl_atr_mult izgarasi {min(axis)}'e iniyor - stop daralinca lot buyur, "
+        f"floor_sl_atr_search_axis ile celisiyor")
+    assert max(axis) <= max(SWING_GRID_OVERLAY["sl_atr_mult"]), (
+        "paylasilan izgara swing overlay'in tavanini asiyor")
 
 
 def test_axes_stay_sorted_and_unique():
