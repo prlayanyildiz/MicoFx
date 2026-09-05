@@ -10,7 +10,7 @@ from typing import Any
 
 from . import backtest
 from .logbus import LOG
-from .models import SymbolConfig
+from .models import TIMEFRAMES, SymbolConfig
 from .strategy import IndicatorCache, Params, compute
 
 
@@ -162,14 +162,27 @@ def capture_book(*, client: Any, store: Any,
     a stop: a thin histogram on one name must not leave the rest of the book
     without a pin for the night.
 
-    ``timeframes`` overrides each symbol's live TF (e.g. ``["M5"]`` for a
-    cross-book M5 costed bake-off). None = each name's configured timeframe.
+    ``timeframes`` overrides each symbol's live TF (e.g. ``["M15"]`` for a
+    cross-book M15 costed bake-off). None = each name's configured timeframe.
+
+    An override naming a bar outside ``TIMEFRAMES`` is refused here. It used to
+    be validated only by the one HTTP caller, so a direct call could pass "M5":
+    ``mt5client.timeframe_const`` would fall back to M30, and the M30 bars it
+    returned would be written to ``holdout_bars/<SYM>_M5.npz`` - a snapshot
+    whose label disagrees with its contents, behind a single WARN line, which
+    every later measurement would then read as genuine M5 data. Nothing
+    exploits that today; it is refused so nothing can.
     """
     rows: list[dict[str, Any]] = []
     symbols = getattr(store, "symbols", None) or {}
     if not isinstance(symbols, dict):
         symbols = {}
     override = [str(t) for t in (timeframes or []) if str(t).strip()]
+    unknown = [t for t in override if t not in TIMEFRAMES]
+    if unknown:
+        raise ValueError(
+            f"Aranamayan zaman dilimi: {', '.join(unknown)} "
+            f"(gecerli: {', '.join(TIMEFRAMES)})")
     for cfg in list(symbols.values()):
         if not getattr(cfg, "enabled", False):
             continue

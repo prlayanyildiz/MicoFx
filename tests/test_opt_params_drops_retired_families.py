@@ -85,9 +85,25 @@ def test_save_opt_params_does_not_persist_retired_family_names(tmp_path, monkeyp
 
 
 def test_every_shipped_family_is_still_searchable_after_the_filter(tmp_path, monkeypatch):
-    """The append-shipped merge must survive the drop, or a new family vanishes."""
+    """The append-shipped merge must survive the drop, or a new family vanishes.
+
+    "Shipped" means ``config/defaults.json optimizer.strategies``, not
+    ``STRATEGIES``. Since 04.09 the code constant also carries dormant families
+    (sweep_fade, range_fade) that are deliberately absent from the shipped list
+    so nothing can select them; asserting they survive the merge would demand
+    the opposite - that the search picks them up.
+    """
+    import json
+
     s = _fresh(tmp_path, monkeypatch)
+    shipped = json.loads(
+        (Path(__file__).resolve().parents[1] / "config" / "defaults.json")
+        .read_text(encoding="utf-8"))["optimizer"]["strategies"]
+    assert set(shipped) <= set(STRATEGIES)
     s.set_setting("opt_params", {"strategies": ["burst"]})
     got = s.opt_params()["strategies"]
-    for name in STRATEGIES:
+    for name in shipped:
         assert name in got, name
+    # And the dormant ones must NOT appear - that is the safety half.
+    for name in set(STRATEGIES) - set(shipped):
+        assert name not in got, f"{name} uykudayken aramaya sizdi"

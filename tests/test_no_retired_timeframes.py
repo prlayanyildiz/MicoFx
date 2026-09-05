@@ -10,11 +10,16 @@ inert, because the search never asks about a bar outside TIMEFRAMES, and now
 filtered out on read.
 
 Deleting the entries alone would have left the real hazard standing, which was
-never M10 itself: ``timeframe_const`` falls back to M5 for anything it does not
-recognise, so an unrecognised timeframe means a symbol quietly trading
-five-minute bars instead of the ones it was validated on. That fallback stays -
-refusing to resolve would take the engine down over one bad row - but it now
-says so out loud instead of looking like a normal resolution.
+never M10 itself: ``timeframe_const`` falls back for anything it does not
+recognise, so an unrecognised timeframe means a symbol quietly trading a bar it
+was not validated on. That fallback stays - refusing to resolve would take the
+engine down over one bad row - but it now says so out loud instead of looking
+like a normal resolution.
+
+05.09: the fallback target moved from M5 to M30 with the M5 retirement, so the
+"falls back to 300 seconds" assertions below moved with it. The fallback is
+still the *slowest* legal bar rather than the fastest, which is the safer
+direction: a misresolved row now over-holds instead of over-trading.
 """
 from __future__ import annotations
 
@@ -32,14 +37,23 @@ from micofx.models import READABLE_TIMEFRAMES, TIMEFRAMES, uses_swing_exits
 # Bar lengths keyed by name, so the assertion follows TIMEFRAMES instead of
 # pinning today's list - H1 left the search on 14.08, came back on 15.08 and
 # left again the same evening, and a literal made that a test edit each time.
-_EXPECTED = {"M5": 300, "M15": 900, "M30": 1800}
+_EXPECTED = {"M15": 900, "M30": 1800}
 
-# M1 left this list 14.08 - it is now wired and offered (see models.TIMEFRAMES).
+# What an unrecognised bar resolves to. Named once so a future change to the
+# fallback is a one-line edit here rather than eleven scattered literals.
+_FALLBACK_SECONDS = 1800
+
 # M1 rejoined this list 14.08: wired and searched, then removed on its numbers.
-# H1 is here for the third time and, unlike the first, on a measurement: 0.110
-# R/day against M5's 1.303. The cost case for it was answered by moving the
-# expensive symbols instead of keeping the bar - nothing in the book is hourly.
-RETIRED = ("M1", "M3", "H1", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
+# H1 is here for the third time and, unlike the first, on a measurement; it was
+# re-measured 05.09 under the corrected replay and lost 6/6 symbols on R/day.
+# M5 joined 05.09: 0/7 symbols would pick it, five outright negative, at
+# +6-32% cost per trade. Nothing in the book is hourly or five-minute.
+RETIRED = ("M1", "M3", "M5", "H1", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
+
+# A family that actually exists. This used to be "stoch_flip", which was
+# retired 01.09 - the assertions still passed (a retired name resolves the same
+# way) but the file read as though that family were live.
+_LIVE_FAMILY = "burst"
 
 
 # ------------------------------------------------------ nothing resolves them
@@ -47,28 +61,40 @@ RETIRED = ("M1", "M3", "H1", "M10", "M20", "H2", "H4", "D1", "W1", "MN1")
 @pytest.mark.parametrize("name", RETIRED)
 def test_a_retired_timeframe_is_not_translated_to_seconds(name):
     """models.uses_swing_exits' own table used to carry M10 and H4."""
-    assert uses_swing_exits("stoch_flip", name) is False
+    assert uses_swing_exits(_LIVE_FAMILY, name) is False
 
 
 @pytest.mark.parametrize("name", RETIRED)
 def test_a_retired_timeframe_has_no_second_count(name):
-    assert mt5client.timeframe_seconds(name) == 300, "taninmayan bar M5'e dusmeli"
+    assert mt5client.timeframe_seconds(name) == _FALLBACK_SECONDS, (
+        "taninmayan bar en yavas yasal bara (M30) dusmeli")
 
 
 def test_the_offered_timeframes_still_translate():
     assert ([mt5client.timeframe_seconds(t) for t in TIMEFRAMES]
             == [_EXPECTED[t] for t in TIMEFRAMES])
-    # The wider exit envelope is decided by the bar, not the family: only the
-    # scalp length (M5) keeps the tight grid, M15+ get swing.
+    # This used to read ``is (tf != "M5")``. With M5 retired that expression is
+    # always True, so the assertion stopped distinguishing anything while still
+    # passing - it looked like a live either/or and tested nothing. Stated
+    # plainly instead: every remaining bar is a swing bar, so the wider exit
+    # envelope applies to all of them. See uses_swing_exits' own docstring.
     for tf in TIMEFRAMES:
-        assert uses_swing_exits("stoch_flip", tf) is (tf != "M5")
+        assert uses_swing_exits(_LIVE_FAMILY, tf) is True
 
 
 # ------------------------------------- the tables themselves carry no leftovers
 
 def _tables(source: str) -> list[str]:
-    """Every dict literal that maps timeframe names to something."""
-    return re.findall(r"\{[^{}]*\"M5\"\s*:[^{}]*\}", source, re.S)
+    """Every dict literal that maps timeframe names to something.
+
+    Anchored on a bar that is actually still shipped. This was anchored on
+    ``"M5"`` until 05.09; when M5 left the tables the regex matched nothing and
+    ``test_no_timeframe_table_still_lists_a_retired_bar`` began passing
+    vacuously for both modules. It was ``test_at_least_one_table_was_actually_found``
+    below that caught it - which is the whole reason that companion exists, and
+    why it should survive any future edit to this pattern.
+    """
+    return re.findall(r"\{[^{}]*\"M30\"\s*:[^{}]*\}", source, re.S)
 
 
 @pytest.mark.parametrize("module", ["models", "mt5client"])

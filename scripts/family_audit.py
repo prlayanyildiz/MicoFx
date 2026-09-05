@@ -55,43 +55,14 @@ def audit_report(headers: dict[str, str]) -> list[str]:
 
 
 def sync_family_gaps(headers: dict[str, str], *, min_gap_r: float = 15.0) -> list[str]:
-    """Apply best validated family/TF when live holdout lags by min_gap_r (flat only)."""
-    done: list[str] = []
-    st = _get("/api/state", headers)
-    if (st.get("opt") or {}).get("busy"):
-        return ["family: opt busy — atlandi"]
-    open_syms = {str(p.get("symbol") or "") for p in st.get("positions") or []}
+    """DISABLED auto-apply — paper holdout family swaps crushed measured books.
 
-    for row in _get("/api/symbols", headers).get("symbols") or []:
-        if not row.get("enabled") or row["symbol"] in open_syms:
-            continue
-        sym = row["symbol"]
-        hold_r = float(((row.get("opt_summary") or {}).get("holdout") or {}).get("net_r") or 0)
-        hist = _get(f"/api/opt/history?symbol={sym}&limit=40", headers)
-        val = [r for r in hist.get("history") or [] if r.get("validated") and r.get("strategy") in FAM]
-        if not val:
-            continue
-        val.sort(key=lambda r: float((r.get("holdout") or {}).get("net_r") or 0), reverse=True)
-        best = val[0]
-        if best.get("strategy") == row.get("strategy") and best.get("timeframe") == row.get("timeframe"):
-            done.append(f"{sym} aile OK {row.get('strategy')}/{row.get('timeframe')} hold={hold_r:+.0f}R")
-            continue
-        best_h = float((best.get("holdout") or {}).get("net_r") or 0)
-        if best_h < hold_r + min_gap_r:
-            continue
-        payload = json.dumps({"symbol": sym, "run_id": int(best["id"]), "force": True}).encode()
-        h = {**headers, "Origin": PANEL, "Content-Type": "application/json"}
-        req = urllib.request.Request(f"{PANEL}/api/opt/apply", data=payload, headers=h, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                json.loads(resp.read().decode())
-            done.append(
-                f"{sym} aile hizala run {best['id']} "
-                f"{best.get('strategy')}/{best.get('timeframe')} "
-                f"{hold_r:+.0f}R->{best_h:+.0f}R")
-        except urllib.error.HTTPError as exc:
-            done.append(f"{sym} aile apply fail: {exc.read().decode()[:80]}")
-    return done
+    04.09 income --auto: SpotBrent mtf→burst (msa 0.05→0.18), NAS burst→mtf.
+    Keep as an explicit operator tool only; ``income_dev_loop --auto`` must
+    call ``audit_report`` instead.
+    """
+    del headers, min_gap_r
+    return ["family: auto-hizala KAPALI (audit-only; 04.09 SpotBrent/NAS)"]
 
 
 def main() -> int:

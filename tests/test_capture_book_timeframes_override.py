@@ -1,4 +1,10 @@
-"""capture_book can pin an explicit TF list (M5 bake-off)."""
+"""capture_book can pin an explicit TF list across the book.
+
+Written for the 03.09 M5 bake-off and pinned "M5" as the override. That bar was
+retired 05.09 and ``capture_book`` now refuses a bar outside TIMEFRAMES, so the
+override is exercised with a searched bar instead. The refusal itself is
+covered in test_capture_book_refuses_a_retired_bar.
+"""
 from __future__ import annotations
 
 import sys
@@ -25,6 +31,6 @@ def test_capture_book_honours_timeframes_override(monkeypatch, tmp_path):
         "US30": SimpleNamespace(symbol="US30", timeframe="M30", enabled=True),
         "OFF": SimpleNamespace(symbol="OFF", timeframe="M30", enabled=False),
     })
-    out = capture_book(client=object(), store=store, timeframes=["M5"])
+    out = capture_book(client=object(), store=store, timeframes=["M15"])
     assert out["captured"] == 2
-    assert set(calls) == {("XAUUSD", "M5"), ("US30", "M5")}
+    assert set(calls) == {("XAUUSD", "M15"), ("US30", "M15")}

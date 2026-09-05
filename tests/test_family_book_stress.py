@@ -112,7 +112,11 @@ def test_live_book_families_are_still_searchable():
     for name in LIVE_NOW:
         assert name in STRATEGIES
         assert name in _FAMILIES
-    assert len(STRATEGIES) == 3
+    # Named, not counted: sweep_fade/range_fade joined as dormant on 04.09 and
+    # a "== 3" pin went permanently red, which hides any real resurrection.
+    assert set(STRATEGIES) == {
+        "mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade",
+    }
     assert set(STRATEGIES) == set(_FAMILIES)
 
 

@@ -562,6 +562,15 @@ class Supervisor:
             if v.quarantine_until > time.time():
                 v.state = "quarantine"
                 v.reason = previous.reason if previous else "karantina"
+                return v
+            exp_r, exp_n = self._autopsy_recent_exp_r(cfg.symbol, n=10)
+            if exp_n >= 5 and exp_r < -0.30:
+                v.state = "watch"
+                v.risk_scale = float(cfgs["watch_risk_scale"])
+                v.reason = (
+                    f"canli exp {exp_r:+.2f}R / {exp_n} otopsi "
+                    f"(< -0.30; lot kisildi)"
+                )
             return v
 
         nets = [d["profit"] + d["commission"] + d["swap"] for d in trades]
@@ -748,6 +757,20 @@ class Supervisor:
                         f" | karar {judged_n} islem PF {v.judged_pf:.2f}"
                     )
 
+        # Claude 04.35: live exp < -0.30R / 10 closes → watch. Deal-window
+        # PF watch needs watch_min_trades; after a stamp judged_n can be 0
+        # while autopsy already shows a bleed (NAS/BTC 04.09). Autopsy
+        # r_realised fills that hole without waiting for the deal ledger.
+        if v.state == "ok":
+            exp_r, exp_n = self._autopsy_recent_exp_r(cfg.symbol, n=10)
+            if exp_n >= 5 and exp_r < -0.30:
+                v.state = "watch"
+                v.risk_scale = float(cfgs["watch_risk_scale"])
+                v.reason = (
+                    f"canli exp {exp_r:+.2f}R / {exp_n} otopsi "
+                    f"(< -0.30; lot kisildi)"
+                )
+
         # Probation: released early - the config was replaced, or an operator
         # cleared the record - but nothing has been proved yet. The evidence
         # epoch means the suspension bar now reads only this config's own
@@ -809,6 +832,36 @@ class Supervisor:
         older_pf = Supervisor._pf(older)
         recent_pf = Supervisor._pf(recent)
         return older_pf > 0 and recent_pf < older_pf * 0.5 and recent_pf < 1.0
+
+    def _autopsy_recent_exp_r(
+        self, symbol: str, n: int = 10,
+    ) -> tuple[float, int]:
+        """Mean autopsy ``r_realised`` over the last ``n`` closes for ``symbol``.
+
+        Returns ``(0.0, 0)`` when the ring is missing or empty for this name.
+        """
+        raw: list = []
+        try:
+            getter = getattr(self.store, "get_setting", None)
+            blob = getter("trade_autopsies", []) if callable(getter) else []
+            if isinstance(blob, list):
+                raw = blob
+        except Exception:
+            return 0.0, 0
+        mine = [
+            row for row in raw
+            if isinstance(row, dict) and str(row.get("symbol") or "") == symbol
+        ]
+        tail = mine[-max(1, int(n)):]
+        vals: list[float] = []
+        for row in tail:
+            try:
+                vals.append(float(row.get("r_realised") or 0.0))
+            except (TypeError, ValueError):
+                continue
+        if not vals:
+            return 0.0, 0
+        return sum(vals) / len(vals), len(vals)
 
     @staticmethod
     def _pf(nets: list[float]) -> float:

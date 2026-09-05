@@ -51,7 +51,11 @@ let OPT_PARAMS = null;
 let activeTab = "panel";
 let optSelection = new Set();
 let optTfSelection = new Set();
-const OPT_TF_OPTIONS = ["M5", "M15", "M30"];
+// M5 retired 05.09 (0/7 symbols chose it; +6-32% cost per trade). Offering
+// it here would let the panel set a timeframe the entry gate now refuses
+// (strategy_allows_timeframe -> READABLE_TIMEFRAMES), i.e. a silently dead
+// symbol. Keep in step with models.TIMEFRAMES.
+const OPT_TF_OPTIONS = ["M15", "M30"];
 let logAfter = 0;
 let logEpoch = 0;
 let logFilter = new Set(LOG_LEVELS);
@@ -395,10 +399,11 @@ async function loadBlocks() {
     if (note) note.textContent = `Sayaclar okunamadi: ${err.message || err}`;
     return;
   }
-  const rows = (data.rows || []).map((r) => {
-    const blocks = Object.entries(r.blocks || {});
-    const tr = el("tr");
-    tr.innerHTML = `
+  const paint = (tableSel, rowsIn, emptyMsg) => {
+    const rows = (rowsIn || []).map((r) => {
+      const blocks = Object.entries(r.blocks || {});
+      const tr = el("tr");
+      tr.innerHTML = `
       <td class="sym">${esc(r.symbol)} <span class="dim">${esc(r.leg || "")}</span></td>
       <td class="num">${r.signals}</td>
       <td class="num ${r.opened ? "pos" : "dim"}">${r.opened}</td>
@@ -413,9 +418,16 @@ async function loadBlocks() {
             return `<span class="pill off" title="${tip}">${esc(k)} ${v}</span>`;
           }).join(" ")
         : '<span class="dim">-</span>'}</td>`;
-    return tr;
-  });
-  rowsInto($("#blocks-table"), rows, "Henuz giris denemesi yok", 5);
+      return tr;
+    });
+    rowsInto($(tableSel), rows, emptyMsg, 5);
+  };
+  paint("#blocks-table", data.rows, "Henuz giris denemesi yok");
+  paint(
+    "#blocks-cum-table",
+    (data.cumulative && data.cumulative.rows) || [],
+    "Tum-zaman henuz bos",
+  );
   if (note) note.textContent = data.note || "";
 }
 
@@ -935,6 +947,8 @@ const STRATEGY_LABEL = {
   mtf_pullback: "Ust TF Trend Geri Cekilmesi",
   burst: "Momentum Patlamasi Devami",
   channel_break: "N barlik kanal kirilimi (Donchian)",
+  sweep_fade: "Basarisiz kirilim fade (sweep)",
+  range_fade: "Sessiz bant fade (ADX dusuk)",
 };
 
 // Card body is session hours only. Lot is remaining book margin × denetci

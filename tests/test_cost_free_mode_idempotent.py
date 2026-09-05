@@ -1,4 +1,4 @@
-"""cost_free_mode only toggles system cost flags; it must not wipe symbol gates."""
+"""cost_free_mode must not write system cost toggles (04.09 --auto damage)."""
 from __future__ import annotations
 
 import importlib.util
@@ -19,13 +19,13 @@ def _load():
     return mod
 
 
-def test_skips_when_system_already_off_and_preserves_gates():
+def test_skips_writes_and_preserves_gates_message():
     mod = _load()
     state = {
         "system": {
-            "charge_costs": False,
-            "block_high_cost": False,
-            "max_cost_pct_of_risk": 0.0,
+            "charge_costs": True,
+            "block_high_cost": True,
+            "max_cost_pct_of_risk": 25.0,
         },
     }
     symbols = {
@@ -55,11 +55,10 @@ def test_skips_when_system_already_off_and_preserves_gates():
             return _Resp(state)
         if url.endswith("/api/symbols"):
             return _Resp(symbols)
-        raise AssertionError(f"unexpected apply url {url}")
+        raise AssertionError(f"unexpected write url {url}")
 
     with patch("urllib.request.urlopen", fake_urlopen):
         lines = mod.apply_cost_free_mode({"Origin": "http://127.0.0.1:8900"})
-    assert any("zaten cost-free" in x for x in lines)
+    assert any("charge_costs korundu" in x or "dokunulmadi" in x for x in lines)
     assert any("gate korunur" in x for x in lines)
-    assert not any("spread/cost_rank kapali" in x for x in lines)
-    assert not any("gates zaten kapali" in x for x in lines)
+    assert not any("charge_costs=false" in x for x in lines)

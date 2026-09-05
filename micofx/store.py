@@ -593,8 +593,9 @@ class Store:
             # says about ``enabled``. defaults.json carries symbol, group,
             # magic, sessions and the enabled flag; strategy, timeframe and
             # every exit parameter live only in the database, so a fresh
-            # install would otherwise start eighteen symbols live on the
-            # dataclass default - mtf_pullback/M5, which nothing has validated and
+            # install would otherwise start every seeded symbol live on the
+            # dataclass default - mtf_pullback on the default bar, which
+            # nothing has validated and
             # which on an FX symbol pays 25-28% of risk in spread against an
             # 18% live ceiling.
             #

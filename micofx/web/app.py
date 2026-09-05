@@ -1116,7 +1116,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                         and strategy_allows_timeframe(next_strat, next_tf, allow)):
                     raise HTTPException(
                         400, f"{next_strat}/{next_tf} eslesmesi yasak "
-                             f"(scalp yalnizca M5; uzun TF swing ailelerine ait) - "
+                             f"(STRATEGY_TIMEFRAMES kisiti veya aranmayan bar) - "
                              f"motor bu kombinasyonda hicbir zaman giris denemez")
             updated = store.update_symbol(symbol, patch, source="panel")
         finally:
@@ -1486,12 +1486,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         data = engine.entry_blocks()
         total = data["signals"]
         top = next(iter(data["totals"].items()), None)
+        cum = data.get("cumulative") or {}
+        cum_n = int(cum.get("signals") or 0)
         data["note"] = (
             "Henuz giris denemesi kaydedilmedi - sayac bu surumle basladi, "
             "bir sinyal gelene kadar bos kalir."
-            if not total else
-            f"{data['opened']}/{total} sinyal islemle sonuclandi"
+            if not total and not cum_n else
+            f"{data['opened']}/{total} sinyal islemle sonuclandi (son 7g)"
             + (f"; en cok engelleyen: {top[0]} ({top[1]})" if top else "")
+            + (f"; tum-zaman {cum.get('opened', 0)}/{cum_n}" if cum_n else "")
         )
         return {"ok": True, **data}
 
@@ -1524,7 +1527,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     @app.post("/api/analysis/entry-blocks/reset")
     def entry_blocks_reset() -> dict[str, Any]:
         engine.reset_entry_blocks()
-        return {"ok": True, "message": "Giris engeli sayaclari sifirlandi."}
+        return {
+            "ok": True,
+            "message": "7-gun giris engeli sayaclari sifirlandi "
+                       "(tum-zaman cumulative dokunulmadi).",
+        }
 
     @app.post("/api/symbols/{symbol}/reset")
     def reset_symbol(symbol: str) -> dict[str, Any]:
@@ -2057,8 +2064,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         Optimizer busy is a 409: the search already holds the terminal for
         tens of thousands of bars per combo.
 
-        Optional JSON ``{"timeframes": ["M5"]}`` pins every enabled name at
-        those TFs (Claude M5 bake-off) instead of each row's live timeframe.
+        Optional JSON ``{"timeframes": ["M15"]}`` pins every enabled name at
+        those TFs instead of each row's live timeframe. Only bars in
+        ``TIMEFRAMES`` are accepted; anything else is rejected here.
         """
         if optimizer.busy:
             raise HTTPException(409, "optimizasyon calisirken holdout capture yok")
@@ -2125,6 +2133,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     if nxt > 0 and nxt < cur - 1e-9:
                         raise HTTPException(
                             400, f"max_spread_atr daraltamaz ({cur:g} -> {nxt:g})")
+                # History run score is for that full candidate, not a gate
+                # overlay on the live book (US30 msa widen stamped 7.4 over
+                # a live 16). Keep live score; charged restamp below fixes it.
+                if live_cfg is not None:
+                    try:
+                        score = float(getattr(live_cfg, "opt_score", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        pass
                 timeframe, strategy = None, None
             else:
                 params = dict(match.get("params") or {})
@@ -2203,6 +2219,46 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         live = store.symbols.get(body.symbol)
         previous = ({"strategy": live.strategy, "timeframe": live.timeframe}
                     if live is not None else None)
+        # Force/history msa widens must not land last-seg illusions (SpotBrent
+        # 04.09 0.08). Same 6-slice door as calibrate / spread_exec.
+        if (live is not None and isinstance(params, dict)
+                and "max_spread_atr" in params
+                and bool(getattr(store.system, "charge_costs", True))):
+            try:
+                cur = float(getattr(live, "max_spread_atr", 0.0) or 0.0)
+                nxt = float(params["max_spread_atr"])
+            except (TypeError, ValueError):
+                cur = nxt = 0.0
+            if nxt > cur + 1e-9:
+                try:
+                    import sys as _sys
+                    if str(ROOT) not in _sys.path:
+                        _sys.path.insert(0, str(ROOT))
+                    from scripts.exec_gates import refuse_msa_widen
+                    if hasattr(live, "to_dict"):
+                        row = live.to_dict()
+                    else:
+                        row = {
+                            "symbol": body.symbol,
+                            "timeframe": getattr(live, "timeframe", ""),
+                            "strategy": getattr(live, "strategy", ""),
+                            "max_spread_atr": cur,
+                            "use_sessions": bool(
+                                getattr(live, "use_sessions", True)),
+                            "sessions": list(
+                                getattr(live, "sessions", None) or []),
+                        }
+                    row["symbol"] = body.symbol
+                    reason = refuse_msa_widen(row, nxt)
+                    if reason:
+                        raise HTTPException(
+                            400, f"{body.symbol}: {reason}")
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    LOG.emit(
+                        f"{body.symbol}: 6-slice msa kapisi atlandi ({exc})",
+                        "OPT", body.symbol)
         prev_force = bool(getattr(optimizer, "_force_apply", False))
         if body.force:
             optimizer._force_apply = True
@@ -2213,6 +2269,21 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             optimizer._force_apply = prev_force
         if not result.get("ok"):
             raise HTTPException(400, result.get("error", "uygulanamadi"))
+        # Gate-axis writes must remeasure charged holdout under the new cap
+        # (msa 0.08→0.12 left paper hold +22R / opt_score 7.4 from the
+        # history row while costed was already +29R). Same restamp for a
+        # force hand-typed msa-only apply (narrow or widen) — gates_only
+        # cannot narrow, but msa_exec still needs a fresh stamp.
+        gate_only_write = body.gates_only or (
+            bool(params) and set(params).issubset(gate_axes))
+        if gate_only_write and optimizer is not None:
+            restamped = optimizer.refresh_live_costed_stamp(body.symbol)
+            if restamped is not None and hasattr(restamped, "to_dict"):
+                result = {**result, "config": restamped.to_dict()}
+        # Stale spread-retry storms must not keep driving calibrate after a
+        # measured msa land (US30 879 retries from pre-0.12 night).
+        if "max_spread_atr" in params and hasattr(engine, "forget_entry_blocks"):
+            engine.forget_entry_blocks(body.symbol)
         applied_at = time.time()
         run_id = None
         if isinstance(detail, dict) and detail.get("id") is not None:

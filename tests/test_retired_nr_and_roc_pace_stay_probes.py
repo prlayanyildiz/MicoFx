@@ -24,7 +24,11 @@ def test_nr_break_and_roc_pace_are_gone_entirely():
     assert "rp_roc_len" not in Params.__dataclass_fields__
     assert "nr_lookback" not in SymbolConfig.__dataclass_fields__
     assert "rp_roc_len" not in SymbolConfig.__dataclass_fields__
-    assert set(STRATEGIES) == {"mtf_pullback", "burst", "channel_break"}
+    # sweep_fade / range_fade joined 04.09 as dormant - in STRATEGIES, not in
+    # the shipped opt list. nr_break and roc_pace must still be absent.
+    assert set(STRATEGIES) == {
+        "mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade",
+    }
 
 
 def test_dead_unstamped_gates_plumbing_is_gone():

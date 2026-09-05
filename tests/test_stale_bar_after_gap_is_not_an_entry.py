@@ -268,6 +268,46 @@ def test_a_signalled_closed_session_is_counted_as_seans_disi(monkeypatch):
     assert data["signals"] == 1
 
 
+def test_a_signalled_hour_block_is_counted_as_saat_kapali(monkeypatch):
+    """blocked_entry_hours closes sess.open but must not look like seans_disi."""
+    from micofx import sessions as sessions_mod
+    from micofx.sessions import SessionState
+
+    eng = _make_engine()
+    monkeypatch.setattr(
+        sessions_mod, "evaluate",
+        lambda *a, **kw: SessionState(
+            open=False, reason="saat kapali",
+            minutes_to_close=None, minutes_to_open=56, window="7/24",
+        ),
+    )
+    monkeypatch.setattr(sessions_mod, "should_flatten", lambda *a, **kw: False)
+
+    tf_sec = timeframe_seconds("M30")
+    now = float(MONDAY_OPEN + 30 * 60)
+    last_bar = int(now - tf_sec)
+
+    def _fake_refresh(cfg_arg, state_arg, params):
+        state_arg.last_bar = last_bar
+        state_arg.primary_signal = "buy"
+        state_arg.atr = 30.1
+        return True
+
+    eng._refresh_signals = _fake_refresh
+    state = SymbolState("JPN225")
+    wants = eng._evaluate(
+        _cfg(), state, server_now=now,
+        account={"equity": 1000.0}, allow_entry=True,
+    )
+    assert wants is False
+    assert state.entry_block == "saat_kapali"
+    assert "saat kapali" in state.note
+    assert "seans disi" not in state.note
+    data = eng.entry_blocks()
+    assert data["totals"].get("saat_kapali") == 1, data
+    assert data["totals"].get("seans_disi") in (None, 0)
+
+
 def test_a_closed_session_without_a_signal_stays_silent(monkeypatch):
     """The drown case: closed-session polls with nothing to refuse."""
     from micofx import sessions as sessions_mod

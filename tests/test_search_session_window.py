@@ -67,7 +67,9 @@ def test_weak_windows_do_not_replace_live():
 def test_search_windows_cover_claude_set():
     keys = {(w[0]["start"], w[0]["end"]) for w in SEARCH_SESSION_WINDOWS}
     assert ("00:00", "23:59") in keys
+    assert ("01:00", "23:59") in keys  # broker-true full day (Claude 14:34)
     assert ("14:00", "22:00") in keys
+    assert ("15:00", "21:00") in keys
     assert ("23:00", "08:00") in keys
     assert ("08:00", "16:00") in keys
 
@@ -121,6 +123,22 @@ def test_pick_ignores_leftover_windows_when_sessions_off():
 
     opt._holdout_costed = fake_costed  # type: ignore[method-assign]
     assert opt._pick_search_sessions(cfg) is None
+
+
+def test_sticky_false_lets_mild_challenger_win_after_family_flip():
+    """Claude 14:52: after family/TF retune, sticky must not freeze the old clock.
+
+    NAS100 15-21 vs 14-22: +10% score is inside the healthy +25% sticky band,
+    so sticky keeps live; sticky=False (primary flip) lets 14-22 win.
+    """
+    live = [{"start": "15:00", "end": "21:00"}]
+    wider = [{"start": "14:00", "end": "22:00"}]
+    scored = [
+        (live, {**_hold(262.6, 1.22), "score": 100.0, "max_dd_r": 41.4}),
+        (wider, {**_hold(307.1, 1.23), "score": 110.0, "max_dd_r": 49.3}),
+    ]
+    assert _choose_search_sessions(live, scored) is None
+    assert _choose_search_sessions(live, scored, sticky=False) == wider
 
 
 def test_near_tie_switches_when_challenger_dd_is_tighter():
@@ -200,6 +218,22 @@ def test_persist_all_hours_clears_use_sessions():
     opt._persist_search_sessions("NAS100", [{"start": "14:00", "end": "22:00"}])
     patch = opt.store.update_symbol.call_args[0][1]
     assert patch["use_sessions"] is True
+
+
+def test_reevaluate_sessions_after_primary_flip_persists_when_challenger_wins():
+    opt = Optimizer.__new__(Optimizer)
+    opt.store = MagicMock()
+    opt.store.system = SystemConfig(charge_costs=True)
+    cfg = SymbolConfig(
+        symbol="NAS100", magic=1, strategy="burst", timeframe="M30",
+        sessions=[{"start": "15:00", "end": "21:00"}], use_sessions=True)
+    opt.store.symbols = {"NAS100": cfg}
+    wider = [{"start": "14:00", "end": "22:00"}]
+    opt._pick_search_sessions = MagicMock(return_value=wider)  # type: ignore
+    opt._persist_search_sessions = MagicMock()  # type: ignore
+    opt.reevaluate_sessions_after_primary_flip("NAS100")
+    opt._pick_search_sessions.assert_called_once_with(cfg, sticky=False)
+    opt._persist_search_sessions.assert_called_once_with("NAS100", wider)
 
 
 def test_0000_2359_drops_last_minute_unlike_sessions_off():

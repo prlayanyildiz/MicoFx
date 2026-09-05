@@ -111,7 +111,7 @@ def test_evaluate_needles_the_two_silent_halts():
     assert "_tally_evaluate_refuse" in eval_body
     assert '"bar_bosluk"' in eval_body
     assert '"bar_doldu"' in eval_body
-    assert '"seans_disi"' in eval_body
+    assert "refuse_block_key" in eval_body
     assert '"piyasa_kapali"' in eval_body
     assert 'state.entry_block = ""' in eval_body.split("if not sess.open", 1)[0], (
         "stale seans_disi must not survive a cycle whose session is open")

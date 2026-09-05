@@ -324,12 +324,15 @@ class DailyGuard:
         # sit green through a losing day (and, via Supervisor.review, skipped
         # the drawdown lot damper too).
         trading = equity - self.cash_flow - self.start_balance
-        pct = trading / self.start_balance * 100.0
-        # C3: a deposit larger than the morning chip can make trading PnL
-        # more negative than -100% of start (lost the deposit too). That
-        # invented -174% stuck the supervisor at risk_scale_floor and would
-        # instant-halt if daily_loss_pct were armed. Cap at -100% of the
-        # chip; deposits still do not buy more room (denom stays start).
+        # Operator 04.09 C3 payda-widen: deposits scale the loss room to real
+        # capital (start + deposits). Withdrawals do not shrink the chip
+        # mid-day (max(0, cash_flow)). Numerator stays trading-only.
+        denom = self.start_balance + max(0.0, float(self.cash_flow or 0.0))
+        if denom <= 0:
+            return 0.0
+        pct = trading / denom * 100.0
+        # Floor at -100% of real capital so a deposit larger than the morning
+        # chip cannot invent sub--100% days for the supervisor damper.
         if pct < -100.0:
             return -100.0
         return pct

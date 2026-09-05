@@ -5,7 +5,10 @@ Başlatma: `start.bat` veya `python run.py`
 
 Uygulama açılınca bot **sadece izler**. Emir için üstteki **Bot Başlat** gerekir.
 
-Güncel portföy (10 sembol): FRA40, GER40, JPN225, NAS100, SpotBrent, UK100, US2000, US30, US500, XAUUSD. (Kaynak: `config/defaults.json`.)
+Güncel portföy (7 sembol): BTCUSD, GER40, JPN225, NAS100, SpotBrent, US30, XAUUSD. (Kaynak: `config/defaults.json`.)
+
+> FRA40, UK100, US2000 ve US500 **emekli edildi**; bu belge 05.09'a kadar hâlâ
+> onları listeliyordu ve BTCUSD'yi hiç saymıyordu.
 
 ## Son güncellemeler (bu belgeyi okuduğun tarihte geçerli olanlar)
 
@@ -250,7 +253,8 @@ bar, ham parametre ızgarası (virgüllü sayı listeleri). İstatistiksel iç
 ayarlar — nadiren dokunulur.
 
 ### Zaman dilimi seçici
-Boş bırakılırsa kayıtlı ayardaki tüm zaman dilimleri (şu an M5/M15/M30/H1)
+Boş bırakılırsa kayıtlı ayardaki tüm zaman dilimleri (şu an M15/M30; M5 ve H1
+**emekli**)
 taranır. Belirli bir turu sadece bir/birkaç TF'e kısıtlamak istersen
 çipleri seç.
 

@@ -14,6 +14,12 @@ from .models import SCALE_OUT_FRAC, SymbolConfig, trail_min_step
 from .sessions import MAX_SIGNAL_BAR_AGE_BARS, WEEKEND_OPEN_GROUPS
 from .strategy import IndicatorCache, Params, compute
 
+# One simulate() call is one symbol's window. Live filters autopsies by
+# symbol; here every close belongs to the same replay, so a fixed tag is
+# enough for ``shakeout_sl_atr_mult``'s symbol match. Imported lazily inside
+# simulate — risk→supervisor→backtest would cycle at module load.
+_BT_SHAKEOUT_SYM = "_bt"
+
 _DAY = 24 * 60
 
 
@@ -570,6 +576,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
     ptr = 0
     guard = 0
     max_open = max(1, int(max_open or 1))
+    # Live shakeout window (last N closes). Empty at start of each simulate
+    # mirrors ``since_ts=cfg.opt_updated_at`` after apply — no inherited
+    # streak from a prior family / prior combo.
+    shakeout_closes: list[dict[str, Any]] = []
     if breakeven_at_r is None:
         breakeven_at_r = float(getattr(p, "breakeven_at_r", 0.0) or 0.0)
     else:
@@ -584,6 +594,15 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             capped = min(int(p.cooldown_sec), max_bars_cd * int(cache.tf_seconds))
             cooldown_bars = max(0, capped // int(cache.tf_seconds))
         return cooldown_bars
+
+    def _entry_sl_dist(atr_entry: float, j_fill: int) -> float:
+        # Same helper live uses: 3 original-SL deaths / last 10 closes →
+        # max(base, min(base*1.5, 2.0)). Trail stays at searched values.
+        # Lazy import: risk → supervisor → backtest.
+        from .risk import shakeout_sl_atr_mult
+        sl_mult = shakeout_sl_atr_mult(
+            float(p.sl_atr_mult or 0.0), _BT_SHAKEOUT_SYM, shakeout_closes)
+        return max(atr_entry * sl_mult, float(min_stop_at[j_fill]))
 
     def _record_trade(is_buy, entry, sl_dist, s, j0, exit_bar, exit_price, reason,
                       banked=0.0, weight=1.0, mfe_px=0.0):
@@ -603,6 +622,14 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         res.trade_mfes.append(max(0.0, mfe_r))
         bar_total += exit_bar - j0 + 1
         exits[reason] = exits.get(reason, 0) + 1
+        # Autopsy tags original hard-stop as ``sl``; replay histogram says
+        # ``stop``. Map so the live counter sees the same deaths.
+        exit_reason = "sl" if reason == "stop" else reason
+        shakeout_closes.append({
+            "symbol": _BT_SHAKEOUT_SYM,
+            "exit_reason": exit_reason,
+            "r_realised": r,
+        })
         if r >= 0:
             res.wins += 1
             res.gross_win_r += r
@@ -806,7 +833,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 if len(opens) >= max_open:
                     ptr += 1
                     continue
-                sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
+                sl_dist = _entry_sl_dist(atr_entry, j0)
                 entry = float(open_[j0] + s) if is_buy else float(open_[j0] - s)
                 sl = entry - sl_dist if is_buy else entry + sl_dist
                 mfe0 = _mfe_tick(is_buy, entry, 0.0, j0)
@@ -863,7 +890,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 and (atr_entry / price_ref) < p.min_atr_ratio):
             ptr += 1
             continue
-        sl_dist = max(atr_entry * p.sl_atr_mult, float(min_stop_at[j0]))
+        sl_dist = _entry_sl_dist(atr_entry, j0)
         entry = float(open_[j0] + s) if is_buy else float(open_[j0] - s)
         sl = entry - sl_dist if is_buy else entry + sl_dist
         # No take-profit level exists in this model, so the only way out is the
@@ -940,8 +967,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                                       exit_bar, exit_price, reason,
                                       banked=banked, weight=weight,
                                       mfe_px=mfe_px)
-                        sl_dist = max(atr_next * p.sl_atr_mult,
-                                      float(min_stop_at[j]))
+                        sl_dist = _entry_sl_dist(atr_next, j)
                         entry = price_ref
                         sl = entry - sl_dist if new_buy else entry + sl_dist
                         is_buy = new_buy
@@ -975,8 +1001,17 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         # would have blocked. Longer holds already cover the pause via exit_bar.
         # Same helper as the stacked path: a second copy of the clamp used to
         # sit here, which made this arm look like it had no cooldown at all.
+        # ``exit_bar - 1``, not ``exit_bar``: the slot is free at the exit bar's
+        # own close, so a signal ON that bar is one live takes (filling at the
+        # next open). Blocking it here cost the replay every such entry - 13.5%
+        # of live consecutive pairs land exactly this way (US30 23%, JPN225 18%,
+        # GER40 13%), and it is the opposite of a modelling gap we can ignore:
+        # it made burst names look better on paper than live. Verified twice -
+        # signal-bar coincidence in the replay and the autopsy book's own
+        # exit-to-next-signal-bar overlap. The cooldown arm below is unchanged,
+        # so a scalp config still gets its 2-bar pause.
         cooldown_bars = _cooldown_bars()
-        resume_signal = max(exit_bar, j0 + cooldown_bars - 1)
+        resume_signal = max(exit_bar - 1, j0 + cooldown_bars - 1)
         while ptr < entries.size and entries[ptr] <= resume_signal:
             ptr += 1
 

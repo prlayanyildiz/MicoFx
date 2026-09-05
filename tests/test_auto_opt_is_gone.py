@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import READABLE_TIMEFRAMES, SystemConfig
 from micofx.supervisor import DEFAULTS
+from tests.retired_lexicon import RETIRED_TIMEFRAMES
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -52,5 +53,10 @@ def test_correlation_unknown_tf_falls_back_to_a_readable_bar():
     assert 'else "H1"' not in src
     assert "timeframe: str = \"H1\"" not in src
     assert "/api/analysis/correlation" not in src
+    # A tripwire, not a permissive allow-list. This read
+    # ``tf in ("M5","M15","M30")`` until 05.09 - it kept passing after M5 was
+    # retired and would have kept passing if M5 came back, so it could not
+    # detect the thing it looks like it is checking.
     for tf in READABLE_TIMEFRAMES:
-        assert tf in ("M5", "M15", "M30")
+        assert tf not in RETIRED_TIMEFRAMES, tf
+    assert list(READABLE_TIMEFRAMES) == ["M15", "M30"]

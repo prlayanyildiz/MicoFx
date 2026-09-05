@@ -29,12 +29,26 @@ from typing import Any
 # READABLE_TIMEFRAMES is what may still be fetched and traded. Should a symbol
 # ever need an hourly bar again, this is one line - and the reason to reopen it
 # is a R/day number, not a spread number.
-TIMEFRAMES = ["M5", "M15", "M30"]
-READABLE_TIMEFRAMES = ["M5", "M15", "M30"]
-# Default search bag. M5 re-entered 03.09 after the full 6-symbol charged
-# bake-off: GER40 M5 burst +74 > live M30 +42; US30 M5 competitive; NAS/BTC/
-# JPN lose on M5 and `_beats_incumbent` keeps them off. WFO picks per name.
-SEARCH_TIMEFRAMES = ["M5", "M15", "M30"]
+TIMEFRAMES = ["M15", "M30"]
+READABLE_TIMEFRAMES = ["M15", "M30"]
+# Default search bag. M5 RETIRED 05.09 (operator). The 03.09 re-entry rested on
+# "GER40 M5 burst +74 > live M30 +42"; re-measured under the shakeout-modelled
+# replay and the trimmed GER40 snapshot that reads +6.4 against +134.6, so the
+# number the decision was made on no longer exists. Across the book 0/7 symbols
+# would pick M5: five are outright negative, and the two that are not (GER40
+# +6.4, US30 +10.2) sit far under their live bar. The cause is structural, not
+# tuning - M5 pays 6-32% more cost per trade for the same R denominator, the
+# same economics that priced out UK100/FRA40. Retiring it also concentrates the
+# search budget on two bars instead of three. Reopening is one line here plus
+# the stored `opt_params.timeframes` (the store WIDENS list axes, so editing
+# this alone would not have narrowed the search); the reason to reopen is an
+# R/day number, as with H1 - re-measured 05.09 under the shakeout + re-entry
+# replay from paired M30 bars: the book makes +0.469 R/day on M30 against
+# **+0.108 on H1**, and H1 is worse on every axis but cost - per-trade
+# expectancy, slice robustness, and drawdown all degrade (BTCUSD maxDD
+# 21.9 -> 48.4, JPN225 25.0 -> 82.5, JPN225 E +0.170 -> -0.135). The cost
+# saving is real (-14 to -31% per trade) and still loses.
+SEARCH_TIMEFRAMES = ["M15", "M30"]
 GROUPS = ["forex", "index", "commodity", "crypto", "stock"]
 
 
@@ -93,10 +107,9 @@ class SymbolConfig:
     group: str = "forex"
     magic: int = 990000
     enabled: bool = True
-    timeframe: str = "M5"
+    timeframe: str = "M30"
     broker_symbol: str = ""          # override when the broker renames an instrument
-    # mtf_pullback | burst | channel_break (see models.STRATEGIES)
-    # (see models.STRATEGIES)
+    # mtf_pullback | burst | channel_break | sweep_fade | range_fade
     strategy: str = "mtf_pullback"
 
     # ---- higher-timeframe trend pullback ----
@@ -115,6 +128,16 @@ class SymbolConfig:
     # this window (F40), so the grid reaches well past burst's 40.
     chan_lookback: int = 50          # channel is the N bars BEFORE the signal bar
     chan_buffer_atr: float = 0.0     # 0 = off; break must clear the level by this much ATR
+
+    # ---- quiet-band mean reversion (range_fade) ----
+    fade_adx_max: float = 22.0
+    fade_ema_len: int = 20
+    fade_band_atr: float = 1.0
+
+    # ---- failed-breakout fade (sweep_fade) ----
+    sweep_lookback: int = 25
+    sweep_pierce_atr: float = 0.25
+    sweep_close_pct: float = 0.6
 
     # ---- adaptive cost-regime gate (scalping families only) ----
     # Percentile ceiling on the bar's cost-to-range ratio inside its own trailing
@@ -490,6 +513,8 @@ OPT_FIELDS = [
     "pull_fast", "pull_depth_atr", "pull_max_bars", "pull_break_confirm",
     "brst_lookback", "brst_range_z", "brst_close_pct",
     "chan_lookback", "chan_buffer_atr",
+    "fade_adx_max", "fade_ema_len", "fade_band_atr",
+    "sweep_lookback", "sweep_pierce_atr", "sweep_close_pct",
     "cost_rank_max",
     # Spread is a far larger fraction of a scalp's target than of a swing's, so
     # the search is allowed to tune the spread/ATR entry gate per symbol rather
@@ -528,11 +553,24 @@ PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
 # ichimoku retired 02.09: Claude+Cursor matrix - no symbol/TF holdout win;
 # leftover DB names fail closed; ichimoku_lines went with it.
 # nr_break retired 03.09 (matrix: never best). roc_pace not shipped (EK19 lock).
-STRATEGIES = ["mtf_pullback", "burst", "channel_break"]
+# range_fade added 04.09 (Claude 12:38): US30 quiet fade — kept as 5th slot,
+# not preferred after 13:16 retract (trail vs mean-reversion mismatch).
+# sweep_fade added 04.09 (Claude 13:16): failed-breakout fade; book-wide.
+# Neither is in the default opt strategies list until unfreeze + WFO.
+STRATEGIES = [
+    "mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade",
+]
 
-# True scalps: cost-scaled micro entries that only make sense on fast bars.
-# Longer TFs turn them into slow mean-reversion with the wrong cost geometry.
-# ``micro_rev`` was the other member until 27.08; ``burst`` carries the set now.
+# True scalps: cost-scaled micro entries. ``micro_rev`` was the other member
+# until 27.08; ``burst`` carries the set now.
+#
+# The original justification here read "only make sense on fast bars - longer
+# TFs turn them into slow mean-reversion with the wrong cost geometry". With
+# M5 retired 05.09, burst only ever runs M15/M30, so that argument now says
+# burst should not exist. It stays on measured results instead: it is a live
+# family on the book today. The set still drives position caps and cooldowns
+# (engine.py, risk.py, backtest.py) - it is not the exit-grid switch, which
+# moved to the bar length in ``uses_swing_exits``.
 SCALP_STRATEGIES = frozenset({"burst"})
 
 # Which timeframes each family is allowed to search / trade. An absent family
@@ -595,12 +633,17 @@ def uses_swing_exits(strategy: str, timeframe: str) -> bool:
 
     Decided by the bar, not by the family. The scalp families used to be
     refused this envelope at every bar length, which was harmless only while
-    they were pinned to M5. Now that every family may be searched on every
-    timeframe, that early return would have handed micro_rev on H1 a stop grid
-    sized for five-minute bars - exactly what SWING_GRID_OVERLAY's own comment
-    warns about: "the search only ever offers H1 candidates a stop tight enough
-    to be noise". A scalp family on hourly bars is holding for hours; what it
-    is called does not change how far price travels while it does.
+    they were pinned to M5.
+
+    **This now returns True for every legal input** (05.09): the table below is
+    ``{"M15": 900, "M30": 1800}`` and the threshold is ``>= 900``, so with M5
+    retired there is no bar left that takes the false branch. Callers such as
+    ``optimizer.py``'s ``if uses_swing_exits(...)`` therefore apply
+    ``SWING_GRID_OVERLAY`` unconditionally. That is the intended behaviour, not
+    an accident - every remaining bar is a swing bar - but it means the
+    function is currently a constant, and the branch is dead code kept only so
+    that reopening a faster bar restores the distinction without new plumbing.
+    Do not read a live either/or into it.
 
     ``is_scalp_strategy`` still decides position caps and cooldowns elsewhere -
     only the exit-grid question moved to the timeframe.
@@ -610,7 +653,7 @@ def uses_swing_exits(strategy: str, timeframe: str) -> bool:
     # still translated to the right number of seconds. Nothing stores them any
     # more - every symbol row uses one of TIMEFRAMES - so the entries were
     # describing a state of the world that no longer exists.
-    seconds = {"M5": 300, "M15": 900, "M30": 1800}
+    seconds = {"M15": 900, "M30": 1800}
     return int(seconds.get(timeframe, 0)) >= 900
 
 

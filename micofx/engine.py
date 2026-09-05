@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import calendar
+import copy
+import json
 import math
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from . import account_lock, backtest, execution, sessions
@@ -109,6 +112,23 @@ def _fill_log_price(result: dict[str, Any], fallback: float) -> float:
     except (TypeError, ValueError):
         px = 0.0
     return px if px > 0 else float(fallback or 0.0)
+
+
+def _chase_trade_log_bit(
+    fill_px: Any,
+    sig_close: Any,
+    side: Any,
+    sl_dist: Any,
+) -> str:
+    """Measure-only chase fragment for TRADE logs. Never gates entry."""
+    try:
+        from scripts.chase_r_log import chase_r, chase_r_abs, format_chase_log
+    except ImportError:
+        return ""
+    return format_chase_log(
+        fill_vs_r=chase_r(fill_px, sig_close, side, sl_dist),
+        chase_abs=chase_r_abs(fill_px, sig_close, sl_dist),
+    )
 
 # Live-tick-spread / bar-spread histogram: buckets of 0.1 from 0.0 to 5.0,
 # plus a final overflow bucket for anything above.
@@ -622,27 +642,32 @@ class Engine:
         # looks like evidence.
         self._entry_blocks: dict[str, dict[str, dict[str, dict[str, int]]]] = {}
         for sym, legs in as_dict(store.get_setting("entry_blocks"), "entry_blocks").items():
-            if not isinstance(legs, dict):
-                continue
-            kept: dict[str, dict[str, dict[str, int]]] = {}
-            for leg, counts in legs.items():
-                if not isinstance(counts, dict):
-                    continue
-                buckets: dict[str, dict[str, int]] = {}
-                for field in ("attempts", "signals"):
-                    raw = counts.get(field)
-                    if not isinstance(raw, dict):
-                        break
-                    try:
-                        buckets[field] = {str(k): int(v) for k, v in raw.items()}
-                    except (TypeError, ValueError):
-                        break
-                else:
-                    kept[str(leg)] = buckets
+            kept = self._parse_entry_block_legs(legs)
             if kept:
                 self._entry_blocks[str(sym)] = kept
         self._entry_blocks_since = as_number(
             store.get_setting("entry_blocks_since"), 0.0, "entry_blocks_since") or time.time()
+        # All-time ledger (operator 04.09): survives 7d roll + panel reset.
+        self._entry_blocks_cum: dict[str, dict[str, dict[str, dict[str, int]]]] = {}
+        for sym, legs in as_dict(
+                store.get_setting("entry_blocks_cumulative"),
+                "entry_blocks_cumulative").items():
+            kept = self._parse_entry_block_legs(legs)
+            if kept:
+                self._entry_blocks_cum[str(sym)] = kept
+        cum_since = as_number(
+            store.get_setting("entry_blocks_cumulative_since"), 0.0,
+            "entry_blocks_cumulative_since")
+        self._entry_blocks_cum_since = float(cum_since) if cum_since else 0.0
+        self._entry_blocks_cum_dirty = False
+        # First boot after this feature: seed from the live rolling window once
+        # so the operator does not start from a blank all-time view.
+        if not self._entry_blocks_cum and self._entry_blocks:
+            self._entry_blocks_cum = copy.deepcopy(self._entry_blocks)
+            self._entry_blocks_cum_since = float(self._entry_blocks_since or time.time())
+            self._entry_blocks_cum_dirty = True
+        if not self._entry_blocks_cum_since:
+            self._entry_blocks_cum_since = float(self._entry_blocks_since or time.time())
         # Aged lifetime tallies (F-D3) must not survive into this process.
         self._entry_blocks_dirty = bool(self._roll_entry_blocks_if_stale())
         # In-memory only: the (bar, reason) episode each leg was last counted
@@ -735,6 +760,48 @@ class Engine:
                 by_leg = {str(value[0]): int(value[1])}
             if by_leg:
                 self._filled_bars[str(sym)] = by_leg
+        # Claude 20:32: land-vs-live window was invisible (28.08 3-day delay).
+        # Stamp once per process so stale_runtime_watch can compare disk mtimes.
+        self._stamp_runtime_boot()
+
+    def _stamp_runtime_boot(self) -> None:
+        """Persist engine_started_at + micofx/*.py mtimes for land-vs-live watch.
+
+        Bridge file is the watcher source of truth (no second sqlite reader).
+        Settings mirror for panel/debug. scripts/ are excluded by the watcher.
+        """
+        root = Path(__file__).resolve().parent.parent
+        micofx = root / "micofx"
+        manifest: dict[str, float] = {}
+        if micofx.is_dir():
+            for path in micofx.rglob("*.py"):
+                if "__pycache__" in path.parts:
+                    continue
+                try:
+                    rel = path.relative_to(root).as_posix()
+                    manifest[rel] = float(path.stat().st_mtime)
+                except OSError:
+                    continue
+        started = time.time()
+        try:
+            self.store.set_setting("engine_started_at", started)
+            self.store.set_setting("runtime_manifest", manifest)
+        except Exception:
+            pass
+        bridge = root / ".bridge" / "RUNTIME_BOOT_MANIFEST.json"
+        try:
+            bridge.parent.mkdir(parents=True, exist_ok=True)
+            bridge.write_text(
+                json.dumps({
+                    "engine_started_at": started,
+                    "manifest": manifest,
+                    "written_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "source": "Engine._stamp_runtime_boot",
+                }, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     # ------------------------------------------------------------- lifecycle
 
@@ -829,12 +896,74 @@ class Engine:
         already emit their own line; the panel doors did not, so a flatten
         showed up as six ``Pozisyon kapatildi kar~`` rows and nothing else
         (26.08 12:22). Empty keeps the broker call silent for those paths.
+
+        Broker deal reason for these closes is EXPERT; ``execution.reap``
+        deliberately skips EXPERT (assumes this path already reported). The
+        TRADE line comes from ``MT5Client.close_position``, but autopsy only
+        ran through ``_close_tracked`` — so panel/daily ``close_all`` left
+        baseline/autopsy rings short (XAU #324842945 04.09). Snapshot before
+        the broker call and record every ticket that left the book.
         """
         magics = {c.magic for c in list(self.store.symbols.values())}
         if reason:
             target = symbol or "tum"
             LOG.emit(f"{reason}: flatten basladi ({target}).", "WARN")
-        return self.client.close_all(magics=magics, symbol=symbol)
+        before: list[dict[str, Any]] = []
+        for pos in list(getattr(self, "_positions", None) or []):
+            try:
+                magic = int(pos.get("magic") or 0)
+            except (TypeError, ValueError):
+                continue
+            if magic not in magics:
+                continue
+            if symbol and str(pos.get("symbol") or "") != str(symbol):
+                continue
+            before.append(dict(pos))
+        closed, remaining = self.client.close_all(magics=magics, symbol=symbol)
+        if before and closed > 0:
+            self._autopsy_close_all_gone(before, reason=reason or "MicoFX close_all")
+        return closed, remaining
+
+    def _autopsy_close_all_gone(self, before: list[dict[str, Any]], *,
+                                reason: str) -> None:
+        """Write flatten autopsies for tickets ``close_all`` removed."""
+        if not self._reload_positions():
+            # Book unverified — do not invent flat; reap may still catch SL/hand
+            # closes, but EXPERT stays filtered. Prefer a later cycle retry over
+            # a wrong autopsy while the ticket might still be open.
+            return
+        live = {int(p["ticket"]) for p in self._positions if p.get("ticket")}
+        snap_fn = getattr(getattr(self, "execution", None), "snapshot", None)
+        for pos in before:
+            try:
+                ticket = int(pos.get("ticket") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not ticket or ticket in live:
+                continue
+            book: dict[str, Any] = {}
+            if callable(snap_fn):
+                snapped = snap_fn(ticket)
+                if isinstance(snapped, dict):
+                    book = dict(snapped)
+            book.setdefault("symbol", pos.get("symbol"))
+            book.setdefault("side", pos.get("side"))
+            book.setdefault("entry", pos.get("price_open"))
+            profit = None
+            try:
+                profit = float(pos.get("profit") or 0.0) + float(pos.get("swap") or 0.0)
+            except (TypeError, ValueError):
+                profit = None
+            self._autopsy_safe(
+                book=book,
+                ticket=ticket,
+                symbol=pos.get("symbol") or book.get("symbol") or "",
+                exit_price=None,
+                exit_time=self._broker_now_int(),
+                profit=profit,
+                reason_code=None,
+                comment=reason,
+            )
 
     def _reload_positions(self) -> bool:
         """Refresh ``self._positions`` from the broker.
@@ -972,6 +1101,8 @@ class Engine:
             self._kick_supervisor_review(pnl)
         if getattr(self, "autopilot", None) is not None and self.autopilot.due():
             self._kick_autopilot()
+        self._maybe_freeze_bind_restart()
+        self._maybe_land_pending_xau_sl()
 
         # Every position-count guard here (max_positions, weekend/secondary)
         # ticket tracking, partial-TP ladder bookkeeping) assumes one ticket
@@ -1112,6 +1243,68 @@ class Engine:
 
         threading.Thread(target=_run, name="micofx-autopilot", daemon=True).start()
 
+    def _maybe_freeze_bind_restart(self) -> None:
+        """When resume flag is set and book is flat, restart to load freeze.
+
+        Sidecar ``freeze_bind_when_flat`` covers the current pre-freeze PID;
+        this hook keeps future AP-off freeze binds self-healing in-process.
+        """
+        from .paths import ROOT
+        flag = ROOT / ".bridge" / "AUTOPILOT_RESUME_AFTER_RESTART"
+        if not flag.is_file():
+            return
+        now = time.time()
+        last = float(getattr(self, "_last_freeze_bind_check", 0.0) or 0.0)
+        if now - last < 90.0:
+            return
+        self._last_freeze_bind_check = now
+        if self._positions:
+            return
+        if getattr(self, "_freeze_bind_armed", False):
+            return
+        self._freeze_bind_armed = True
+        LOG.emit("freeze-bind: kitap flat — restart tetikleniyor", "WARN")
+
+        def _run() -> None:
+            try:
+                import subprocess
+                import sys
+                script = ROOT / "scripts" / "freeze_bind_when_flat.py"
+                subprocess.run(
+                    [sys.executable, str(script), "--verify"],
+                    cwd=str(ROOT), timeout=180, check=False)
+            except Exception as exc:
+                LOG.emit(f"freeze-bind restart fail: {exc}", "ERROR")
+                self._freeze_bind_armed = False
+
+        threading.Thread(
+            target=_run, name="micofx-freeze-bind", daemon=True).start()
+
+    def _maybe_land_pending_xau_sl(self) -> None:
+        """Finish Claude 04.50 XAU sl 0.7 land + re-enable even if AP is off.
+
+        ``pending_exit_patch`` can land via ``_apply_pending_exits`` while AP
+        is still disabled; without this hook XAU would stay ``enabled=false``
+        after sl is already 0.7.
+        """
+        from .paths import ROOT
+        flag = ROOT / ".bridge" / "XAU_SL_07_PENDING"
+        if not flag.is_file():
+            return
+        now = time.time()
+        last = float(getattr(self, "_last_xau_sl_land_check", 0.0) or 0.0)
+        if now - last < 30.0:
+            return
+        self._last_xau_sl_land_check = now
+        opt = getattr(getattr(self, "supervisor", None), "optimizer", None)
+        try:
+            from .autopilot import maybe_land_pending_xau_sl
+            msg = maybe_land_pending_xau_sl(opt, self.store)
+            if msg:
+                LOG.emit(msg, "OPT", "XAUUSD")
+        except Exception as exc:
+            LOG.emit(f"XAU sl pending land fail: {exc}", "WARN")
+
     def _run_fill_verify(self, pending: dict[str, Any]) -> None:
         kwargs = dict(pending.get("verify_kwargs") or {})
         try:
@@ -1213,11 +1406,11 @@ class Engine:
         state.entry_block = "acildi"
         ticket = int(result.get("position", 0) or 0)
         fill_px = _fill_log_price(result, entry)
+        sig_close = None
+        if state.bars is not None and len(state.bars.close):
+            sig_close = float(state.bars.close[-1])
         note_fill = getattr(self.execution, "note_fill", None)
         if ticket and callable(note_fill):
-            sig_close = None
-            if state.bars is not None and len(state.bars.close):
-                sig_close = float(state.bars.close[-1])
             point = float(info.get("point") or 0)
             fill_vs = None
             if sig_close is not None and side:
@@ -1260,10 +1453,11 @@ class Engine:
         if log_sl <= 0:
             log_sl = _fill_original_sl(side, fill_px, sl_dist,
                                        float(result.get("sl") or 0)) or 0.0
+        chase_bit = _chase_trade_log_bit(fill_px, sig_close, side, sl_dist)
         LOG.emit(
             f"#{ticket} {side.upper()} {vol:g} lot @ {_fill_log_price(result, fill_px):.5f} "
             f"SL={log_sl:.5f} TP={float(result.get('tp') or 0):.5f} magic={cfg.magic}"
-            f"{cost_bit} | lot: {note}",
+            f"{cost_bit}{chase_bit} | lot: {note}",
             "TRADE", cfg.symbol)
         try:
             self._reload_positions()
@@ -1399,6 +1593,30 @@ class Engine:
             ),
         }
 
+    @staticmethod
+    def _parse_entry_block_legs(
+        legs: Any,
+    ) -> dict[str, dict[str, dict[str, int]]]:
+        """Keep only well-shaped ``{leg: {attempts, signals}}`` trees."""
+        if not isinstance(legs, dict):
+            return {}
+        kept: dict[str, dict[str, dict[str, int]]] = {}
+        for leg, counts in legs.items():
+            if not isinstance(counts, dict):
+                continue
+            buckets: dict[str, dict[str, int]] = {}
+            for field in ("attempts", "signals"):
+                raw = counts.get(field)
+                if not isinstance(raw, dict):
+                    break
+                try:
+                    buckets[field] = {str(k): int(v) for k, v in raw.items()}
+                except (TypeError, ValueError):
+                    break
+            else:
+                kept[str(leg)] = buckets
+        return kept
+
     def _tally_entry(self, symbol: str, reason: str,
                      bar_key: tuple | None = None, source: str = "") -> None:
         """Record the outcome of one entry attempt. Never raises.
@@ -1425,6 +1643,9 @@ class Engine:
         point, which should not happen - bucket it rather than lose it, so a
         future edit that adds an unmarked return shows up as a rising
         "isaretsiz" instead of silently shrinking the total.
+
+        Rolling (7d) and cumulative (all-time) share one episode latch so a
+        retry never double-counts ``signals`` on either ledger.
         """
         try:
             key = str(reason or "isaretsiz")
@@ -1432,22 +1653,29 @@ class Engine:
             # ``source=="secondary"`` argument must not mint a bucket the
             # panel would read as a live config that does not exist.
             leg = "primary"
-            legs = self._entry_blocks.setdefault(str(symbol), {})
-            counts = legs.setdefault(leg, {"attempts": {}, "signals": {}})
-            attempts, signals = counts["attempts"], counts["signals"]
-            attempts[key] = int(attempts.get(key, 0)) + 1
-            # One episode per (bar, leg, reason); the retry loop must not
-            # inflate it. The de-dupe latch is in-memory (a restart starting a
-            # fresh episode is the honest reading). The bar identity itself is
-            # appended to ``_entry_events`` and persisted, so a later window
-            # can name the bars the counters only counted.
-            seen = self._entry_last_bar.setdefault(str(symbol), {})
             episode = (repr(bar_key), key)
-            if seen.get(leg) != episode:
+            seen = self._entry_last_bar.setdefault(str(symbol), {})
+            new_episode = seen.get(leg) != episode
+            if new_episode:
                 seen[leg] = episode
-                signals[key] = int(signals.get(key, 0)) + 1
                 self._record_entry_event(str(symbol), key, bar_key)
+
+            def _bump(tree: dict[str, dict[str, dict[str, dict[str, int]]]]) -> None:
+                legs = tree.setdefault(str(symbol), {})
+                counts = legs.setdefault(leg, {"attempts": {}, "signals": {}})
+                attempts, signals = counts["attempts"], counts["signals"]
+                attempts[key] = int(attempts.get(key, 0)) + 1
+                if new_episode:
+                    signals[key] = int(signals.get(key, 0)) + 1
+
+            _bump(self._entry_blocks)
+            cum = getattr(self, "_entry_blocks_cum", None)
+            if not isinstance(cum, dict):
+                self._entry_blocks_cum = {}
+                cum = self._entry_blocks_cum
+            _bump(cum)
             self._entry_blocks_dirty = True
+            self._entry_blocks_cum_dirty = True
         except Exception:
             pass
 
@@ -1594,8 +1822,9 @@ class Engine:
         try:
             self._roll_entry_blocks_if_stale()
             blocks_dirty = getattr(self, "_entry_blocks_dirty", False)
+            cum_dirty = getattr(self, "_entry_blocks_cum_dirty", False)
             events_dirty = getattr(self, "_entry_events_dirty", False)
-            if not blocks_dirty and not events_dirty:
+            if not blocks_dirty and not cum_dirty and not events_dirty:
                 return
             now = time.time()
             last = float(getattr(self, "_entry_blocks_flushed_at", 0.0) or 0.0)
@@ -1609,6 +1838,14 @@ class Engine:
                 self.store.set_setting("entry_blocks", self._entry_blocks)
                 self.store.set_setting("entry_blocks_since", self._entry_blocks_since)
                 self._entry_blocks_dirty = False
+            if cum_dirty:
+                # Cumulative keeps deleted-symbol history (all-time view).
+                cum = getattr(self, "_entry_blocks_cum", None) or {}
+                self.store.set_setting("entry_blocks_cumulative", cum)
+                self.store.set_setting(
+                    "entry_blocks_cumulative_since",
+                    float(getattr(self, "_entry_blocks_cum_since", 0.0) or now))
+                self._entry_blocks_cum_dirty = False
             if events_dirty:
                 events = [e for e in list(getattr(self, "_entry_events", []) or [])
                           if e.get("symbol") in live]
@@ -1627,6 +1864,7 @@ class Engine:
 
         ``signals`` is the number that compares to a holdout trade count;
         ``attempts`` only says how many polls the gate held each one off.
+        ``cumulative`` is the all-time ledger (reset/roll immune).
         """
         # Snapshot every level with list()/dict() before iterating it. This
         # runs on the web thread while the engine thread is inside
@@ -1635,8 +1873,23 @@ class Engine:
         # symbol changes, so: normally) raised "dictionary changed size during
         # iteration" and 500'd the view. Same defence list(self.states.items())
         # already uses at the two other cross-thread reads.
+        rolling = self._entry_blocks_payload(self._entry_blocks)
+        cum_tree = getattr(self, "_entry_blocks_cum", None) or {}
+        cumulative = self._entry_blocks_payload(cum_tree)
+        cumulative["since"] = float(
+            getattr(self, "_entry_blocks_cum_since", 0.0) or 0.0)
+        return {
+            **rolling,
+            "since": self._entry_blocks_since,
+            "cumulative": cumulative,
+        }
+
+    def _entry_blocks_payload(
+        self,
+        tree: dict[str, Any],
+    ) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
-        for symbol, legs in sorted(list(self._entry_blocks.items())):
+        for symbol, legs in sorted(list(tree.items())):
             if not isinstance(legs, dict):
                 continue
             for leg, counts in sorted(list(legs.items())):
@@ -1666,7 +1919,6 @@ class Engine:
             for k, v in row["blocks"].items():
                 totals[k] = totals.get(k, 0) + v
         return {
-            "since": self._entry_blocks_since,
             "rows": rows,
             "totals": dict(sorted(totals.items(), key=lambda kv: -kv[1])),
             "signals": sum(r["signals"] for r in rows),
@@ -2276,7 +2528,8 @@ class Engine:
             state.pending_bar_key = (0, 0)
 
         if not sess.open:
-            state.note = f"seans disi ({sess.window})"
+            block = sessions.refuse_block_key(sess.reason)
+            state.note = sessions.refuse_note(sess)
             # Merge already ran, so a live signal can sit here. Tally it
             # before clearing: this is the same invisibility as bar_bosluk,
             # one gate earlier. No-signal closed polls stay silent via the
@@ -2285,12 +2538,12 @@ class Engine:
             # resurrected it from the still-set primary on the next poll
             # and a pre-close signal could fire the instant the session
             # reopened, on whatever bar was still cached.
-            self._tally_evaluate_refuse(cfg, state, "seans_disi", bar_key)
+            self._tally_evaluate_refuse(cfg, state, block, bar_key)
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
             state.pending_bar_key = (0, 0)
-            state.entry_block = "seans_disi"
+            state.entry_block = block
             return False
         if not self.client.market_open(cfg.symbol):
             # Same staleness hazard as the sess.open branch above: with
@@ -3111,15 +3364,15 @@ class Engine:
         # Not ``note``: that name already holds the lot-sizing explanation this
         # method logs a few lines down. Rebinding it printed a bound method in
         # place of "risk %1.09 -> 0.515" on every fill.
+        sig_close = None
+        if state.bars is not None and len(state.bars.close):
+            sig_close = float(state.bars.close[-1])
         note_fill = getattr(self.execution, "note_fill", None)
         if ticket and callable(note_fill):
             # Fill-time facts the close path cannot reconstruct: the signal
             # bar is already consumed, and spread/ADX on state will move.
             # Broker clock, same stamps as deal.time, so held_min is a
             # duration not a UTC-vs-wall-clock gap.
-            sig_close = None
-            if state.bars is not None and len(state.bars.close):
-                sig_close = float(state.bars.close[-1])
             point = float(info.get("point") or 0)
             fill_vs = None
             if sig_close is not None:
@@ -3159,10 +3412,11 @@ class Engine:
         if log_sl <= 0:
             log_sl = _fill_original_sl(side, fill_px, sl_dist,
                                        float(result.get("sl") or 0)) or 0.0
+        chase_bit = _chase_trade_log_bit(fill_px, sig_close, side, sl_dist)
         LOG.emit(
             f"#{ticket} {side.upper()} {vol:g} lot @ {_fill_log_price(result, fill_px):.5f} "
             f"SL={log_sl:.5f} TP={float(result.get('tp') or 0):.5f} magic={cfg.magic}"
-            f"{cost_bit} | lot: {note}",
+            f"{cost_bit}{chase_bit} | lot: {note}",
             "TRADE", cfg.symbol,
         )
 
@@ -3587,6 +3841,7 @@ class Engine:
             return
         live = {int(p["ticket"]) for p in self._positions}
         seen: set[int] = set(live)
+        thin_by_ticket: dict[int, dict[str, Any]] = {}
         for row in getattr(self, "_trade_autopsies", []) or []:
             if not isinstance(row, dict):
                 continue
@@ -3594,16 +3849,31 @@ class Engine:
                 t = int(row.get("ticket") or 0)
             except (TypeError, ValueError):
                 continue
-            if t:
-                seen.add(t)
+            if not t:
+                continue
+            seen.add(t)
+            # Pre-enrich rows (ticket logged, no entry/side) — XAU #324655544
+            # after the first reconcile landed a thin otopsi before IN deals
+            # were wired into the book.
+            if not str(row.get("side") or "") or self._autopsy_float(row.get("entry")) is None:
+                thin_by_ticket[t] = row
         broker_now = self.client.broker_now()
-        since = (broker_now if broker_now > 0.0 else time.time()) - 7200.0
+        now = broker_now if broker_now > 0.0 else time.time()
+        # Fresh restart-gap closes: last 2h. Thin otopsi from an earlier PID
+        # (XAU #324655544) may sit past that if BTC kept the book open —
+        # reach back from each thin exit so IN+OUT deals are still visible.
+        since = now - 7200.0
+        for row in thin_by_ticket.values():
+            et = self._autopsy_float(row.get("exit_time"))
+            if et is not None and et > 0:
+                since = min(since, float(et) - 86400.0)
         try:
             deals = self.client.deals_since(since)
         except Exception as exc:
             LOG.emit(f"restart arasi kapanis taramasi basarisiz: {exc}", "WARN")
             return
         closers: dict[int, list[dict[str, Any]]] = {}
+        by_pos: dict[int, list[dict[str, Any]]] = {}
         net: dict[int, float] = {}
         for deal in deals or []:
             try:
@@ -3614,6 +3884,7 @@ class Engine:
                 continue
             if magic not in magics or pos <= 0:
                 continue
+            by_pos.setdefault(pos, []).append(deal)
             net[pos] = (net.get(pos, 0.0)
                         + float(deal.get("profit", 0.0) or 0.0)
                         + float(deal.get("commission", 0.0) or 0.0)
@@ -3622,8 +3893,6 @@ class Engine:
                 continue
             closers.setdefault(pos, []).append(deal)
         for pos, chunks in closers.items():
-            if pos in seen:
-                continue
             deal = chunks[-1]
             volume = sum(float(d.get("volume", 0.0) or 0.0) for d in chunks)
             if volume > 0:
@@ -3633,21 +3902,100 @@ class Engine:
                     for d in chunks) / volume
             else:
                 price = float(deal.get("price") or 0.0)
+            reason = int(deal.get("reason") or 0)
+            book = self._restart_gap_book(
+                by_pos.get(pos) or [], exit_price=price, reason=reason)
+            if pos in thin_by_ticket and book:
+                self._enrich_thin_restart_autopsy(
+                    thin_by_ticket[pos], book=book, exit_price=price,
+                    exit_time=int(deal.get("time") or 0), reason=reason,
+                    profit=round(net.get(pos, float(deal.get("profit") or 0.0)), 2))
+                continue
+            if pos in seen:
+                continue
             report = {
                 "ticket": pos,
                 "symbol": str(deal.get("symbol") or ""),
                 "magic": int(deal.get("magic") or 0),
-                "reason": int(deal.get("reason") or 0),
-                "label": execution._REASON_LABEL.get(
-                    int(deal.get("reason") or 0), "broker"),
+                "reason": reason,
+                "label": execution._REASON_LABEL.get(reason, "broker"),
                 "price": price,
                 "volume": volume,
                 "profit": round(net.get(pos, float(deal.get("profit") or 0.0)), 2),
                 "time": int(deal.get("time") or 0),
-                "book": {},
+                "book": book,
                 "restart_gap": True,
             }
             self._log_broker_exit(report)
+
+    def _enrich_thin_restart_autopsy(
+            self, row: dict[str, Any], *, book: dict[str, Any],
+            exit_price: float, exit_time: int, reason: int,
+            profit: float) -> None:
+        """Fill entry/side/R on a restart-gap otopsi that landed without a book."""
+        enriched = self._autopsy_row(
+            book=book, ticket=row.get("ticket"), symbol=row.get("symbol"),
+            exit_price=exit_price, exit_time=exit_time or row.get("exit_time"),
+            profit=profit if profit is not None else row.get("profit"),
+            reason_code=reason, comment="")
+        for key, val in enriched.items():
+            if val is None or val == "" or val == 0:
+                continue
+            cur = row.get(key)
+            if cur is None or cur == "" or (
+                    key in ("side", "entry", "sl", "original_sl", "r_realised",
+                            "fill_time", "exit_reason") and not cur):
+                row[key] = val
+        self._trade_autopsies_dirty = True
+        self._rebuild_autopsy_pending()
+
+    @staticmethod
+    def _restart_gap_book(
+            deals: list[dict[str, Any]], *, exit_price: float,
+            reason: int) -> dict[str, Any]:
+        """Best-effort open book from IN+OUT deals when ``execution._open`` is empty.
+
+        Enough for ``r_realised`` / after-1h premature: entry, side, and for an
+        SL exit the stop ≈ exit print (hard stop at fill).
+        """
+        # DEAL_ENTRY_IN == 0 on MetaTrader5; OUT/INOUT/OUT_BY are 1/2/3.
+        # Do not use ``x or -1`` — entry/type 0 is a real value (IN / BUY).
+        def _deal_int(d: dict[str, Any], key: str) -> int:
+            raw = d.get(key)
+            if raw is None:
+                return -1
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                return -1
+
+        ins = [d for d in deals if _deal_int(d, "entry") == 0]
+        if not ins:
+            return {}
+        vol = sum(float(d.get("volume", 0.0) or 0.0) for d in ins)
+        if vol <= 0:
+            return {}
+        entry = sum(
+            float(d.get("price", 0.0) or 0.0) * float(d.get("volume", 0.0) or 0.0)
+            for d in ins) / vol
+        # DEAL_TYPE_BUY == 0
+        buy_vol = sum(
+            float(d.get("volume", 0.0) or 0.0) for d in ins
+            if _deal_int(d, "type") == 0)
+        side = "buy" if buy_vol + 1e-12 >= vol / 2.0 else "sell"
+        fill_time = min(int(d.get("time") or 0) for d in ins)
+        book: dict[str, Any] = {
+            "symbol": str(ins[0].get("symbol") or ""),
+            "side": side,
+            "entry": entry,
+            "fill_time": fill_time,
+            "magic": int(ins[0].get("magic") or 0),
+        }
+        if reason == execution.DEAL_REASON_SL and exit_price > 0:
+            book["sl"] = float(exit_price)
+            book["original_sl"] = float(exit_price)
+            book["risk_dist"] = abs(float(entry) - float(exit_price))
+        return book
 
     def _restore_cooldown(self, state: SymbolState) -> None:
         """Carry a still-running post-fill cooldown across a restart.
@@ -3865,6 +4213,9 @@ class Engine:
         opt = getattr(getattr(self, "supervisor", None), "optimizer", None)
         if opt is not None and hasattr(opt, "_recalibrate_spread_cap"):
             opt._recalibrate_spread_cap(cfg.symbol, next_tf)
+        if opt is not None and hasattr(opt, "reevaluate_sessions_after_primary_flip"):
+            # Same sticky reset as flat apply() primary flip (Claude 14:52).
+            opt.reevaluate_sessions_after_primary_flip(cfg.symbol)
 
     def _close_tracked(self, pos: dict[str, Any], comment: str, leg: str,
                        volume: float | None = None, fill: dict[str, Any] | None = None) -> bool:

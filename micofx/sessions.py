@@ -130,6 +130,47 @@ def _prev_day(day: int) -> int:
     return 7 if day == 1 else day - 1
 
 
+# Friday wind-down. ``weekend_closed`` keys on day >= 6, which is AFTER the
+# broker has already stopped quoting, so it can only ever fire too late to
+# close anything: live 04.09 opened XAUUSD 23:30 Friday, tried to flatten at
+# 23:59 and got 10018 (market closed) every 2 s for the rest of the weekend.
+# The replay never saw this because ``flatten_mask`` always succeeds at a bar
+# boundary; live has to send an order to a venue that is already shut.
+#
+# So the fix is at the entry, not the exit: refuse to OPEN inside the band, and
+# leave anything already open alone (``should_flatten`` returns False when the
+# state is closed, so this cannot cut a runner - and overnight holds are where
+# the book's profit is: same-day trades are negative on 7/7 symbols, held
+# trades positive on 7/7).
+#
+# 120 minutes is sized to the hold, not to the R: XAUUSD's mean hold is ~2 h,
+# so a trade opened at the band's edge still has a typical lifetime to resolve
+# before the close. The R evidence agrees and costs nothing - entries in the
+# last 1/2/3 h of Friday are worth -0.5R / -4.5R / -7.5R across 22/36/70 trades
+# (measured 05.09, BTC excluded). Crypto is exempt for the same reason it is
+# exempt from ``weekend_closed``: it trades through.
+WEEKEND_WINDDOWN_MIN = 120
+
+
+def _block_weekend_winddown(cfg: SymbolConfig, day: int, minute: int,
+                            state: SessionState) -> SessionState:
+    """Refuse a new entry in the last minutes before the weekend; never flatten."""
+    if not state.open or WEEKEND_WINDDOWN_MIN <= 0:
+        return state
+    if getattr(cfg, "weekend_open", False):
+        return state
+    if str(getattr(cfg, "group", "") or "").strip().lower() in WEEKEND_OPEN_GROUPS:
+        return state
+    if day != 5 or minute < (24 * 60 - WEEKEND_WINDDOWN_MIN):
+        return state
+    return SessionState(
+        open=False, reason="hafta sonu oncesi",
+        minutes_to_close=None,
+        minutes_to_open=_minutes_to_next_day(day, minute, [1, 2, 3, 4, 5]),
+        window=state.window,
+    )
+
+
 def _block_entry_hour(cfg: SymbolConfig, minute: int, state: SessionState) -> SessionState:
     """Refuse a new entry in listed clock hours; do not start a flatten."""
     if not state.open:
@@ -146,6 +187,37 @@ def _block_entry_hour(cfg: SymbolConfig, minute: int, state: SessionState) -> Se
         minutes_to_open=60 - (minute % 60),
         window=state.window,
     )
+
+
+def refuse_block_key(reason: str) -> str:
+    """Map ``SessionState.reason`` to entry_block / tally key.
+
+    ``blocked_entry_hours`` closes ``sess.open`` while keeping the underlying
+    window label (e.g. ``7/24``). Tallying those as ``seans_disi`` hid the
+    real gate from fill watches and the income board (JPN225 14-15).
+    """
+    r = (reason or "").strip().lower()
+    if r == "saat kapali":
+        return "saat_kapali"
+    if r == "gun kapali":
+        return "gun_kapali"
+    if r == "hafta sonu oncesi":
+        return "hafta_sonu_oncesi"
+    if r.startswith("hafta sonu"):
+        return "hafta_sonu"
+    return "seans_disi"
+
+
+def refuse_note(sess: SessionState) -> str:
+    """Panel note for a closed session — reason first, window in parens."""
+    key = refuse_block_key(sess.reason)
+    label = {
+        "saat_kapali": "saat kapali",
+        "gun_kapali": "gun kapali",
+        "hafta_sonu": "hafta sonu",
+    }.get(key, "seans disi")
+    win = (sess.window or "").strip()
+    return f"{label} ({win})" if win else label
 
 
 def evaluate(cfg: SymbolConfig, server_epoch: float,
@@ -173,7 +245,8 @@ def evaluate(cfg: SymbolConfig, server_epoch: float,
     if all_hours:
         state = SessionState(open=True, reason="", minutes_to_close=None,
                              minutes_to_open=None, window="tum saatler")
-        return _block_entry_hour(cfg, minute, state)
+        return _block_weekend_winddown(
+            cfg, day, minute, _block_entry_hour(cfg, minute, state))
 
     if not cfg.use_sessions or not windows:
         allowed = day in cfg.trade_days
@@ -184,7 +257,8 @@ def evaluate(cfg: SymbolConfig, server_epoch: float,
             minutes_to_open=None if allowed else _minutes_to_next_day(day, minute, cfg.trade_days),
             window="7/24" if allowed else "gun disi",
         )
-        return _block_entry_hour(cfg, minute, state) if allowed else state
+        blocked = _block_entry_hour(cfg, minute, state) if allowed else state
+        return _block_weekend_winddown(cfg, day, minute, blocked)
 
     best_close: int | None = None
     active = ""
@@ -218,7 +292,8 @@ def evaluate(cfg: SymbolConfig, server_epoch: float,
     if best_close is not None:
         state = SessionState(open=True, reason="", minutes_to_close=best_close,
                              minutes_to_open=None, window=active)
-        return _block_entry_hour(cfg, minute, state)
+        return _block_weekend_winddown(
+            cfg, day, minute, _block_entry_hour(cfg, minute, state))
 
     wait = _minutes_to_next_window(day, minute, windows, cfg.trade_days)
     nxt = min(windows, key=lambda w: w[0])

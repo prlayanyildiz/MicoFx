@@ -223,6 +223,20 @@ Fail-first: write the test, watch it fail, then implement.
   `_queue_reoptimization` (retry cooldown). Do not resurrect a
   weekly/decay auto-search.
 - `_MAX_SIGNAL_BAR_AGE_BARS = 2` Ã— timeframe. Search default is M15/M30
-  (`SEARCH_TIMEFRAMES`); M5 stays legal to trade (SpotBrent stoch/M5) and
-  a one-off `POST /api/opt/run` can still name it. US30 live is M30; an
-  M5 name's 600 s `bar_bosluk` on overnight drought is normal.
+  (`SEARCH_TIMEFRAMES`). **M5 was RETIRED 05.09** and is no longer legal
+  anywhere: `TIMEFRAMES`, `READABLE_TIMEFRAMES` and `SEARCH_TIMEFRAMES` are
+  `["M15","M30"]`, the panel no longer offers it, and
+  `strategy_allows_timeframe` refuses it - naming it in a one-off
+  `POST /api/opt/run` is dropped from the request, and if nothing legal is
+  left the call is refused outright with `"Aranabilir zaman dilimi yok"`
+  (verified 05.09; the earlier "produces a dead symbol" wording was wrong).
+  Measured
+  0/7 symbols would pick it (five outright negative) at +6-32% cost per
+  trade; H1 (emekli / retired) was re-measured the same day and lost 6/6 on
+  R/day, so it stays gone. Reopening
+  needs `models.TIMEFRAMES` **and** `config/defaults.json optimizer.timeframes`
+  - and that is all. `store.opt_params()` unions the shipped list into the
+  stored blob on every read, so the stored `opt_params.timeframes` does NOT
+  have to be edited. This paragraph claimed it did until 05.09; resurrection
+  is a two-file change, cheaper than documented, so treat both files as live
+  risk surfaces.
