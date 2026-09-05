@@ -8820,3 +8820,60 @@ her biri ayri triyaj isteyen).
 
 **Hepsi diskte, canlida degil.** Motor 12:41'de baglandi ve calisiyor; bu
 degisiklikler bir sonraki restart'ta yururluge girer. Aceleye gerek yok.
+
+### EK29 devami — olu korumalarin diriltilmesi (05.09)
+
+Operator: *"uygulanmasi gerekenleri uygula operator yetkini her zaman kullan"*.
+
+**41 test kirmiziydi, ama asil mesele kirmizilik degildi: korduklari sey oluydu.**
+`_Store` sahteleri uretimin okudugu `system` alanini tasimiyordu, yani her test
+kendi iddiasina VARMADAN `AttributeError` ile oluyordu. Gerileme olsa yeni bir
+hata uretmezlerdi. Bugun `trade_days` dogrulayicisinin bir `return`'un altina
+dusup fark edilmemesinin sebebi tam olarak buydu.
+
+Sahtelere el yapimi stub degil, uretimin kendi `SystemConfig`'i verildi — stub
+bugun uretimin dokundugu tek alani tasir ve bir sonrakinde yine kayar.
+`test_supervisor_hour_scale_roundtrip`'te ayri bir kusur vardi: sahte kitap bos
+oldugu icin `prune_orphans()` NAS100'un kaydini **hakli olarak** siliyordu —
+uretim dogru, fixture eksikti.
+
+```
+pytest: 57 -> 30 basarisiz   (3164 gecti, once 3137)
+```
+
+27 koruma daha canli.
+
+### Duzeltilen yanlis ifadeler
+
+- `risk.py`: *"max_concurrent_risk_pct okunmuyor; bu can_open tavani degil"* —
+  iki yarisi da yanlis. `can_open` o tavani uyguluyor ve ayara
+  `live_concurrent_pct` uzerinden ulasiyor. Bu satiri okuyan biri kapinin var
+  olmadigi sonucuna varirdi; olan da buna yakindi.
+- `test_auto_opt_is_gone.py` baslıgi: *"Otomatik arama yalnizca operatore ait"*
+  — **yanlis**, ve suitedeki en yaniltici cumleydi: bu dosya "bir sey otomatik
+  optimize ediyor mu?" diye grep'lenen dosya. Supervisor karantinaya giren
+  sembolde `apply_best=True` ile arama basliyor — ve dosyanin kendi testi uc
+  satir asagida o cagriyi assert ediyor. Gercekten kaldirilmis olan: takvim ve
+  decay tetikleyicileri.
+- `engine.py` cooldown yorumlari M5 ve H1 uzerine kuruluydu; ikisi de emekli.
+  Clamp bugun etkisiz (yedi satirin hepsinde `configured` seciliyor) ama daha
+  hizli bar donerse yeniden baglar — kaldirilmadi, durumu yazildi.
+- `test_all_timeframes_searchable.py`: *"burst retired 27.08"* — tam tersi.
+  Emekli olan `micro_rev`'di; **burst canli ve araniyor.** "burst retired" diye
+  grep'leyen biri canli bir aileyi silmek icin izin okurdu.
+
+### UYGULANMADI — ve neden
+
+**`symbol_daily_loss_pct` yazilabilir yapilmadi.** Ajan bunu "armlanamayan
+koruma" diye raporladi; dogru bir *tarif*, yanlis bir *teshis*. Alan
+`test_account_sizes_the_book.py`'nin GONE grubunda, kendi reddetme testiyle
+(`test_http_refuses_symbol_daily_loss`), ve dosyanin basligi gerekceyi yaziyor:
+*"Operator 28.08: max_lot / max_margin_pct / max_positions kartta yonetilmesin."*
+Kasitli olarak silahsizlandirilmis. Geri eklemek bir hatayi duzeltmek degil,
+bir karari geri almak olurdu. Yerine `_OPERATOR_SYMBOL_FIELDS`'in yanina bunun
+neden orada OLMADIGI yazildi.
+
+**Supervisor acilmadi.** Acmak yalnizca `risk_scale 0.6`'yi uygulamaz;
+karantina kuyrugunu da acar, ve o kuyruk `apply_best=True` ile canli sembole
+uygulama yapiyor. Olculmemis bir aparati canli hesapta acmak icin gerekce yok.
+Operator karari.

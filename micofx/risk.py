@@ -1326,9 +1326,19 @@ class RiskManager:
         else:
             headroom = max(0.0, by_margin_all)
 
-        # Live remaining 1R across the open book. Leftover
-        # max_concurrent_risk_pct is unread; this is for STOPSUZ and the
-        # panel, not a can_open ceiling. A naked stop is unbounded
+        # Live remaining 1R across the open book. This particular number is for
+        # STOPSUZ and the panel.
+        #
+        # The comment here used to add "max_concurrent_risk_pct is unread ...
+        # not a can_open ceiling". Both halves were false and the pair was
+        # actively misleading: can_open DOES apply a concurrent-risk ceiling
+        # (see the eszamanli check there), and it reaches that setting through
+        # live_concurrent_pct. Anyone reading this line would have concluded
+        # the gate did not exist - which is close to what happened: the ceiling
+        # was deriving itself from the vacant slot count, jamming the book at
+        # four concurrent positions, and nothing pointed at it. Corrected 05.09.
+        #
+        # A naked stop is unbounded
         # (remaining_position_risk returns inf). json.dumps would write
         # Infinity and /api/state would 500 the whole panel - the same
         # class as execution's RATIO_ALL_ADVERSE.

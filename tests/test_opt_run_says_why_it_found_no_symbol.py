@@ -37,7 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.models import SymbolConfig
+from micofx.models import SymbolConfig, SystemConfig
 from micofx.optimizer import Optimizer
 
 
@@ -57,6 +57,13 @@ class _Thread:
 
 class _Store:
     def __init__(self, symbols):
+        # Production reads store.system.charge_costs (optimizer.py:1005).
+        # The real dataclass, not a stub: a stub only carries the field
+        # production happens to touch today and drifts again on the next
+        # one. This double was stale enough that every test in the file
+        # died on AttributeError before its assertion - so the guard it
+        # contains proved nothing. Added 05.09.
+        self.system = SystemConfig()
         self.symbols = {c.symbol: c for c in symbols}
 
     def get_setting(self, key, default=None):

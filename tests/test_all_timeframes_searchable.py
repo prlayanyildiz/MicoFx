@@ -112,7 +112,11 @@ def test_a_scalp_family_on_long_bars_gets_the_swing_envelope():
 
 def test_scalp_classification_itself_is_unchanged():
     """Position caps and cooldowns read this; only the exit grid moved."""
-    # burst retired 27.08; burst carries the scalp set alone.
+    # ``micro_rev`` retired 27.08; burst carries the scalp set alone. The
+    # comment here named *burst* as the retired one, which is exactly backwards
+    # - burst is live and searched (it is in defaults.json optimizer.strategies).
+    # An engineer grepping for "burst retired" would have read this as licence
+    # to remove a live family. Corrected 05.09.
     assert SCALP_STRATEGIES == frozenset({"burst"})
 
 

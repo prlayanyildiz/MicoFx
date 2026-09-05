@@ -12,12 +12,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.models import SymbolConfig
+from micofx.models import SymbolConfig, SystemConfig
 from micofx.optimizer import Optimizer
 
 
 class _Store:
     def __init__(self, cfg, orphan_scan=None):
+        # Production reads store.system.charge_costs (optimizer.py:1005).
+        # The real dataclass, not a stub: a stub only carries the field
+        # production happens to touch today and drifts again on the next
+        # one. This double was stale enough that every test in the file
+        # died on AttributeError before its assertion - so the guard it
+        # contains proved nothing. Added 05.09.
+        self.system = SystemConfig()
         self._cfg = cfg
         self.symbols = {"XAUUSD": cfg}
         self._orphan_scan = orphan_scan or {}

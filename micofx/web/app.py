@@ -494,6 +494,16 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
     # 0 = off. POST accepts 0 only (F44). harvest stays hands-off (F41).
     "partial_at_r",
 })
+# NOT here, deliberately: ``symbol_daily_loss_pct``. A 05.09 audit reported it
+# as "a protection that cannot be armed" - true as a description (no path sets
+# it, all seven rows are 0.0, so engine._symbol_daily_halt takes its off
+# branch) but wrong as a diagnosis. It was disarmed on purpose: the operator's
+# 28.08 call was to stop managing per-symbol risk knobs on the card, and it
+# sits in the same GONE group as max_lot / max_margin_pct / max_positions with
+# its own refusal test (test_http_refuses_symbol_daily_loss). Adding it back
+# would reverse a decision, not fix a defect. If the per-symbol breaker is
+# wanted again that is an operator call plus a measured threshold - what is an
+# ordinary losing day for XAUUSD is not one for SpotBrent - not a quiet edit.
 _OPERATOR_OPT_FIELDS = frozenset({
     "lookback_days", "refine_rounds", "max_combos", "timeframes",
     # Charged expectancy ranking (Claude Fix B / 03.09). gap_freq stayed

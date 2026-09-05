@@ -63,13 +63,21 @@ _PANEL_STATE_KEYS = (
 )
 
 # A cooldown is meant to stop the same setup re-firing on the next bar or two,
-# so it belongs on the strategy's own clock. The stored seconds were written for
-# the M5-and-slower presets; left alone they would silently cost an M5 config
-# five bars of opportunity per fill. Capped, never extended - a config that asks
-# for a short pause still gets exactly what it asks for.
+# so it belongs on the strategy's own clock rather than on a stored second
+# count. Capped, never extended - a config that asks for a short pause still
+# gets exactly what it asks for.
+#
+# The original note here argued from M5 ("five bars of opportunity per fill")
+# and H1 ("two H1 bars would idle the symbol for two hours"). Both bars were
+# retired - M5 on 05.09, H1 before it - so the argument no longer describes
+# anything that can run. The clamp is now inert in practice: at M15/M30 every
+# live row's stored cooldown is already shorter than the bar cap, so
+# min(configured, bars * tf_sec) picks the configured value on all seven.
+# Kept because it is the arm that would bind again the moment a faster bar or
+# a longer stored pause returns.
 _COOLDOWN_BARS = 2
 # Swing / higher-TF families already wait a full bar between signals; one bar of
-# post-fill silence is enough. Two H1 bars would idle the symbol for two hours.
+# post-fill silence is enough.
 _COOLDOWN_BARS_SWING = 1
 # Both moved to ``sessions`` so the walk-forward can refuse the same gap fills
 # this gate refuses live. Re-exported under the old private name because the
