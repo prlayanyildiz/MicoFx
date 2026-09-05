@@ -29,6 +29,7 @@ from ..models import (
     SymbolConfig,
     SystemConfig,
     invalid_exit_param,
+    is_valid_instrument_name,
     strategy_allows_timeframe,
 )
 from ..mt5client import MT5Client
@@ -1119,7 +1120,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             if broker_changing:
                 want = str(patch["broker_symbol"] or "").strip()
                 if want:
-                    if not all(ch.isalnum() or ch in "._-" for ch in want):
+                    if not is_valid_instrument_name(want):
                         raise HTTPException(
                             400, f"broker_symbol gecersiz ({want!r}) - "
                                  f"harf/rakam/_/./- disinda karakter olamaz")
@@ -1693,7 +1694,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     409, f"broker_symbol birden fazla sembole ayni anda atanamaz "
                          f"({len(targets)} hedef) - her config tek bir enstrumani "
                          f"yonetmeli")
-            if want and not all(ch.isalnum() or ch in "._-" for ch in want):
+            if want and not is_valid_instrument_name(want):
                 raise HTTPException(
                     400, f"broker_symbol gecersiz ({want!r}) - "
                          f"harf/rakam/_/./- disinda karakter olamaz")

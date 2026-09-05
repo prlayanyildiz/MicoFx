@@ -7,7 +7,14 @@ import time
 from typing import Any
 
 from .logbus import LOG
-from .models import OPT_FIELDS, STRATEGIES, TIMEFRAMES, SymbolConfig, SystemConfig
+from .models import (
+    OPT_FIELDS,
+    STRATEGIES,
+    TIMEFRAMES,
+    SymbolConfig,
+    SystemConfig,
+    is_valid_instrument_name,
+)
 from .paths import DB_PATH, ensure_dirs, load_defaults
 
 # Retired family knobs that may still sit in old symbol payloads. Load
@@ -485,7 +492,7 @@ class Store:
         # narrow beyond that: the name is a settings key, a dict key and a URL
         # path segment, so no slashes, spaces or punctuation that would change
         # what those mean.
-        if not name or not all(ch.isalnum() or ch in "._-" for ch in name):
+        if not is_valid_instrument_name(name):
             raise ValueError("Gecerli bir sembol adi yazin (harf/rakam/_/./-)")
         if name in self.symbols:
             raise ValueError(f"{name} zaten portfoyde")

@@ -85,6 +85,16 @@ class _Optimizer:
     MAX_COST_PER_TRADE_R = 0.25
     def apply(self, *a, **k): return {"ok": True}
 
+    def refresh_live_costed_stamp(self, symbol: str):
+        """patch_symbol calls this whenever a session-clock edit lands.
+
+        Added 05.09: without it every test here that PATCHes a session window
+        died on AttributeError before its assertion, so the enable-gate guard
+        this file carries was dead. None = nothing to restamp, which is the
+        branch that leaves the caller's config alone.
+        """
+        return None
+
 
 def _cfg(symbol, *, optimised, enabled=False, magic=1):
     c = SymbolConfig(symbol=symbol, magic=magic, enabled=enabled)
@@ -112,11 +122,20 @@ def test_an_unsearched_symbol_cannot_be_switched_on():
 
 
 def test_the_message_names_what_it_is_actually_carrying():
-    """"mtf_pullback/M5" is the default, and saying so is the whole point."""
+    """The refusal must quote the config the row is really on.
+
+    Read from SymbolConfig rather than pinned to a literal: this said
+    "mtf_pullback/M5" because that WAS the untouched default, and it stopped
+    being true on 05.09 when M5 was retired and the default bar became M30. The
+    point of the test is that the operator is told what the row carries, not
+    which particular pair that happens to be today.
+    """
     tc, _ = _client([_cfg("EURUSD", optimised=False)])
     body = tc.post("/api/symbols/EURUSD", json={"enabled": True}).text
     assert "EURUSD" in body
-    assert "mtf_pullback" in body and "M5" in body
+    default = SymbolConfig(symbol="EURUSD", magic=1)
+    assert default.strategy in body, f"{default.strategy} mesajda yok: {body}"
+    assert default.timeframe in body, f"{default.timeframe} mesajda yok: {body}"
 
 
 def test_bulk_enable_is_refused_for_the_same_reason():

@@ -11,7 +11,11 @@ import numpy as np
 from . import indicators as ind
 from .exits import harvest_trail_step, overlay_stop
 from .models import SCALE_OUT_FRAC, SymbolConfig, trail_min_step
-from .sessions import MAX_SIGNAL_BAR_AGE_BARS, WEEKEND_OPEN_GROUPS
+from .sessions import (
+    MAX_SIGNAL_BAR_AGE_BARS,
+    WEEKEND_OPEN_GROUPS,
+    WEEKEND_WINDDOWN_MIN,
+)
 from .strategy import IndicatorCache, Params, compute
 
 # One simulate() call is one symbol's window. Live filters autopsies by
@@ -30,11 +34,38 @@ def _blocked_entry_hours(cfg: SymbolConfig) -> list[int]:
 
 def _drop_blocked_entry_hours(cfg: SymbolConfig, times: np.ndarray,
                               mask: np.ndarray) -> np.ndarray:
+    """Every entry refusal the live gate applies but the window maths does not.
+
+    Called at all four ``session_mask`` return paths on purpose. The Friday
+    wind-down was added to ``sessions.evaluate`` on 05.09 and applied at each of
+    its three return paths there - but nothing taught this side, so the replay
+    kept taking Friday 22:00-23:59 entries the live engine now refuses.
+    ``test_session_mask_matches_the_live_session_gate`` caught it: 24 of 2016
+    bars, all "gun 5, 22:xx, maske=True kapi=False".
+
+    That divergence is the exact failure this module keeps paying for - a
+    replay that is allowed to do something live cannot, so the search scores a
+    product that is not the one trading. Folding both refusals into one helper
+    rather than repeating them at four call sites is the point: a new refusal
+    now has one place to be added, not four to be remembered.
+    """
+    times_arr = np.asarray(times)
     hours = _blocked_entry_hours(cfg)
-    if not hours:
-        return mask
-    bar_hour = (np.asarray(times) % 86400) // 3600
-    return mask & ~np.isin(bar_hour, np.asarray(hours, dtype=np.int64))
+    if hours:
+        bar_hour = (times_arr % 86400) // 3600
+        mask = mask & ~np.isin(bar_hour, np.asarray(hours, dtype=np.int64))
+
+    # Friday wind-down. Mirrors sessions._block_weekend_winddown, including its
+    # two exemptions: an explicitly weekend_open symbol and the crypto group,
+    # both of which are supposed to carry through the weekend.
+    if WEEKEND_WINDDOWN_MIN > 0 and not getattr(cfg, "weekend_open", False) \
+            and str(getattr(cfg, "group", "") or "").strip().lower() \
+            not in WEEKEND_OPEN_GROUPS:
+        days = ((times_arr // 86400 + 3) % 7) + 1     # Mon=1 .. Sun=7
+        minutes = (times_arr % 86400) // 60
+        winddown = (days == 5) & (minutes >= (24 * 60 - WEEKEND_WINDDOWN_MIN))
+        mask = mask & ~winddown
+    return mask
 
 # Out-of-sample samples thinner than this are noise, not evidence.
 MIN_TEST_TRADES = 25

@@ -50,8 +50,14 @@ class _Client:
 
 
 def _cfg():
-    return SymbolConfig(symbol="XAUUSD", magic=1, strategy="stoch_flip",
-                        timeframe="M5", sl_atr_mult=1.0, trail_step_atr=0.6)
+    # A LIVE family and bar. This was stoch_flip/M5 - both retired - so
+    # Optimizer.apply refused at the family/TF gate before ever reaching the
+    # zero-cost check this file exists to guard. The tests were red for a
+    # reason unrelated to their subject, which meant the guard itself was dead:
+    # a charged stamp really could have started carrying zero cost and nothing
+    # here would have said so. (05.09)
+    return SymbolConfig(symbol="XAUUSD", magic=1, strategy="burst",
+                        timeframe="M30", sl_atr_mult=1.0, trail_step_atr=0.6)
 
 
 def _detail(**over):
@@ -79,7 +85,7 @@ def test_explicit_charged_stamp_with_zero_cost_is_refused():
     cfg = _cfg()
     result = _opt(cfg).apply(
         "XAUUSD", {"sl_atr_mult": 1.2}, score=9.9,
-        detail=_detail(charge_costs=True), timeframe="M5", strategy="stoch_flip")
+        detail=_detail(charge_costs=True), timeframe="M30", strategy="burst")
     assert not result["ok"]
     assert "maliyet" in (result.get("error") or "").lower()
     assert cfg.opt_score != 9.9
@@ -89,7 +95,7 @@ def test_omitted_stamp_with_zero_cost_does_not_claim_charged():
     cfg = _cfg()
     result = _opt(cfg).apply(
         "XAUUSD", {"sl_atr_mult": 1.2}, score=9.9,
-        detail=_detail(), timeframe="M5", strategy="stoch_flip")
+        detail=_detail(), timeframe="M30", strategy="burst")
     assert result["ok"], result
     assert cfg.opt_summary["charge_costs"] is False
     assert cfg.opt_summary["holdout"]["cost_per_trade_r"] == 0.0
@@ -101,6 +107,6 @@ def test_charged_stamp_with_real_cost_still_writes():
     detail["holdout"] = {**detail["holdout"], "cost_per_trade_r": 0.027}
     result = _opt(cfg).apply(
         "XAUUSD", {"sl_atr_mult": 1.2}, score=9.9,
-        detail=detail, timeframe="M5", strategy="stoch_flip")
+        detail=detail, timeframe="M30", strategy="burst")
     assert result["ok"], result
     assert cfg.opt_summary["charge_costs"] is True

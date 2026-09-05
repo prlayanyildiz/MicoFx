@@ -20,27 +20,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 
-class _Store:
-    """Only the name check runs; the rest of add_symbol needs a real store."""
-
-    symbols: dict = {}
-
-    def _check(self, symbol: str) -> str:
-        name = str(symbol or "").strip().upper().replace(" ", "_")
-        if not name or not all(ch.isalnum() or ch in "._-" for ch in name):
-            raise ValueError("bad")
-        return name
+from micofx.models import is_valid_instrument_name
 
 
 def _accepts(name: str) -> bool:
-    import re
+    """Ask the real rule, not a re-implementation of it.
 
-    src = Path(__file__).resolve().parents[1] / "micofx" / "store.py"
-    line = [ln for ln in src.read_text(encoding="utf-8").splitlines()
-            if "ch.isalnum() or ch in" in ln][0]
-    allowed = re.search(r'ch in "([^"]*)"', line).group(1)
-    cleaned = str(name).strip().upper().replace(" ", "_")
-    return bool(cleaned) and all(c.isalnum() or c in allowed for c in cleaned)
+    This used to grep store.py for the line containing ``ch.isalnum() or ch in``
+    and re-derive the allowed characters from it with a regex. That made the
+    file fail on 05.09 for a change that did not alter the rule at all: the rule
+    moved into ``models.is_valid_instrument_name`` so the web layer's
+    broker_symbol patch could share it instead of keeping a second copy - which
+    is exactly what ``test_add_symbol_is_the_only_place_that_checks`` below
+    asks for. A test that reads the source cannot tell "the rule changed" from
+    "the rule moved", and it re-implements the very logic it is checking.
+
+    ``add_symbol`` upper-cases and turns spaces into underscores before the
+    check, so that normalisation is applied here too.
+    """
+    cleaned = str(name or "").strip().upper().replace(" ", "_")
+    return is_valid_instrument_name(cleaned)
 
 
 @pytest.mark.parametrize("name", ["BRENTOIL-PERP", "AAPL.US-24", "XOM.US-24",
@@ -66,9 +65,19 @@ def test_the_message_names_the_hyphen():
     assert "-" in src[i:i + 80], "the error should say what is allowed"
 
 
-def test_add_symbol_is_the_only_place_that_checks():
-    """A second copy of this rule is how the two doors drift apart."""
+def test_there_is_still_exactly_one_copy_of_this_rule():
+    """A second copy of this rule is how the two doors drift apart.
+
+    Two doors need it now: ``Store.add_symbol`` for a new row, and the web
+    layer's ``broker_symbol`` patch for repointing an existing one - the second
+    was added 05.09, when broker_symbol turned out to have no validation at all.
+    The answer is one shared function, not a second inline copy, so what this
+    pins is that the character class is written down once.
+
+    Named for what it checks rather than for store.py, which is no longer where
+    it lives.
+    """
     root = Path(__file__).resolve().parents[1] / "micofx"
-    hits = [p.name for p in root.rglob("*.py")
-            if "ch.isalnum() or ch in" in p.read_text(encoding="utf-8")]
-    assert hits == ["store.py"], hits
+    hits = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.py")
+                  if "ch.isalnum() or ch in" in p.read_text(encoding="utf-8"))
+    assert hits == ["models.py"], hits

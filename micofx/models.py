@@ -609,6 +609,27 @@ SWING_GRID_OVERLAY: dict[str, list] = {
 }
 
 
+def is_valid_instrument_name(name: str) -> bool:
+    """One copy of the rule for what may name a broker instrument.
+
+    The hyphen is not decoration: this broker names 158 tradeable instruments
+    with one - every dated equity CFD (AAPL.US-24) and the perpetuals
+    (BRENTOIL-PERP). Refusing it rejected real symbols with a message that read
+    like the operator mistyped. Deliberately narrow beyond that: the name is a
+    settings key, a dict key and a URL path segment, so no slashes, spaces or
+    punctuation that would change what any of those mean.
+
+    Lives here rather than in Store because two doors now need it -
+    ``Store.add_symbol`` for a new row, and the web layer's ``broker_symbol``
+    patch for repointing an existing one. ``test_a_broker_name_with_a_hyphen_
+    is_valid`` pins that there is exactly one copy, and its reasoning is the
+    reason this function exists: "a second copy of this rule is how the two
+    doors drift apart". (05.09)
+    """
+    text = str(name or "").strip()
+    return bool(text) and all(ch.isalnum() or ch in "._-" for ch in text)
+
+
 def is_scalp_strategy(strategy: str) -> bool:
     return strategy in SCALP_STRATEGIES
 
