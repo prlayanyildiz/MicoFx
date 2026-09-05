@@ -351,6 +351,24 @@ def spread_cap_search_axis(bars: Any, point: float, live_cap: float,
     return sorted(out)[:5]
 
 
+def _hashable(value):
+    """A dict-key-safe view of a config value.
+
+    Config values are JSON shapes: a few of them are lists (blocked_entry_hours)
+    and could become dicts. Anything built into a cache key has to survive
+    ``hash()``, and the cost of it not doing so is not a slow cache - it is a
+    TypeError inside a try/except that turns the whole lookup into None. See
+    _fresh_incumbent_holdout.
+    """
+    if isinstance(value, (list, tuple)):
+        return tuple(_hashable(v) for v in value)
+    if isinstance(value, dict):
+        return tuple(sorted((str(k), _hashable(v)) for k, v in value.items()))
+    if isinstance(value, set):
+        return tuple(sorted(_hashable(v) for v in value))
+    return value
+
+
 def _sessions_key(windows: list | None) -> tuple[tuple[str, str], ...]:
     out: list[tuple[str, str]] = []
     for row in windows or []:
@@ -2503,8 +2521,22 @@ class Optimizer:
             if not charging:
                 return None
             params = {k: getattr(cfg, k) for k in OPT_FIELDS if hasattr(cfg, k)}
+            # ``_hashable`` is not tidiness. ``blocked_entry_hours`` is an
+            # OPT_FIELD and it is a LIST, so the key below was unhashable and
+            # ``key in cache`` raised TypeError - swallowed by the bare except
+            # at the bottom, which made this function return None on EVERY
+            # call, for every symbol, including ones whose list is empty.
+            #
+            # That is not a lost cache. Two callers read None as "no fresh
+            # replay exists": _beats_incumbent's unvalidated-stamp branch then
+            # returns True (candidate wins by default) and the same-window
+            # branch skips the fresh comparison entirely, while
+            # _incumbent_kept_tail falls back to quoting the stale stamp - the
+            # exact thing test_keep_log_does_not_quote_a_stale_stamp is named
+            # after. The incumbent's fresh-replay defence has been off.
+            # Found 05.09 by chasing why that test was red. (T1)
             key = (str(cfg.symbol), str(cfg.timeframe), str(cfg.strategy),
-                   tuple(sorted(params.items())))
+                   tuple(sorted((k, _hashable(v)) for k, v in params.items())))
             cache = getattr(self, "_incumbent_holdout_cache", None)
             if cache is None:
                 self._incumbent_holdout_cache = {}
