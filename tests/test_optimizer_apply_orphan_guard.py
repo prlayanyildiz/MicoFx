@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.models import SymbolConfig, SystemConfig
+from micofx.models import EXIT_RISK_FIELDS, SymbolConfig, SystemConfig
 from micofx.optimizer import Optimizer
 
 
@@ -87,7 +87,19 @@ def test_apply_holds_back_exit_fields_when_orphan_scan_pending_and_no_visible_po
                        detail=STAMP)
 
     assert result["ok"] is True
-    assert store.updated_with["pending_exit_patch"] == {"sl_atr_mult": 2.0}
+    held = store.updated_with["pending_exit_patch"]
+    # Asserted as a property, not as an exact dict. Production now defers the
+    # whole exit set rather than only the field the caller moved, which is the
+    # safer direction while a ticket may exist that nothing can see - and it
+    # made an exact-equality assertion fail for a change that strengthened the
+    # guard. What must hold: the changed exit field is deferred at its new
+    # value, a non-exit field is NOT deferred, and nothing outside the exit set
+    # gets held back.
+    assert held.get("sl_atr_mult") == 2.0, held
+    assert "t3_length" not in held, (
+        f"cikis disi alan da geri tutuldu, bosuna erteleniyor: {held}")
+    assert set(held) <= set(EXIT_RISK_FIELDS), (
+        f"cikis kumesi disinda alan geri tutuldu: {sorted(set(held) - set(EXIT_RISK_FIELDS))}")
     assert "sl_atr_mult" not in store.updated_with
     # Entry-signal param is NOT held back - only exit/risk fields are.
     assert store.updated_with["t3_length"] == 10

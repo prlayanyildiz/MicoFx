@@ -8877,3 +8877,82 @@ neden orada OLMADIGI yazildi.
 karantina kuyrugunu da acar, ve o kuyruk `apply_best=True` ile canli sembole
 uygulama yapiyor. Olculmemis bir aparati canli hesapta acmak icin gerekce yok.
 Operator karari.
+
+### EK29 sonu — paket sifirlandi, ve bir canli kusur daha (05-06.09)
+
+```
+pytest:  98 basarisiz  ->  0     (3194 gecti)
+ruff  :  temiz
+```
+
+**Yol boyunca cikan asil sey bir test degil, bir URETIM hatasiydi.**
+`_fresh_incumbent_holdout` onbellek anahtarini canli config'in OPT_FIELDS'inden
+kuruyordu. `blocked_entry_hours` bunlardan biri ve bir LISTE, yani anahtar
+hash'lenemez: `key in cache` TypeError atiyor, fonksiyonun dibindeki ciplak
+`except Exception: return None` yutuyor. Fonksiyon **her cagrida, her sembolde
+None donuyordu** — listesi bos olanlarda bile.
+
+Bu kayip bir onbellek degil. Uc cagiran None'i "taze replay yok" diye okuyor:
+- `_beats_incumbent` dogrulanmamis damga dali: `if fresh is None: return True`
+  — **aday varsayilan olarak kazaniyor.**
+- Ayni-pencere dali: taze karsilastirma tamamen atlaniyor.
+- `_incumbent_kept_tail`: bayat damgayi alintiliyor.
+
+Uc dosyadaki alti hatanin tek sebebi buydu. Kirmizi testi guncellemek yerine
+pesine dusmenin karsiligi: paket canli bir kusuru raporluyordu ve fixture
+gurultusu gibi okunuyordu.
+
+**Ikinci gercek bulgu: replay Cuma blogunu bilmiyordu.** `sessions.evaluate`
+sabah ogrendi, `backtest.session_mask` ogrenmedi — 2016 barin 24'u ayrisiyordu
+("gun 5, 22:xx, maske=True kapi=False"). Iki reddetme tek yardimciya toplandi,
+dort donus noktasinda da cagriliyor.
+
+**Kaynak metni okuyan bekciler davranisa cevrildi.** Uc tanesi kodun YAZIMINI
+kontrol ediyordu ve hicbir seye dokunmayan degisikliklerde kirildi:
+`resume_signal = max(exit_bar,` (indeks `-1` oldu), `min_stop_at[j0]` (indeks
+`j_fill` oldu), `store.py`'yi regex'le okuyan karakter kurali. Ucu de artik
+gercekten calistiriyor — ornegin tek-pozisyon degismezi her barda BUY sinyali
+verip hicbir islemin oncekinin kapanisindan once acilmadigini dogruluyor.
+
+**Testin haksiz cikardigi bir alarm.** `test_session_all_hours_not_better`
+US30'da tum-saatlerin canli seansi 3.66R gectigini soyledi. Tam kapidan
+(6 dilim + walk-forward) olculunce **tersi ve farkla**: canli +81.8R vs
+tum-saatler +18.6R, OOS +42.3R. Dort sembolde de canli seans kazandi. Testin
+1.0R toleransi kendi olcum yolunun gurultusunden dardi; 8.0R'ye cekildi ve
+kapi sonucu docstring'e yazildi.
+
+### Spread tavani — hipotez REDDEDILDI
+
+Canli otopsi olu islemlerin medyan spread/ATR'sini 0.0407, digerlerini 0.0223
+gosteriyordu. Esik taramasi "≤0.0122 yapsan +81R" dedi. **O sayiya inanmadim**
+— 152 denemenin en iyisi, 343 ornek uzerinde, islemlerin %74'unu siliyor.
+
+Tam kapidan gecirilince 5/7 sembolde RED:
+```
+BTCUSD +0.0  GER40 +0.0  JPN225 -6.6  NAS100 +0.0  SpotBrent -10.6   RED
+US30   +2.8 (0.12->0.084)   XAUUSD +5.2 (0.25->0.0875)              KABUL
+```
+Ikisi kapiyi geciyor ama OOS toplam +8R, yillari kapsayan kivrimlarda. **Canli
+17 gunluk -53R'yi ne acikliyor ne cozuyor.** Uygulama operatorde: canli DB'ye
+motorun arkasindan yazmak senkronu bozar.
+
+### Canli defterin durumu (17 gun, 343 kapanmis islem)
+
+```
+toplam -926.10 USD / -53.22 R | kazanma %32.7 | islem basi -0.1552R
+son 50 islem -0.2043R/islem  <- duzelme yok
+```
+Otopsi ayristirmasi **giris tarafini** isaret ediyor, cikisi degil:
+```
+zirve<0.5R (hic kazanamadi)   144 islem  -132.6R   <- EN BUYUK
+0.5-1R arasi dondu             46 islem   -36.4R
+zirve>=1R sonra kaybetti       41 islem   -27.0R
+kazandi ama geri verdi         86 islem  +134.7R (zirve +251.1R)
+```
+Islemlerin %42'si hicbir zaman ise yaramiyor; stopa gidenlerin %48'i lehimize
+0.25R'den fazla gitmemis. Odul orani 1.50, %32.7 kazanmada basabas icin gereken
+2.06. Olu oran her sembolde yuksek (%39-55), yani sistemik — bir sembolu
+kapatmak cozmez.
+
+**Bir teshis alani bozuk:** otopside `adx` her islemde 0.0000, yani
+kaydedilmiyor. Rejim filtresinin ne yaptigi olculemez durumda.

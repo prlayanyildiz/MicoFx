@@ -75,9 +75,15 @@ def test_sl_retune_allows_charged_improvement():
         "capture": 0.1, "exits": {}, "holdout_days": 500.0,
     })
     # Hybrid gate also needs premature autopsy on force widen.
+    # exit_reason/r_realised are required: premature_sl_count_from_autopsy was
+    # narrowed on 03.09 to count only losing hard-stop prints (live US30 read
+    # prem=65 off only 50 SL rows before that). The fixture predates the
+    # narrowing, so it counted 0 and the widen gate correctly refused - the
+    # gate was right and the evidence was malformed.
     opt.store.get_setting = MagicMock(return_value=[
-        {"symbol": "GER40", "after_1h_bars": 10,
-         "after_1h_through_entry": True, "after_1h_recovery_r": 1.0}
+        {"symbol": "GER40", "exit_reason": "sl", "r_realised": -1.0,
+         "after_1h_bars": 10, "after_1h_through_entry": True,
+         "after_1h_recovery_r": 1.0}
         for _ in range(5)
     ])
     res = opt.apply(

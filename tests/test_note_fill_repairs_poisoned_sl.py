@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from micofx.execution import ExecutionMonitor
-from micofx.engine import Engine
 from micofx import execution as execution_mod
+from micofx.engine import Engine
+from micofx.execution import ExecutionMonitor
 
 
 def _tracker() -> ExecutionMonitor:

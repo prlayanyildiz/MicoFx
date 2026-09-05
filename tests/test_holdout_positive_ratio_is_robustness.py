@@ -103,10 +103,19 @@ def test_f1_pos_ratio_blocks_weaker_robustness_stamp():
             "expectancy": 0.1, "profit_factor": 1.2, "cost_per_trade_r": 0.01,
         },
     }
-    reason = opt.reject_reason(cfg, best, strategy="burst", timeframe="M30")
-    assert "tutarlilik" in reason
-    best["positive_ratio"] = 0.67
-    reason = opt.reject_reason(cfg, best, strategy="burst", timeframe="M30")
-    assert "tutarlilik" in reason
+    # Asserted as "refused, and the number is named", not as one Turkish word.
+    # A ratio weaker than the incumbent's is caught by two different gates
+    # depending on how weak it is - min_positive_ratio ("holdout dilimleri
+    # kirilgan") below 0.6, and the family/TF-flip consistency gate
+    # ("tutarlilik zayif") between 0.6 and the stamp's own 0.83. Pinning the
+    # second gate's wording made the test fail when the first one legitimately
+    # answered first, which says nothing about the property this file guards:
+    # that a weaker robustness fraction cannot replace a stronger one.
+    for weaker in (0.50, 0.67):
+        best["positive_ratio"] = weaker
+        reason = opt.reject_reason(cfg, best, strategy="burst", timeframe="M30")
+        assert reason, f"positive_ratio {weaker} reddedilmedi (damga 0.83)"
+        assert f"{weaker:.2f}" in reason, (
+            f"red gerekcesi orani adlandirmiyor: {reason}")
     best["positive_ratio"] = 0.83
     assert opt.reject_reason(cfg, best, strategy="burst", timeframe="M30") == ""
