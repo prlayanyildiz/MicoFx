@@ -530,7 +530,26 @@ class RiskManager:
             return stored
         if self._setting_pin_active(self._KASA_PIN_CONC):
             return stored
-        n = self._vacant_enabled_count(positions)
+        # The BOOK size, not the vacant count. This read
+        # ``_vacant_enabled_count(positions)`` until 05.09, which made the
+        # book-wide concurrent-risk ceiling fall every time a ticket opened:
+        # 17.6% at flat, 15.0 with one open, 12.5 with two, 10.0 with three,
+        # 7.5 with four. A ceiling that shrinks as you approach it is not a
+        # ceiling - measured, the book jammed at 4 concurrent positions out of
+        # 7 validated names, and the refusal ("eszamanli risk limiti") never
+        # named that as the cause. The replay each config is judged on has no
+        # cross-symbol cap at all, so the gap was invisible on both sides.
+        #
+        # Measured cost before the fix, seven symbols replayed on one timeline
+        # over the shared 2022-11..2026-09 window: 260 of 8124 entries refused,
+        # carrying +79.8R of +954.8R - 8.4% of net R, 85% of it XAUUSD. Real,
+        # but second-order: the book wants 4+ concurrent only 8.6% of the time.
+        # Reported as a mechanism, not as the live-vs-holdout cause.
+        #
+        # Splitting by vacancy stays correct for LOT sizing (see
+        # live_lot_multiplier) - remaining margin genuinely is shared out among
+        # the names that can still fill. It is only wrong for the ceiling.
+        n = self._enabled_count()
         plan = compute_kasa_targets(
             equity=equity,
             n_enabled=n,
@@ -617,6 +636,18 @@ class RiskManager:
         if reference <= 0:
             return 1.0
         return max(self.EDGE_MIN, min(self.EDGE_MAX, (mine / reference) ** 0.5))
+
+    def _enabled_count(self) -> int:
+        """How many names the book can hold at once, ignoring what is open.
+
+        The concurrent-risk ceiling is a property of the book, not of how much
+        of it is currently in use - see live_concurrent_pct. Floored at 1 so an
+        empty or all-disabled book cannot produce a zero ceiling that refuses
+        every entry.
+        """
+        n = sum(1 for cfg in list(self.store.symbols.values())
+                if getattr(cfg, "enabled", True))
+        return max(1, n)
 
     def _vacant_enabled_count(self, positions: list[dict[str, Any]] | None) -> int:
         """Enabled names that do not already hold one of our tickets.

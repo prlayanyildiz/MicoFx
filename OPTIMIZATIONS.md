@@ -8652,3 +8652,171 @@ kapandi. **Kitap 7 sembol olarak kaliyor.**
 Kaydedilen tek acik uc: GOLD-PERP'in risk-ayarli ustunlugu (netR/maxDD 4.70 vs
 2.24) gercek. Bugun onemli degil cunku kitap R/gun ile buyuyor; drawdown
 baglayici hale gelirse tekrar bakilir.
+
+---
+
+## EK29 — Tersine muhendislik taramasi: kapilar, ateslemeyen korumalar (05.09)
+
+Operator: *"tersine muhendislik ile sistemi full tara olu emekli bayat kod tf
+ler semboller kablo boru kose kenar kapi herseye bak"* ve *"tam yetkin var ne
+gerekiyorsa yap"*.
+
+Uc ajan uc ayri yuzeyi taradi (canli motor yollari / dis API+panel / test+
+kopru+script). **Her bulgu uygulanmadan once elle calistirilarak dogrulandi**;
+asagida yalnizca dogrulananlar var.
+
+### A. Eszamanli risk tavani — olculdu, sonra buyutulmedi
+
+`live_concurrent_pct` tavani **bos slot sayisindan** turetiyordu, yani defter
+doldukca daraliyordu:
+
+```
+acik  0 -> %17.6    acik  3 -> %10.0
+acik  1 -> %15.0    acik  4 ->  %7.5   <- burada tikaniyor
+acik  2 -> %12.5
+```
+
+Islem basi %2 riskle defter **7 dogrulanmis sembolun en fazla 4'unu** ayni anda
+tutabiliyordu. Red mesaji (`eszamanli risk limiti`) sebebi soylemiyordu, panel
+de "%12.09 / max %12.5" yaziyordu — yani yer varmis gibi.
+
+**Ilk hipotezimi olcum kucultttu.** Bunun holdout-canli bosluğunun mekanizmasi
+olabilecegini soyledim; yedi sembolu tek zaman cizgisinde oynatip gercek kapiyi
+uygulayinca:
+
+```
+ortak pencere 2022-11 .. 2026-09, 8124 islem
+  esZAMANLI 0-3 pozisyon : %89.3      <- kapinin hic degmedigi bolge
+  esZAMANLI 4            :  %6.5
+  esZAMANLI 5+           :  %2.1
+
+kapi uygulaninca: 260 islem reddediliyor, +79.8R
+  = replay'in gordugu +954.8R'nin %8.4'u
+  XAUUSD 111 red +67.7R (kaybin %85'i) | NAS100 51 red -12.0R (reddi KAZANC)
+```
+
+Gercek ama **ikinci dereceden**. Sebep degil, sizinti. (Olcumun kusuru: ayni
+barda acilip kapanan islemlerde sayac ~%2 negatife dusuyor; ve reddedilen islem
+tekrar denenmiyor varsayildi, yani %8.4 bir UST SINIR.)
+
+**Duzeltme dar tutuldu.** Once "operatorun ayarini oku" dusundum — `15.2`.
+Ama `kasa_sizing.py:111` o degeri autopilot'un kendi ciktisindan geri yaziyor,
+yani ayari okumak dongusel olurdu. Gercek hata cagri yerinde: **bos slot
+sayisi, `n_enabled` adli parametreye geciriliyordu.** Yeni `_enabled_count()`
+defter boyutunu veriyor; tavan artik %17.6'da sabit ve 7 pozisyonun tamami
+acilabiliyor. Lot boyutlandirmadaki bos-slota bolme **dokunulmadan kaldi** —
+orada dogru: kalan marj gercekten dolabilecek isimler arasinda paylasilir.
+
+Bir tavanin, kendisine yaklastikca daralmasi tavan degildir.
+
+### B. `broker_symbol` — hicbir korumadan gecmiyordu
+
+Bu alan config'in barlarinin, tick'lerinin, marjinin ve emirlerinin hangi broker
+enstrumanindan geldigine karar veriyor — `magic` ile ayni sinif karar, ve
+`magic` dort ayri korumadan geciyor. Bu **hicbirinden** gecmiyordu: `guarded`
+kumesinde olmadigi icin giris kilidi ve acik-pozisyon kontrolu **hic
+girilmiyordu**, format ve benzersizlik kontrolu de yoktu.
+
+Tek PATCH ile canli, acik bir XAUUSD satiri baska bir enstrumana (emekli bir
+isim dahil) yonlendirilebilirdi; satir XAUUSD'nin etiketini, seansini, spread
+tavanini ve holdout damgasini korurdu. Etkinlestirme kapilari zaten etkin bir
+sembolde tekrar calismaz, yani sonraki her R rakami islem gormemis bir isme
+yazilirdi. Toplu uc daha kotu: tek deger **tum defteri** bir enstrumana
+yonlendirirdi.
+
+Eklendi: `guarded` kumesine dahil, format kontrolu, benzersizlik (iki config
+tek enstrumani yonetemez), acik pozisyonda 409, ve toplu ucta cok-hedef reddi.
+
+### C. Uykudaki aileler arama yolundan girebiliyordu
+
+`POST /api/opt/run` `strategies` alani **hic dogrulanmiyordu**, ve optimizer
+5'li `models.STRATEGIES`'e gore filtreliyordu — uykudaki `sweep_fade` /
+`range_fade` dahil. `defaults.json` hala onlarin grid'lerini gonderiyor, yani
+sweep'in oynatacak ekseni de vardi. Tek cagri yeterliydi:
+
+```
+POST /api/opt/run {"symbols":["XAUUSD"],"strategies":["sweep_fade"],"apply_best":true}
+```
+
+Hicbir sey dogrulamamis bir aile aranip kazanan olarak **canli etkin bir
+sembole** mesru gorunumlu bir damgayla uygulanabilirdi. Ajanlar bu uca zaten
+komut veriyor (`cursor/max_yield.py`, `cursor/watch_flat_partials.py`).
+
+Iki yerde de aranan kumeye (`store.opt_params()["strategies"]`) baglandi.
+Bir aileyi geri acmak bir **olcum karari + defaults.json'a gonderme** isidir,
+API argumani degil.
+
+### D. `trade_days` dogrulamasi olu koddu
+
+Dogrulayici `_session_clock_changed` icine tasinmis ve o fonksiyonun
+`return False`'unun **altina** dusmustu — hic calismiyordu. Ve model reddetmiyor,
+**yerine baska bir sey koyuyor**:
+
+```
+[]      -> [1,2,3,4,5]   sembolu kapatmak isterken TAM HAFTA
+[0]     -> [1,2,3,4,5]
+[1,8]   -> [1]           bir yazim hatasi haftayi Pazartesi'ye indiriyor
+```
+
+Hepsi 200 OK donuyordu. Dogrulayici `_validate_sessions`'a (gercekten cagrilan
+fonksiyon) tasindi.
+
+**Bunun neden fark edilmedigi ayrica onemli:** tek kapsayan testler 66 bilinen
+hatanin icinde kirmiziydi — `_Optimizer` sahtesi `refresh_live_costed_stamp`
+tasimadigi icin. Kirmizi bir test hicbir sey kanitlamaz. Sahte onarildi; dosya
+19/29 -> 29/29.
+
+### E. Silahsizlandirilan iki kopru scripti
+
+Ikisinde de `if __name__` korumasi yoktu — **import edilmeleri yetiyordu**.
+
+- `force_ger40.py`: `POST /api/app/restart` — canli motoru **acik pozisyon
+  kontrolu olmadan** yeniden baslatiyor (`.bridge/NASIL.md` bunu acikca
+  yasakliyor), ardindan `force:true` ve `score: 0.0` ile GER40'a damga basiyor.
+- `_land_claude_2244.py`: `cursor/FOR_CLAUDE.md`'ye 04.09 tarihli otoriter
+  gorunumlu bayat bir brifing ekliyor ve `WAKE.txt` ile bir sonraki oturumu o
+  icerikle uyandiriyor. Ledger korumasi en sonda, yani uc kopru yazisi coktan
+  olmus oluyor.
+
+`.bridge/_arsiv_silahsiz/` altinda `.py.txt` olarak, iki dilli README ile.
+
+### F. Ateslenemeyen korumalar — dokunulmadi, karar operatorde
+
+- **Supervisor kapali** (`enabled=false`): karantina, drawdown olcekleme, saat
+  bloklari hepsi no-op. NAS100/US30/XAUUSD su an `risk_scale 0.6` tasiyor ama
+  `effective_scale 1.0` — kazandiklari %40 kesinti uygulanmiyor. Durum
+  `risk_scale_enforced: false` ile durust sekilde raporlaniyor, yani gizli hata
+  degil; karar verilecek bir durum.
+- **`symbol_daily_loss_pct` armlanamiyor**: 7 sembolde de 0 ve **hicbir yol
+  yazamiyor** — API alani degil, hicbir script yazmiyor. "Bir enstruman kanarken
+  hesap geneli yesil kalirsa" sorusunun cevabi yok. XAUUSD bugunku 12 kapanisin
+  7'sini tasidi.
+- **Scalp/swing pozisyon kovasi** erisilemez (iki alan da 0, yazan yok), ama
+  `risk_kova_limiti` sayaci hala tahsis ediliyor.
+
+### G. Yanlis ifadeler (kayit, henuz duzeltilmedi)
+
+- `risk.py:1298` *"max_concurrent_risk_pct okunmuyor; bu can_open tavani
+  degil"* — iki yarisi da yanlis; `can_open` o tavani uyguluyor.
+- `test_auto_opt_is_gone.py` docstring'i *"otomatik arama yalnizca operatore
+  ait"* — **yanlis**: supervisor karantinaya giren sembolde `apply_best=True`
+  ile arama basliyor (`supervisor.py:1145`). Yalnizca takvim ve decay
+  tetikleyicileri kaldirilmis.
+- `engine.py:66-72` M5 ve H1 uzerine kurulu bar-yasi yorumlari; ikisi de emekli.
+- `test_all_timeframes_searchable.py:115` *"burst retired 27.08"* — emekli olan
+  `micro_rev`'di; `burst` canli ve araniyor.
+
+### H. Sonuc
+
+```
+pytest:  66 basarisiz -> 57  (3137 gecti, once 3128)
+ruff  :  dokunulan dosyalarda temiz
+```
+
+Dokuz test daha geciyor, yeni kirilan yok. Kalan 57 iki onceden var olan kume:
+bayat test sahteleri (~41 test, kirmizi olduklari icin **korumalari da
+olu** — gerileme olsa yeni hata uretmezler) ve ilgisiz davranissal kayma (~20,
+her biri ayri triyaj isteyen).
+
+**Hepsi diskte, canlida degil.** Motor 12:41'de baglandi ve calisiyor; bu
+degisiklikler bir sonraki restart'ta yururluge girer. Aceleye gerek yok.

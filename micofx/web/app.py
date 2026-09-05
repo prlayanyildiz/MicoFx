@@ -270,9 +270,20 @@ def _validate_sessions(patch: dict[str, Any]) -> None:
 
     Nothing validated this field at all, so every malformed spelling reached
     the config: "abc", "9", "09:00:00", an empty string, or a deliberate
-    zero-length 09:00-09:00. trade_days had the same gap - [] or [0, 9] was
-    accepted and left the symbol permanently shut with the panel reporting it
-    opens in 0 minutes.
+    zero-length 09:00-09:00.
+
+    ``trade_days`` has the same shape of gap, and its guard had come loose:
+    the block below had been moved into ``_session_clock_changed`` and landed
+    AFTER that function's ``return False``, so it was unreachable and this
+    docstring's claim that the field was checked was false. The repo's own
+    ``test_bad_trade_days_are_refused`` was red on main because of it. Restored
+    here, in the function that patch_symbol and symbols-bulk actually call.
+
+    What made it worth restoring rather than deleting: SymbolConfig.from_dict
+    does not refuse a bad list, it SUBSTITUTES one, and the substitution is not
+    conservative. ``[]`` (asking to shut the symbol) becomes Mon-Fri; so do
+    ``[0]``, ``[9]`` and ``"abc"``. A typo like ``[1, 8]`` silently becomes
+    ``[1]`` - a week cut to Monday. Every one of those returned 200 OK.
     """
     sessions = patch.get("sessions")
     if sessions is not None:
@@ -296,6 +307,16 @@ def _validate_sessions(patch: dict[str, Any]) -> None:
                          f"sifir uzunluklu pencere 7/24 islem anlamina gelir; "
                          f"seansi kapatmak icin use_sessions yerine trade_days kullanin")
 
+    days = patch.get("trade_days")
+    if days is not None:
+        if not isinstance(days, list) or not days:
+            raise HTTPException(400, "trade_days bos olamaz (1=Pazartesi .. 7=Pazar)")
+        for d in days:
+            if not isinstance(d, int) or isinstance(d, bool) or not 1 <= d <= 7:
+                raise HTTPException(
+                    400, f"trade_days gecersiz gun ({d!r}) - 1..7 arasi olmali "
+                         f"(1=Pazartesi, 7=Pazar)")
+
 
 def _session_clock_changed(cfg, patch: dict[str, Any]) -> bool:
     """True when the live trade mask (use_sessions / windows) actually moved."""
@@ -307,16 +328,6 @@ def _session_clock_changed(cfg, patch: dict[str, Any]) -> bool:
         from ..optimizer import _sessions_key
         return _sessions_key(patch.get("sessions")) != _sessions_key(cfg.sessions)
     return False
-
-    days = patch.get("trade_days")
-    if days is not None:
-        if not isinstance(days, list) or not days:
-            raise HTTPException(400, "trade_days bos olamaz (1=Pazartesi .. 7=Pazar)")
-        for d in days:
-            if not isinstance(d, int) or isinstance(d, bool) or not 1 <= d <= 7:
-                raise HTTPException(
-                    400, f"trade_days gecersiz gun ({d!r}) - 1..7 arasi olmali "
-                         f"(1=Pazartesi, 7=Pazar)")
 
 
 def _require_optimised_before_enabling(patch: dict[str, Any], cfg) -> None:
@@ -1064,7 +1075,22 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # replicate optimizer's hold-and-defer machinery a second time here.
         exit_fields_changing = current is not None and any(
             key in patch and patch[key] != getattr(current, key) for key in EXIT_RISK_FIELDS)
-        guarded = (magic_changing or primary_changing or exit_fields_changing)
+        # ``broker_symbol`` decides which broker instrument this config's bars,
+        # ticks, margin and orders come from - the same class of decision as
+        # ``magic``, which is guarded four separate ways below. It was guarded
+        # none: not in this set, so the entry lock and the open-position check
+        # were never even entered, and no format or uniqueness check ran. One
+        # PATCH could point a live enabled XAUUSD row at any instrument the
+        # terminal resolves - including a retired one - while the row kept
+        # XAUUSD's label, sessions, spread cap and holdout stamp. Nothing
+        # downstream would notice: the enable-time gates do not re-run on an
+        # already-enabled symbol, so every later R figure would be attributed
+        # to a name that was not traded. Added 05.09.
+        broker_changing = (current is not None and "broker_symbol" in patch
+                           and str(patch["broker_symbol"] or "").strip()
+                           != str(current.broker_symbol or "").strip())
+        guarded = (magic_changing or primary_changing or exit_fields_changing
+                   or broker_changing)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -1080,7 +1106,34 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 blocked = _magic_blocked_by_orphan_state(new_magic)
                 if blocked:
                     raise HTTPException(409, blocked)
+            if broker_changing:
+                want = str(patch["broker_symbol"] or "").strip()
+                if want:
+                    if not all(ch.isalnum() or ch in "._-" for ch in want):
+                        raise HTTPException(
+                            400, f"broker_symbol gecersiz ({want!r}) - "
+                                 f"harf/rakam/_/./- disinda karakter olamaz")
+                    # Two configs resolving to one instrument means two magics
+                    # managing one broker object. ``magic`` gets this check;
+                    # this field decides the same thing from the other end.
+                    clash = next(
+                        (s for s, c in store.symbols.items()
+                         if s != symbol
+                         and str(c.broker_symbol or "").strip().upper() == want.upper()),
+                        None)
+                    if clash is not None:
+                        raise HTTPException(
+                            409, f"broker_symbol {want} zaten {clash} tarafindan "
+                                 f"kullaniliyor - iki config tek enstrumani yonetemez")
             if guarded and current is not None:
+                if broker_changing:
+                    open_here = _open_under_magic(current.magic)
+                    if open_here:
+                        raise HTTPException(
+                            409, f"{symbol}: broker eslemesi degistirilemedi, "
+                                 f"{len(open_here)} acik pozisyon var - esleme "
+                                 f"degisirse acik ticket baska bir enstrumanin "
+                                 f"barlariyla yonetilir (once kapatin)")
                 if magic_changing or primary_changing:
                     open_here = _open_under_magic(current.magic)
                     # optimizer.apply() already refuses a family swap while a
@@ -1619,6 +1672,31 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             if clash is not None:
                 raise HTTPException(
                     409, f"magic {new_magic} zaten {clash} tarafindan kullaniliyor")
+        if "broker_symbol" in body.patch:
+            # Same argument as magic directly above, and worse: one fixed
+            # broker_symbol across many targets points the WHOLE BOOK at a
+            # single instrument, each row keeping its own label, sessions and
+            # holdout stamp. Bulk had no guard on this field at all (05.09).
+            want = str(body.patch["broker_symbol"] or "").strip()
+            if len(targets) > 1:
+                raise HTTPException(
+                    409, f"broker_symbol birden fazla sembole ayni anda atanamaz "
+                         f"({len(targets)} hedef) - her config tek bir enstrumani "
+                         f"yonetmeli")
+            if want and not all(ch.isalnum() or ch in "._-" for ch in want):
+                raise HTTPException(
+                    400, f"broker_symbol gecersiz ({want!r}) - "
+                         f"harf/rakam/_/./- disinda karakter olamaz")
+            if want:
+                clash = next(
+                    (s for s, c in store.symbols.items()
+                     if s not in targets
+                     and str(c.broker_symbol or "").strip().upper() == want.upper()),
+                    None)
+                if clash is not None:
+                    raise HTTPException(
+                        409, f"broker_symbol {want} zaten {clash} tarafindan "
+                             f"kullaniliyor")
         changed = 0
         rejected: list[str] = []
         # Same hazard patch_symbol guards per-symbol: a strategy/TF/magic
@@ -1637,7 +1715,8 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _require_optimised_before_enabling(body.patch, store.symbols.get(target))
             _require_current_cost_basis_before_enabling(
                 body.patch, store.symbols.get(target), optimizer)
-        guarded = (needs_tf_check or magic_changing or bool(exit_fields))
+        guarded = (needs_tf_check or magic_changing or bool(exit_fields)
+                   or "broker_symbol" in body.patch)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()

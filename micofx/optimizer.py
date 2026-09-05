@@ -1034,18 +1034,33 @@ class Optimizer:
             # a sweep - so a one-off subset is not persisted into opt_params.
             requested_fam = [str(s) for s in (strategies or [])]
             if requested_fam:
-                dropped_fam = [s for s in requested_fam if s not in STRATEGIES]
-                kept_fam = [s for s in requested_fam if s in STRATEGIES]
+                # Filtered against the SEARCHED set, not ``models.STRATEGIES``.
+                # Since 04.09 that constant also carries sweep_fade and
+                # range_fade, which are deliberately dormant - present in code,
+                # absent from config/defaults.json optimizer.strategies, so no
+                # ordinary sweep can pick them. Filtering against it made this
+                # one-off override the door that reopened them: a single
+                # POST /api/opt/run {"strategies":["sweep_fade"],
+                # "apply_best":true} could search a family nothing has
+                # validated and apply the winner to a live enabled symbol with
+                # a stamp that looks legitimate. defaults.json still ships
+                # their grids, so the sweep would have had axes to move.
+                # Reopening one is a measurement decision plus shipping it in
+                # defaults.json - not an API argument. (05.09)
+                searchable = [s for s in (self.store.opt_params().get("strategies") or [])
+                              if s in STRATEGIES] or list(STRATEGIES)
+                dropped_fam = [s for s in requested_fam if s not in searchable]
+                kept_fam = [s for s in requested_fam if s in searchable]
                 if dropped_fam:
                     LOG.emit(
                         f"Aranamayan strateji istekten dusuruldu: "
-                        f"{', '.join(dropped_fam[:8])} (aranan: {', '.join(STRATEGIES)})",
+                        f"{', '.join(dropped_fam[:8])} (aranan: {', '.join(searchable)})",
                         "OPT")
                 if not kept_fam:
                     return {"ok": False, "error": (
                         f"Aranabilir strateji yok (istenilen: "
                         f"{', '.join(requested_fam)}; aranan: "
-                        f"{', '.join(STRATEGIES)})")}
+                        f"{', '.join(searchable)})")}
                 fam_override = kept_fam
             else:
                 fam_override = None
@@ -1137,8 +1152,13 @@ class Optimizer:
             or list(SEARCH_TIMEFRAMES)
         refine_rounds = int(params.get("refine_rounds", 2))
         shared = {k: v for k, v in (params.get("grid") or {}).items() if isinstance(v, list) and v}
-        families = [s for s in (fam_override or params.get("strategies") or ["burst"])
-                    if s in STRATEGIES] \
+        # ``params["strategies"]`` is the searched set; ``STRATEGIES`` is the
+        # whole book including the dormant families. Filter against the former
+        # so a dormant name cannot enter a sweep from either door - the
+        # override is already checked in start(), this is the second lock.
+        searchable = [s for s in (params.get("strategies") or []) if s in STRATEGIES]
+        families = [s for s in (fam_override or searchable or ["burst"])
+                    if s in (searchable or STRATEGIES)] \
             or ["burst"]
         family_grids = params.get("strategy_grids") or {}
         # One sweep per family: its own parameters on top of the shared risk
