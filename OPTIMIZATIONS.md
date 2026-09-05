@@ -8956,3 +8956,36 @@ kapatmak cozmez.
 
 **Bir teshis alani bozuk:** otopside `adx` her islemde 0.0000, yani
 kaydedilmiyor. Rejim filtresinin ne yaptigi olculemez durumda.
+
+### EK30 — ADX kaydi onarildi (06.09)
+
+Otopside `adx` 343 kapanmis islemin 316'sinda 0.0000 okuyordu. Sebep
+`strategy.py:379`:
+
+```python
+need_adx = p.adx_min > 0 or p.adx_max > 0
+adx_series = cache.adx(p.adx_period) if need_adx else np.zeros(...)
+```
+
+ADX yalnizca kapi kuruluysa hesaplaniyordu, ve `Signals.adx` motorun her
+islem otopsisine damgaladigi sey. Yani **islemlerin %42'sinin neden hic
+kazanmadigini sorarken en cok isteyecegimiz rejim degiskeninin kaydi yok.**
+
+Kapiyla tutarli bile degildi:
+```
+US30    adx_min=22  ->  92 islemin 0'inda adx var
+XAUUSD  adx_min= 0  ->  41 islemin 15'inde var
+GER40   adx_min=15  ->  46 islemin 4'unde var
+```
+`state.adx` evaluate'te tazeleniyor, fill her zaman taze olani gormuyor.
+
+**Duzeltme:** her zaman hesaplaniyor. Maliyet IndicatorCache basina tek
+memoize cagri — `adx_period` aranan alan DEGIL, yani binlerce kombinasyonluk
+bir sweep tek bir 203ms hesabi paylasiyor (olculdu: ilk cagri 434ms, ikinci
+38ms). Kapi davranisi degismedi, dogrulandi: `adx_min=0` iken rejim maskesi
+gercek seriyle de sifir serisiyle de birebir ayni (90000/90000); `adx_min=22`
+iken daraliyor (50656/90000). Paket 3194/3194, ruff temiz.
+
+**Bu ileriye donuk bir duzeltme.** Gecmis 343 islemin adx'i geri gelmez; yeni
+kapanislar kayitli gelecek. Olu %42'yi ayiran bir rejim esigi varsa, artik
+aranabilir.

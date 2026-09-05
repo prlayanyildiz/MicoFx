@@ -376,8 +376,21 @@ def _common(cache: IndicatorCache, p: Params):
     t3 = cache.t3(p.t3_length, p.t3_volume_factor)
     k, d = cache.stoch(p.rsi_length, p.stoch_length, p.smooth_k, p.smooth_d)
     atr_series = cache.atr(p.atr_period)
-    need_adx = p.adx_min > 0 or p.adx_max > 0
-    adx_series = cache.adx(p.adx_period) if need_adx else np.zeros(cache.close.size)
+    # Always computed, even when no gate reads it. It used to be skipped unless
+    # adx_min/adx_max were armed, which left Signals.adx as zeros - and that is
+    # what the engine stamps into every trade autopsy. Result: `adx` reads
+    # 0.0000 on 316 of 343 closed trades, so the one regime variable we would
+    # most want when asking why 42% of trades never reach 0.5R is the one the
+    # book has no record of. (It was not even consistent with the gate: US30
+    # carries adx_min=22 and recorded zero on all 92 of its trades, while
+    # XAUUSD has no gate and recorded a value on 15 of 41 - state.adx is
+    # refreshed on evaluate and the fill does not always see a fresh one.)
+    #
+    # The cost is one memoised call per IndicatorCache: adx_period is not a
+    # searched field, so a sweep of thousands of combos shares a single 203ms
+    # computation over 90k bars. Gate behaviour is unchanged - _regime still
+    # only consults the series when adx_min/adx_max are above zero.
+    adx_series = cache.adx(p.adx_period)
     return t3, k, d, atr_series, adx_series
 
 
