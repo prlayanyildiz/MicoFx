@@ -1122,7 +1122,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # Same hazard class as magic/primary/exit: refuse while this magic
         # still has tickets (Claude TEYIT Py #3).
         guarded = (magic_changing or primary_changing or exit_fields_changing
-                   or broker_changing or clock_changed)
+                   or broker_changing)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -1191,17 +1191,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                             409, f"{symbol}: cikis/risk parametreleri ({', '.join(changed_fields)}) "
                                  f"degistirilemedi, {len(open_here)} acik pozisyon var{note} "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
-                if (clock_changed
-                        and not (magic_changing or primary_changing
-                                 or exit_fields_changing or broker_changing)):
-                    open_here = _open_under_magic(current.magic)
-                    pending_scan = _pending_orphan_scan(current.magic, symbol)
-                    if open_here or pending_scan:
-                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
-                        raise HTTPException(
-                            409, f"{symbol}: seans saati / use_sessions "
-                                 f"degistirilemedi, {len(open_here)} acik pozisyon var{note} "
-                                 f"(once kapatin veya pozisyon kapanmasini bekleyin)")
+
             if primary_changing:
                 tf_allow = store.opt_params().get("strategy_timeframes")
                 allow = tf_allow if isinstance(tf_allow, dict) else None
