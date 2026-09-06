@@ -8989,3 +8989,29 @@ iken daraliyor (50656/90000). Paket 3194/3194, ruff temiz.
 **Bu ileriye donuk bir duzeltme.** Gecmis 343 islemin adx'i geri gelmez; yeni
 kapanislar kayitli gelecek. Olu %42'yi ayiran bir rejim esigi varsa, artik
 aranabilir.
+
+### EK31 — Log kismasi koda ozel olmaktan cikarildi (06.09 03:12)
+
+Dun eklenen kisma yalnizca `10018` (piyasa kapali) taniyordu. Bu gece 03:12'de
+broker'in hafta sonu bakim penceresi **`10031`** (islem sunucusuyla baglanti
+yok) dondurdu — guardi teget gecti ve saniyede bir ERROR yeniden basladi.
+
+Ders: ariza "piyasa kapali" degil, **"ayni cagri ayni sekilde tekrar tekrar
+basarisiz"**. Kisma artik `(ticket, code)` ikilisine gore:
+
+- Bir ikilinin **ILK gorulusu hala ERROR** — yeni bir hata bicimi, baska bir
+  hata icin kurulmus bir kismanin arkasina saklanamaz. Dogrulandi: yeni kod ->
+  ERROR, yeni ticket -> ERROR.
+- Tekrarlar 15 dk'da bir WARN, ve satir **kacinci deneme oldugunu ve ne
+  suredir surdugunu** yaziyor, boylece firtinanin olcegi tek satirdan gorunur.
+- 2 sn araliklarla 1000 deneme: 1 ERROR + 2 WARN + 997 sessiz.
+
+Retry'a dokunulmadi.
+
+**Kendi testim bir kusur yakaladi:** ilk taslak "hic gorulmedi"yi `first_at
+<= 0.0` ile anliyordu, ki bu ayni zamanda sifir zaman damgasinin gorunusu.
+`time.time()`'a karsi zararsizdi ama saat donmus/mock'lanmis olsa kirilirdi;
+sozlukte varlik kontrolune cevrildi. Paket 3194/3194, ruff temiz.
+
+**Ayrica bu gece:** BTCUSD #325130187 00:42'de stopla kapandi (-15.80 USD).
+Kripto hafta sonu isler; beklenen davranis. XAUUSD #325114801 hala acik.

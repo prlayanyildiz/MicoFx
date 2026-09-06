@@ -2104,20 +2104,53 @@ class MT5Client:
             # XAUUSD ticket produced 4409 identical ERROR lines in 2.5 h and
             # would have run all weekend. Log once per ticket, then at most
             # every 15 min, at WARN.
+            # Throttled per (ticket, code), not per code. The first version of
+            # this only knew about MARKET_CLOSED, and on 06.09 at 03:12 the
+            # weekend trade-server maintenance window answered 10031
+            # (no connection) instead - which walked straight past the guard
+            # and produced an ERROR every 2 s again. The failure mode is not
+            # "market closed", it is "the same call failing the same way over
+            # and over", so that is what is throttled now.
+            #
+            # The FIRST occurrence of a (ticket, code) pair is still loud, at
+            # ERROR: a new way of failing must never be hidden by a throttle
+            # armed for a different one. Only the repeats are quietened, to
+            # WARN once per 15 minutes, and the counter is reported so the
+            # scale of a storm stays visible in one line.
+            #
+            # Retry behaviour is untouched. An unclosed position is real risk
+            # and the venue reopens; the caller is right to keep trying.
             closed_code = getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", 10018)
-            if code == closed_code:
-                seen = getattr(self, "_market_closed_logged", None)
-                if seen is None:
-                    seen = self._market_closed_logged = {}
-                now = time.time()
-                if now - float(seen.get(ticket, 0.0)) >= 900:
-                    seen[ticket] = now
-                    LOG.emit(
-                        f"Pozisyon kapatilamadi #{ticket} - piyasa kapali "
-                        f"({code}). Acilista tekrar denenecek; bu satir 15 dk'da "
-                        f"bir yenilenir.", "WARN", p.symbol)
+            seen = getattr(self, "_close_fail_logged", None)
+            if seen is None:
+                seen = self._close_fail_logged = {}
+            key = (ticket, int(code))
+            now = time.time()
+            # Membership, not a 0.0 sentinel. The first draft used first_at
+            # <= 0.0 to mean "never seen", which is also what a timestamp of
+            # zero looks like - harmless against time.time() but it made the
+            # unit check emit two ERRORs instead of one, and a guard that
+            # depends on the clock never being zero is a guard waiting for a
+            # frozen or mocked clock to break it.
+            known = key in seen
+            first_at, last_at, hits = seen.get(key, (now, now, 0))
+            hits += 1
+            if not known:
+                seen[key] = (now, now, hits)
+                why = " - piyasa kapali" if code == closed_code else ""
+                LOG.emit(
+                    f"Pozisyon kapatilamadi #{ticket}{why} ({code}). Denemeye "
+                    f"devam ediliyor; ayni hata tekrarlarsa bu satir 15 dk'da "
+                    f"bir yenilenir.", "ERROR", p.symbol)
                 return False
-            LOG.emit(f"Pozisyon kapatilamadi #{ticket} ({code})", "ERROR", p.symbol)
+            if now - last_at >= 900:
+                seen[key] = (first_at, now, hits)
+                mins = (now - first_at) / 60.0
+                LOG.emit(
+                    f"Pozisyon kapatilamadi #{ticket} ({code}) - {hits} denemedir "
+                    f"ayni hata, {mins:.0f} dk'dir suruyor.", "WARN", p.symbol)
+            else:
+                seen[key] = (first_at, last_at, hits)
             return False
         partial = result.retcode == mt5.TRADE_RETCODE_DONE_PARTIAL
         if partial:
