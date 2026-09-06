@@ -778,7 +778,15 @@ class RiskManager:
             cfg, sl_distance, balance, multiplier, edge)
         if money_per_unit <= 0:
             return 0.0, "tick degeri yok, islem atlandi (risk % hesaplanamadi)"
-        note = f"risk %{cfg.risk_percent * multiplier:.3g} -> {raw:.3f}"
+        # "aday", not the chosen size. On the account path below, ``raw`` is
+        # NOT what gets traded: the lot is min(margin share, auto-1R cap,
+        # volume_max) and this number never enters it. The old wording -
+        # "risk %2.75 -> 0.129" - reads as the decision, and on 01.09 a BTCUSD
+        # fill logged exactly that and then took 0.18 lot (the 1R ceiling),
+        # losing $59.94 on a -1R stop against an intended ~$15. Nothing was
+        # wrong with the sizing that line describes; the line was describing
+        # something that had not happened.
+        note = f"risk aday %{cfg.risk_percent * multiplier:.3g} -> {raw:.3f}"
         if note_edge_capped:
             note += " (SL broker min'e yapisik, avantaj carpani kisildi)"
         if raw <= 0:
@@ -865,6 +873,17 @@ class RiskManager:
                 note += f" | marj pay {auto:.3f}"
             if r_cap + 1e-12 < auto:
                 note += f" | 1R tavan {r_cap:.3f}"
+            # What the ticket will actually risk, in the account's own money.
+            # Every other number on this line is a candidate or a bound; this
+            # is the one the operator is asking about when a stop prints. It
+            # is also the number that showed the 01.09 BTCUSD fill risking
+            # ~8% of balance while "risk aday %2.75" sat next to it.
+            try:
+                risk_money = float(lot) * float(sl_distance) * float(money_per_unit)
+                pct_of_bal = (100.0 * risk_money / balance) if balance > 0 else 0.0
+                note += f" | 1R = {risk_money:.2f} ({pct_of_bal:.2f}% bakiye)"
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
             try:
                 lev = int((account or {}).get("leverage") or 0)
             except (TypeError, ValueError):

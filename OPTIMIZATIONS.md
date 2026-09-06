@@ -9015,3 +9015,57 @@ sozlukte varlik kontrolune cevrildi. Paket 3194/3194, ruff temiz.
 
 **Ayrica bu gece:** BTCUSD #325130187 00:42'de stopla kapandi (-15.80 USD).
 Kripto hafta sonu isler; beklenen davranis. XAUUSD #325114801 hala acik.
+
+### EK32 — BTCUSD incelendi: sembol degil, boyut ve log (06.09)
+
+Operator: *"btcusd 7x24 ve her islemde zarar bunu duzelt"*.
+
+**Hipotez olculdu ve REDDEDILDI.** BTCUSD replay'de kitabin en guclusu:
+```
+7/24 (canli)   +313.0R  1366 islem  E +0.2291  6/6 dilim
+hafta ici      +305.4R  1179 islem  E +0.2590  6/6 dilim
+hafta sonunun payi: +7.6R / 187 islem  (islem basi +0.0407R)
+```
+Hafta sonu **pozitif katki veriyor**, sadece zayif. Walk-forward bes kivrimin
+besinde "hafta ici"ni seciyor (islem basi daha yuksek) ama **OOS -12.7R
+kaybediyor** — ders niteliginde bir asiri-uyum tuzagi, kapi yakaladi.
+Canlidaki 8 islem 1366'yi curutmez.
+
+**Asil bulgu boyutlandirmada.** BTCUSD'nin 8 canli isleminde 1R, 6.88 dolardan
+59.94 dolara kadar degisiyor — ayni sembol, ayni nominal risk, 9 kat fark:
+
+```
+kapanis            R      USD   1R=USD  hedef %2   kat
+2026-09-01 13:39  -1.00  -59.94  59.94    15.00   4.00x   <- tek islem, kaybin yarisi
+2026-09-03 08:56  -1.01   -6.93   6.88    15.00   0.46x
+2026-09-04 11:05  +4.08  +17.53   4.30    15.00   0.29x   <- KAZANAN, kucuk boyutlu
+```
+
+Kaybedenler buyuk, kazananlar kucuk boyutlandirilmis. 8 islem -1.90R ama -115
+dolar; her islem hedeflenen 15 dolarla boyutlansaydi -28.50 dolar olurdu.
+**Boyut tutarsizligi 115 dolarin ~87'sini yazdi.**
+
+09-01'in log satiri mekanizmayi acikca gosteriyor:
+```
+#370634169 SELL 0.18 lot | lot: risk %2.75 -> 0.129 | avantaj x0.69 | 1R tavan 0.188
+```
+Risk hesabi 0.129 dedi, avantaj carpani 0.69 daha da kuculecekti — alinan lot
+**0.18**, yani tam olarak 1R tavani. 333 puan x 0.18 = 59.94 dolar.
+
+Iki sebep:
+1. **`raw` kullanilmiyor.** `lot = min(auto, r_cap, ceiling)` blogunun tamami
+   `if auto is not None:` icinde; hesap tablosu varken risk yuzdesine gore
+   hesaplanan lot nihai lota **girmiyor**, yalnizca loglaniyor. Bu kasitli
+   tasarim (lot = kalan marj payi, otomatik-1R tavaniyla sinirli).
+2. **"1R tavani" %2 degil.** `cap_multiplier` icinde kasa `lot_multiplier` var,
+   ve o donemde ~3.9'du -> tavan bakiyenin ~%8'i. Bugun carpan 1.2, yani tavan
+   %2.4 = 16.29 dolar. O ozel asim bugun 3 kat kucuk.
+
+**Duzeltilen:** davranis degil, gorunurluk. Log satiri `risk %2.75 -> 0.129`
+diye yaziyordu ve bu **karar gibi okunuyordu** — beni de yanoltti. Artik
+`risk aday %...` yaziyor, ve satira **islemin gercekten riske attigi para**
+ekleniyor: `1R = 59.94 (7.79% bakiye)`. Boyle bir satir olsaydi 01.09'daki
+asim ayni gun goze carpardi.
+
+Paket 3194/3194, ruff temiz. Sembolde degistirilen hicbir sey yok — olcum
+BTCUSD'yi aklıyor.
