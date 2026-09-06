@@ -9069,3 +9069,55 @@ asim ayni gun goze carpardi.
 
 Paket 3194/3194, ruff temiz. Sembolde degistirilen hicbir sey yok — olcum
 BTCUSD'yi aklıyor.
+
+### EK33 — Boyutlandirma kitap geneli olculdu: HIPOTEZ REDDEDILDI (06.09)
+
+EK32'de BTCUSD'nin 8 isleminde "kaybedenler buyuk, kazananlar kucuk
+boyutlandirilmis" ortugusunu bulmustum. **Genellemeye hazirlaniyordum; 301
+islemde olcunce cikmadi.**
+
+```
+sembol      kazanan 1R   kaybeden 1R   oran
+BTCUSD           13.47         17.85   1.33   <- 8 islem
+GER40            23.09         17.68   0.77   <- TERSI
+XAUUSD           12.75          9.57   0.75   <- TERSI
+JPN225           15.68         13.32   0.85   <- TERSI
+NAS100           10.78         11.86   1.10
+US30             12.94         13.91   1.07
+KITAP            13.16         12.82   0.97   <- dengeli
+```
+
+**Ve boyut degiskenligi kitaba para KAYBETTIRMEMIS.** Her islem kitabin medyan
+1R'siyle (13.00 USD) boyutlansaydi:
+```
+gerceklesen : -926.49 USD
+sabit 1R ile: -947.20 USD
+fark        :  +20.71 USD   (gerceklesen DAHA IYI)
+```
+
+Boyut kumeleri ayni yone isaret ediyor — buyuk pozisyonlar daha iyi:
+```
+0.50-0.80 x hedef :  88 islem  -303.93 USD
+0.80-1.25 x hedef : 104 islem  -336.19 USD
+1.25-2.00 x hedef :  46 islem  -383.27 USD
+2.00+     x hedef :  18 islem  +149.34 USD   <- tek pozitif kume
+```
+
+**Gercek olan kusur:** 1R sabit degil. GER40'ta 3.98 -> 127.49 USD (32 kat),
+NAS100 24.6 kat, XAUUSD 24.5 kat. Risk %2'de tutulmuyor ve bu bir kontrol
+kusuru — ama **para kaybettiren sey bu degil**, olculdu.
+
+### Bugun test edilen ve reddedilen ucuncu hipotez
+
+1. Daha siki `max_spread_atr` — 5/7 sembolde RED (EK29)
+2. BTCUSD hafta sonunu kapat — RED, OOS -12.7R (EK32)
+3. Boyutlandirma kaybettiriyor — RED, +20.71 USD lehte (bu kayit)
+
+Kolay aciklamalar tukendi. Geriye sabahki teshis kaliyor ve degismedi:
+**islemlerin %42'si hicbir zaman 0.5R'ye ulasmiyor**, odul orani 1.50, %32.7
+kazanmada basabas icin 2.06 gerekiyor. Negatif beklenti gercek ve nedeni
+bulunamadi.
+
+17 gun / -857 USD / kalan 679 USD / iyilesme egilimi yok. Claude'un onerisi:
+Pazartesi calistirilmasin. Arastirma motorun islem yapmasini gerektirmiyor -
+bugunku her olcum snapshot uzerinde yapildi.

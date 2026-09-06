@@ -69,6 +69,12 @@ _AMBIGUOUS_RETCODES: frozenset[int] = frozenset(
 
 AMBIGUOUS_RETCODES = _AMBIGUOUS_RETCODES
 
+# Weekend / maintenance close storm (XAU #325114801 04–06.09): MARKET_CLOSED
+# and link-class rejects will not clear on the next 2 s poll. Log throttle
+# alone still let every poll hit order_send (~20k attempts). Skip the send
+# until this window elapses; the ticket stays sticky in weekend_pending.
+CLOSE_RETRY_BACKOFF_SEC = 60.0
+
 
 def _broker_send_succeeded(result: Any) -> bool:
     """Did this ``order_send`` actually land (DEAL, SLTP, or close)?
@@ -2045,8 +2051,15 @@ class MT5Client:
         bool return is left exactly as it was so every existing caller keeps
         working unchanged.
         """
+        ticket_i = int(ticket)
+        now = time.time()
+        retry_after = getattr(self, "_close_retry_after", None)
+        if isinstance(retry_after, dict):
+            until = retry_after.get(ticket_i)
+            if until is not None and now < float(until):
+                return False
         with self._lock:
-            found = mt5.positions_get(ticket=int(ticket))
+            found = mt5.positions_get(ticket=ticket_i)
         if found is None:
             # None = API failure (same as positions()); empty tuple = gone.
             self.connected = False
@@ -2070,7 +2083,7 @@ class MT5Client:
             "symbol": p.symbol,
             "volume": amount,
             "type": mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY,
-            "position": int(ticket),
+            "position": ticket_i,
             "price": requested,
             "deviation": int(slippage),
             "magic": int(p.magic),
@@ -2121,11 +2134,19 @@ class MT5Client:
             # Retry behaviour is untouched. An unclosed position is real risk
             # and the venue reopens; the caller is right to keep trying.
             closed_code = getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", 10018)
+            # Same class of "will not clear in 2 s" as the log throttle: market
+            # closed + link ambiguity. Arm order_send backoff so weekend
+            # sticky retries stop hammering the trade server.
+            if (int(code) == int(closed_code)
+                    or int(code) in _AMBIGUOUS_RETCODES):
+                after = getattr(self, "_close_retry_after", None)
+                if after is None:
+                    after = self._close_retry_after = {}
+                after[ticket_i] = now + float(CLOSE_RETRY_BACKOFF_SEC)
             seen = getattr(self, "_close_fail_logged", None)
             if seen is None:
                 seen = self._close_fail_logged = {}
-            key = (ticket, int(code))
-            now = time.time()
+            key = (ticket_i, int(code))
             # Membership, not a 0.0 sentinel. The first draft used first_at
             # <= 0.0 to mean "never seen", which is also what a timestamp of
             # zero looks like - harmless against time.time() but it made the
@@ -2152,6 +2173,14 @@ class MT5Client:
             else:
                 seen[key] = (first_at, last_at, hits)
             return False
+        # Landed: drop any prior fail backoff / log throttle for this ticket.
+        after = getattr(self, "_close_retry_after", None)
+        if isinstance(after, dict):
+            after.pop(ticket_i, None)
+        seen = getattr(self, "_close_fail_logged", None)
+        if isinstance(seen, dict):
+            for key in [k for k in seen if k[0] == ticket_i]:
+                seen.pop(key, None)
         partial = result.retcode == mt5.TRADE_RETCODE_DONE_PARTIAL
         if partial:
             # IOC closed less than requested - the position still has volume
