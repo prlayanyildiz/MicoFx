@@ -138,10 +138,12 @@ def _score_windows(
 
 def propose_session_upgrade(row: dict[str, Any]) -> dict[str, Any] | None:
     """Offline charged compare; returns patch payload fields or None."""
-    from scripts.exec_gates import charged_slice_nets, pipeline_frozen, upgrade_robust
+    from scripts.exec_gates import charged_slice_nets, pipeline_frozen, upgrade_robust  # noqa: F401
 
-    if pipeline_frozen():
-        return None
+    # Operator charter 07.09: trading sessions are authoritative and fixed by operator.
+    # Sessions are sticky and broad; do not auto-narrow.
+    return None
+
     live = live_trade_sessions(row)
     windows_list = list(SEARCH_SESSION_WINDOWS)
     if _sessions_key(live) not in {_sessions_key(w) for w in windows_list}:

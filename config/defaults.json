@@ -7,7 +7,7 @@
     "autostart_bot": false,
     "poll_interval_sec": 2.0,
     "max_total_positions": 60,
-    "lot_multiplier": 1.0,
+    "lot_multiplier": 1.5,
     "size_by_edge": true,
     "block_high_cost": true,
     "max_cost_pct_of_risk": 18.0,

@@ -587,7 +587,9 @@ class AutoPilot:
             trail_pick = None
             trail_start_pick = None
             try:
-                sess_pick = propose_session_upgrade(row)
+                # Operator charter 07.09: trading sessions are authoritative and fixed by operator.
+                # Autopilot must not override operator session windows.
+                sess_pick = None
             except Exception as exc:
                 done.append(f"{sym} seans olcum fail: {exc}")
             try:
