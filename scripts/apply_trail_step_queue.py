@@ -6,7 +6,6 @@ matching stamp. This prints open book + live vs target — does not invent stamp
 from __future__ import annotations
 
 import json
-import sys
 import urllib.request
 
 PANEL = "http://127.0.0.1:8900"

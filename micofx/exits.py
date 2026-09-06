@@ -66,7 +66,11 @@ def overlay_stop(*, is_buy: bool, entry: float, ref: float, atr: float,
             else:
                 trail = struct_sl
         target = trail
-    if breakeven_at_r > 0 and original_risk > 0 and profit >= breakeven_at_r * original_risk:
+    # Float: ``entry - (entry - 1.5*risk)`` can undershoot the threshold by
+    # ~1e-13 (XAU #324842945), so a bare ``>=`` skipped BE and left only a
+    # trail level that live min_step then refused — stop stuck at hard SL.
+    if (breakeven_at_r > 0 and original_risk > 0
+            and profit + 1e-9 >= breakeven_at_r * original_risk):
         be_sl = entry + be_offset if is_buy else entry - be_offset
         if target is None:
             target = be_sl

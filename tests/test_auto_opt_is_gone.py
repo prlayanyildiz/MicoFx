@@ -1,4 +1,23 @@
-"""Automatic search is operator-only. Calendar and AI queue must not start one."""
+"""The CALENDAR and DECAY triggers are gone. The quarantine queue is not.
+
+The old first line read "Automatic search is operator-only", which is false and
+was the most misleading sentence in the test suite: it is the file an engineer
+greps to answer "does anything auto-optimise?". Something does.
+``Supervisor._queue_reoptimization`` calls ``optimizer.start(..., apply_best=
+True, source="quarantine")`` (supervisor.py), reached unconditionally from
+``review()`` - so a quarantined symbol can be re-searched AND have the winner
+applied to it live, with no operator in the loop. This file's own
+``test_supervisor_does_not_restore_decay_or_calendar_auto_search`` asserts that
+call is present, so the docstring contradicted the assertion three lines below
+it.
+
+What is actually pinned here: no calendar trigger, no decay trigger, no panel
+dial for either. That is a narrower claim than the old sentence and it is true.
+
+Whether the quarantine path SHOULD auto-apply is a live question, not settled
+here - and today it is moot in practice, because supervisor.enabled is false so
+review() never runs. Corrected 05.09.
+"""
 from __future__ import annotations
 
 import inspect
@@ -9,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import READABLE_TIMEFRAMES, SystemConfig
 from micofx.supervisor import DEFAULTS
+from tests.retired_lexicon import RETIRED_TIMEFRAMES
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -52,5 +72,10 @@ def test_correlation_unknown_tf_falls_back_to_a_readable_bar():
     assert 'else "H1"' not in src
     assert "timeframe: str = \"H1\"" not in src
     assert "/api/analysis/correlation" not in src
+    # A tripwire, not a permissive allow-list. This read
+    # ``tf in ("M5","M15","M30")`` until 05.09 - it kept passing after M5 was
+    # retired and would have kept passing if M5 came back, so it could not
+    # detect the thing it looks like it is checking.
     for tf in READABLE_TIMEFRAMES:
-        assert tf in ("M5", "M15", "M30")
+        assert tf not in RETIRED_TIMEFRAMES, tf
+    assert list(READABLE_TIMEFRAMES) == ["M15", "M30"]

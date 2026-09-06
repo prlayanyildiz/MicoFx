@@ -213,8 +213,9 @@
       <div class="panel-head"><h2>Giris Engelleri</h2>
         <div class="panel-note" id="blocks-note">Yukleniyor...</div>
         <button class="btn btn-sm" id="btn-blocks-refresh">Yenile</button>
-        <button class="btn btn-sm" id="btn-blocks-reset">Sifirla</button>
+        <button class="btn btn-sm" id="btn-blocks-reset" title="Sadece son 7 gun; tum-zaman dokunulmaz">Sifirla (7g)</button>
       </div>
+      <div class="panel-note dim" style="padding:0 12px 6px">Son 7 gun (rolling)</div>
       <div class="table-wrap">
         <table class="grid" id="blocks-table">
           <thead>
@@ -222,6 +223,19 @@
                 <th class="num" data-help="th.block.Sinyal">Sinyal</th>
                 <th class="num" data-help="th.block.Acilan">Acilan</th>
                 <th class="num" data-help="th.block.Oran">Oran</th>
+                <th>Engelleyen kapilar</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="panel-note dim" style="padding:12px 12px 6px">Tum zaman (cumulative — restart/reset immune)</div>
+      <div class="table-wrap">
+        <table class="grid" id="blocks-cum-table">
+          <thead>
+            <tr><th>Sembol</th>
+                <th class="num">Sinyal</th>
+                <th class="num">Acilan</th>
+                <th class="num">Oran</th>
                 <th>Engelleyen kapilar</th></tr>
           </thead>
           <tbody></tbody>

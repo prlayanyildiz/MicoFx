@@ -23,6 +23,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from micofx.optimizer import Optimizer
 
 
+@pytest.fixture(autouse=True)
+def _unfreeze_calibrate(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.exec_gates.pipeline_frozen", lambda: False)
+    # Snapshot-backed 6-slice gate must not block fixture-only calibrate tests.
+    monkeypatch.setattr(
+        "scripts.exec_gates.charged_slice_nets",
+        lambda *a, **k: None)
+    monkeypatch.setattr(
+        "scripts.exec_gates.upgrade_robust",
+        lambda *a, **k: True)
+
+
 class _Bars:
     """GER40's shape: the expensive bars are also the strongly trending ones.
 

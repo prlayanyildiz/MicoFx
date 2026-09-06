@@ -55,6 +55,17 @@ def test_force_apply_builds_stamp_from_charged_holdout():
         "holdout_days": 555.0,
     }
     opt.client.positions.return_value = []
+    # This test is about where the STAMP comes from, but its patch widens
+    # sl_atr_mult, so it also passes through the widen gate - which wants >=5
+    # premature-stop autopsies as evidence. A MagicMock store returns a mock
+    # for get_setting, not a list, so the count read 0 and the whole apply was
+    # refused for a reason unrelated to what this file guards.
+    store.get_setting = MagicMock(return_value=[
+        {"symbol": "GER40", "exit_reason": "sl", "r_realised": -1.0,
+         "after_1h_bars": 10, "after_1h_through_entry": True,
+         "after_1h_recovery_r": 1.0}
+        for _ in range(5)
+    ])
 
     res = opt.apply(
         "GER40",

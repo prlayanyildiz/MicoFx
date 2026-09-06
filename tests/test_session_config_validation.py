@@ -92,6 +92,19 @@ class _Optimizer:
     def apply(self, *a, **k):
         return {"ok": True}
 
+    def refresh_live_costed_stamp(self, symbol: str):
+        """Added 05.09. patch_symbol calls this on any session-clock change.
+
+        The double had drifted behind the production class, so every test in
+        this file that PATCHes a session window died on AttributeError before
+        reaching its assertion. That is how ``trade_days`` validation could be
+        moved after a ``return`` and go unnoticed: the only tests covering the
+        session-write path were red for an unrelated reason, and a red test
+        proves nothing. Returning None is the "nothing to restamp" branch, so
+        the caller leaves ``updated`` alone.
+        """
+        return None
+
 
 def _client():
     cfg = SymbolConfig(symbol="XAUUSD", magic=990021)

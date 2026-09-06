@@ -245,6 +245,8 @@ def main() -> int:
     # apply_secondary()'s open-position check races the exact same way those
     # routes used to before entry_lock existed.
     optimizer.entry_lock = engine.entry_lock
+    from micofx.autopilot import maybe_land_pending_xau_sl
+    maybe_land_pending_xau_sl(optimizer, store)
     # Only matters once host is not 127.0.0.1 - see create_app()'s docstring.
     api_token = os.getenv("MICO_API_TOKEN", "").strip()
     if host not in ("127.0.0.1", "localhost") and not api_token:

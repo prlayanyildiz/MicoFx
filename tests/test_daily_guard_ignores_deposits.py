@@ -59,22 +59,26 @@ def test_deposit_is_not_counted_as_profit():
     g = _guard()
     g.set_cash_flow(DEPOSIT)
 
-    # Trading truth: (-304.62 + 151.29) / 1723.44 = -8.90%
-    # Agrees with the deposit-immune sibling path (_symbol_daily_halt's
-    # realised+floating) to within the 2dp rounding of its inputs.
-    assert g.pnl_pct(EQUITY) == pytest.approx(
-        (REALISED + FLOATING) / START_BALANCE * 100.0, abs=0.01)
-    assert round(g.pnl_pct(EQUITY), 2) == -8.90  # live panel read -8.96 later
+    # Numerator stays trading-only; denom = start + deposit (operator C3 payda).
+    trading = REALISED + FLOATING
+    denom = START_BALANCE + DEPOSIT
+    assert g.pnl_pct(EQUITY) == pytest.approx(trading / denom * 100.0, abs=0.01)
     assert g.pnl_pct(EQUITY) < 0.0, "a losing day must not report as profit"
+    # Deposit must not flip the day green (naive equity/start would).
+    naive = (EQUITY - START_BALANCE) / START_BALANCE * 100.0
+    assert naive > 0.0 and g.pnl_pct(EQUITY) < 0.0
 
 
 def test_deposit_larger_than_chip_cannot_invent_sub_100_pct_day():
-    """C3: start 100 + deposit 300 + equity 225 → trading −175, not −174%."""
+    """Trading −175 vs start+deposit denom; still floor at −100%."""
     g = _guard()
     g.start_balance = 100.51
     g.set_cash_flow(300.0)
-    assert g.pnl_pct(225.0) == pytest.approx(-100.0)
-    assert g.pnl_pct(225.0) >= -100.0
+    # trading = 225-300-100.51 = -175.51; denom = 400.51 → ~-43.8%
+    assert g.pnl_pct(225.0) == pytest.approx(-175.51 / 400.51 * 100.0, abs=0.05)
+    # Extreme: lose the whole real capital + more → floor -100%
+    assert g.pnl_pct(0.0) == pytest.approx(-100.0)
+    assert g.pnl_pct(0.0) >= -100.0
 
 
 def test_without_the_correction_the_day_reads_positive():
@@ -84,8 +88,11 @@ def test_without_the_correction_the_day_reads_positive():
 
 
 def test_deposit_cannot_hold_the_loss_breaker_open():
-    """A deposit must not buy the account more room to lose."""
-    equity = START_BALANCE + DEPOSIT - 600.0  # -34.8% of the anchor, past the 33% cap
+    """Deposit widens room (payda) but still halts at -33% of real capital."""
+    # -33% of (start+deposit) ≈ -734 trading; equity = start+dep+trading
+    denom = START_BALANCE + DEPOSIT
+    lose = 0.34 * denom  # past 33%
+    equity = START_BALANCE + DEPOSIT - lose
     g = _guard()
     g.set_cash_flow(DEPOSIT)
 
@@ -134,3 +141,19 @@ def test_rollover_clears_cash_flow():
 
     assert g.cash_flow == 0.0
     assert DailyGuard(store).cash_flow == 0.0
+
+def test_deposit_widens_brake_denominator_operator_c3():
+    """Operator 04.09: denom = start + max(0, cash_flow); numerator unchanged."""
+    g = _guard()
+    g.start_balance = 222.52
+    g.set_cash_flow(400.0)
+    assert g.pnl_pct(222.52 + 400.0) == pytest.approx(0.0)
+    eq = 222.52 + 400.0 - 93.0
+    pct = g.pnl_pct(eq)
+    assert pct == pytest.approx(-93.0 / (222.52 + 400.0) * 100.0, abs=0.01)
+    old_style = -93.0 / 222.52 * 100.0
+    assert old_style < -40.0
+    assert pct > -16.0
+    assert g.check(eq, _sys_cfg(15.0)).ok is True
+    assert g.check(222.52 + 400.0 - 94.0, _sys_cfg(15.0)).ok is False
+

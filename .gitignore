@@ -47,3 +47,7 @@ cookies.txt
 _opt_*.json
 _poll_opt.*
 _restart.json
+
+# Git-bash altinda "2>nul" yazilinca Windows`un bos aygiti yerine bu adda
+# gercek bir dosya olusuyor ve icine uyarilar dokuluyor. Urun degil, kaza.
+nul

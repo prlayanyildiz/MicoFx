@@ -324,12 +324,15 @@ class DailyGuard:
         # sit green through a losing day (and, via Supervisor.review, skipped
         # the drawdown lot damper too).
         trading = equity - self.cash_flow - self.start_balance
-        pct = trading / self.start_balance * 100.0
-        # C3: a deposit larger than the morning chip can make trading PnL
-        # more negative than -100% of start (lost the deposit too). That
-        # invented -174% stuck the supervisor at risk_scale_floor and would
-        # instant-halt if daily_loss_pct were armed. Cap at -100% of the
-        # chip; deposits still do not buy more room (denom stays start).
+        # Operator 04.09 C3 payda-widen: deposits scale the loss room to real
+        # capital (start + deposits). Withdrawals do not shrink the chip
+        # mid-day (max(0, cash_flow)). Numerator stays trading-only.
+        denom = self.start_balance + max(0.0, float(self.cash_flow or 0.0))
+        if denom <= 0:
+            return 0.0
+        pct = trading / denom * 100.0
+        # Floor at -100% of real capital so a deposit larger than the morning
+        # chip cannot invent sub--100% days for the supervisor damper.
         if pct < -100.0:
             return -100.0
         return pct
@@ -527,7 +530,26 @@ class RiskManager:
             return stored
         if self._setting_pin_active(self._KASA_PIN_CONC):
             return stored
-        n = self._vacant_enabled_count(positions)
+        # The BOOK size, not the vacant count. This read
+        # ``_vacant_enabled_count(positions)`` until 05.09, which made the
+        # book-wide concurrent-risk ceiling fall every time a ticket opened:
+        # 17.6% at flat, 15.0 with one open, 12.5 with two, 10.0 with three,
+        # 7.5 with four. A ceiling that shrinks as you approach it is not a
+        # ceiling - measured, the book jammed at 4 concurrent positions out of
+        # 7 validated names, and the refusal ("eszamanli risk limiti") never
+        # named that as the cause. The replay each config is judged on has no
+        # cross-symbol cap at all, so the gap was invisible on both sides.
+        #
+        # Measured cost before the fix, seven symbols replayed on one timeline
+        # over the shared 2022-11..2026-09 window: 260 of 8124 entries refused,
+        # carrying +79.8R of +954.8R - 8.4% of net R, 85% of it XAUUSD. Real,
+        # but second-order: the book wants 4+ concurrent only 8.6% of the time.
+        # Reported as a mechanism, not as the live-vs-holdout cause.
+        #
+        # Splitting by vacancy stays correct for LOT sizing (see
+        # live_lot_multiplier) - remaining margin genuinely is shared out among
+        # the names that can still fill. It is only wrong for the ceiling.
+        n = self._enabled_count()
         plan = compute_kasa_targets(
             equity=equity,
             n_enabled=n,
@@ -614,6 +636,18 @@ class RiskManager:
         if reference <= 0:
             return 1.0
         return max(self.EDGE_MIN, min(self.EDGE_MAX, (mine / reference) ** 0.5))
+
+    def _enabled_count(self) -> int:
+        """How many names the book can hold at once, ignoring what is open.
+
+        The concurrent-risk ceiling is a property of the book, not of how much
+        of it is currently in use - see live_concurrent_pct. Floored at 1 so an
+        empty or all-disabled book cannot produce a zero ceiling that refuses
+        every entry.
+        """
+        n = sum(1 for cfg in list(self.store.symbols.values())
+                if getattr(cfg, "enabled", True))
+        return max(1, n)
 
     def _vacant_enabled_count(self, positions: list[dict[str, Any]] | None) -> int:
         """Enabled names that do not already hold one of our tickets.
@@ -1292,9 +1326,19 @@ class RiskManager:
         else:
             headroom = max(0.0, by_margin_all)
 
-        # Live remaining 1R across the open book. Leftover
-        # max_concurrent_risk_pct is unread; this is for STOPSUZ and the
-        # panel, not a can_open ceiling. A naked stop is unbounded
+        # Live remaining 1R across the open book. This particular number is for
+        # STOPSUZ and the panel.
+        #
+        # The comment here used to add "max_concurrent_risk_pct is unread ...
+        # not a can_open ceiling". Both halves were false and the pair was
+        # actively misleading: can_open DOES apply a concurrent-risk ceiling
+        # (see the eszamanli check there), and it reaches that setting through
+        # live_concurrent_pct. Anyone reading this line would have concluded
+        # the gate did not exist - which is close to what happened: the ceiling
+        # was deriving itself from the vacant slot count, jamming the book at
+        # four concurrent positions, and nothing pointed at it. Corrected 05.09.
+        #
+        # A naked stop is unbounded
         # (remaining_position_risk returns inf). json.dumps would write
         # Infinity and /api/state would 500 the whole panel - the same
         # class as execution's RATIO_ALL_ADVERSE.

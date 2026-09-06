@@ -18,6 +18,7 @@ import time
 
 import pytest
 
+from micofx.models import SymbolConfig, SystemConfig
 from micofx.supervisor import DEFAULTS, Supervisor, SymbolVerdict
 
 
@@ -25,8 +26,22 @@ class _Store:
     """Store stand-in that round-trips through JSON exactly like the real one."""
 
     def __init__(self) -> None:
+        # Production reads store.system.charge_costs (optimizer.py:1005).
+        # The real dataclass, not a stub: a stub only carries the field
+        # production happens to touch today and drifts again on the next
+        # one. This double was stale enough that every test in the file
+        # died on AttributeError before its assertion - so the guard it
+        # contains proved nothing. Added 05.09.
+        self.system = SystemConfig()
         self._rows: dict[str, str] = {}
-        self.symbols: dict = {}
+        # NAS100 must be IN the book. Supervisor._restore ends with
+        # prune_orphans(), which correctly drops verdicts for names the book no
+        # longer holds (a leftover FRA40/UK100 blob from an older portfolio).
+        # With an empty dict every restored verdict was pruned, so these tests
+        # died on KeyError before asserting anything about hour scaling - the
+        # roundtrip guard they exist for was dead. Production is right here;
+        # the fixture was the thing that had drifted. (05.09)
+        self.symbols: dict = {"NAS100": SymbolConfig(symbol="NAS100", magic=990014)}
 
     def get_setting(self, key, default=None):
         raw = self._rows.get(key)

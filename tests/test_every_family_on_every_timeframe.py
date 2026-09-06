@@ -125,7 +125,13 @@ def test_the_registry_is_the_whole_book():
     # (keltner rolled back). Same day matrix: nr_break never best on any
     # symbol, roc_pace never best either → live set back to 3
     # (burst / mtf_pullback / channel_break).
-    assert len(FAMILIES) == 3, f"aile sayisi degisti: {FAMILIES}"
+    # 3 -> 5 on 04.09: sweep_fade and range_fade joined as DORMANT - present in
+    # STRATEGIES, absent from the shipped opt list, so nothing can select them.
+    # Named rather than counted: a bare count pin here went red for a reason
+    # that had nothing to do with the retirements this file guards.
+    assert set(FAMILIES) == {
+        "burst", "channel_break", "mtf_pullback", "range_fade", "sweep_fade",
+    }, f"aile kitabi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

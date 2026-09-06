@@ -294,7 +294,12 @@ Optimizer does **not** guess which family fits a symbol: it searches **all enabl
 - `_trend_gate`: if `htf_mode=="t3"` and `htf_factor>1`, higher-TF T3 must agree; else allow both sides.
 - `Params`: flat dataclass view of SymbolConfig fields + overrides for grid search.
 
-### `burst` (M5-native scalp)
+### `burst` (range-expansion scalp)
+> Was described here as "M5-native" until 05.09. That bar is **emekli / retired**:
+> `burst` now only ever runs M15/M30, so the family's own premise — that scalps
+> need fast bars — no longer describes what it does. It stays live on measured
+> results, not on that argument.
+
 Continuation off a single **range-expansion** bar: range above `mean + brst_range_z * sd`
 of the trailing `brst_lookback` distribution, closing inside the top/bottom
 `brst_close_pct` of its own bar. Anchored to no level at all — unlike `orb` (session) and
@@ -315,7 +320,8 @@ are portfolio safety, not signal indicators.
 ### `cost_rank_max` (burst scalp)
 Adaptive cost-regime gate: the bar's cost-to-range ratio must sit inside the given
 percentile of its own trailing distribution. Unlike `max_spread_atr` it is not a fixed
-number, so it follows the symbol and the session. Measured 25.08 US30 M5: **1/44 fills**
+number, so it follows the symbol and the session. Measured 25.08 on US30's then-current
+bar (emekli / retired 05.09): **1/44 fills**
 while ATR was ~12.5 (ceiling 2.21 → 1.51 pts). The ratio does not follow the session;
 `cost_rank_max` does, and is only wired on `burst` (`micro_rev` retired 27.08).
 
@@ -341,7 +347,7 @@ File: `optimizer.py` + `backtest.walk_forward`.
 ### Calendar window
 Same lookback for every TF:  
 `want = min(max_bars, lookback_days * 86400 / timeframe_seconds(tf))`  
-so a 30-minute config is not judged on years while M5 is judged on days.
+so a 30-minute config is not judged on years while a 15-minute one is judged on days.
 
 ### Segment split (`segments` clamped 4–8; defaults often 5)
 Equal bar edges:

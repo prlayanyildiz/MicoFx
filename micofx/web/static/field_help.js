@@ -18,7 +18,7 @@ const FIELD_HELP = {
   "stoch_length": "StochRSI stoch periyodu.",
   "smooth_k": "%K yumusatma. Buyutmek kesisimleri geciktirir.",
   "smooth_d": "%D yumusatma.",
-  "htf_factor": "Ust TF carpani (or. 6 x M5 = M30). 0 = ust TF kapisi kapali.",
+  "htf_factor": "Ust TF carpani (or. 2 x M15 = M30). 0 = ust TF kapisi kapali.",
 
   "atr_period": "ATR periyodu. SL, trail ve bircok filtre bu seriye bakar.",
   "sl_atr_mult": "Stop mesafesi = ATR x bu. Lot bu mesafeye gore hesaplanir; buyutmek lotu kucultur.",
@@ -43,6 +43,12 @@ const FIELD_HELP = {
   "brst_close_pct": "Kapanisin barin ucuna bu kadar yakin olmasi gerekir (0.5-0.99).",
 
   "chan_lookback": "channel_break kanalinin uzunlugu (bar). Kapanis, KENDISINDEN ONCEKI bu kadar barin en yuksegini asarsa alis, en dusugunu kirarsa satis. Uzun pencere daha seyrek ama olculen asimetrisi daha yuksek.",
+  "fade_adx_max": "range_fade: ADX bu degerin ALTINDAYKEN sinyal. Yuksek = daha cok sessiz bar.",
+  "fade_ema_len": "range_fade: EMA band ortasi (bar).",
+  "fade_band_atr": "range_fade: EMA ± (bu × ATR) bant genisligi.",
+  "sweep_lookback": "sweep_fade: onceki N barin extreme'i (sinyal bari haric).",
+  "sweep_pierce_atr": "sweep_fade: extreme'i kac ATR asinca 'sweep' sayilir.",
+  "sweep_close_pct": "sweep_fade: kapanisin bar icindeki konumu (CLV / 1-CLV).",
   "chan_buffer_atr": "Kirilimin seviyeyi en az bu kadar ATR gecmesi gerekir. 0 = kapali. Seviyenin kilinda gezinen kirilimlari eler.",
 
   "adx_period": "ADX periyodu (rejim filtresi).",
@@ -58,7 +64,7 @@ const FIELD_HELP = {
   "lookback_days": "Aramanin baktigi takvim gunu ustune ek bir tavan. 0 = sinirsiz, o zaman tek belirleyici Maks Bar. Sifirdan buyukse hangisi once biterse o baglar: gun sayisi mi, bar sayisi mi.",
   "refine_rounds": "Kazanan bolgede ekstra yerel tarama turu. Her tur max_combos kadar is. 0 = sadece kaba tarama.",
   "max_combos": "Bir aile/TF taramasinda denenecek ust kombinasyon. Buyutmek daha uzun surer.",
-  "max_bars": "Aramaya verilen bar tavani ve normalde tek belirleyici olan sayi. Terminalin M5/M15 tavani 99.718; ustunu istemek hic bar getirmez, o yuzden 90.000 pay birakir. Ayni bar sayisi her sembolde ayni takvim demek degil: 90.000 M5 bari BTCUSD icin 314 gun, FRA40 icin 771 gun.",
+  "max_bars": "Aramaya verilen bar tavani ve normalde tek belirleyici olan sayi. Terminalin bar tavani 99.718; ustunu istemek hic bar getirmez, o yuzden 90.000 pay birakir. Ayni bar sayisi her sembolde ayni takvim demek degil: 90.000 bar XAUUSD'nin M15'inde ~983 gun, BTCUSD'nin M30'unda ~1925 gun (05.09 olcumu).",
   "segments": "Gecmisi kac esit dilime boler. Son dilim holdout, sondan onceki validation.",
   "min_trades": "Selection skorunda ornek indirimi bu islem sayisina gore. Az islem skoru kucultur.",
   "min_positive_ratio": "Selection dilimlerinin en az bu kadari net arti olmali. Dusurmek daha cok aday gecirir.",

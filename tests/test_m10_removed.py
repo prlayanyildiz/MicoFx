@@ -59,17 +59,20 @@ def test_the_family_timeframe_table_is_empty_or_clean():
 
 
 @pytest.mark.parametrize("family", ["burst"])
-def test_a_scalp_family_may_use_m5_and_not_m10(family):
-    """The scalp families are the ones M5 exists for.
+def test_a_live_family_may_use_a_shipped_bar_and_not_m10(family):
+    """M10 is refused; a bar that is actually searched is not.
 
     With STRATEGY_TIMEFRAMES empty this resolves through the "not configured ->
-    allow every TIMEFRAMES entry" branch, so what it really asserts is that M5
-    is offered and M10 is not - the point either way. It used to parametrize
-    over ``t3_ribbon`` as well, one of the six families removed on 12.08; the
-    name outlived the family because the assertion never depended on it, which
-    is the kind of residue this sweep was looking for.
+    allow every TIMEFRAMES entry" branch, so what it really asserts is that the
+    shipped bars are offered and M10 is not - the point either way. It used to
+    parametrize over ``t3_ribbon``, one of the six families removed on 12.08,
+    and it used to name M5 as "the bar the scalp families exist for"; M5 was
+    itself retired 05.09. Both times the name outlived the thing because the
+    assertion never depended on it - the kind of residue this sweep looks for,
+    so the assertion now reads TIMEFRAMES rather than any literal.
     """
-    assert strategy_allows_timeframe(family, "M5")
+    for tf in TIMEFRAMES:
+        assert strategy_allows_timeframe(family, tf), tf
     assert not strategy_allows_timeframe(family, "M10")
 
 
@@ -110,8 +113,9 @@ def test_the_translation_tables_no_longer_know_it():
     from micofx.models import uses_swing_exits
     from micofx.mt5client import timeframe_seconds
 
-    assert timeframe_seconds("M10") == 300, "taninmayan bar M5'e dusmeli"
-    assert timeframe_seconds("H4") == 300
+    # 1800 since 05.09: the fallback moved from M5 to M30 with M5's retirement.
+    assert timeframe_seconds("M10") == 1800, "taninmayan bar M30'a dusmeli"
+    assert timeframe_seconds("H4") == 1800
     # Both now land on the narrow exit envelope by way of the 0 default rather
     # than on their own second counts.
     assert uses_swing_exits("t3_flip", "M10") is False

@@ -13,6 +13,15 @@ import micofx.indicators as ind
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# The whole book, searched and dormant. Named rather than counted: a count pin
+# ("== 3") went permanently red on 04.09 when sweep_fade and range_fade were
+# added as dormant, and an always-failing anti-resurrection guard guards
+# nothing - ichimoku could have come back without producing a new failure.
+# Adding any family still trips this; adding a *retired* one trips it by name.
+EXPECTED_FAMILIES = frozenset({
+    "mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade",
+})
+
 
 def test_retired_indicator_helpers_are_gone():
     for name in ("trix", "delta_proxy", "zscore", "macd", "macd_periods",
@@ -31,7 +40,7 @@ def test_ichimoku_is_gone():
     assert "ichimoku" not in _FAMILIES
     assert not hasattr(strategy, "_ichimoku")
     assert not hasattr(ind, "ichimoku_lines")
-    assert len(STRATEGIES) == 3
+    assert set(STRATEGIES) == EXPECTED_FAMILIES
 
 
 def test_retired_kivanc_losers_are_gone():
@@ -62,8 +71,7 @@ def test_never_applied_scan_waste_is_gone():
         assert field not in OPT_FIELDS, field
         assert field not in Params.__dataclass_fields__
     assert not hasattr(IndicatorCache, "macd")
-    # 3 since 02.09: ichimoku retired (zero TF wins).
-    assert len(STRATEGIES) == 3
+    assert set(STRATEGIES) == EXPECTED_FAMILIES
 
 
 def test_the_three_lottery_families_are_gone():

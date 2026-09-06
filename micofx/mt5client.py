@@ -151,21 +151,24 @@ def timeframe_const(name: str) -> int:
     # stopped existing - and keeping them made the real hazard easy to miss.
     #
     # That hazard is the fallback, not the retired names. Anything this table
-    # does not recognise resolves to M5, which means a symbol trading
-    # five-minute bars when it was validated on something else - the quietest
+    # does not recognise resolves to M30, which means a symbol trading
+    # thirty-minute bars when it was validated on something else - the quietest
     # possible way to be wrong. Refusing outright would take the engine down
     # over a single bad row, so the fallback stays; it just no longer looks
-    # like an ordinary resolution.
+    # like an ordinary resolution. It fell back to M5 until 05.09, when M5 was
+    # retired (0/7 symbols chose it; +6-32% cost per trade): a fallback onto a
+    # bar the book no longer trades is the same silent-substitution trap this
+    # comment exists to warn about, so it now lands on the book's own default.
     table = {
-        "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
+        "M15": mt5.TIMEFRAME_M15,
         "M30": mt5.TIMEFRAME_M30,
     }
     key = str(name).upper()
     if key not in table:
-        LOG.emit(f"Bilinmeyen zaman dilimi '{name}' - M5 barlarina dusuldu. "
+        LOG.emit(f"Bilinmeyen zaman dilimi '{name}' - M30 barlarina dusuldu. "
                  f"Sembolun dogrulandigi bar bu degilse sonuclar yaniltici olur.",
                  "WARN")
-        return mt5.TIMEFRAME_M5
+        return mt5.TIMEFRAME_M30
     return table[key]
 
 
@@ -173,7 +176,7 @@ _TF_SECONDS_WARNED: set[str] = set()
 
 
 def timeframe_seconds(name: str) -> int:
-    """Bar length in seconds, or M5's as a last resort - loudly.
+    """Bar length in seconds, or M30's as a last resort - loudly.
 
     The bar-fetching side already warns when it cannot translate a timeframe
     (see above); this one fell back to 300 in silence. That asymmetry is what
@@ -188,15 +191,15 @@ def timeframe_seconds(name: str) -> int:
     nowhere - not in the MT5 map, not here - so adding it to TIMEFRAMES would
     have produced M5 data measured as M1 and reported as a real M1 result.
     """
-    table = {"M5": 300, "M15": 900, "M30": 1800}
+    table = {"M15": 900, "M30": 1800}
     key = str(name).upper()
     if key not in table:
         if key not in _TF_SECONDS_WARNED:
             _TF_SECONDS_WARNED.add(key)
-            LOG.emit(f"Bilinmeyen zaman dilimi '{name}' - bar suresi M5 (300sn) "
+            LOG.emit(f"Bilinmeyen zaman dilimi '{name}' - bar suresi M30 (1800sn) "
                      f"varsayildi. Bu isimden turetilen her bar hesabi yanlis olur.",
                      "WARN")
-    return table.get(key, 300)
+    return table.get(key, 1800)
 
 
 class MT5Client:
@@ -2094,7 +2097,60 @@ class MT5Client:
                     break
         if not _broker_send_succeeded(result):
             code = getattr(result, "retcode", -1)
-            LOG.emit(f"Pozisyon kapatilamadi #{ticket} ({code})", "ERROR", p.symbol)
+            # MARKET_CLOSED is expected and unactionable. The caller is right to
+            # keep retrying - an unclosed position is real risk and the venue
+            # reopens - but it is not something the operator can act on, and at
+            # a 2 s poll it buries every other line. Live 04.09: one stuck
+            # XAUUSD ticket produced 4409 identical ERROR lines in 2.5 h and
+            # would have run all weekend. Log once per ticket, then at most
+            # every 15 min, at WARN.
+            # Throttled per (ticket, code), not per code. The first version of
+            # this only knew about MARKET_CLOSED, and on 06.09 at 03:12 the
+            # weekend trade-server maintenance window answered 10031
+            # (no connection) instead - which walked straight past the guard
+            # and produced an ERROR every 2 s again. The failure mode is not
+            # "market closed", it is "the same call failing the same way over
+            # and over", so that is what is throttled now.
+            #
+            # The FIRST occurrence of a (ticket, code) pair is still loud, at
+            # ERROR: a new way of failing must never be hidden by a throttle
+            # armed for a different one. Only the repeats are quietened, to
+            # WARN once per 15 minutes, and the counter is reported so the
+            # scale of a storm stays visible in one line.
+            #
+            # Retry behaviour is untouched. An unclosed position is real risk
+            # and the venue reopens; the caller is right to keep trying.
+            closed_code = getattr(mt5, "TRADE_RETCODE_MARKET_CLOSED", 10018)
+            seen = getattr(self, "_close_fail_logged", None)
+            if seen is None:
+                seen = self._close_fail_logged = {}
+            key = (ticket, int(code))
+            now = time.time()
+            # Membership, not a 0.0 sentinel. The first draft used first_at
+            # <= 0.0 to mean "never seen", which is also what a timestamp of
+            # zero looks like - harmless against time.time() but it made the
+            # unit check emit two ERRORs instead of one, and a guard that
+            # depends on the clock never being zero is a guard waiting for a
+            # frozen or mocked clock to break it.
+            known = key in seen
+            first_at, last_at, hits = seen.get(key, (now, now, 0))
+            hits += 1
+            if not known:
+                seen[key] = (now, now, hits)
+                why = " - piyasa kapali" if code == closed_code else ""
+                LOG.emit(
+                    f"Pozisyon kapatilamadi #{ticket}{why} ({code}). Denemeye "
+                    f"devam ediliyor; ayni hata tekrarlarsa bu satir 15 dk'da "
+                    f"bir yenilenir.", "ERROR", p.symbol)
+                return False
+            if now - last_at >= 900:
+                seen[key] = (first_at, now, hits)
+                mins = (now - first_at) / 60.0
+                LOG.emit(
+                    f"Pozisyon kapatilamadi #{ticket} ({code}) - {hits} denemedir "
+                    f"ayni hata, {mins:.0f} dk'dir suruyor.", "WARN", p.symbol)
+            else:
+                seen[key] = (first_at, last_at, hits)
             return False
         partial = result.retcode == mt5.TRADE_RETCODE_DONE_PARTIAL
         if partial:

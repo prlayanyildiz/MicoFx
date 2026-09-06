@@ -67,8 +67,59 @@ def test_walk_forward_builds_it_from_the_raw_spread_not_the_cost_series():
 
 
 def test_simulate_takes_the_series_and_reads_it_per_bar():
+    """The entry stop reads THIS bar's floor, proved by running it.
+
+    This used to grep backtest.py for ``float(min_stop_at[j0])`` and so went
+    red on 05.09 for a rename - the index is ``j_fill`` now, inside
+    ``_entry_sl_dist``. The behaviour never moved. A test that pins a local
+    variable's name cannot tell a rename from the floor going back to a single
+    plan-time scalar, which is the whole failure this file exists to catch.
+
+    Run instead: the same bars twice, once with a flat floor and once with a
+    floor raised only on the bars where entries land. If the floor is read per
+    bar the trades must differ; if it were read once, they could not.
+    """
+    import numpy as np
+
+    from micofx.backtest import simulate
+    from micofx.models import SymbolConfig
+    from micofx.strategy import IndicatorCache, Params, Signals
+
     assert "min_stop=min_stop_series," in BACKTEST
-    assert "float(min_stop_at[j0])" in BACKTEST, "giris stopu bar tabanini okumuyor"
+
+    n = 300
+    times = np.arange(n, dtype=np.int64) * 1800
+    close = 100.0 + np.cumsum(np.sin(np.arange(n) / 4.0)) * 0.5
+    high, low = close + 0.8, close - 0.8
+    open_ = np.concatenate(([close[0]], close[:-1]))
+    spread = np.full(n, 1.0)
+    cache = IndicatorCache(high, low, close, times, 1800, open_,
+                           np.ones(n), np.zeros(n))
+    cfg = SymbolConfig(symbol="X", magic=1, strategy="burst", timeframe="M30",
+                       sl_atr_mult=0.9, use_sessions=False)
+    p_ = Params.from_config(cfg)
+    ones = np.ones(n)
+    sig = Signals(t3=close, k=ones * 50, d=ones * 50, atr=ones,
+                  adx=ones * 30, buy=np.ones(n, dtype=bool),
+                  sell=np.zeros(n, dtype=bool),
+                  htf_up=np.ones(n, dtype=bool),
+                  htf_down=np.zeros(n, dtype=bool))
+
+    def _go(floor):
+        res = simulate(cache, sig, open_, spread, 0.01, p_,
+                       np.ones(n, dtype=bool), 0, n, 0.0,
+                       min_stop=floor, max_open=1, block_reverse=True)
+        return res.trades, round(res.net_r, 6)
+
+    flat = _go(np.full(n, 0.01))
+    tall = np.full(n, 0.01)
+    tall[::2] = 5.0                     # a much wider floor on every other bar
+    raised = _go(tall)
+
+    assert flat[0] >= 5, f"replay bos ({flat[0]} islem) - test hicbir sey kanitlamiyor"
+    assert flat != raised, (
+        "bar basina taban degistirildi ama sonuc ayni - giris stopu tabani "
+        "tek bir plan-zamani skalerinden okuyor olabilir")
     assert "ms = float(min_stop_at[j])" in BACKTEST, "trail bar tabanini okumuyor"
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -13,11 +14,19 @@ from micofx.web.app import create_app
 HEAD = {"Origin": "http://testserver"}
 
 
+@pytest.fixture(autouse=True)
+def _skip_six_slice_msa_gate(monkeypatch):
+    """These tests assert HTTP write-scope, not 6-slice compose."""
+    monkeypatch.setattr(
+        "scripts.exec_gates.refuse_msa_widen", lambda *a, **k: None)
+
+
 class _Cfg:
     strategy = "channel_break"
     timeframe = "M30"
     magic = 990120
     max_spread_atr = 0.05
+    opt_score = 15.982
 
 
 class _Store:
@@ -64,12 +73,20 @@ class _Optimizer:
         self.client = _Client()
         self.entry_lock = _Engine.entry_lock
         self.last_apply: tuple | None = None
+        self.refresh_calls: list[str] = []
 
     def apply(self, symbol, params, score, detail, timeframe, strategy):
         cfg = self.store.symbols[symbol]
-        self.last_apply = (symbol, dict(params), timeframe, strategy)
+        self.last_apply = (symbol, dict(params), timeframe, strategy, score)
         cfg.max_spread_atr = params["max_spread_atr"]
+        cfg.opt_score = score
         return {"ok": True, "symbol": symbol, "config": {"max_spread_atr": params["max_spread_atr"]}}
+
+    def refresh_live_costed_stamp(self, symbol: str):
+        self.refresh_calls.append(symbol)
+        cfg = self.store.symbols[symbol]
+        cfg.opt_score = 29.4
+        return cfg
 
 
 class _StoreBurstRun(_Store):
@@ -136,7 +153,7 @@ def test_force_run_id_allows_measured_exit_retune():
     }, headers=HEAD)
     assert res.status_code == 200, res.text
     assert opt.last_apply is not None
-    _sym, params, _tf, _st = opt.last_apply
+    _sym, params, _tf, _st, _score = opt.last_apply
     assert params["trail_step_atr"] == 0.8
     assert params["adx_min"] == 15.0
     assert params["sl_atr_mult"] == 1.5  # stamped base kept
@@ -174,7 +191,29 @@ def test_gates_only_widens_spread_without_changing_family():
     assert store.symbols["US30"].strategy == "channel_break"
     assert store.symbols["US30"].timeframe == "M30"
     assert opt.last_apply is not None
-    _sym, params, tf, strat = opt.last_apply
+    _sym, params, tf, strat, score = opt.last_apply
     assert strat is None
     assert tf is None
     assert params == {"max_spread_atr": 0.18}
+    # Live opt_score kept (not history run 12.0); restamp ran.
+    assert score == pytest.approx(15.982)
+    assert opt.refresh_calls == ["US30"]
+    assert store.symbols["US30"].opt_score == pytest.approx(29.4)
+
+
+def test_force_msa_only_without_gates_only_still_restamps():
+    """msa_exec narrow/widen via force hand-typed params needs restamp."""
+    store = _Store()
+    opt = _Optimizer(store)
+    app = create_app(store, _Client(), _Engine(), opt)
+    tc = TestClient(app)
+    tc.get("/")
+    res = tc.post("/api/opt/apply", json={
+        "symbol": "US30",
+        "params": {"max_spread_atr": 0.05},
+        "score": 15.982,
+        "force": True,
+    }, headers=HEAD)
+    assert res.status_code == 200, res.text
+    assert store.symbols["US30"].max_spread_atr == 0.05
+    assert opt.refresh_calls == ["US30"]

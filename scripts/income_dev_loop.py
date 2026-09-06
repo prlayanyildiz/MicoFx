@@ -25,12 +25,128 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from micofx.entry_pressure import spread_pressure  # noqa: E402
 from micofx.paths import DB_PATH, LOG_DIR  # noqa: E402
 
 PANEL = "http://127.0.0.1:8900"
 ORIGIN = PANEL
-FAM = frozenset({"burst", "mtf_pullback", "ichimoku", "channel_break"})
 BOOK = ("BTCUSD", "GER40", "JPN225", "NAS100", "SpotBrent", "US30", "XAUUSD")
+BRIDGE = ROOT / ".bridge"
+
+
+def htf_gate_label(params: dict[str, Any] | None) -> str:
+    """Claude 11:12: htf=0 display is not a block when factor<=1 (gate OFF)."""
+    p = params or {}
+    try:
+        factor = int(p.get("htf_factor") or 0)
+    except (TypeError, ValueError):
+        factor = 0
+    mode = str(p.get("htf_mode") or "t3")
+    if mode == "t3" and factor > 1:
+        return f"ON/{factor}"
+    return "OFF"
+
+
+def load_symbol_queues(bridge: Path = BRIDGE) -> list[dict[str, Any]]:
+    """Postponed symbol adds (e.g. UK100/FRA40 after 25+unfreeze)."""
+    out: list[dict[str, Any]] = []
+    if not bridge.is_dir():
+        return out
+    for path in sorted(bridge.glob("SYMBOL_QUEUE_*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            data = {**data, "_path": path.name}
+            out.append(data)
+    return out
+
+
+# Post-freeze income actions (measurement queues — not SYMBOL_QUEUE adds).
+_ACTION_QUEUE_FILES: tuple[str, ...] = (
+    "XAU_MIN_BODY_APPLY_QUEUE.json",
+    "NAS100_MIN_BODY_APPLY_QUEUE.json",
+    "NAS100_SESSION_REEVAL_ONCE.json",
+    "WFO_APPLY_GATE_QUEUE.json",
+    "GER40_SNAPSHOT_RECLEAN_QUEUE.json",
+    "GER40_TRAIL_STEP_HOLD_ONLY.json",
+    "XAU_TRAIL_STEP_GIVEBACK_QUEUE.json",
+    "XAU_BE_AT_R_HOLD_ONLY.json",
+    "STALE_RUNTIME_WATCH_QUEUE.json",
+)
+
+
+def load_action_queues(bridge: Path = BRIDGE) -> list[dict[str, Any]]:
+    """Unfreeze action board: body/session/WFO/GER40 measurement queues."""
+    out: list[dict[str, Any]] = []
+    if not bridge.is_dir():
+        return out
+    for name in _ACTION_QUEUE_FILES:
+        path = bridge / name
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        when = data.get("when") or data.get("do_not_wire_while")
+        if when is None and (
+            data.get("do_not_apply_now") or data.get("do_not_run_now")
+        ):
+            when = "blocked_until_unfreeze"
+        out.append({
+            "_path": name,
+            "status": data.get("status") or data.get("recommendation") or "?",
+            "when": when,
+            "summary": (
+                data.get("decision")
+                or data.get("recommendation")
+                or data.get("note")
+                or data.get("source")
+                or ""
+            ),
+            "symbol": data.get("symbol"),
+            "challenger": data.get("challenger"),
+            "field": data.get("field"),
+        })
+    return out
+
+
+def load_day25_checklist(bridge: Path = BRIDGE) -> dict[str, Any]:
+    """Day-of-25 idle board: axes CLOSED + readiness + when-ready actions."""
+    path = bridge / "UNFREEZE_DAY25_CHECKLIST.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    ready = data.get("readiness") if isinstance(data.get("readiness"), dict) else {}
+    axes = data.get("axes") if isinstance(data.get("axes"), dict) else {}
+    items = data.get("day_of_25_when_ready")
+    if not isinstance(items, list):
+        items = []
+    latest = data.get("latest_close")
+    if not isinstance(latest, dict):
+        latest = {}
+    return {
+        "_path": path.name,
+        "phase": data.get("phase") or "",
+        "axes": axes,
+        "baseline_new": int(ready.get("baseline_new") or 0),
+        "baseline_target": int(ready.get("baseline_target") or 25),
+        "ready_to_execute": bool(ready.get("ready_to_execute")),
+        "frozen": bool(ready.get("frozen")),
+        "day_of_25_when_ready": [str(x) for x in items if x is not None],
+        "latest_close": latest,
+        "ts": data.get("ts") or "",
+    }
+
 
 # fill_rate below this with spread as top block -> spread calibration candidate
 _SPREAD_FILL_ALERT = 0.25
@@ -68,6 +184,30 @@ def _setting(c: sqlite3.Connection, key: str, default: Any = None) -> Any:
         return json.loads(row["value"])
     except json.JSONDecodeError:
         return default
+
+
+
+
+def day_brake_snapshot(c: sqlite3.Connection) -> dict[str, Any]:
+    """Cash-flow-aware daily brake readout (operator C3)."""
+    start = float(_setting(c, "day_start_balance", 0.0) or 0.0)
+    flow = float(_setting(c, "day_cash_flow", 0.0) or 0.0)
+    sys_ = _setting(c, "system", {}) or {}
+    if not isinstance(sys_, dict):
+        sys_ = {}
+    loss_pct = float(sys_.get("daily_loss_pct") or 0.0)
+    denom = start + max(0.0, flow)
+    room = abs(loss_pct) / 100.0 * denom if loss_pct and denom > 0 else 0.0
+    return {
+        "day_start_balance": round(start, 2),
+        "day_cash_flow": round(flow, 2),
+        "brake_denom": round(denom, 2),
+        "daily_loss_pct": loss_pct,
+        "brake_room_usd": round(room, 2),
+        "effective_brake_pct_of_equity_hint": (
+            round(100.0 * room / denom, 2) if denom > 0 else 0.0
+        ),
+    }
 
 
 def _symbols(c: sqlite3.Connection) -> dict[str, dict[str, Any]]:
@@ -210,13 +350,13 @@ def spread_recovery_actions(entry_rows: list[dict[str, Any]],
         if sym not in active:
             continue
         blocks = row.get("blocks") or {}
-        spread_n = int(blocks.get("spread") or 0)
+        spread_n = spread_pressure(row)
         signals = int(row.get("signals") or 0)
         fill = float(row.get("fill_rate") or 0.0)
         if spread_n < 5 or signals < 10:
             continue
-        top = max(blocks.values()) if blocks else 0
-        spread_dominant = spread_n >= top
+        top = max(int(v or 0) for v in blocks.values()) if blocks else 0
+        spread_dominant = spread_n >= max(top, 1)
         low_fill = fill < _SPREAD_FILL_ALERT
         if spread_dominant and (low_fill or spread_n >= 15):
             actions.append(
@@ -241,13 +381,13 @@ def spread_auto_targets(entry_rows: list[dict[str, Any]],
         if sym not in active or sym in open_symbols:
             continue
         blocks = row.get("blocks") or {}
-        spread_n = int(blocks.get("spread") or 0)
+        spread_n = spread_pressure(row)
         signals = int(row.get("signals") or 0)
         fill = float(row.get("fill_rate") or 0.0)
         if spread_n < _SPREAD_AUTO_MIN or signals < 5:
             continue
-        top = max(blocks.values()) if blocks else 0
-        if spread_n >= top and fill < 0.35:
+        top = max(int(v or 0) for v in blocks.values()) if blocks else 0
+        if spread_n >= max(top, _SPREAD_AUTO_MIN) and fill < 0.35:
             out.append(sym)
         elif spread_n >= _SPREAD_AUTO_MIN and fill < 0.25:
             out.append(sym)
@@ -274,6 +414,8 @@ def audit(c: sqlite3.Connection) -> dict[str, Any]:
             "strategy": p.get("strategy"),
             "timeframe": p.get("timeframe"),
             "max_spread_atr": p.get("max_spread_atr"),
+            "htf_gate": htf_gate_label(p),
+            "htf_factor": p.get("htf_factor"),
             "opt_score": round(float(p.get("opt_score") or 0), 2),
             "holdout_net_r": round(float(hold.get("net_r") or 0), 1),
             "expectancy": round(float(hold.get("expectancy") or 0), 3),
@@ -319,6 +461,7 @@ def audit(c: sqlite3.Connection) -> dict[str, Any]:
     return {
         "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "live": live,
+        "day_brake": day_brake_snapshot(c),
         "entry_blocks": [r for r in entry_rows if r.get("symbol") in active],
         "active_symbols": sorted(active),
         "system": {
@@ -365,7 +508,12 @@ def apply_safe(report: dict[str, Any]) -> list[str]:
 
 
 def apply_trust_entries(report: dict[str, Any]) -> list[str]:
-    """No AI hard refuse; spread calibrate only when costs are charged."""
+    """AI trust knobs only — never band-calibrate here.
+
+    Spread widen lives in ``apply_spread_calibration`` (evidence + freeze +
+    upgrade_robust). This path used to POST ``/spread-calibrate`` on every
+    flat active symbol and undid NAS100 0.05→0.06 (04.09).
+    """
     headers, up = _api_session()
     if not up:
         return ["panel offline — trust mode atlandi"]
@@ -376,33 +524,31 @@ def apply_trust_entries(report: dict[str, Any]) -> list[str]:
         "hard_block_only_quarantine": True,
     })
     done.append(f"AI trust mode {'ok' if ok else 'fail'} {msg[:80]}")
-
-    st = _api_get("/api/state", headers) or {}
-    if not (st.get("system") or {}).get("charge_costs", True):
-        done.append("spread kalibre atlandi (charge_costs=false)")
-        return done
-
-    live = report.get("live") or {}
-    open_syms = set(live.get("open_symbols") or [])
-    for sym in report.get("active_symbols") or []:
-        if sym in open_syms:
-            continue
-        ok, msg = _api_post(f"/api/symbols/{sym}/spread-calibrate", headers, {})
-        if ok:
-            try:
-                body = json.loads(msg)
-                if body.get("changed"):
-                    done.append(f"{sym} spread {body.get('before')} -> {body.get('after')}")
-            except json.JSONDecodeError:
-                done.append(f"{sym} spread kalibre ok")
-        elif "Not Found" not in msg:
-            done.append(f"{sym} spread kalibre fail: {msg[:60]}")
-
     return done
+
+
+def spread_calib_targets(report: dict[str, Any]) -> list[str]:
+    """Flat symbols with evidence spread pain — not every active name.
+
+    04.09 ``--auto`` added all ``active_symbols`` and band-calibrated NAS100
+    0.05→0.06 while charged preferred 0.05. Match in-process autopilot:
+    only ``spread_auto`` evidence rows.
+    """
+    live = report.get("live") or {}
+    open_syms = {str(s) for s in (live.get("open_symbols") or []) if s}
+    out: list[str] = []
+    for sym in report.get("spread_auto") or []:
+        s = str(sym or "")
+        if s and s not in open_syms:
+            out.append(s)
+    return sorted(set(out))
 
 
 def apply_spread_calibration(report: dict[str, Any]) -> list[str]:
     """Auto widen spread caps on flat enabled symbols with spread pain."""
+    from scripts.exec_gates import pipeline_frozen
+    if pipeline_frozen():
+        return ["spread: exec pipeline FREEZE (Claude 03:36)"]
     headers, up = _api_session()
     if not up:
         return ["panel offline — spread kalibrasyon atlandi"]
@@ -417,14 +563,7 @@ def apply_spread_calibration(report: dict[str, Any]) -> list[str]:
         return ["spread kalibrasyon atlandi (charge_costs=false)"]
 
     done: list[str] = []
-    targets = set(report.get("spread_auto") or [])
-    open_syms = set(live.get("open_symbols") or [])
-    for sym in report.get("active_symbols") or []:
-        if sym in open_syms:
-            continue
-        targets.add(sym)
-
-    for sym in sorted(targets):
+    for sym in spread_calib_targets(report):
         row = next((r for r in report["ranked"] if r["symbol"] == sym), None)
         cap = float((row or {}).get("max_spread_atr") or 0.0)
         hist = _api_get(f"/api/opt/history?symbol={sym}&limit=50", headers) or {}
@@ -436,8 +575,11 @@ def apply_spread_calibration(report: dict[str, Any]) -> list[str]:
         spec.loader.exec_module(spread_mod)
         ok, msg = spread_mod.apply_spread_widen(
             headers, panel=PANEL, symbol=sym, current_cap=cap,
-            history=list(hist.get("history") or []))
+            history=list(hist.get("history") or []),
+            strategy=str((row or {}).get("strategy") or "") or None)
         done.append(msg if ok else f"FAIL {msg}")
+    if not done:
+        done.append("spread: kanitli hedef yok")
     return done
 
 
@@ -454,6 +596,205 @@ def render_markdown(report: dict[str, Any], applied: list[str]) -> str:
         f"- MT5: {'bagli' if live.get('mt5_connected') else 'kopuk'}",
         f"- opt: {report.get('opt_job')}",
         "",
+    ]
+    db = report.get("day_brake") or {}
+    if db:
+        lines.extend([
+            "## Gunluk brake (C3 payda)",
+            (
+                f"- start={db.get('day_start_balance')} flow={db.get('day_cash_flow')} "
+                f"denom={db.get('brake_denom')} loss%={db.get('daily_loss_pct')} "
+                f"room_usd={db.get('brake_room_usd')}"
+            ),
+            "",
+        ])
+    d25 = report.get("day25_checklist") or {}
+    if d25:
+        axes = d25.get("axes") or {}
+        axis_bits = ", ".join(
+            f"{k}={v}" for k, v in axes.items() if v is not None
+        ) or "-"
+        lines.extend([
+            "## Day25 checklist (idle until 25)",
+            (
+                f"- phase={d25.get('phase') or '-'} "
+                f"new={d25.get('baseline_new')}/{d25.get('baseline_target')} "
+                f"frozen={d25.get('frozen')} "
+                f"ready={d25.get('ready_to_execute')} "
+                f"axes=[{axis_bits}]"
+            ),
+        ])
+        latest = d25.get("latest_close") or {}
+        if latest:
+            lines.append(
+                f"- latest_close: {latest.get('symbol')} "
+                f"#{latest.get('ticket')} {latest.get('exit')} "
+                f"r={latest.get('r')} mfe={latest.get('mfe_r')}"
+            )
+        for item in (d25.get("day_of_25_when_ready") or [])[:8]:
+            lines.append(f"- when_ready: {item}")
+        lines.append("")
+    up = report.get("unfreeze_prep") or {}
+    if up:
+        lines.extend([
+            "## Unfreeze prep (Claude 10:14 board)",
+            (
+                f"- new={(up.get('baseline') or {}).get('new_trades')}/"
+                f"{(up.get('baseline') or {}).get('target')} "
+                f"phase={((up.get('gate_frame') or {}).get('phase'))} "
+                f"premature_total={up.get('premature_total')} "
+                f"premature_post={up.get('premature_total_post_restart')} "
+                f"rate_post="
+                f"{((up.get('premature_metrics_post_restart') or {}).get('rate'))} "
+                f"lift="
+                f"{((up.get('premature_metrics') or {}).get('lift'))} "
+                f"lift_raw="
+                f"{((up.get('premature_metrics') or {}).get('lift_nonsl_raw'))} "
+                f"lift_vs_all="
+                f"{((up.get('premature_metrics') or {}).get('lift_vs_all'))} "
+                f"give_back="
+                f"{((up.get('give_back_post_restart') or {}).get('ratio'))}"
+                f"(n={((up.get('give_back_post_restart') or {}).get('n'))}"
+                f",gate={((up.get('give_back_post_restart') or {}).get('is_gate'))}"
+                f",by_exit={((up.get('give_back_post_restart') or {}).get('by_exit'))}) "
+                f"geometry="
+                f"{((up.get('trail_geometry') or {}).get('axis_status')) or 'AXIS_CLOSED_OPTIMUM'} "
+                f"wide="
+                f"{((up.get('trail_geometry') or {}).get('wide_symbols'))
+                   or ((up.get('trail_geometry') or {}).get('trap_symbols'))
+                   or []} "
+                f"gate6={((up.get('gate6') or {}).get('ok_all'))} "
+                f"safety={up.get('safety_checkpoint_ok')} "
+                f"evidence={up.get('evidence_gate_ok')} "
+                f"ready_hint={up.get('unfreeze_ready_hint')}"
+            ),
+            "",
+        ])
+    tg = (report.get("unfreeze_prep") or {}).get("trail_geometry") or {}
+    wide = tg.get("wide_symbols") or tg.get("trap_symbols") or []
+    if wide or tg.get("axis_status") == "AXIS_CLOSED_OPTIMUM":
+        axis = tg.get("axis_status") or "AXIS_CLOSED_OPTIMUM"
+        lines.append(f"## Trail geometry ({axis} — monitor, not a fix)")
+        by = tg.get("by_symbol") or {}
+        for sym in wide:
+            g = by.get(sym) or {}
+            lines.append(
+                f"- {sym}: improves@"
+                f"{g.get('trail_improves_at_r')}R "
+                f"> BE@{g.get('breakeven_at_r')} "
+                f"(step={g.get('trail_step_atr')} sl={g.get('sl_atr_mult')}) "
+                f"— {g.get('why') or 'OPTIMUM wide geometry'}"
+            )
+        if not wide:
+            lines.append("- (no wide symbols; axis closed OPTIMUM)")
+        lines.append("")
+    for q in report.get("symbol_queues") or []:
+        syms = ",".join(q.get("symbols") or []) or "?"
+        lines.extend([
+            f"## Symbol queue ({syms})",
+            (
+                f"- decision={q.get('decision')} "
+                f"after={'; '.join(q.get('after') or [])}"
+            ),
+            f"- reason: {q.get('reason')}",
+            "",
+        ])
+    aq = report.get("action_queues") or []
+    if aq:
+        lines.append("## Unfreeze action queue")
+        for a in aq:
+            bit = f"- {a.get('_path')}: status={a.get('status')}"
+            if a.get("symbol") and a.get("field"):
+                bit += (
+                    f" {a.get('symbol')}.{a.get('field')}"
+                    f"->{a.get('challenger')}"
+                )
+            when = a.get("when")
+            if when is not None:
+                bit += f" when={when}"
+            summ = str(a.get("summary") or "").replace("\n", " ")
+            if summ:
+                bit += f" — {summ[:160]}"
+            lines.append(bit)
+        lines.append("")
+    bl = report.get("post_restart_baseline") or {}
+    if bl.get("armed"):
+        lines.extend([
+            "## Post-restart baseline (Claude TEMIZ WAIT)",
+            (
+                f"- new closes: {bl.get('new_trades')}/{bl.get('target')} "
+                f"(autopsy {bl.get('autopsy_n')}; restart {bl.get('restart_at')})"
+            ),
+            (
+                f"- streak/exp wakes: "
+                f"{'SUSPEND' if bl.get('suppressed') else 'ARMED'} "
+                f"({bl.get('note')})"
+            ),
+            "",
+        ])
+    uf = report.get("us30_fill") or {}
+    if uf:
+        lines.extend([
+            "## US30 fill (post-restart spread-gate)",
+            (
+                f"- fill={uf.get('fill_rate')} "
+                f"sig={uf.get('signals')} opened={uf.get('opened')} "
+                f"spread_blocks={uf.get('spread_blocks')} "
+                f"poor={uf.get('poor_fill')}"
+            ),
+            "",
+        ])
+    gf = report.get("ger40_fill") or {}
+    if gf:
+        lines.extend([
+            "## GER40 fill (EU open heighten)",
+            (
+                f"- fill={gf.get('fill_rate')} "
+                f"sig={gf.get('signals')} opened={gf.get('opened')} "
+                f"poor={gf.get('poor_fill')}"
+            ),
+            "",
+        ])
+    nf = report.get("nas100_fill") or {}
+    if nf:
+        lines.extend([
+            "## NAS100 fill (15:00 session-open heighten)",
+            (
+                f"- fill={nf.get('fill_rate')} "
+                f"act_fill={nf.get('action_fill_rate')} "
+                f"act={nf.get('actionable_signals')} "
+                f"sig={nf.get('signals')} opened={nf.get('opened')} "
+                f"poor={nf.get('poor_fill')} "
+                f"spread_blocks={nf.get('spread_blocks')} "
+                f"dominant={nf.get('dominant_block') or '-'} "
+                f"(honesty: raw fill includes seans_disi; act_fill is in-session)"
+            ),
+            "",
+        ])
+    sil = report.get("eu_silence") or {}
+    if sil:
+        lines.extend([
+            "## EU session silence (book)",
+            (
+                f"- open_min={sil.get('minutes_open')} "
+                f"sig={sil.get('signals')} fire={sil.get('fire')} "
+                f"gaps={sil.get('gaps_min')} "
+                f"thr={sil.get('thresholds_min')} "
+                f"fire_syms={sil.get('fire_syms')}"
+            ),
+            "",
+        ])
+    eb = report.get("entry_blocks_summary") or {}
+    if eb:
+        lines.extend([
+            "## Entry blocks (7g / tum-zaman)",
+            (
+                f"- rolling {eb.get('opened')}/{eb.get('signals')} "
+                f"| cumulative {eb.get('cum_opened')}/{eb.get('cum_signals')}"
+            ),
+            "",
+        ])
+    lines.extend([
         "## Sistem",
         f"- lot_multiplier: {report['system'].get('lot_multiplier')}",
         f"- size_by_edge: {report['system'].get('size_by_edge')}",
@@ -467,29 +808,37 @@ def render_markdown(report: dict[str, Any], applied: list[str]) -> str:
         "",
         "## Kacan islem (entry-blocks)",
         "",
-        "| Sembol | Sinyal | Acilan | Fill | Spread | Sembol dolu | Ters yon |",
-        "|--------|--------|--------|------|--------|-------------|----------|",
-    ]
+        (
+            "| Sembol | Sinyal | Acilan | Fill | Spread | Sembol dolu | "
+            "Ters yon | Seans disi | Saat kapali |"
+        ),
+        (
+            "|--------|--------|--------|------|--------|-------------|"
+            "----------|------------|-------------|"
+        ),
+    ])
     for row in report.get("entry_blocks") or []:
         blocks = row.get("blocks") or {}
         lines.append(
             f"| {row['symbol']} | {row['signals']} | {row['opened']} | "
             f"%{float(row.get('fill_rate') or 0)*100:.0f} | "
             f"{blocks.get('spread', 0)} | {blocks.get('risk_sembol_limiti', 0)} | "
-            f"{blocks.get('risk_ters_yon', 0)} |"
+            f"{blocks.get('risk_ters_yon', 0)} | "
+            f"{blocks.get('seans_disi', 0)} | {blocks.get('saat_kapali', 0)} |"
         )
     lines.extend([
         "",
         "## Sembol siralamasi (holdout net R)",
         "",
-        "| Sembol | Aile/TF | Holdout R | Skor | Spread tavan | Supervisor |",
-        "|--------|---------|-----------|------|--------------|------------|",
+        "| Sembol | Aile/TF | Holdout R | Skor | Spread | HTF gate | Supervisor |",
+        "|--------|---------|-----------|------|--------|----------|------------|",
     ])
     for r in report["ranked"]:
         lines.append(
             f"| {r['symbol']} | {r['strategy']}/{r['timeframe']} | "
             f"{r['holdout_net_r']:+.0f} | {r['opt_score']:.1f} | "
-            f"{r.get('max_spread_atr')} | {r['supervisor']} |"
+            f"{r.get('max_spread_atr')} | {r.get('htf_gate', '?')} | "
+            f"{r['supervisor']} |"
         )
     lines.extend([
         "",
@@ -501,6 +850,69 @@ def render_markdown(report: dict[str, Any], applied: list[str]) -> str:
         "",
         "## Otomatik spread hedefleri (flat)",
         ", ".join(report.get("spread_auto") or []) or "(yok)",
+        "",
+        "## 6-slice compose (book audit)",
+        "",
+    ])
+    robust = report.get("robust_slices") or []
+    if robust:
+        lines.append(
+            "| Sembol | wins | floor | sumR | durum |"
+        )
+        lines.append(
+            "|--------|------|-------|------|-------|"
+        )
+        for r in robust:
+            wins = r.get("wins")
+            sum_r = r.get("sum_r")
+            lines.append(
+                f"| {r['symbol']} | "
+                f"{'-' if wins is None else f'{wins}/{r.get('parts', 6)}'} | "
+                f"{r.get('floor')} | "
+                f"{'-' if sum_r is None else f'{sum_r:+.1f}'} | "
+                f"{r.get('note')} |"
+            )
+    else:
+        lines.append("(olculmedi)")
+    xs = report.get("xau_streak") or {}
+    if xs:
+        exp = xs.get("expectancy") or {}
+        lines.extend([
+            "",
+            "## XAU non-winner streak",
+            (
+                f"{xs.get('symbol', 'XAUUSD')}: streak={xs.get('streak')} "
+                f"level={xs.get('level')} "
+                f"(review>={xs.get('review_at')}, "
+                f"escalate>={xs.get('escalate_at')}); "
+                f"last{exp.get('n')}/{exp.get('window')} "
+                f"exp={exp.get('expectancy_r')}R"
+            ),
+        ])
+    book = report.get("book_streaks") or []
+    if book:
+        lines.extend(["", "## Book non-winner streaks", ""])
+        lines.append("| Sembol | streak | level | exp10 |")
+        lines.append("|--------|--------|-------|-------|")
+        for r in book:
+            exp = r.get("expectancy") or {}
+            lines.append(
+                f"| {r.get('symbol')} | {r.get('streak')} | "
+                f"{r.get('level')} | {exp.get('expectancy_r')} |"
+            )
+    chain = report.get("pending_chain") or {}
+    if chain:
+        lines.extend([
+            "",
+            "## Pending chain (freeze-bind / XAU sl 0.7)",
+            (
+                f"resume={chain.get('resume')} pending_sl={chain.get('xau_sl')} "
+                f"reenable={chain.get('reenable')} done_bind={chain.get('bind_done')} "
+                f"done_sl={chain.get('sl_done')} xau_enabled={chain.get('xau_enabled')} "
+                f"xau_sl={chain.get('xau_sl_live')}"
+            ),
+        ])
+    lines.extend([
         "",
         "## Onerilen aksiyonlar",
     ])
@@ -522,13 +934,14 @@ def render_markdown(report: dict[str, Any], applied: list[str]) -> str:
 
 
 def _run_family_audit(headers: dict[str, str]) -> list[str]:
+    """Report-only — never force-apply a different family (04.09 SpotBrent/NAS)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "family_audit", ROOT / "scripts" / "family_audit.py")
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(mod)
-    return mod.sync_family_gaps(headers)
+    return mod.audit_report(headers)
 
 
 def _run_signal_health(headers: dict[str, str]) -> list[str]:
@@ -553,6 +966,223 @@ def _run_holdout_live_sync(headers: dict[str, str]) -> list[str]:
     return mod.sync_flat_symbols(headers)
 
 
+def _run_session_upgrades(headers: dict[str, str]) -> list[str]:
+    """Charged session-window upgrades on flat enabled names (SpotBrent pattern)."""
+    import importlib.util
+    st = _api_get("/api/state", headers) or {}
+    if (st.get("opt") or {}).get("busy"):
+        return ["seans: opt busy — atlandi"]
+    open_syms = {str(p.get("symbol") or "") for p in st.get("positions") or []}
+    body = _api_get("/api/symbols", headers) or {}
+    rows = body.get("symbols") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return ["seans: symbols okunamadi"]
+    spec = importlib.util.spec_from_file_location(
+        "session_exec", ROOT / "scripts" / "session_exec.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    done: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("enabled"):
+            continue
+        sym = str(row.get("symbol") or "")
+        if not sym or sym in open_syms:
+            continue
+        ok, msg = mod.apply_session_upgrade(headers, panel=PANEL, row=row)
+        done.append(msg if ok else f"FAIL {msg}")
+    return done
+
+
+def _run_msa_upgrades(headers: dict[str, str]) -> list[str]:
+    """Charged max_spread_atr upgrades on flat enabled names (US30/NAS pattern)."""
+    import importlib.util
+    st = _api_get("/api/state", headers) or {}
+    if (st.get("opt") or {}).get("busy"):
+        return ["msa: opt busy — atlandi"]
+    open_syms = {str(p.get("symbol") or "") for p in st.get("positions") or []}
+    body = _api_get("/api/symbols", headers) or {}
+    rows = body.get("symbols") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return ["msa: symbols okunamadi"]
+    spec = importlib.util.spec_from_file_location(
+        "msa_exec", ROOT / "scripts" / "msa_exec.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    done: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("enabled"):
+            continue
+        sym = str(row.get("symbol") or "")
+        if not sym or sym in open_syms:
+            continue
+        ok, msg = mod.apply_msa_upgrade(headers, panel=PANEL, row=row)
+        done.append(msg if ok else f"FAIL {msg}")
+    return done
+
+
+def _run_cost_rank_upgrades(headers: dict[str, str]) -> list[str]:
+    """Charged cost_rank_max upgrades (entry gate; OK while open)."""
+    import importlib.util
+    st = _api_get("/api/state", headers) or {}
+    if (st.get("opt") or {}).get("busy"):
+        return ["cost_rank: opt busy — atlandi"]
+    body = _api_get("/api/symbols", headers) or {}
+    rows = body.get("symbols") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return ["cost_rank: symbols okunamadi"]
+    spec = importlib.util.spec_from_file_location(
+        "cost_rank_exec", ROOT / "scripts" / "cost_rank_exec.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    done: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("enabled"):
+            continue
+        sym = str(row.get("symbol") or "")
+        if not sym:
+            continue
+        ok, msg = mod.apply_cost_rank_upgrade(headers, panel=PANEL, row=row)
+        done.append(msg if ok else f"FAIL {msg}")
+    return done
+
+
+def _run_trail_upgrades(headers: dict[str, str]) -> list[str]:
+    """Charged trail_step_atr upgrades on flat names (neighbor-spike gated)."""
+    import importlib.util
+    st = _api_get("/api/state", headers) or {}
+    if (st.get("opt") or {}).get("busy"):
+        return ["trail: opt busy — atlandi"]
+    open_syms = {str(p.get("symbol") or "") for p in st.get("positions") or []}
+    body = _api_get("/api/symbols", headers) or {}
+    rows = body.get("symbols") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return ["trail: symbols okunamadi"]
+    spec = importlib.util.spec_from_file_location(
+        "trail_exec", ROOT / "scripts" / "trail_exec.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    done: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("enabled"):
+            continue
+        sym = str(row.get("symbol") or "")
+        if not sym or sym in open_syms:
+            continue
+        ok, msg = mod.apply_trail_upgrade(headers, panel=PANEL, row=row)
+        done.append(msg if ok else f"FAIL {msg}")
+        # Re-read row after step land so start measure uses new step.
+        body2 = _api_get("/api/symbols", headers) or {}
+        rows2 = body2.get("symbols") if isinstance(body2, dict) else None
+        if isinstance(rows2, list):
+            for r2 in rows2:
+                if isinstance(r2, dict) and r2.get("symbol") == sym:
+                    row = r2
+                    break
+        ok2, msg2 = mod.apply_trail_start_upgrade(headers, panel=PANEL, row=row)
+        done.append(msg2 if ok2 else f"FAIL {msg2}")
+    return done
+
+
+def _load_exec(name: str, path: Path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _run_charged_tunes(headers: dict[str, str]) -> list[str]:
+    """One charged land per symbol — fixed axis order (Claude compound gate).
+
+    Order: seans → msa → cost_rank → adx → atr_pct → body → trail_step → trail_start.
+    EXIT_RISK axes (trail_*) skip symbols with open tickets.
+    """
+    from scripts.exec_gates import pipeline_frozen
+    if pipeline_frozen():
+        return ["tune: exec pipeline FREEZE (Claude 03:36)"]
+    st = _api_get("/api/state", headers) or {}
+    if (st.get("opt") or {}).get("busy"):
+        return ["tune: opt busy — atlandi"]
+    open_syms = {str(p.get("symbol") or "") for p in st.get("positions") or []}
+    body = _api_get("/api/symbols", headers) or {}
+    rows = body.get("symbols") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return ["tune: symbols okunamadi"]
+
+    sess = _load_exec("session_exec", ROOT / "scripts" / "session_exec.py")
+    msa = _load_exec("msa_exec", ROOT / "scripts" / "msa_exec.py")
+    cr = _load_exec("cost_rank_exec", ROOT / "scripts" / "cost_rank_exec.py")
+    adx = _load_exec("adx_exec", ROOT / "scripts" / "adx_exec.py")
+    atrp = _load_exec("atr_pct_exec", ROOT / "scripts" / "atr_pct_exec.py")
+    bodyx = _load_exec("body_exec", ROOT / "scripts" / "body_exec.py")
+    trail = _load_exec("trail_exec", ROOT / "scripts" / "trail_exec.py")
+
+    done: list[str] = []
+    kept = 0
+    scanned = 0
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("enabled"):
+            continue
+        sym = str(row.get("symbol") or "")
+        if not sym:
+            continue
+        scanned += 1
+        flat = sym not in open_syms
+        landed = False
+
+        if flat:
+            ok, msg = sess.apply_session_upgrade(headers, panel=PANEL, row=row)
+            done.append(msg if ok else f"FAIL {msg}")
+            if ok and "->" in msg and "degismedi" not in msg:
+                landed = True
+        if not landed and flat:
+            ok, msg = msa.apply_msa_upgrade(headers, panel=PANEL, row=row)
+            done.append(msg if ok else f"FAIL {msg}")
+            if ok and "->" in msg and "degismedi" not in msg:
+                landed = True
+        if not landed:
+            ok, msg = cr.apply_cost_rank_upgrade(headers, panel=PANEL, row=row)
+            done.append(msg if ok else f"FAIL {msg}")
+            if ok and "->" in msg and "degismedi" not in msg:
+                landed = True
+        if not landed:
+            ok, msg = adx.apply_adx_upgrade(headers, panel=PANEL, row=row)
+            done.append(msg if ok else f"FAIL {msg}")
+            if ok and "->" in msg and "degismedi" not in msg:
+                landed = True
+        if not landed:
+            ok, msg = atrp.apply_atr_pct_upgrade(headers, panel=PANEL, row=row)
+            done.append(msg if ok else f"FAIL {msg}")
+            if ok and "->" in msg and "degismedi" not in msg:
+                landed = True
+        if not landed:
+            ok, msg = bodyx.apply_body_upgrade(headers, panel=PANEL, row=row)
+            done.append(msg if ok else f"FAIL {msg}")
+            if ok and "->" in msg and "degismedi" not in msg:
+                landed = True
+        if not landed and flat:
+            ok, msg = trail.apply_trail_upgrade(headers, panel=PANEL, row=row)
+            done.append(msg if ok else f"FAIL {msg}")
+            if ok and "->" in msg and "degismedi" not in msg:
+                landed = True
+            elif ok and "degismedi" in msg:
+                ok2, msg2 = trail.apply_trail_start_upgrade(
+                    headers, panel=PANEL, row=row)
+                done.append(msg2 if ok2 else f"FAIL {msg2}")
+                if ok2 and "->" in msg2 and "degismedi" not in msg2:
+                    landed = True
+        if not landed:
+            kept += 1
+    if scanned:
+        done.append(f"tune: {kept}/{scanned} KEEP (1 land/sembol)")
+    return done
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="MicoFX income development loop audit")
     parser.add_argument("--apply-safe", action="store_true",
@@ -562,6 +1192,13 @@ def main() -> int:
     args = parser.parse_args()
     if args.auto:
         args.apply_safe = True
+        print(
+            "UYARI: --auto lockdown (04.09): family hizala OFF, cost_free "
+            "no-op, spread kanitli; seans/msa/cr/trail charged + "
+            "1 land/sembol/tur. Exec pipeline FREEZE (Claude 03:50) — "
+            "charged tunes skip.",
+            flush=True,
+        )
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "income_loop.log"
@@ -573,10 +1210,228 @@ def main() -> int:
     finally:
         c.close()
 
-    applied: list[str] = []
+    report["symbol_queues"] = load_symbol_queues()
+    report["action_queues"] = load_action_queues()
+    report["day25_checklist"] = load_day25_checklist()
+    try:
+        from scripts.baseline_accumulate_watch import (
+            maybe_alert_stale_heartbeat,
+        )
+        applied_pre = maybe_alert_stale_heartbeat()
+    except Exception:
+        applied_pre = []
+
+    applied: list[str] = list(applied_pre)
     if args.apply_safe:
         applied.extend(apply_safe(report))
     headers, panel_up = _api_session()
+    if panel_up:
+        try:
+            import importlib.util
+            spec_br = importlib.util.spec_from_file_location(
+                "book_robust_audit",
+                ROOT / "scripts" / "book_robust_audit.py")
+            br = importlib.util.module_from_spec(spec_br)
+            assert spec_br.loader is not None
+            spec_br.loader.exec_module(br)
+            report["robust_slices"] = br.audit_from_panel(PANEL)
+            try:
+                from scripts import unfreeze_prep as _uf
+                report["unfreeze_prep"] = _uf.snapshot()
+            except Exception as exc:
+                report["unfreeze_prep"] = {}
+                applied.append(f"unfreeze_prep fail: {exc}")
+            try:
+                from scripts.xau_streak_watch import baseline_status, fetch_autopsy_rows
+                bl = baseline_status(len(fetch_autopsy_rows()))
+            except Exception:
+                bl = {}
+            br.append_evidence_ledger(
+                report["robust_slices"],
+                meta={
+                    "source": "income_dev_loop",
+                    "new_trades": bl.get("new_trades"),
+                    "autopsy_n": bl.get("autopsy_n"),
+                    "frozen": True,
+                },
+            )
+            bad = [r for r in report["robust_slices"] if not r.get("ok")]
+            if bad:
+                applied.extend(br.alert_erosion(report["robust_slices"]))
+        except Exception as exc:
+            report["robust_slices"] = []
+            applied.append(f"6-slice audit fail: {exc}")
+        try:
+            import importlib.util
+            spec_xs = importlib.util.spec_from_file_location(
+                "xau_streak_watch",
+                ROOT / "scripts" / "xau_streak_watch.py")
+            xs = importlib.util.module_from_spec(spec_xs)
+            assert spec_xs.loader is not None
+            spec_xs.loader.exec_module(xs)
+            xreps, xnotes = xs.run_book(PANEL, alert=True)
+            report["book_streaks"] = xreps
+            xau = next(
+                (r for r in xreps if r.get("symbol") == "XAUUSD"), {})
+            report["xau_streak"] = xau
+            applied.extend(xnotes)
+            try:
+                from scripts.xau_streak_watch import (
+                    baseline_status,
+                    fetch_autopsy_rows,
+                    maybe_alert_baseline_ready,
+                )
+                n = len(fetch_autopsy_rows(PANEL))
+                report["post_restart_baseline"] = baseline_status(n)
+                applied.extend(maybe_alert_baseline_ready(n))
+            except Exception as exc:
+                report["post_restart_baseline"] = {"armed": False, "error": str(exc)}
+            try:
+                import importlib.util as _ilu2
+                spec_u = _ilu2.spec_from_file_location(
+                    "us30_fill_watch",
+                    ROOT / "scripts" / "us30_fill_watch.py")
+                uw = _ilu2.module_from_spec(spec_u)
+                assert spec_u.loader is not None
+                spec_u.loader.exec_module(uw)
+                urep = uw.snapshot(PANEL)
+                report["us30_fill"] = urep
+                applied.extend(uw.maybe_alert(urep))
+                try:
+                    ger_path = ROOT / ".bridge" / "GER40_FILL_BASELINE.json"
+                    grep = uw.snapshot(
+                        PANEL, symbol="GER40", state_path=ger_path,
+                        min_signals=4,
+                    )
+                    report["ger40_fill"] = grep
+                    applied.extend(uw.maybe_alert(grep, state_path=ger_path))
+                except Exception as exc:
+                    report["ger40_fill"] = {}
+                    applied.append(f"ger40 fill watch fail: {exc}")
+                try:
+                    nas_path = ROOT / ".bridge" / "NAS100_FILL_BASELINE.json"
+                    nrep = uw.snapshot(
+                        PANEL, symbol="NAS100", state_path=nas_path,
+                        min_signals=4,
+                    )
+                    report["nas100_fill"] = nrep
+                    applied.extend(uw.maybe_alert(nrep, state_path=nas_path))
+                except Exception as exc:
+                    report["nas100_fill"] = {}
+                    applied.append(f"nas100 fill watch fail: {exc}")
+            except Exception as exc:
+                report["us30_fill"] = {}
+                applied.append(f"us30 fill watch fail: {exc}")
+            try:
+                from scripts.session_open_silence import (
+                    maybe_alert as silence_alert,
+                )
+                from scripts.session_open_silence import (
+                    snapshot as silence_snapshot,
+                )
+                srep = silence_snapshot(PANEL)
+                report["eu_silence"] = srep
+                applied.extend(silence_alert(srep))
+            except Exception as exc:
+                report["eu_silence"] = {}
+                applied.append(f"eu silence watch fail: {exc}")
+            try:
+                from scripts.xau_streak_watch import (
+                    fetch_autopsy_rows as _fetch_rows,
+                )
+                from scripts.xau_streak_watch import (
+                    maybe_alert_first_new_close,
+                )
+                applied.extend(maybe_alert_first_new_close(len(_fetch_rows(PANEL))))
+            except Exception as exc:
+                applied.append(f"first-close watch fail: {exc}")
+            try:
+                import http.cookiejar as _cj
+                import json as _json
+                import urllib.request as _ur
+                _op = _ur.build_opener(_ur.HTTPCookieProcessor(_cj.CookieJar()))
+                _op.open(PANEL + "/")
+                _eb = _json.loads(
+                    _op.open(
+                        _ur.Request(
+                            PANEL + "/api/analysis/entry-blocks",
+                            headers={"Origin": PANEL},
+                        )
+                    ).read().decode()
+                )
+                _cum = _eb.get("cumulative") or {}
+                report["entry_blocks_summary"] = {
+                    "signals": _eb.get("signals"),
+                    "opened": _eb.get("opened"),
+                    "cum_signals": _cum.get("signals"),
+                    "cum_opened": _cum.get("opened"),
+                }
+            except Exception as exc:
+                report["entry_blocks_summary"] = {}
+                applied.append(f"entry blocks summary fail: {exc}")
+        except Exception as exc:
+            report["book_streaks"] = []
+            report["xau_streak"] = {}
+            applied.append(f"xau streak watch fail: {exc}")
+    # When AP was disabled only to bind freeze, restart as soon as flat.
+    if panel_up:
+        try:
+            import importlib.util
+            spec_fb = importlib.util.spec_from_file_location(
+                "freeze_bind_when_flat",
+                ROOT / "scripts" / "freeze_bind_when_flat.py")
+            fb = importlib.util.module_from_spec(spec_fb)
+            assert spec_fb.loader is not None
+            spec_fb.loader.exec_module(fb)
+            if fb.RESUME_FLAG.is_file():
+                op = fb._session(PANEL)
+                flat, npos = fb.book_flat(op, PANEL)
+                if flat:
+                    code, body = fb.request_restart(op, PANEL)
+                    applied.append(
+                        f"freeze-bind restart HTTP {code}: {body[:80]}")
+                    if code in (200, 202):
+                        ok, msg = fb.verify_bind(PANEL)
+                        applied.append(msg if ok else f"FAIL {msg}")
+                else:
+                    applied.append(
+                        f"freeze-bind bekleniyor: {npos} pozisyon acik")
+        except Exception as exc:
+            applied.append(f"freeze-bind check fail: {exc}")
+        try:
+            import importlib.util
+            spec_xl = importlib.util.spec_from_file_location(
+                "xau_sl_land",
+                ROOT / "scripts" / "xau_sl_land.py")
+            xl = importlib.util.module_from_spec(spec_xl)
+            assert spec_xl.loader is not None
+            spec_xl.loader.exec_module(xl)
+            if xl.PENDING.is_file():
+                ok_l, msg_l = xl.land(PANEL)
+                applied.append(msg_l if ok_l else f"FAIL {msg_l}")
+        except Exception as exc:
+            applied.append(f"xau_sl_land fail: {exc}")
+        try:
+            import importlib.util
+            spec_xr = importlib.util.spec_from_file_location(
+                "xau_temp_reenable",
+                ROOT / "scripts" / "xau_temp_reenable.py")
+            xr = importlib.util.module_from_spec(spec_xr)
+            assert spec_xr.loader is not None
+            spec_xr.loader.exec_module(xr)
+            ok_r, msg_r = xr.reenable(PANEL)
+            applied.append(msg_r if ok_r else f"FAIL {msg_r}")
+        except Exception as exc:
+            applied.append(f"xau_temp_reenable fail: {exc}")
+        report["pending_chain"] = {
+            "resume": (ROOT / ".bridge" / "AUTOPILOT_RESUME_AFTER_RESTART").is_file(),
+            "xau_sl": (ROOT / ".bridge" / "XAU_SL_07_PENDING").is_file(),
+            "reenable": (ROOT / ".bridge" / "XAU_SL_07_REENABLE").is_file(),
+            "bind_done": (ROOT / ".bridge" / "FREEZE_BIND_DONE.txt").is_file(),
+            "sl_done": (ROOT / ".bridge" / "XAU_SL_07_DONE.txt").is_file(),
+            "xau_enabled": None,
+            "xau_sl_live": None,
+        }
     if args.auto and panel_up:
         import importlib.util
         spec = importlib.util.spec_from_file_location(
@@ -587,6 +1442,7 @@ def main() -> int:
         applied.extend(kasa_mod.apply_kasa_tune(headers))
         applied.extend(apply_trust_entries(report))
         applied.extend(apply_spread_calibration(report))
+        applied.extend(_run_charged_tunes(headers))
         applied.extend(_run_holdout_live_sync(headers))
         applied.extend(_run_family_audit(headers))
         applied.extend(_run_signal_health(headers))

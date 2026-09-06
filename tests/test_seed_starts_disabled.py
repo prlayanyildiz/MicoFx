@@ -52,9 +52,17 @@ def test_the_seeded_symbols_are_otherwise_intact(fresh):
                           .read_text(encoding="utf-8-sig"))
     wanted = {e["symbol"] for e in template["symbols"]}
     assert set(fresh.symbols) == wanted
-    xau = fresh.symbols["XAUUSD"]
-    assert xau.group == "commodity"
-    assert xau.sessions[0]["start"] == "02:00"
+    # Read from the template, not pinned to a literal: the point of this test
+    # is that seeding carries every non-``enabled`` field through unchanged,
+    # not that XAUUSD opens at any particular hour. The literal "02:00" here
+    # turned an ordinary refresh of the shipped book (05.09) into a failure
+    # that said nothing about seeding.
+    by_name = {e["symbol"]: e for e in template["symbols"]}
+    for name, entry in by_name.items():
+        seeded = fresh.symbols[name]
+        assert seeded.group == entry["group"], name
+        assert seeded.magic == entry["magic"], name
+        assert seeded.sessions == entry["sessions"], name
 
 
 def test_no_seeded_symbol_carries_a_searched_config(fresh):

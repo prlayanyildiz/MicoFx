@@ -200,12 +200,22 @@ def test_a_minimum_lot_above_the_cap_skips_the_trade_rather_than_sizing_up():
     cfgs = _book()
     rm = _rm(cfgs)
 
+    # Derived from the constant, not pinned to a number. This said 80.0 with
+    # the note "above concurrent hard ceiling (3.5x)". The ceiling was raised
+    # to 4.5 on the record (OPTIMIZATIONS.md: "min-lot concurrent overshoot
+    # 3.5->4.5", because live US30 at ~$232 sits ~4.1x and 3.5 left it lot-0)
+    # and the test was not moved, so 80.0 fell UNDER the new ceiling: the
+    # unlock fired, a lot was sized, and the guard named "skips the trade
+    # rather than sizing up" was asserting the opposite of what happens. The
+    # constant's own comment already says where this test belongs - "see skip
+    # test at ~6x".
+    cap_1r = 20.0                      # the ~20-lot 1R cap this book produces
+    wide_min = cap_1r * (RiskManager.MAX_MIN_LOT_CONCURRENT_OVERSHOOT + 1.5)
+
     class _Wide(_Client):
         def info(self, symbol):
             i = super().info(symbol)
-            # 4x the ~20-lot 1R cap — above concurrent hard ceiling (3.5x)
-            # so unlock cannot fire even when kasa invents a live concurrent %.
-            i["volume_min"] = 80.0
+            i["volume_min"] = wide_min
             return i
 
     rm.client = _Wide()

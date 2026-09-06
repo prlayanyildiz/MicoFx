@@ -44,6 +44,16 @@ class Params:
     chan_lookback: int = 50
     chan_buffer_atr: float = 0.0
 
+    # ---- quiet-band mean reversion (range_fade; reserved, not preferred) ----
+    fade_adx_max: float = 22.0       # only fire while ADX is below this
+    fade_ema_len: int = 20
+    fade_band_atr: float = 1.0
+
+    # ---- failed-breakout fade (sweep_fade) ----
+    sweep_lookback: int = 25
+    sweep_pierce_atr: float = 0.25
+    sweep_close_pct: float = 0.6
+
     # ---- adaptive cost-regime gate (burst) ----
     cost_rank_max: float = 0.0       # 0 disables; percentile ceiling on cost/range
 
@@ -112,6 +122,8 @@ class Params:
                 self.pull_break_confirm,
                 self.brst_lookback, self.brst_range_z, self.brst_close_pct,
                 self.chan_lookback, self.chan_buffer_atr,
+                self.fade_adx_max, self.fade_ema_len, self.fade_band_atr,
+                self.sweep_lookback, self.sweep_pierce_atr, self.sweep_close_pct,
                 self.cost_rank_max)
 
 
@@ -364,8 +376,21 @@ def _common(cache: IndicatorCache, p: Params):
     t3 = cache.t3(p.t3_length, p.t3_volume_factor)
     k, d = cache.stoch(p.rsi_length, p.stoch_length, p.smooth_k, p.smooth_d)
     atr_series = cache.atr(p.atr_period)
-    need_adx = p.adx_min > 0 or p.adx_max > 0
-    adx_series = cache.adx(p.adx_period) if need_adx else np.zeros(cache.close.size)
+    # Always computed, even when no gate reads it. It used to be skipped unless
+    # adx_min/adx_max were armed, which left Signals.adx as zeros - and that is
+    # what the engine stamps into every trade autopsy. Result: `adx` reads
+    # 0.0000 on 316 of 343 closed trades, so the one regime variable we would
+    # most want when asking why 42% of trades never reach 0.5R is the one the
+    # book has no record of. (It was not even consistent with the gate: US30
+    # carries adx_min=22 and recorded zero on all 92 of its trades, while
+    # XAUUSD has no gate and recorded a value on 15 of 41 - state.adx is
+    # refreshed on evaluate and the fill does not always see a fresh one.)
+    #
+    # The cost is one memoised call per IndicatorCache: adx_period is not a
+    # searched field, so a sweep of thousands of combos shares a single 203ms
+    # computation over 90k bars. Gate behaviour is unchanged - _regime still
+    # only consults the series when adx_min/adx_max are above zero.
+    adx_series = cache.adx(p.adx_period)
     return t3, k, d, atr_series, adx_series
 
 
@@ -581,10 +606,97 @@ def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
                    buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down)
 
 
+def _range_fade(cache: IndicatorCache, p: Params) -> Signals:
+    """Fade extremes of an EMA±ATR band while ADX is quiet.
+
+    Complements ``channel_break``: CB needs a trending regime (ADX floor);
+    this family only fires when ADX is *below* ``fade_adx_max``. Measured
+    US30 M30 charged (Claude 12:38): CB alone +75R 4/6; CB|fade +208R 5/6
+    with almost no signal overlap. Do not enable live until post-restart
+    baseline + unfreeze + US30 WFO — code lands first, apply later.
+    """
+    close = cache.close
+    size = close.size
+    t3, k, d, atr_series, _ = _common(cache, p)
+    # _common skips ADX when adx_min/adx_max are 0; fade gates on its own axis.
+    adx_series = cache.adx(p.adx_period)
+    ema_len = max(2, int(p.fade_ema_len))
+    mid = cache.ema(ema_len)
+    band = max(0.0, float(p.fade_band_atr)) * atr_series
+    lower = mid - band
+    upper = mid + band
+    quiet = adx_series < float(p.fade_adx_max)
+    buy = quiet & (close < lower) & (k < 25.0)
+    sell = quiet & (close > upper) & (k > 75.0)
+
+    warmup = min(size, max(ema_len * 3, int(p.atr_period) * 3, 60))
+    buy[:warmup] = False
+    sell[:warmup] = False
+    buy = ind.first_of_run(buy)
+    sell = ind.first_of_run(sell)
+    buy, sell = _resolve_conflicts(buy, sell)
+    zero = np.zeros(size, dtype=bool)
+    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series,
+                   buy=buy, sell=sell, htf_up=zero, htf_down=zero)
+
+
+def _sweep_fade(cache: IndicatorCache, p: Params) -> Signals:
+    """Fade a failed sweep of the prior N-bar extreme while ADX is capped.
+
+    Pierces beyond ``prev_lo``/``prev_hi`` then closes back inside with a
+    strong close location (CLV) — opposite of ``channel_break``'s close
+    *beyond* the level. Uses ``adx_max`` (was dead: no family read it).
+    Claude 13:16: GER40 18/18 configs 6/6; preferred over range_fade.
+    """
+    close, open_ = cache.close, cache.open
+    high, low = cache.high, cache.low
+    size = close.size
+    t3, k, d, atr_series, _ = _common(cache, p)
+    adx_series = cache.adx(p.adx_period)
+    w = max(2, int(p.sweep_lookback))
+    lo, _ = ind.rolling_min_max(low, w)
+    _, hi = ind.rolling_min_max(high, w)
+    prev_lo = np.roll(lo, 1)
+    prev_hi = np.roll(hi, 1)
+    prev_lo[0] = -np.inf
+    prev_hi[0] = np.inf
+    rng = np.maximum(high - low, 1e-12)
+    clv = (close - low) / rng
+    pierce = max(0.0, float(p.sweep_pierce_atr)) * atr_series
+    pct = float(p.sweep_close_pct)
+    quiet = _regime(p, adx_series, size)  # adx_max (and adx_min if set)
+    # When adx_max is 0, _regime is all-pass — intentional (grid includes 0).
+    buy = (
+        quiet
+        & (low < prev_lo - pierce)
+        & (close > prev_lo)
+        & (clv >= pct)
+        & (close > open_)
+    )
+    sell = (
+        quiet
+        & (high > prev_hi + pierce)
+        & (close < prev_hi)
+        & (((high - close) / rng) >= pct)
+        & (close < open_)
+    )
+    warmup = min(size, max(w + 1, int(p.atr_period) * 3, 60))
+    buy[:warmup] = False
+    sell[:warmup] = False
+    buy = ind.first_of_run(buy)
+    sell = ind.first_of_run(sell)
+    buy, sell = _resolve_conflicts(buy, sell)
+    zero = np.zeros(size, dtype=bool)
+    return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series,
+                   buy=buy, sell=sell, htf_up=zero, htf_down=zero)
+
+
 _FAMILIES = {
     "mtf_pullback": _mtf_pullback,
     "burst": _burst,
     "channel_break": _channel_break,
+    "sweep_fade": _sweep_fade,
+    "range_fade": _range_fade,
 }
 
 # Exit / live-entry axes the family function never names. The search and the
@@ -639,10 +751,23 @@ def absent_regime_gates_to_zero(family: str, stamped: dict[str, Any]) -> dict[st
 
 
 def searchable_axes(family: str, axes: dict[str, Any]) -> dict[str, Any]:
-    """Drop OPT axes the family never reads. Engine axes stay."""
+    """Drop OPT axes the family never reads. Engine axes stay.
+
+    Also collapses pull_depth values below ``MIN_PULL_DEPTH_ATR`` (Claude
+    13:16 grid defect: 0.3 clamped to 0.5 wasted ~25% of the search budget).
+    """
     allow = opt_fields_read(family) | ENGINE_OPT_FIELDS
-    return {k: v for k, v in axes.items()
-            if k in allow or k not in OPT_FIELDS}
+    out = {k: v for k, v in axes.items()
+           if k in allow or k not in OPT_FIELDS}
+    if family == "mtf_pullback":
+        depths = out.get("pull_depth_atr")
+        if isinstance(depths, list) and depths:
+            kept = sorted({
+                float(x) for x in depths
+                if float(x) + 1e-12 >= MIN_PULL_DEPTH_ATR
+            })
+            out["pull_depth_atr"] = kept or [MIN_PULL_DEPTH_ATR]
+    return out
 
 
 def required_bars(p: Params) -> int:
@@ -662,4 +787,8 @@ def required_bars(p: Params) -> int:
                    # burst ranks cost against a 240-bar window.
                    p.brst_lookback * 6 + 260,
                    # channel_break needs the full channel before its first read.
-                   int(p.chan_lookback) + 2))
+                   int(p.chan_lookback) + 2,
+                   # range_fade: EMA warm-up + ADX.
+                   int(p.fade_ema_len) * 3 + 2,
+                   # sweep_fade: prior N-bar extreme + ADX.
+                   int(p.sweep_lookback) + 2))

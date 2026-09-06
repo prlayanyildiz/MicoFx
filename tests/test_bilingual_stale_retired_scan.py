@@ -14,7 +14,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import STRATEGIES, TIMEFRAMES
-from tests.retired_lexicon import GONE_WORDS, RETIRED_FAMILIES, RETIRED_TIMEFRAMES
+from tests.retired_lexicon import (
+    GONE_WORDS,
+    RETIRED_FAMILIES,
+    RETIRED_SYMBOLS,
+    RETIRED_TIMEFRAMES,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = ROOT / "config" / "defaults.json"
@@ -22,7 +27,12 @@ PANEL_FILES = (
     ROOT / "micofx" / "web" / "static" / "app.js",
     ROOT / "micofx" / "web" / "static" / "field_help.js",
 )
-DOC_FILES = ("README.md", "MASTER_PROMPT.md", "AGENTS.md")
+# docs/KULLANIM.md joined 05.09. Until then ``docs/`` was scanned by no guard
+# at all, and it had gone the furthest out of date of anything in the repo: it
+# still advertised a 10-symbol portfolio naming four retired symbols, omitted
+# BTCUSD entirely, and offered "M5/M15/M30/H1" as the searchable bars. It is
+# the file an operator actually reads, so it is now guarded like the rest.
+DOC_FILES = ("README.md", "MASTER_PROMPT.md", "AGENTS.md", "docs/KULLANIM.md")
 
 
 def _says_removed(lines: list[str], i: int) -> bool:
@@ -37,9 +47,30 @@ def _read_lines(path: Path) -> list[str]:
 def test_shipped_defaults_only_list_live_families():
     data = json.loads(DEFAULTS.read_text(encoding="utf-8"))
     opt = data["optimizer"]
-    assert set(opt["strategies"]) == set(STRATEGIES)
-    assert set(opt["strategy_grids"]) == set(STRATEGIES)
+    # ``<=``, not ``==``: the shipped list is the *searched* subset, and a
+    # dormant family (sweep_fade / range_fade) is in STRATEGIES without being
+    # offered to the optimizer. Equality here would fail red until someone
+    # "fixed" it by adding the dormant names to defaults.json - which is the
+    # accidental-activation path this file exists to close.
+    assert set(opt["strategies"]) <= set(STRATEGIES)
+    assert set(opt["strategy_grids"]) <= set(STRATEGIES)
     assert set(opt["timeframes"]) <= set(TIMEFRAMES)
+
+
+def test_shipped_starter_book_names_no_retired_symbol():
+    """``overwrite=true`` seeding DELETES the portfolio and rebuilds it from
+    this list, so a stale entry here is a live-book risk, not a doc typo.
+    """
+    book = json.loads(DEFAULTS.read_text(encoding="utf-8"))["symbols"]
+    names = [str(e.get("symbol") or "") for e in book]
+    assert names, "defaults.json ships an empty starter book"
+    for retired in RETIRED_SYMBOLS:
+        assert retired not in names, (
+            f"defaults.json still seeds retired symbol {retired!r}; "
+            f"'varsayilana don' would rebuild the old portfolio")
+    magics = [e.get("magic") for e in book]
+    assert len(set(magics)) == len(magics), f"duplicate seed magic: {magics}"
+    assert len(set(names)) == len(names), f"duplicate seed symbol: {names}"
 
 
 def test_panel_files_do_not_present_retired_families_as_live():

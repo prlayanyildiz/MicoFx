@@ -24,7 +24,7 @@ from test_plan_symbol_reads_shared_from_variant import (
     _Client,
 )
 
-from micofx.models import STRATEGIES
+from micofx.models import STRATEGIES, TIMEFRAMES
 from micofx.optimizer import family_max_combos, run_combo_budget
 
 
@@ -111,20 +111,27 @@ def test_combo_total_uses_the_family_cap_not_the_global_one():
     """Live: burst 28800 override, everyone else 2000, refine_rounds=5."""
     families = list(STRATEGIES)
     blob = {"strategy_max_combos": {"burst": 28800}}
+    # TF count read off the list, not written as a literal. This passed
+    # ["M5","M15","M30"] and multiplied by 3; run_combo_budget drops bars that
+    # are not searched, so once M5 was retired the product was 2/3 of the
+    # expected number and the test failed for a reason that had nothing to do
+    # with the family budget it guards.
+    tfs = list(TIMEFRAMES)
     total, per_sweep = run_combo_budget(
-        blob, families, ["M5", "M15", "M30"], 2000, 5, n_symbols=6)
+        blob, families, tfs, 2000, 5, n_symbols=6)
     assert per_sweep["burst"] == 28800 * 6
     n_other = len(families) - 1
     assert per_sweep["channel_break"] == 2000 * 6
-    assert total == 6 * 3 * (n_other * 12000 + 172800)
+    assert total == 6 * len(tfs) * (n_other * 12000 + 172800)
 
 
 def test_combo_total_without_a_family_map_matches_the_old_global_product():
     families = ["burst", "channel_break"]
+    tfs = list(TIMEFRAMES)
     total, per_sweep = run_combo_budget(
-        {}, families, ["M5", "M30"], 2000, 5, n_symbols=3)
+        {}, families, tfs, 2000, 5, n_symbols=3)
     assert per_sweep["burst"] == per_sweep["channel_break"] == 12000
-    assert total == 3 * 2 * 2 * 12000
+    assert total == 3 * len(tfs) * len(families) * 12000
 
 
 def test_plan_without_a_family_map_keeps_the_global_budget():

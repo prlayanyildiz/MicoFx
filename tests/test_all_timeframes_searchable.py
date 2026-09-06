@@ -71,8 +71,13 @@ def test_the_swing_families_reach_the_five_minute_chart():
     # is worse than no test. Cursor's scan #080 found it.
     swing = [f for f in STRATEGIES if f not in SCALP_STRATEGIES]
     assert swing, "no swing family left to test"
+    # Reads TIMEFRAMES rather than a literal. This asserted "M5" until 05.09;
+    # when M5 was retired the assertion inverted from "the fast bar is open to
+    # swing families too" into a plain failure, which is the same literal-pin
+    # trap the comment above describes.
     for family in swing:
-        assert strategy_allows_timeframe(family, "M5")
+        for tf in TIMEFRAMES:
+            assert strategy_allows_timeframe(family, tf), f"{family}/{tf}"
 
 
 def test_a_retired_family_is_not_quietly_accepted():
@@ -107,7 +112,11 @@ def test_a_scalp_family_on_long_bars_gets_the_swing_envelope():
 
 def test_scalp_classification_itself_is_unchanged():
     """Position caps and cooldowns read this; only the exit grid moved."""
-    # burst retired 27.08; burst carries the scalp set alone.
+    # ``micro_rev`` retired 27.08; burst carries the scalp set alone. The
+    # comment here named *burst* as the retired one, which is exactly backwards
+    # - burst is live and searched (it is in defaults.json optimizer.strategies).
+    # An engineer grepping for "burst retired" would have read this as licence
+    # to remove a live family. Corrected 05.09.
     assert SCALP_STRATEGIES == frozenset({"burst"})
 
 
@@ -139,20 +148,22 @@ def test_an_unrecognised_bar_never_claims_the_swing_envelope():
     assert uses_swing_exits("stoch_flip", "") is False
 
 
-def test_the_searchable_timeframes_are_exactly_these_three():
-    """Each name here left on a measurement, not on an argument.
+def test_the_searchable_timeframes_are_exactly_these_two():
+    """Each name that left did so on a measurement, not on an argument.
 
-    M1: 0.099 R/trade against M5's 0.121, at 0.043 R/trade of cost against
-    0.024, on a quarter of the history. M3 the same way.
+    M1: 0.099 R/trade against the then-fastest bar's 0.121, at 0.043 R/trade of
+    cost against 0.024, on a quarter of the history. M3 the same way.
 
-    H1 is the one that moved twice. It left 14.08 on a wall-clock guess, which
-    was not a measurement and should not have counted; came back 15.08 on a
-    real cost reading (UK100 spends 21.3% of R on spread at M5 against 8.6% at
-    H1); and left again that evening on a yield reading that outranks it -
-    0.110 R/**day** against M5's 1.303. Per trade the hourly bar is cheaper and
-    per day it is far poorer, and at this account size the day is what compounds.
-    The cost problem was answered by moving the expensive symbols instead.
+    H1 moved three times. It left 14.08 on a wall-clock guess, which was not a
+    measurement and should not have counted; came back 15.08 on a real cost
+    reading; left again that evening on a yield reading that outranks it; and
+    was re-measured 05.09 under the corrected replay, losing 6/6 symbols on
+    R/day. Per trade the hourly bar is cheaper and per day it is far poorer,
+    and at this account size the day is what compounds.
 
-    Reopening it needs a R/day number, not a spread number.
+    M5 left 05.09, which is why this test is no longer named "three": 0/7
+    symbols would pick it, five outright negative, at +6-32% cost per trade.
+
+    Reopening either needs an R/day number, not a spread number.
     """
-    assert TIMEFRAMES == ["M5", "M15", "M30"]
+    assert TIMEFRAMES == ["M15", "M30"]

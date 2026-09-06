@@ -87,7 +87,21 @@ def test_tick_skips_spread_when_optimizer_busy():
                for x in out)
 
 
-def test_tick_skips_spread_when_mt5_down():
+def test_tick_skips_spread_when_mt5_down(monkeypatch):
+    """MT5 down -> no tuning, and the line says why.
+
+    The freeze has to be lifted for this test to reach the branch it is named
+    after. ``scripts.exec_gates.pipeline_frozen()`` short-circuits every tuning
+    arm before the connection is ever consulted, and it currently returns True
+    (EXEC_PIPELINE_FROZEN is a hardcoded constant plus a live flag file), so
+    the tick answered "exec pipeline FREEZE" and the MT5 branch never ran.
+    Without this patch the test passes or fails on the freeze, not on the
+    thing it guards - and it would keep "passing" if the MT5 check were
+    deleted outright. (05.09)
+    """
+    import scripts.exec_gates as gates
+
+    monkeypatch.setattr(gates, "pipeline_frozen", lambda *a, **k: False)
     opt = _IdleOpt()
     ap, _ = _engine(connected=False, opt=opt, entry_rows=[{
         "symbol": "US30", "leg": "buy", "signals": 20, "opened": 1,

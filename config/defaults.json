@@ -38,7 +38,7 @@
       "max_lot": 0.05,
       "max_positions": 1,
       "risk_percent": 0.5,
-      "timeframe": "M5",
+      "timeframe": "M30",
       "t3_length": 5,
       "t3_volume_factor": 0.7,
       "rsi_length": 8,
@@ -81,7 +81,7 @@
       "max_lot": 0.3,
       "max_positions": 1,
       "risk_percent": 0.5,
-      "timeframe": "M5",
+      "timeframe": "M30",
       "t3_length": 6,
       "t3_volume_factor": 0.7,
       "rsi_length": 9,
@@ -124,7 +124,7 @@
       "max_lot": 0.05,
       "max_positions": 1,
       "risk_percent": 0.5,
-      "timeframe": "M5",
+      "timeframe": "M30",
       "t3_length": 7,
       "t3_volume_factor": 0.7,
       "rsi_length": 10,
@@ -252,16 +252,16 @@
   },
   "symbols": [
     {
-      "symbol": "FRA40",
-      "group": "index",
-      "magic": 990102,
+      "symbol": "BTCUSD",
+      "group": "crypto",
+      "magic": 990116,
       "sessions": [
         {
-          "start": "09:00",
-          "end": "22:55"
+          "start": "00:00",
+          "end": "23:59"
         }
       ],
-      "max_spread_atr": 0.065,
+      "max_spread_atr": 0.18,
       "enabled": true
     },
     {
@@ -270,10 +270,11 @@
       "magic": 990011,
       "sessions": [
         {
-          "start": "10:00",
-          "end": "22:55"
+          "start": "08:00",
+          "end": "15:59"
         }
       ],
+      "max_spread_atr": 0.05,
       "enabled": true
     },
     {
@@ -283,9 +284,10 @@
       "sessions": [
         {
           "start": "01:00",
-          "end": "15:00"
+          "end": "23:59"
         }
       ],
+      "max_spread_atr": 0.08,
       "enabled": true
     },
     {
@@ -294,35 +296,11 @@
       "magic": 990014,
       "sessions": [
         {
-          "start": "01:00",
-          "end": "23:55"
+          "start": "15:00",
+          "end": "21:00"
         }
       ],
       "max_spread_atr": 0.05,
-      "enabled": true
-    },
-    {
-      "symbol": "UK100",
-      "group": "index",
-      "magic": 990103,
-      "sessions": [
-        {
-          "start": "10:00",
-          "end": "22:55"
-        }
-      ],
-      "enabled": true
-    },
-    {
-      "symbol": "US2000",
-      "group": "index",
-      "magic": 990115,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ],
       "enabled": true
     },
     {
@@ -332,22 +310,10 @@
       "sessions": [
         {
           "start": "08:00",
-          "end": "15:59"
+          "end": "16:00"
         }
       ],
-      "max_spread_atr": 0.07,
-      "enabled": true
-    },
-    {
-      "symbol": "US500",
-      "group": "index",
-      "magic": 990016,
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:55"
-        }
-      ],
+      "max_spread_atr": 0.12,
       "enabled": true
     },
     {
@@ -356,10 +322,11 @@
       "magic": 990022,
       "sessions": [
         {
-          "start": "01:00",
-          "end": "23:55"
+          "start": "14:00",
+          "end": "22:00"
         }
       ],
+      "max_spread_atr": 0.05,
       "enabled": true
     },
     {
@@ -368,10 +335,11 @@
       "magic": 990021,
       "sessions": [
         {
-          "start": "02:00",
-          "end": "23:55"
+          "start": "00:00",
+          "end": "23:59"
         }
       ],
+      "max_spread_atr": 0.25,
       "enabled": true
     }
   ],
@@ -385,7 +353,6 @@
     "plateau_weight": 0.5,
     "refine_rounds": 5,
     "timeframes": [
-      "M5",
       "M15",
       "M30"
     ],
@@ -405,7 +372,8 @@
         "pull_depth_atr": [
           0.5,
           0.8,
-          1.2
+          1.2,
+          1.6
         ],
         "pull_max_bars": [
           4,
@@ -427,8 +395,30 @@
           18.0,
           25.0
         ],
+        "min_body_ratio": [
+          0.0,
+          0.1,
+          0.2,
+          0.3
+        ],
+        "t3_length": [
+          4,
+          6,
+          8,
+          12,
+          16
+        ],
+        "t3_volume_factor": [
+          0.4,
+          0.5,
+          0.618,
+          0.7,
+          0.9
+        ],
         "atr_pct_min": [
           0.0,
+          0.1,
+          0.2,
           0.25
         ],
         "max_spread_atr": [
@@ -477,6 +467,20 @@
         "min_body_ratio": [
           0.0,
           0.25
+        ],
+        "t3_length": [
+          4,
+          6,
+          8,
+          12,
+          16
+        ],
+        "t3_volume_factor": [
+          0.4,
+          0.5,
+          0.618,
+          0.7,
+          0.9
         ],
         "trail_start_atr": [
           0.3,
@@ -529,6 +533,128 @@
         "min_body_ratio": [
           0.0,
           0.25
+        ],
+        "t3_length": [
+          4,
+          6,
+          8,
+          12,
+          16
+        ],
+        "t3_volume_factor": [
+          0.4,
+          0.5,
+          0.618,
+          0.7,
+          0.9
+        ],
+        "sl_atr_mult": [
+          1.0,
+          1.5,
+          2.0,
+          2.5,
+          3.0
+        ],
+        "trail_start_atr": [
+          0.3,
+          0.5,
+          0.8,
+          1.0,
+          1.4,
+          1.5,
+          2.0
+        ],
+        "trail_step_atr": [
+          0.4,
+          0.6,
+          0.8,
+          1.2,
+          1.6,
+          2.2,
+          2.8
+        ],
+        "max_spread_atr": [
+          0.04,
+          0.05,
+          0.08,
+          0.12,
+          0.18
+        ]
+      },
+      "sweep_fade": {
+        "adx_max": [
+          0.0,
+          15.0,
+          18.0,
+          22.0
+        ],
+        "sweep_lookback": [
+          15,
+          25,
+          40
+        ],
+        "sweep_pierce_atr": [
+          0.0,
+          0.25,
+          0.5
+        ],
+        "sweep_close_pct": [
+          0.5,
+          0.6,
+          0.7
+        ],
+        "sl_atr_mult": [
+          1.0,
+          1.5,
+          2.0,
+          2.5,
+          3.0
+        ],
+        "trail_start_atr": [
+          0.3,
+          0.5,
+          0.8,
+          1.0,
+          1.4,
+          1.5,
+          2.0
+        ],
+        "trail_step_atr": [
+          0.4,
+          0.6,
+          0.8,
+          1.2,
+          1.6,
+          2.2,
+          2.8
+        ],
+        "max_spread_atr": [
+          0.04,
+          0.05,
+          0.08,
+          0.12,
+          0.18
+        ]
+      },
+      "range_fade": {
+        "fade_adx_max": [
+          18.0,
+          20.0,
+          22.0,
+          24.0,
+          26.0
+        ],
+        "fade_ema_len": [
+          10,
+          14,
+          20,
+          30
+        ],
+        "fade_band_atr": [
+          1.0,
+          1.5,
+          2.0,
+          2.5
         ],
         "sl_atr_mult": [
           1.0,

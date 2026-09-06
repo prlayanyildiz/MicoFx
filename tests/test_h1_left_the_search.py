@@ -43,8 +43,11 @@ def test_h1_is_not_offered():
 
 
 def test_h1_no_longer_translates_to_its_own_length():
-    """It falls to M5 like any other unknown name - loudly, per mt5client."""
-    assert timeframe_seconds("H1") == 300
+    """It falls back like any other unknown name - loudly, per mt5client.
+
+    1800 since 05.09: the fallback was M5/300 until M5 was itself retired.
+    """
+    assert timeframe_seconds("H1") == 1800
 
 
 def test_everything_searchable_is_also_readable():

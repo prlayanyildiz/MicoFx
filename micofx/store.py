@@ -7,7 +7,14 @@ import time
 from typing import Any
 
 from .logbus import LOG
-from .models import OPT_FIELDS, STRATEGIES, TIMEFRAMES, SymbolConfig, SystemConfig
+from .models import (
+    OPT_FIELDS,
+    STRATEGIES,
+    TIMEFRAMES,
+    SymbolConfig,
+    SystemConfig,
+    is_valid_instrument_name,
+)
 from .paths import DB_PATH, ensure_dirs, load_defaults
 
 # Retired family knobs that may still sit in old symbol payloads. Load
@@ -485,7 +492,7 @@ class Store:
         # narrow beyond that: the name is a settings key, a dict key and a URL
         # path segment, so no slashes, spaces or punctuation that would change
         # what those mean.
-        if not name or not all(ch.isalnum() or ch in "._-" for ch in name):
+        if not is_valid_instrument_name(name):
             raise ValueError("Gecerli bir sembol adi yazin (harf/rakam/_/./-)")
         if name in self.symbols:
             raise ValueError(f"{name} zaten portfoyde")
@@ -593,8 +600,9 @@ class Store:
             # says about ``enabled``. defaults.json carries symbol, group,
             # magic, sessions and the enabled flag; strategy, timeframe and
             # every exit parameter live only in the database, so a fresh
-            # install would otherwise start eighteen symbols live on the
-            # dataclass default - mtf_pullback/M5, which nothing has validated and
+            # install would otherwise start every seeded symbol live on the
+            # dataclass default - mtf_pullback on the default bar, which
+            # nothing has validated and
             # which on an FX symbol pays 25-28% of risk in spread against an
             # 18% live ceiling.
             #

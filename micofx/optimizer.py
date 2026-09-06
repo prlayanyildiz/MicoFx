@@ -45,6 +45,7 @@ APPLY_STAMP_MISSING = "uygulama damgasi yok (holdout/validated/holdout_days)"
 # persist so the live book matches the stamp.
 SEARCH_SESSION_WINDOWS: list[list[dict[str, str]]] = [
     [{"start": "00:00", "end": "23:59"}],
+    [{"start": "01:00", "end": "23:59"}],  # broker-true full day (ops 04.09)
     [{"start": "00:00", "end": "09:00"}],
     [{"start": "08:00", "end": "16:00"}],
     [{"start": "14:00", "end": "22:00"}],
@@ -178,6 +179,9 @@ def premature_sl_count_from_autopsy(
 
     ``through_entry`` or strong ``after_1h_recovery_r`` — same signal Claude
     used for the −58R premature ledger. Thin / missing after-1h windows skip.
+    Only ``exit_reason == "sl"`` with a losing (or unknown) ``r_realised``:
+    trail/flatten after-1h bounce and winning SL prints are not premature
+    hard stops (live US30 prem=65 with only 50 SL rows).
     """
     want = str(symbol or "")
     if not want or not isinstance(rows, list):
@@ -192,6 +196,15 @@ def premature_sl_count_from_autopsy(
             continue
         if str(row.get("symbol") or "") != want:
             continue
+        if str(row.get("exit_reason") or "") != "sl":
+            continue
+        try:
+            realised = row.get("r_realised")
+            if realised is not None and not isinstance(realised, bool):
+                if float(realised) >= 0.0:
+                    continue
+        except (TypeError, ValueError):
+            pass
         try:
             bars = float(row.get("after_1h_bars") or 0)
         except (TypeError, ValueError):
@@ -338,6 +351,24 @@ def spread_cap_search_axis(bars: Any, point: float, live_cap: float,
     return sorted(out)[:5]
 
 
+def _hashable(value):
+    """A dict-key-safe view of a config value.
+
+    Config values are JSON shapes: a few of them are lists (blocked_entry_hours)
+    and could become dicts. Anything built into a cache key has to survive
+    ``hash()``, and the cost of it not doing so is not a slow cache - it is a
+    TypeError inside a try/except that turns the whole lookup into None. See
+    _fresh_incumbent_holdout.
+    """
+    if isinstance(value, (list, tuple)):
+        return tuple(_hashable(v) for v in value)
+    if isinstance(value, dict):
+        return tuple(sorted((str(k), _hashable(v)) for k, v in value.items()))
+    if isinstance(value, set):
+        return tuple(sorted(_hashable(v) for v in value))
+    return value
+
+
 def _sessions_key(windows: list | None) -> tuple[tuple[str, str], ...]:
     out: list[tuple[str, str]] = []
     for row in windows or []:
@@ -431,13 +462,17 @@ def _session_rank(hold: dict | None) -> float:
 
 def _choose_search_sessions(
         current: list,
-        scored: list[tuple[list, dict | None]]) -> list | None:
+        scored: list[tuple[list, dict | None]],
+        *,
+        sticky: bool = True) -> list | None:
     """Best charged window for the sweep, or None to keep the live sessions.
 
     Ranked on holdout ``score`` (not raw net_r) so a fat 24h book with a thin
     edge cannot beat a tighter window the rest of the optimizer would prefer.
     Measured on the live family/TF only; a later family flip still inherits
-    the window (JPN 23-08 held on burst and channel_break).
+    the window (JPN 23-08 held on burst and channel_break) unless
+    ``sticky=False`` (Claude 14:52: primary flip must re-open the race —
+    the 03.09 NAS100 14-22 dd91 vs 15-21 dd57 note is pre-retune history).
 
     A +25% score sticky keeps a healthy live clock (full ok gate) from
     flipping on a mild pre-step bump. Pre-step scores the *current* params
@@ -447,7 +482,8 @@ def _choose_search_sessions(
     Soft-eligible live (positive R, PF just under 1.10) keeps the older
     +15% bar. Near-ties inside the sticky band still switch when the
     challenger has a clearly tighter max_dd_r *and* live clears full ok
-    (NAS100 14-22 dd91 vs 15-21 dd57 — Claude 03.09).
+    (historical NAS100 14-22 dd91 vs 15-21 dd57 — Claude 03.09; post-burst
+    retune DD gap collapsed — sticky=False after primary flip).
     """
     cur_key = _sessions_key(current)
     current_hold: dict | None = None
@@ -469,11 +505,12 @@ def _choose_search_sessions(
     # Near-tie DD escape only when the live window itself clears the full
     # ok gate; a soft-eligible live clock needs a clear score jump
     # (NAS100 15-21 PF-miss must not flip to 08-16 on tighter dd alone).
-    if _session_sticky_eligible(current_hold):
+    # ``sticky=False`` after family/TF flip: equal race under the new book.
+    if sticky and _session_sticky_eligible(current_hold):
         cur_rank = _session_rank(current_hold)
         live_ok = _session_holdout_ok(current_hold)
-        sticky = 1.25 if live_ok else 1.15
-        if best_ok[0] <= cur_rank * sticky:
+        sticky_mult = 1.25 if live_ok else 1.15
+        if best_ok[0] <= cur_rank * sticky_mult:
             if live_ok:
                 cur_dd = float((current_hold or {}).get("max_dd_r") or 1e9)
                 best_dd = float((best_ok[2] or {}).get("max_dd_r") or 1e9)
@@ -1015,18 +1052,33 @@ class Optimizer:
             # a sweep - so a one-off subset is not persisted into opt_params.
             requested_fam = [str(s) for s in (strategies or [])]
             if requested_fam:
-                dropped_fam = [s for s in requested_fam if s not in STRATEGIES]
-                kept_fam = [s for s in requested_fam if s in STRATEGIES]
+                # Filtered against the SEARCHED set, not ``models.STRATEGIES``.
+                # Since 04.09 that constant also carries sweep_fade and
+                # range_fade, which are deliberately dormant - present in code,
+                # absent from config/defaults.json optimizer.strategies, so no
+                # ordinary sweep can pick them. Filtering against it made this
+                # one-off override the door that reopened them: a single
+                # POST /api/opt/run {"strategies":["sweep_fade"],
+                # "apply_best":true} could search a family nothing has
+                # validated and apply the winner to a live enabled symbol with
+                # a stamp that looks legitimate. defaults.json still ships
+                # their grids, so the sweep would have had axes to move.
+                # Reopening one is a measurement decision plus shipping it in
+                # defaults.json - not an API argument. (05.09)
+                searchable = [s for s in (self.store.opt_params().get("strategies") or [])
+                              if s in STRATEGIES] or list(STRATEGIES)
+                dropped_fam = [s for s in requested_fam if s not in searchable]
+                kept_fam = [s for s in requested_fam if s in searchable]
                 if dropped_fam:
                     LOG.emit(
                         f"Aranamayan strateji istekten dusuruldu: "
-                        f"{', '.join(dropped_fam[:8])} (aranan: {', '.join(STRATEGIES)})",
+                        f"{', '.join(dropped_fam[:8])} (aranan: {', '.join(searchable)})",
                         "OPT")
                 if not kept_fam:
                     return {"ok": False, "error": (
                         f"Aranabilir strateji yok (istenilen: "
                         f"{', '.join(requested_fam)}; aranan: "
-                        f"{', '.join(STRATEGIES)})")}
+                        f"{', '.join(searchable)})")}
                 fam_override = kept_fam
             else:
                 fam_override = None
@@ -1118,8 +1170,13 @@ class Optimizer:
             or list(SEARCH_TIMEFRAMES)
         refine_rounds = int(params.get("refine_rounds", 2))
         shared = {k: v for k, v in (params.get("grid") or {}).items() if isinstance(v, list) and v}
-        families = [s for s in (fam_override or params.get("strategies") or ["burst"])
-                    if s in STRATEGIES] \
+        # ``params["strategies"]`` is the searched set; ``STRATEGIES`` is the
+        # whole book including the dormant families. Filter against the former
+        # so a dormant name cannot enter a sweep from either door - the
+        # override is already checked in start(), this is the second lock.
+        searchable = [s for s in (params.get("strategies") or []) if s in STRATEGIES]
+        families = [s for s in (fam_override or searchable or ["burst"])
+                    if s in (searchable or STRATEGIES)] \
             or ["burst"]
         family_grids = params.get("strategy_grids") or {}
         # One sweep per family: its own parameters on top of the shared risk
@@ -2464,8 +2521,22 @@ class Optimizer:
             if not charging:
                 return None
             params = {k: getattr(cfg, k) for k in OPT_FIELDS if hasattr(cfg, k)}
+            # ``_hashable`` is not tidiness. ``blocked_entry_hours`` is an
+            # OPT_FIELD and it is a LIST, so the key below was unhashable and
+            # ``key in cache`` raised TypeError - swallowed by the bare except
+            # at the bottom, which made this function return None on EVERY
+            # call, for every symbol, including ones whose list is empty.
+            #
+            # That is not a lost cache. Two callers read None as "no fresh
+            # replay exists": _beats_incumbent's unvalidated-stamp branch then
+            # returns True (candidate wins by default) and the same-window
+            # branch skips the fresh comparison entirely, while
+            # _incumbent_kept_tail falls back to quoting the stale stamp - the
+            # exact thing test_keep_log_does_not_quote_a_stale_stamp is named
+            # after. The incumbent's fresh-replay defence has been off.
+            # Found 05.09 by chasing why that test was red. (T1)
             key = (str(cfg.symbol), str(cfg.timeframe), str(cfg.strategy),
-                   tuple(sorted(params.items())))
+                   tuple(sorted((k, _hashable(v)) for k, v in params.items())))
             cache = getattr(self, "_incumbent_holdout_cache", None)
             if cache is None:
                 self._incumbent_holdout_cache = {}
@@ -2660,6 +2731,20 @@ class Optimizer:
         to read. Losing a calibration is not a reason to lose an apply.
         """
         try:
+            import sys as _sys
+            from pathlib import Path as _Path
+            _root = _Path(__file__).resolve().parents[1]
+            if str(_root) not in _sys.path:
+                _sys.path.insert(0, str(_root))
+            from scripts.exec_gates import pipeline_frozen
+            if pipeline_frozen():
+                LOG.emit(
+                    f"{symbol}: makas kalibrasyonu FREEZE (Claude 03:36)",
+                    "OPT", symbol)
+                return
+        except Exception:
+            pass
+        try:
             cfg = self.store.symbols.get(symbol)
             if cfg is None:
                 return
@@ -2672,15 +2757,83 @@ class Optimizer:
             if abs(result.cap - float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)) < 1e-9:
                 return
             old_cap = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)
+            new_cap = float(result.cap)
+            if new_cap > old_cap + 1e-9:
+                sys = getattr(self.store, "system", None)
+                charging = True if sys is None else bool(
+                    getattr(sys, "charge_costs", True))
+                if charging:
+                    try:
+                        hold_old = self._holdout_costed(
+                            symbol, timeframe, cfg.strategy, {},
+                            allow_fetch=True)
+                        hold_new = self._holdout_costed(
+                            symbol, timeframe, cfg.strategy,
+                            {"max_spread_atr": new_cap}, allow_fetch=True)
+                    except Exception:
+                        hold_old = hold_new = None
+                    if isinstance(hold_old, dict) and isinstance(hold_new, dict):
+                        try:
+                            old_r = float(hold_old.get("net_r") or 0.0)
+                            new_r = float(hold_new.get("net_r") or 0.0)
+                        except (TypeError, ValueError):
+                            old_r = new_r = 0.0
+                        if new_r + 1e-9 < old_r - 1.0:
+                            LOG.emit(
+                                f"{symbol}: makas kalibrasyonu reddedildi "
+                                f"{old_cap:g}->{new_cap:g} (charged "
+                                f"{old_r:+.1f}R->{new_r:+.1f}R)",
+                                "OPT", symbol)
+                            return
+                # 6-slice non-erosion (SpotBrent 04.09: last-seg +80R /
+                # 1/6 compose). Soft full Δ (−1R noise OK); wins/min/backload
+                # still bind via upgrade_robust.
+                try:
+                    import sys as _sys
+                    from pathlib import Path as _Path
+                    _root = _Path(__file__).resolve().parents[1]
+                    if str(_root) not in _sys.path:
+                        _sys.path.insert(0, str(_root))
+                    from scripts.exec_gates import charged_slice_nets, upgrade_robust
+                    if hasattr(cfg, "to_dict"):
+                        row = cfg.to_dict()
+                    else:
+                        row = {
+                            "symbol": symbol,
+                            "timeframe": timeframe,
+                            "strategy": getattr(cfg, "strategy", ""),
+                            "max_spread_atr": old_cap,
+                            "use_sessions": bool(
+                                getattr(cfg, "use_sessions", True)),
+                            "sessions": list(
+                                getattr(cfg, "sessions", None) or []),
+                        }
+                    row["symbol"] = symbol
+                    row["timeframe"] = timeframe
+                    live_nets = charged_slice_nets(row)
+                    chal_nets = charged_slice_nets(
+                        row, field="max_spread_atr", value=new_cap)
+                    if not upgrade_robust(
+                        live_nets, chal_nets, min_full_delta_r=-1.0,
+                    ):
+                        LOG.emit(
+                            f"{symbol}: makas kalibrasyonu reddedildi "
+                            f"{old_cap:g}->{new_cap:g} (6-slice erozyon)",
+                            "OPT", symbol)
+                        return
+                except Exception as exc:  # noqa: BLE001 — keep calibrate safe
+                    LOG.emit(
+                        f"{symbol}: 6-slice makas kapisi atlandi ({exc})",
+                        "OPT", symbol)
             summary = dict(getattr(cfg, "opt_summary", None) or {})
             summary["spread_recalibrated_from"] = old_cap
-            summary["spread_recalibrated_to"] = float(result.cap)
+            summary["spread_recalibrated_to"] = new_cap
             self.store.update_symbol(
                 symbol,
-                {"max_spread_atr": result.cap, "opt_summary": summary},
+                {"max_spread_atr": new_cap, "opt_summary": summary},
                 source="spread kalibrasyonu")
             LOG.emit(f"{symbol}: makas tavani {timeframe} icin yeniden okundu "
-                     f"-> {result.cap:g} ({result.reason})", "OPT", symbol)
+                     f"-> {new_cap:g} ({result.reason})", "OPT", symbol)
         except Exception as exc:                      # noqa: BLE001 - see docstring
             LOG.emit(f"{symbol}: makas kalibrasyonu okunamadi ({exc}) - "
                      f"mevcut tavan korundu.", "OPT", symbol)
@@ -2785,11 +2938,13 @@ class Optimizer:
                 "OPT", cfg.symbol)
         return out
 
-    def _pick_search_sessions(self, cfg) -> list | None:
+    def _pick_search_sessions(self, cfg, *, sticky: bool = True) -> list | None:
         """Legacy single-window pick (sticky). Prefer ``_session_search_shortlist``.
 
         Kept for unit coverage of sticky / soft-PF rules; live planning uses
-        the shortlist fan-out so WFO+F6 choose the clock.
+        the shortlist fan-out so WFO+F6 choose the clock. ``sticky=False``
+        after a family/TF flip (Claude 14:52) so the inherited window does
+        not freeze a pre-retune DD decision.
         """
         if not self._live_search_charging():
             return None
@@ -2824,14 +2979,42 @@ class Optimizer:
             LOG.emit(
                 f"{cfg.symbol}: seans pre-step [{', '.join(ranked)}]",
                 "OPT", cfg.symbol)
-        picked = _choose_search_sessions(current, scored)
+        picked = _choose_search_sessions(current, scored, sticky=sticky)
         if picked:
             row = picked[0] if picked else {}
             LOG.emit(
                 f"{cfg.symbol}: arama seans {row.get('start')}-{row.get('end')} "
-                f"(charged holdout, canli pencereden daha iyi)",
+                f"(charged holdout, canli pencereden daha iyi"
+                f"{'' if sticky else ', sticky=off aile/TF flip'})",
                 "OPT", cfg.symbol)
         return picked
+
+    def reevaluate_sessions_after_primary_flip(self, symbol: str) -> None:
+        """Equal-race session pick under the new family/TF (no sticky).
+
+        Sticky is not a stored stamp — it is computed in
+        ``_choose_search_sessions`` from live vs challenger holdouts. After
+        a primary flip the pre-retune DD decision is stale (Claude 14:52
+        NAS100); waive sticky and persist only if a challenger wins.
+        """
+        cfg = (self.store.symbols or {}).get(symbol)
+        if cfg is None or not self._live_search_charging():
+            return
+        try:
+            picked = self._pick_search_sessions(cfg, sticky=False)
+        except Exception as exc:
+            LOG.emit(
+                f"{symbol}: seans sticky-reset olculemedi ({exc})",
+                "WARN", symbol)
+            return
+        if not picked:
+            return
+        self._persist_search_sessions(symbol, picked)
+        row = picked[0] if isinstance(picked[0], dict) else {}
+        LOG.emit(
+            f"{symbol}: aile/TF flip sonrasi seans sticky reset -> "
+            f"{row.get('start')}-{row.get('end')}",
+            "OPT", symbol)
 
     def _holdout_costed(self, symbol: str, timeframe: str, strategy: str,
                         params: dict[str, Any], *,
@@ -3038,7 +3221,7 @@ class Optimizer:
         if not strategy_allows_timeframe(next_strat, next_tf, allow):
             return {"ok": False,
                     "error": f"{next_strat}/{next_tf} eslesmesi yasak "
-                             f"(scalp yalnizca M5; uzun TF swing ailelerine ait)"}
+                             f"(STRATEGY_TIMEFRAMES kisiti veya aranmayan bar)"}
         primary_changed = (
             (strategy in STRATEGIES and strategy != cfg.strategy)
             or (timeframe in TIMEFRAMES and timeframe != cfg.timeframe)
@@ -3161,10 +3344,72 @@ class Optimizer:
                 if abs(live_sl - new_sl) > 1e-9:
                     changed.append("sl_atr_mult")
                 if changed:
-                    msg = (f"{'+'.join(changed)} charged holdout geriledi "
-                           f"({live_net:+.1f}R -> {new_net:+.1f}R)")
-                    LOG.emit(f"{symbol}: {msg} - uygulanmadi.", "OPT", symbol)
-                    return {"ok": False, "error": msg}
+                    # Claude 04.50: last-seg regression alone must not block a
+                    # force SL *widen* that clears premature + upgrade_robust
+                    # (XAU 0.5→0.7: last-seg −12R, full-window +71R gated OK).
+                    waive_sl = False
+                    force_measured = (
+                        getattr(self, "_force_apply", False)
+                        and str((detail or {}).get("keep_reason") or "")
+                        == "force charged measure"
+                    )
+                    if (changed == ["sl_atr_mult"]
+                            and force_measured
+                            and new_sl > live_sl + 1e-9):
+                        raw_auto: list = []
+                        try:
+                            getter = getattr(self.store, "get_setting", None)
+                            raw = (getter("trade_autopsies", [])
+                                   if callable(getter) else [])
+                            if isinstance(raw, list):
+                                raw_auto = raw
+                        except Exception:
+                            raw_auto = []
+                        prem = premature_sl_count_from_autopsy(raw_auto, symbol)
+                        if prem >= 5:
+                            try:
+                                from scripts.exec_gates import (
+                                    charged_slice_nets,
+                                    upgrade_robust,
+                                )
+                                if hasattr(cfg, "to_dict"):
+                                    row = cfg.to_dict()
+                                else:
+                                    row = {
+                                        "symbol": symbol,
+                                        "timeframe": next_tf,
+                                        "strategy": next_strat,
+                                        "sl_atr_mult": live_sl,
+                                        "use_sessions": bool(
+                                            getattr(cfg, "use_sessions", True)),
+                                    }
+                                live_nets = charged_slice_nets(row)
+                                chal_nets = charged_slice_nets(
+                                    row, field="sl_atr_mult", value=float(new_sl))
+                                waive_sl = bool(
+                                    upgrade_robust(live_nets, chal_nets))
+                            except Exception:
+                                waive_sl = False
+                        if not waive_sl and prem < 5:
+                            msg = (
+                                f"sl_atr_mult genisletme otopsi premature "
+                                f"yetersiz ({prem}<5); WFO floor kullan"
+                            )
+                            LOG.emit(
+                                f"{symbol}: {msg} - uygulanmadi.", "OPT", symbol)
+                            return {"ok": False, "error": msg}
+                    if not waive_sl:
+                        msg = (f"{'+'.join(changed)} charged holdout geriledi "
+                               f"({live_net:+.1f}R -> {new_net:+.1f}R)")
+                        LOG.emit(
+                            f"{symbol}: {msg} - uygulanmadi.", "OPT", symbol)
+                        return {"ok": False, "error": msg}
+                    LOG.emit(
+                        f"{symbol}: sl_atr_mult {live_sl:g}->{new_sl:g} "
+                        f"last-seg gerileme waiver "
+                        f"({live_net:+.1f}R->{new_net:+.1f}R; "
+                        f"upgrade_robust+premature)",
+                        "OPT", symbol)
             # Force measured SL widen: autopsy premature + charged together.
             # WFO stamps (keep_reason != force charged measure) stay exempt —
             # search already paid the >=0.9 floor / F6 path.
@@ -3472,4 +3717,10 @@ class Optimizer:
             # a secondary writer that no longer exists, and must not refuse a
             # primary family swap because a leftover candidate is stored.
             updated = self.store.update_symbol(symbol, patch, source="opt apply")
+        if (updated is not None and primary_changed
+                and not (open_here or pending_scan)):
+            # Regime gates already zeroed above; reopen session race under the
+            # new family/TF (Claude 14:52 — pre-retune sticky DD is stale).
+            self.reevaluate_sessions_after_primary_flip(symbol)
+            updated = (self.store.symbols or {}).get(symbol) or updated
         return {"ok": updated is not None, "symbol": symbol, "config": updated.to_dict() if updated else None}

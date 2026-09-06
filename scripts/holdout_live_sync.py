@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from micofx.entry_pressure import spread_pressure  # noqa: E402
 from scripts.spread_exec import apply_spread_widen  # noqa: E402
 
 DB_PATH = ROOT / "data" / "micofx.db"
@@ -29,7 +30,7 @@ def _get(path: str, headers: dict[str, str]) -> dict[str, Any]:
 
 
 def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    out: dict[str, dict[str, int]] = {}
+    out: dict[str, dict[str, Any]] = {}
     for row in rows:
         sym = str(row.get("symbol") or "")
         if not sym:
@@ -37,7 +38,29 @@ def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> dict[str, dict[str, i
         agg = out.setdefault(sym, {"signals": 0, "opened": 0, "spread": 0})
         agg["signals"] += int(row.get("signals") or 0)
         agg["opened"] += int(row.get("opened") or 0)
-        agg["spread"] += int((row.get("blocks") or {}).get("spread") or 0)
+        # Keep the row's retries so spread_pressure can see them after merge.
+        prev = int(agg.get("spread") or 0)
+        pressure = spread_pressure(row)
+        agg["spread"] = max(prev, pressure)
+        # Stash last retries for pressure on the merged dict shape.
+        retries = dict(agg.get("retries") or {})
+        row_retries = row.get("retries") or {}
+        if isinstance(row_retries, dict):
+            for k, v in row_retries.items():
+                try:
+                    retries[k] = int(retries.get(k) or 0) + int(v or 0)
+                except (TypeError, ValueError):
+                    continue
+        agg["retries"] = retries
+        blocks = dict(agg.get("blocks") or {})
+        row_blocks = row.get("blocks") or {}
+        if isinstance(row_blocks, dict):
+            for k, v in row_blocks.items():
+                try:
+                    blocks[k] = int(blocks.get(k) or 0) + int(v or 0)
+                except (TypeError, ValueError):
+                    continue
+        agg["blocks"] = blocks
     return out
 
 
@@ -63,6 +86,8 @@ def sync_flat_symbols(headers: dict[str, str]) -> list[str]:
         sig = int(eb_r.get("signals") or 0)
         fill = float(eb_r.get("opened") or 0) / sig if sig else 0.0
         spread_n = int(eb_r.get("spread") or 0)
+        if spread_n < _EXEC_SPREAD_MIN:
+            spread_n = spread_pressure(eb_r)
 
         exec_gap = fill < _EXEC_FILL_MAX and spread_n >= _EXEC_SPREAD_MIN
         if not exec_gap:
@@ -71,7 +96,8 @@ def sync_flat_symbols(headers: dict[str, str]) -> list[str]:
         hist = _get(f"/api/opt/history?symbol={sym}&limit=50", headers)
         ok, msg = apply_spread_widen(
             headers, panel=PANEL, symbol=sym, current_cap=cap,
-            history=list(hist.get("history") or []))
+            history=list(hist.get("history") or []),
+            strategy=str(payload.get("strategy") or "") or None)
         done.append(msg if ok else f"FAIL {msg}")
     db.close()
     return done

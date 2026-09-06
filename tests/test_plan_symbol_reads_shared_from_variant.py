@@ -102,4 +102,13 @@ def test_plan_symbol_does_not_nameerror_on_shared():
     assert plan["jobs"], plan["attempts"]
     sl = plan["jobs"][0]["grid"]["sl_atr_mult"]
     assert 1.0 not in sl
-    assert sl == OPERATOR_SL
+    # The operator's axis must survive intact. Exact equality was too strong:
+    # floor_sl_atr_search_axis re-injects the symbol's OWN live SL via
+    # sl_atr_search_keep, so the incumbent stays nameable even when it sits
+    # under the 0.9 floor. Deliberate and documented (JPN 04.09: the floor
+    # cliffs at -33R while live 0.7->0.8 is the sweet spot; without keep the
+    # WFO cannot name 0.8 at all). Here the config carries the 1.2 default.
+    live_sl = SymbolConfig(symbol="GER40", magic=1).sl_atr_mult
+    assert set(OPERATOR_SL) <= set(sl), f"operatorun ekseni kirpildi: {sl}"
+    assert set(sl) <= set(OPERATOR_SL) | {live_sl}, (
+        f"izgaraya beklenmeyen deger girdi: {sorted(set(sl) - set(OPERATOR_SL))}")

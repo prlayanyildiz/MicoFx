@@ -297,10 +297,16 @@ def test_patch_refuses_strategy_change_with_open_position():
 def test_patch_refuses_strategy_even_when_flat():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
+    # Asserted as "unchanged", not as "!= M30". The old form assumed the config
+    # started on something other than M30 - true when SymbolConfig defaulted to
+    # M5, false since the 05.09 retirement made M30 the default, at which point
+    # the assertion could no longer fail no matter what the endpoint did.
+    before = store.symbols["XAUUSD"].timeframe
 
     res = tc.post("/api/symbols/XAUUSD", json={"strategy": "burst", "timeframe": "M30"})
     assert res.status_code == 400
-    assert store.symbols["XAUUSD"].timeframe != "M30"
+    assert store.symbols["XAUUSD"].strategy == "mtf_pullback"
+    assert store.symbols["XAUUSD"].timeframe == before
 
 
 def test_bulk_patch_refuses_strategy_for_the_whole_request():
@@ -311,13 +317,18 @@ def test_bulk_patch_refuses_strategy_for_the_whole_request():
     positions = [{"ticket": 1, "symbol": "XAUUSD", "magic": 990021, "side": "sell"}]
     tc, store = _client(symbols, positions)
 
+    before = {s: c.strategy for s, c in store.symbols.items()}
+
     res = tc.post("/api/symbols-bulk", json={
         "symbols": ["XAUUSD", "COPPER"],
         "patch": {"strategy": "burst", "timeframe": "M30"},
     })
     assert res.status_code == 400
-    assert store.symbols["XAUUSD"].timeframe != "M30"
-    assert store.symbols["COPPER"].timeframe != "M30"
+    # Same correction as above: the family is what the patch tried to change and
+    # what must be untouched. Pinning "timeframe != M30" stopped meaning
+    # anything once M30 became the default.
+    for name, was in before.items():
+        assert store.symbols[name].strategy == was, name
 
 
 def test_bulk_patch_allows_non_strategy_fields_with_open_position():

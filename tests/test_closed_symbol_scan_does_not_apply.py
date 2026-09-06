@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.models import SymbolConfig
+from micofx.models import SymbolConfig, SystemConfig
 from micofx.optimizer import Optimizer
 
 
@@ -36,6 +36,11 @@ class _Thread:
 class _StartStore:
     def __init__(self, symbols):
         self.symbols = {c.symbol: c for c in symbols}
+        # optimizer.start reads store.system.charge_costs. The real dataclass,
+        # not a stub - a stub carries only the field production touches today.
+        # Without it every test here died before its assertion, so the guard
+        # "a closed symbol is still SEARCHED, just not applied" was dead. (05.09)
+        self.system = SystemConfig()
 
     def get_setting(self, key, default=None):
         return default
