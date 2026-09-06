@@ -230,6 +230,7 @@ _RISK_BLOCK_KEYS: tuple[tuple[str, str], ...] = (
     ("toplam pozisyon limiti", "risk_toplam_limit"),
     ("pozisyon limiti", "risk_kova_limiti"),      # scalp/swing bucket
     ("sembol marj limiti", "risk_sembol_marj"),
+    ("kademe araligi", "risk_kademe_aralik"),
     ("marj hesaplanamadi", "risk_marj_okunamadi"),
     ("serbest marj yetersiz", "risk_serbest_marj"),
     ("marj kullanimi limiti", "risk_marj_kullanimi"),
@@ -3139,14 +3140,15 @@ class Engine:
             state.entry_block = "lot"
             return
 
+        entry = float(tick["ask"] if side == "buy" else tick["bid"])
         verdict = self.risk.can_open(
-            cfg, side, lot, self._positions, account, sl_distance=sl_dist)
+            cfg, side, lot, self._positions, account, sl_distance=sl_dist,
+            entry_price=entry, atr=atr)
         if not verdict.ok:
             state.note = verdict.reason
             state.entry_block = _risk_block_key(verdict.reason)
             return
 
-        entry = tick["ask"] if side == "buy" else tick["bid"]
         sl = entry - sl_dist if side == "buy" else entry + sl_dist
         tp = 0.0 if tp_dist <= 0 else (entry + tp_dist if side == "buy" else entry - tp_dist)
         if sl <= 0:

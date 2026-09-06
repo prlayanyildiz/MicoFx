@@ -429,19 +429,20 @@ class RiskManager:
     def _vacant_enabled_cfgs(
             self, positions: list[dict[str, Any]] | None) -> list[SymbolConfig]:
         magics = {c.magic for c in list(self.store.symbols.values())}
-        occupied: set[str] = set()
+        pos_counts: dict[str, int] = {}
         for pos in positions or ():
             if pos.get("magic") not in magics:
                 continue
-            name = pos.get("symbol")
+            name = str(pos.get("symbol") or "")
             if name:
-                occupied.add(str(name))
+                pos_counts[name] = pos_counts.get(name, 0) + 1
         out: list[SymbolConfig] = []
         for cfg in list(self.store.symbols.values()):
             if not getattr(cfg, "enabled", True):
                 continue
             broker = self.client.resolve(cfg.symbol) or cfg.symbol
-            if broker in occupied:
+            cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+            if pos_counts.get(broker, 0) >= cap:
                 continue
             if self._cannot_open(cfg.symbol):
                 continue
@@ -650,34 +651,8 @@ class RiskManager:
         return max(1, n)
 
     def _vacant_enabled_count(self, positions: list[dict[str, Any]] | None) -> int:
-        """Enabled names that do not already hold one of our tickets.
-
-        Remaining book margin is split across that set so the first signal
-        does not swallow the kasa. Occupied names are 1-ticket already.
-        """
-        magics = {c.magic for c in list(self.store.symbols.values())}
-        occupied: set[str] = set()
-        for pos in positions or ():
-            if pos.get("magic") not in magics:
-                continue
-            name = pos.get("symbol")
-            if name:
-                occupied.add(str(name))
-        n = 0
-        for cfg in list(self.store.symbols.values()):
-            if not getattr(cfg, "enabled", True):
-                continue
-            broker = self.client.resolve(cfg.symbol) or cfg.symbol
-            if broker in occupied:
-                continue
-            # A quarantined name carries risk_scale 0.0 and cannot open, but
-            # it used to keep a full share of the remaining book margin
-            # reserved anyway - so every entry that *could* happen was sized
-            # at (vacant - suspended) / vacant of its intended lot.
-            if self._cannot_open(cfg.symbol):
-                continue
-            n += 1
-        return max(1, n)
+        """Enabled names that have capacity for more tickets."""
+        return max(1, len(self._vacant_enabled_cfgs(positions)))
 
     def _margin_lot_ceiling(self, cfg: SymbolConfig, account: dict[str, Any] | None,
                             side: str, floor: float,
@@ -719,7 +694,8 @@ class RiskManager:
         except (TypeError, ValueError):
             scale = 1.0
         whole = budget * scale
-        share = whole * self._budget_share_frac(cfg, positions)
+        pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+        share = (whole * self._budget_share_frac(cfg, positions)) / pos_cap
         unit = floor if floor > 0 else 0.01
         try:
             need = float(self.client.margin_for(cfg.symbol, unit, side) or 0.0)
@@ -729,10 +705,10 @@ class RiskManager:
             return None
         # Splitting across vacant names must not zero every entry on a small
         # account: if one share cannot fund min lot but the whole book can,
-        # size this signal on whole remaining budget. can_open() and
+        # size this signal on remaining budget share. can_open() and
         # max_concurrent_risk_pct still bind when several names fill.
-        if share + 1e-12 < need and whole + 1e-12 >= need:
-            share = whole
+        if share + 1e-12 < need and (whole / pos_cap) + 1e-12 >= need:
+            share = whole / pos_cap
         return min(broker_ceiling, unit * (share / need))
 
     def lot_for(self, cfg: SymbolConfig, sl_distance: float, balance: float,
@@ -774,19 +750,17 @@ class RiskManager:
         # max_margin_pct are unread — remaining book margin × auto 1R size.
         if sl_distance <= 0:
             return 0.0, "lot sifir (stop yok), islem atlandi"
+        pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
         raw, multiplier, note_edge_capped, money_per_unit = self._risk_raw_lot(
             cfg, sl_distance, balance, multiplier, edge)
         if money_per_unit <= 0:
             return 0.0, "tick degeri yok, islem atlandi (risk % hesaplanamadi)"
         # "aday", not the chosen size. On the account path below, ``raw`` is
         # NOT what gets traded: the lot is min(margin share, auto-1R cap,
-        # volume_max) and this number never enters it. The old wording -
-        # "risk %2.75 -> 0.129" - reads as the decision, and on 01.09 a BTCUSD
-        # fill logged exactly that and then took 0.18 lot (the 1R ceiling),
-        # losing $59.94 on a -1R stop against an intended ~$15. Nothing was
-        # wrong with the sizing that line describes; the line was describing
-        # something that had not happened.
-        note = f"risk aday %{cfg.risk_percent * multiplier:.3g} -> {raw:.3f}"
+        # volume_max) and this number never enters it.
+        note_pct = (cfg.risk_percent / pos_cap) * multiplier
+        note_extra = f" (kademe 1/{pos_cap})" if pos_cap > 1 else ""
+        note = f"risk aday %{note_pct:.3g}{note_extra} -> {raw:.3f}"
         if note_edge_capped:
             note += " (SL broker min'e yapisik, avantaj carpani kisildi)"
         if raw <= 0:
@@ -810,7 +784,7 @@ class RiskManager:
                 stored = float(getattr(cfg, "risk_percent", 0.0) or 0.0)
             except (TypeError, ValueError):
                 stored = 0.0
-            r_pct = max(stored, self.AUTO_R_PCT)
+            r_pct = max(stored, self.AUTO_R_PCT) / pos_cap
             # Deliberately NOT ``multiplier``: that already carries edge_scale
             # (up to EDGE_MAX 2.2), so scaling the ceiling by the same push it
             # exists to bound made the "auto 1R" cap ~4.4% of balance instead
@@ -932,7 +906,9 @@ class RiskManager:
         edge_capped = min_stop > 0 and sl_distance <= min_stop * 1.05 and edge > 1.0
         if edge_capped:
             multiplier /= edge
-        risk_money = balance * float(cfg.risk_percent) / 100.0 * multiplier
+        pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+        risk_pct = (float(cfg.risk_percent) / pos_cap) if pos_cap > 0 else float(cfg.risk_percent)
+        risk_money = balance * risk_pct / 100.0 * multiplier
         return risk_money / (sl_distance * money_per_unit), multiplier, edge_capped, money_per_unit
 
     def lot_mode_diagnostics(self, balance: float,
@@ -1032,7 +1008,8 @@ class RiskManager:
 
     def can_open(self, cfg: SymbolConfig, side: str, lot: float,
                  positions: list[dict[str, Any]], account: dict[str, Any],
-                 sl_distance: float = 0.0) -> Verdict:
+                 sl_distance: float = 0.0, entry_price: float = 0.0,
+                 atr: float = 0.0) -> Verdict:
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
         mine = [p for p in positions if p["magic"] in magics]
@@ -1049,13 +1026,29 @@ class RiskManager:
         same_symbol = [p for p in mine if p["symbol"] == self.client.resolve(cfg.symbol)]
         if any(p["side"] != side for p in same_symbol):
             return Verdict(False, "ters yonde acik pozisyon var")
+        cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+        if len(same_symbol) >= cap:
+            return Verdict(False, f"sembol pozisyon limiti ({cap})")
         if same_symbol:
-            # Search still scores max_open=1. Leftover DB max_positions 5/10
-            # is unread — the 13.08 stack. One ticket per name; lot_for spends
-            # the margin share on that ticket instead of restacking.
-            cap = 1
-            if len(same_symbol) >= cap:
-                return Verdict(False, f"sembol pozisyon limiti ({cap})")
+            # Scale-in ticket: require ATR spacing >= 1.0 ATR from nearest existing ticket.
+            eff_atr = float(atr) if (atr is not None and atr > 0) else 0.0
+            if eff_atr <= 0 and sl_distance > 0:
+                mult = max(0.1, float(getattr(cfg, "sl_atr_mult", 1.0) or 1.0))
+                eff_atr = sl_distance / mult
+            eff_px = float(entry_price) if (entry_price is not None and entry_price > 0) else 0.0
+            if eff_px <= 0:
+                tick = self.client.tick(cfg.symbol)
+                if tick:
+                    eff_px = float(tick.get("ask" if side == "buy" else "bid") or 0.0)
+            if eff_atr <= 0 or eff_px <= 0:
+                return Verdict(False, "kademe araligi hesaplanamadi")
+            open_prices = [float(p.get("price_open") or 0.0) for p in same_symbol
+                           if float(p.get("price_open") or 0.0) > 0]
+            if not open_prices:
+                return Verdict(False, "kademe araligi hesaplanamadi")
+            min_dist = min(abs(eff_px - px) for px in open_prices)
+            if min_dist < (1.0 * eff_atr - 1e-9):
+                return Verdict(False, f"kademe araligi yetersiz (< 1.0 ATR: {min_dist / eff_atr:.2f} ATR)")
 
         # Leftover max_total_positions is unread. Another *name* may still
         # open until margin / STOPSUZ (and scalp/swing only when those

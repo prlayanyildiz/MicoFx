@@ -362,18 +362,18 @@ def test_can_open_refuses_a_second_same_side_ticket():
 
 
 def test_can_open_ignores_leftover_symbol_max_positions():
-    """DB leftover 5/10 must not restack. Search scored max_open=1."""
+    """DB leftover > 5 is clipped to 5. Search scored max_open=1."""
     cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=10)
     store = _LotStore(cfg)
     store.system.max_positions = 1
     risk = RiskManager.__new__(RiskManager)
     risk.store = store
     risk.client = _LotClient()
-    existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy"}]
+    existing = [{"ticket": 100 + i, "symbol": "XAUUSD", "magic": 1, "side": "buy"} for i in range(5)]
     account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 0.0}
     blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
     assert not blocked.ok
-    assert "sembol pozisyon limiti" in blocked.reason
+    assert "sembol pozisyon limiti (5)" in blocked.reason
 
 
 def test_can_open_ignores_leftover_symbol_margin_pct():
@@ -383,12 +383,16 @@ def test_can_open_ignores_leftover_symbol_margin_pct():
     risk = RiskManager.__new__(RiskManager)
     risk.store = store
     risk.client = _LinearMarginClient()
-    existing = [{"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy",
-                 "volume": 0.5, "sl": 1900.0, "price_open": 2000.0}]
+    existing = [
+        {"ticket": 100, "symbol": "XAUUSD", "magic": 1, "side": "buy",
+         "volume": 0.5, "sl": 1900.0, "price_open": 2000.0},
+        {"ticket": 101, "symbol": "XAUUSD", "magic": 1, "side": "buy",
+         "volume": 0.5, "sl": 1900.0, "price_open": 2010.0},
+    ]
     account = {"equity": 1000.0, "margin_free": 950.0, "margin": 50.0}
     blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
     assert not blocked.ok
-    assert "sembol pozisyon limiti" in blocked.reason
+    assert "sembol pozisyon limiti (2)" in blocked.reason
 
 
 def test_can_open_ignores_leftover_total_slot_cap():

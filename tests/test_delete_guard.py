@@ -414,7 +414,7 @@ def test_patch_refuses_exit_field_change_with_open_position():
     tc, store = _client(symbols, positions)
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
-    assert res.status_code == 400
+    assert res.status_code == 409
     assert store.symbols["XAUUSD"].sl_atr_mult != 2.5
 
 
@@ -422,9 +422,10 @@ def test_patch_refuses_exit_field_even_when_flat():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
 
-    res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
+    # trail_start_atr remains hands-off even when flat
+    res = tc.post("/api/symbols/XAUUSD", json={"trail_start_atr": 2.5})
     assert res.status_code == 400
-    assert store.symbols["XAUUSD"].sl_atr_mult != 2.5
+    assert store.symbols["XAUUSD"].trail_start_atr != 2.5
 
 
 def test_bulk_patch_refuses_exit_field_change_with_open_position():
@@ -522,7 +523,7 @@ def test_patch_refuses_max_positions_inside_the_old_card_cap():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
     before = store.symbols["XAUUSD"].max_positions
-    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 1})
+    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 6})
     assert res.status_code == 400, res.text
     assert store.symbols["XAUUSD"].max_positions == before
 

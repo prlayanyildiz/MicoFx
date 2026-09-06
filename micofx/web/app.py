@@ -173,7 +173,7 @@ _SYMBOL_RISK_BOUNDS = {
     "commission_per_lot": (0.0, 10000.0, True),
     "max_lot": (0.0, 100.0, True),
     "max_margin_pct": (0.0, 100.0, True),
-    "max_positions": (1, 10, True),
+    "max_positions": (1, 5, True),
     # Panel-writable and, until 31.08, the only writable symbol field with no
     # bound here at all - the ``max: 240`` on the card is UI-only, so a POST
     # carrying 10**9 was accepted and blocked every entry on that symbol for
@@ -509,7 +509,7 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
     # sl_atr_mult still hits EXIT_RISK 409 while this magic has a ticket.
     "sl_atr_mult", "vol_ratio_min", "chase_max_atr", "max_spread_atr",
     "mfe_lock1_at_r", "mfe_lock1_to_r", "mfe_lock2_at_r", "mfe_lock2_to_r",
-    "stale_flat_bars", "stale_max_abs_r",
+    "stale_flat_bars", "stale_max_abs_r", "max_positions",
 })
 # NOT here, deliberately: ``symbol_daily_loss_pct``. A 05.09 audit reported it
 # as "a protection that cannot be armed" - true as a description (no path sets

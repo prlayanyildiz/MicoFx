@@ -255,12 +255,11 @@ def test_symbol_lot_and_margin_caps_are_not_writable():
     tc, store, _ = _client()
     before = store.symbols["XAUUSD"]
     res = tc.post("/api/symbols/XAUUSD", json={
-        "max_lot": 0.5, "max_margin_pct": 15.0, "max_positions": 1,
+        "max_lot": 0.5, "max_margin_pct": 15.0,
     })
     assert res.status_code == 400, res.text
     assert store.symbols["XAUUSD"].max_lot == before.max_lot
     assert store.symbols["XAUUSD"].max_margin_pct == before.max_margin_pct
-    assert store.symbols["XAUUSD"].max_positions == before.max_positions
 
 
 def test_enabled_still_writes():

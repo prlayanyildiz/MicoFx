@@ -1,4 +1,4 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 `MASTER_PROMPT.md` §19. Do not port remaining `D:\MicoAi` extras
@@ -140,15 +140,15 @@ Fail-first: write the test, watch it fail, then implement.
  cost toggles (`charge_costs` / `block_high_cost` / `max_cost_pct_of_risk`).
  Opt POST: `lookback_days` /
  `refine_rounds` / `max_combos` / `timeframes`, plus the shared grid's
- **cost axes only** (`max_spread_atr`, `cost_rank_max`, F50 â€” the write
+ **cost axes only** (`max_spread_atr`, `cost_rank_max`, F50 — the write
  merges onto the stored grid; a whole-value assign would delete the other
  axes). Family / TF / exits / magic / rest-of-grid /
   lot_mode /
   `daily_loss_flatten` / size_by_edge /
   `max_total_positions` / `risk_percent` / system `max_lot` /
-  system `max_positions` / symbol `max_lot` / `max_margin_pct` /
-  `max_positions` are 400. `POST .../reset` is
-  400. GET still returns readout fields.
+ system `max_positions` / symbol `max_lot` / `max_margin_pct`
+ are 400. `POST .../reset` is
+ 400. GET still returns readout fields.
 - `POST /api/opt/run` `strategies` is **one-off**. Empty inherits the
   saved list. Do not persist a subset into `opt_params`. `apply_best`
   still defaults true.
@@ -202,17 +202,14 @@ Fail-first: write the test, watch it fail, then implement.
   `force=True`. `execution.flush()` sits on the same side of `join`.
   Do not flush either blob before `_stop.set()` â€” the last in-flight
   cycle then hits a fresh window and drops its rows.
-- Live count is **1 ticket per name** (leftover `max_positions` 5/10
-  unread â€” the 13.08 stack). Lot is remaining book margin split across
-  vacant enabled names, clipped by auto 1R `max(risk_percent, 2%)` Ã—
-  denetci. Leftover `max_lot` / `max_margin_pct` unread. System
- `max_positions` / `max_lot` unread. Leftover `max_total_positions`
- stays unread. `max_concurrent_risk_pct` **binds again** (operator
- 31.08): `remaining_position_risk` summed over open tickets plus this
- fill must stay under it; 0 = off; a trailed stop frees budget. Re-armed
- *before* any size increase because `lot_for` is `min(margin share, auto
- 1R cap)` and that 2% cap is the only thing holding the book off the 90%
- margin allowance. Search still scores `max_open=1`.
+- Live count allows **scale-in tickets up to `cfg.max_positions` (clipped 1..5)**
+  (operator + peer ACK 07.09, deployed first on XAUUSD=5; other names default 1).
+  Guarded against 13.08 restack via: (1) ATR spacing >= 1.0 ATR from nearest open
+  ticket, (2) max 1 new fill per symbol per closed bar (`_filled_bars`), (3) risk-splitting
+  where each ticket risks `risk_percent / max_positions` and 1R cap is divided by
+  `max_positions`, (4) book-wide `max_concurrent_risk_pct` and daily loss bounds remain
+  active, (5) no hedging (opposite side blocked). System `max_positions` and symbol
+  `max_lot` / `max_margin_pct` remain unread/400. Search still scores `max_open=1` for honest WFO.
 - Do not add an adverse-fill entry gate on autopsy
   `fill_vs_signal_close_r` *R thresholds* (Claude 18:45: Q4 in-sample
   curve-fit; unverifiable). Live `chase_max_atr` (default 0.25) is a

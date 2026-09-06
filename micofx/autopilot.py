@@ -553,7 +553,6 @@ class AutoPilot:
             from scripts.body_exec import propose_body_upgrade
             from scripts.cost_rank_exec import propose_cost_rank_upgrade
             from scripts.msa_exec import propose_msa_upgrade
-            from scripts.session_exec import propose_session_upgrade
             from scripts.trail_exec import (
                 propose_trail_start_upgrade,
                 propose_trail_upgrade,
