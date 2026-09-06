@@ -39,3 +39,8 @@ def test_keep_reinjects_live_and_mid_step_below_floor():
     axis = floor_sl_atr_search_axis(
         [0.5, 0.7, 0.9, 1.2], floor=0.9, keep=sl_atr_search_keep(0.7))
     assert axis == [0.9, 1.2, 0.7, 0.8]
+
+
+def test_default_floor_is_one_atr():
+    assert floor_sl_atr_search_axis([0.5, 0.7, 0.9, 1.0, 1.2]) == [1.0, 1.2]
+    assert floor_sl_atr_search_axis([0.5, 0.7]) == [1.0, 1.2, 1.5, 2.0]

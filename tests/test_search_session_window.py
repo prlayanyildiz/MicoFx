@@ -72,6 +72,14 @@ def test_search_windows_cover_claude_set():
     assert ("15:00", "21:00") in keys
     assert ("23:00", "08:00") in keys
     assert ("08:00", "16:00") in keys
+    # Claude 06.09 14:4x targeted extensions (signal pile just outside KEEP)
+    assert ("08:00", "18:00") in keys
+    assert ("08:00", "20:00") in keys
+    assert ("08:00", "22:00") in keys
+    assert ("13:00", "23:00") in keys
+    assert ("09:00", "23:00") in keys
+    assert ("12:00", "23:59") in keys
+    assert ("09:00", "23:59") in keys
 
 
 def test_pick_search_sessions_uses_costed_overlay():

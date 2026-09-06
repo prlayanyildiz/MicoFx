@@ -83,11 +83,17 @@ class Params:
     partial_close_frac: float = 0.0  # 0 = off; fraction booked at the rung
     harvest_at_r: float = 0.0        # 0 = off; tighten trail after this many R
     harvest_step_atr: float = 0.0    # 0 = off; ATR distance once harvest_at_r hits
+    mfe_lock1_at_r: float = 1.5
+    mfe_lock1_to_r: float = 0.75
+    mfe_lock2_at_r: float = 2.0
+    mfe_lock2_to_r: float = 1.25
     cooldown_sec: int = 0            # live engine caps to 2 bars of TF; BT mirrors that
     max_spread_atr: float = 0.0
     min_atr_ratio: float = 0.0
     min_body_ratio: float = 0.0
     atr_pct_min: float = 0.0
+    vol_ratio_min: float = 0.0       # 0 = off; burst/channel tick_volume / SMA
+    chase_max_atr: float = 0.25      # live only; 0 = off (see engine._try_entry)
 
     @classmethod
     def from_config(cls, cfg: SymbolConfig, **overrides: Any) -> Params:
@@ -158,12 +164,25 @@ class IndicatorCache:
         self._atr_lists: dict[int, list] = {}
         self.volume = volume if volume is not None else np.ones(close.size)
         self._src = ind.t3_source(high, low, close)
+        self._vol_ratio: dict[int, np.ndarray] = {}
 
     # ---- transaction cost -------------------------------------------------
 
     def cost(self) -> np.ndarray | None:
         """Round-turn cost per bar in price units, or None when unavailable."""
         return self._cost
+
+    def volume_ratio(self, period: int = 20) -> np.ndarray:
+        """tick_volume / SMA(tick_volume, period). Warm bars stay ~1.0."""
+        key = max(1, int(period))
+        cached = self._vol_ratio.get(key)
+        if cached is not None:
+            return cached
+        vol = np.asarray(self.volume, dtype=np.float64)
+        avg = ind.sma(vol, key)
+        out = vol / np.where(avg > 1e-12, avg, 1e-12)
+        self._vol_ratio[key] = out
+        return out
 
     def cost_ok(self, rank_max: float, window: int = 240) -> np.ndarray:
         """Bars whose cost is cheap *relative to what this market usually is*.
@@ -487,21 +506,11 @@ def _mtf_pullback(cache: IndicatorCache, p: Params) -> Signals:
 
 
 def _burst(cache: IndicatorCache, p: Params) -> Signals:
-    """Continuation off a single range-expansion bar that closed on its extreme.
+    """Continuation off a volume-confirmable range-expansion bar (M15/M30).
 
-    A level-based breakout keys off a price the market has already printed -
-    a session's opening range, an N-bar channel. None of those can fire on
-    the bar that actually matters to a scalper - the one where a burst of
-    one-sided activity expands the range well beyond what the last hour has been
-    doing and then closes hard against its own extreme, with no prior level
-    involved. That bar is the signal here: range above ``brst_range_z`` standard
-    deviations of the trailing range distribution, close inside the top (or
-    bottom) ``brst_close_pct`` of its own bar, entry on the continuation.
-
-    Because it is anchored to nothing but the current bar it is available at any
-    hour, which is the point on M5 - and because a burst is exactly when spreads
-    widen, it carries a ``cost_rank_max`` regime gate:
-    an expansion bar you have to pay up for is not an edge.
+    M5 is retired (05.09). This family is M15/M30 range expansion: range above
+    ``brst_range_z`` σ of the trailing window, close hard on its extreme,
+    optional ``vol_ratio_min`` tick-volume confirmation. Not a level breakout.
     """
     close, open_ = cache.close, cache.open
     t3, k, d, atr_series, adx_series = _common(cache, p)
@@ -523,6 +532,8 @@ def _burst(cache: IndicatorCache, p: Params) -> Signals:
     ok = expansion & wide & regime & cache.cost_ok(p.cost_rank_max)
     if p.atr_pct_min > 0:
         ok &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
+    if p.vol_ratio_min > 0:
+        ok &= cache.volume_ratio(20) >= float(p.vol_ratio_min)
 
     buy = ok & (clv >= edge) & (close > open_) & allow_long
     sell = ok & (clv <= 1.0 - edge) & (close < open_) & allow_short
@@ -584,6 +595,8 @@ def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
     ok = regime
     if p.atr_pct_min > 0:
         ok = ok & (cache.atr_rank(p.atr_period) >= p.atr_pct_min)
+    if p.vol_ratio_min > 0:
+        ok = ok & (cache.volume_ratio(20) >= float(p.vol_ratio_min))
 
     buy = ok & allow_long & (close > prev_hi + pad)
     sell = ok & allow_short & (close < prev_lo - pad)

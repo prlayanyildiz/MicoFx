@@ -1,9 +1,8 @@
-"""Chase (kovalama) measure-only LOG helpers — Claude 21:38.
+"""Chase (kovalama) LOG + live ATR ceiling helpers.
 
-At fill time compute ``fill_vs_signal`` / ``chase_r`` and format a log
-fragment. **Never gates entry** — AGENTS forbids an adverse-fill entry
-gate on ``fill_vs_signal_close_r``. Threshold talk only after n>=50 OOS
-new entries with the same monotone shape.
+Measure-only TRADE log fragments stay unconditional. The live entry gate
+``chase_blocks`` is a separate door: adverse tick vs signal close in *ATR*
+units (``chase_max_atr``), not an autopsy R-threshold curve-fit. 0 = off.
 """
 from __future__ import annotations
 
@@ -59,6 +58,31 @@ def chase_r_abs(
     if dist <= 0:
         return None
     return abs(fill - sig) / dist
+
+
+def chase_blocks(
+    fill_px: Any,
+    sig_close: Any,
+    side: Any,
+    *,
+    atr: Any,
+    max_atr: Any,
+) -> bool:
+    """True when adverse tick move exceeds ``max_atr * atr`` (live ceiling).
+
+    ``max_atr <= 0`` disables. Missing/non-finite inputs do not block.
+    """
+    try:
+        cap = float(max_atr)
+        atr_f = float(atr)
+    except (TypeError, ValueError):
+        return False
+    if cap <= 0 or atr_f <= 0:
+        return False
+    vs = fill_vs_signal(fill_px, sig_close, side)
+    if vs is None:
+        return False
+    return vs > cap * atr_f
 
 
 def format_chase_log(

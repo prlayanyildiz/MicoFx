@@ -271,7 +271,7 @@ def session_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False) 
         return _drop_blocked_entry_hours(cfg, times, ~weekend)
 
     if not cfg.use_sessions:
-        windows: list[tuple[int, int]] = []
+        windows: list[tuple[int, int, frozenset[int] | None]] = []
     else:
         windows = cfg.session_windows()
 
@@ -282,16 +282,23 @@ def session_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False) 
 
     mask = np.zeros(times.size, dtype=bool)
     prev_days = np.where(days == 1, 7, days - 1)
-    allowed_prev = np.isin(prev_days, np.array(cfg.trade_days or [1, 2, 3, 4, 5], dtype=np.int64))
+    trade_arr = np.array(cfg.trade_days or [1, 2, 3, 4, 5], dtype=np.int64)
 
-    for start, end in windows:
+    for start, end, dayset in windows:
+        if dayset is None:
+            day_ok = allowed_day
+            prev_ok = np.isin(prev_days, trade_arr)
+        else:
+            day_arr = np.array(sorted(dayset), dtype=np.int64)
+            day_ok = np.isin(days, day_arr)
+            prev_ok = np.isin(prev_days, day_arr)
         if start < end:
-            inside = (minutes >= start) & (minutes < end) & allowed_day
+            inside = (minutes >= start) & (minutes < end) & day_ok
             if cfg.flat_before_close_min > 0:
                 inside &= minutes < (end - cfg.flat_before_close_min)
         else:
-            evening = (minutes >= start) & allowed_day
-            morning = (minutes < end) & allowed_prev
+            evening = (minutes >= start) & day_ok
+            morning = (minutes < end) & prev_ok
             if cfg.flat_before_close_min > 0:
                 morning &= minutes < (end - cfg.flat_before_close_min)
             inside = evening | morning
@@ -368,18 +375,25 @@ def flatten_mask(cfg: SymbolConfig, times: np.ndarray, all_hours: bool = False,
     # with all_hours on, live never winds a session down (see should_flatten).
     if not all_hours and cfg.use_sessions and cfg.flat_before_close_min > 0:
         windows = cfg.session_windows()
-        allowed_day = np.isin(days, np.array(cfg.trade_days or [1, 2, 3, 4, 5], dtype=np.int64))
+        trade_arr = np.array(cfg.trade_days or [1, 2, 3, 4, 5], dtype=np.int64)
+        allowed_day = np.isin(days, trade_arr)
         prev_days = np.where(days == 1, 7, days - 1)
-        allowed_prev = np.isin(prev_days, np.array(cfg.trade_days or [1, 2, 3, 4, 5], dtype=np.int64))
         fb = cfg.flat_before_close_min
-        for start, end in windows:
+        for start, end, dayset in windows:
+            if dayset is None:
+                day_ok = allowed_day
+                prev_ok = np.isin(prev_days, trade_arr)
+            else:
+                day_arr = np.array(sorted(dayset), dtype=np.int64)
+                day_ok = np.isin(days, day_arr)
+                prev_ok = np.isin(prev_days, day_arr)
             if start < end:
-                inside = (minutes >= start) & (minutes < end) & allowed_day
+                inside = (minutes >= start) & (minutes < end) & day_ok
                 mask |= inside & (minutes >= end - fb)
             else:
                 # Overnight window: the closing edge (``end``) only falls inside
                 # the "morning" half - the "evening" half's close is hours away.
-                morning = (minutes < end) & allowed_prev
+                morning = (minutes < end) & prev_ok
                 mask |= morning & (minutes >= end - fb)
     return mask
 
@@ -639,7 +653,10 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                       banked=0.0, weight=1.0, mfe_px=0.0):
         nonlocal equity, peak, streak, bar_total
         if exit_price is None:
-            exit_price = close[exit_bar] + (0.0 if is_buy else s)
+            # Entry already paid the open-side quote (buy open+s / sell
+            # open-s). Adding +s again on a short time-exit was B3's
+            # double charge; long paid once. Same print for both sides.
+            exit_price = close[exit_bar]
             reason = "time"
         move = (exit_price - entry) if is_buy else (entry - exit_price)
         r = float(banked + weight * (move - commission_price) / sl_dist)
@@ -688,7 +705,11 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             breakeven_at_r=breakeven_at_r, original_risk=sl_dist,
             be_offset=commission_price,
             harvest_at_r=float(getattr(p, "harvest_at_r", 0.0) or 0.0),
-            harvest_step_atr=float(getattr(p, "harvest_step_atr", 0.0) or 0.0))
+            harvest_step_atr=float(getattr(p, "harvest_step_atr", 0.0) or 0.0),
+            mfe_lock1_at_r=float(getattr(p, "mfe_lock1_at_r", 0.0) or 0.0),
+            mfe_lock1_to_r=float(getattr(p, "mfe_lock1_to_r", 0.0) or 0.0),
+            mfe_lock2_at_r=float(getattr(p, "mfe_lock2_at_r", 0.0) or 0.0),
+            mfe_lock2_to_r=float(getattr(p, "mfe_lock2_to_r", 0.0) or 0.0))
         if target is None:
             return sl, trailing
         breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
@@ -734,14 +755,15 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         #   long stop / long trail  — bid vs SL  → bar_low <= sl
         #   short stop / short trail — ask vs SL  → bar_high + pad >= sl
         # Fill is the SL unless the bar opened through it (then the open).
-        # Flatten is a market cover (close, +pad on a short), not a stop.
+        # Flatten is a market cover at the print close — not a stop.
+        # Do not add spread here: entry already embedded open±s (B3).
         bar_high, bar_low = high[j], low[j]
         fill = stop_fill_price(is_buy, sl, open_l[j], bar_high, bar_low,
                                float(trigger_pad[j]))
         if fill is not None:
             return fill, ("trail" if trailing else "stop")
         if flatten is not None and flatten[j]:
-            return close[j] + (0.0 if is_buy else s), "flatten"
+            return close[j], "flatten"
         return None, None
 
     def _mfe_tick(is_buy, entry, mfe_px, j):
@@ -844,7 +866,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         _record_trade(
                             pos["is_buy"], pos["entry"], pos["sl_dist"],
                             pos["s"], pos["j0"], j,
-                            float(open_l[j] + (0.0 if pos["is_buy"] else s)),
+                            float(open_l[j]),
                             "reverse",
                             banked=pos.get("banked", 0.0),
                             weight=pos.get("weight", 1.0),
@@ -961,7 +983,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 # Live force-closes at the current market price the instant the
                 # session/day-end band starts, ahead of trail/BE/stale checks -
                 # same ordering here (checked immediately after the stop).
-                exit_price = close[j] + (0.0 if is_buy else s)
+                # Print close only: open-side spread already in entry (B3).
+                exit_price = close[j]
                 reason = "flatten"
                 exit_bar = j
                 break
@@ -978,7 +1001,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 flip = (is_buy and want_sell) or ((not is_buy) and want_buy)
                 if flip and (tradable is None or tradable[j]):
                     s_now = float(spread_price[j])
-                    exit_price = float(open_l[j] + (0.0 if is_buy else s_now))
+                    exit_price = float(open_l[j])
                     reason = "reverse"
                     exit_bar = j
                     atr_next = atr[sig_i]
@@ -1020,7 +1043,7 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             exit_bar = j
 
         if exit_price is None:
-            exit_price = close[exit_bar] + (0.0 if is_buy else s)
+            exit_price = close[exit_bar]
             reason = "time"
 
         _record_trade(is_buy, entry, sl_dist, s, j0, exit_bar, exit_price, reason,

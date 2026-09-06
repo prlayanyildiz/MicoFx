@@ -247,6 +247,16 @@ class SymbolConfig:
     # is the BE-1 threshold plus XAUUSD's proven tight step.
     harvest_at_r: float = 0.0        # 0 = off; tighten trail after this many R
     harvest_step_atr: float = 0.0    # 0 = off; ATR distance once harvest_at_r hits
+    # MFE profit locks (Antigravity 07.09). Not TP / not OPT. 0 at_r = rung off.
+    # Default rungs: +1.5R → lock +0.75R; +2.0R → lock +1.25R.
+    mfe_lock1_at_r: float = 1.5
+    mfe_lock1_to_r: float = 0.75
+    mfe_lock2_at_r: float = 2.0
+    mfe_lock2_to_r: float = 1.25
+    # Momentum-stale flatten (optional). 0 bars = off. Not max_bars_in_trade:
+    # only fires when |open R| stays under stale_max_abs_r for that many bars.
+    stale_flat_bars: int = 0
+    stale_max_abs_r: float = 0.25
     # ---- costs ----
     commission_per_lot: float = 0.0  # round-turn commission in account currency
 
@@ -257,6 +267,12 @@ class SymbolConfig:
     min_atr_ratio: float = 0.0       # ATR / price floor, filters dead markets
     min_body_ratio: float = 0.0      # signal bar body / range floor; 0 disables
     atr_pct_min: float = 0.0         # ATR percentile floor (0-1); skips dead regimes
+    # Volume spike floor for burst/channel_break (Antigravity FAZ2). 0 = off.
+    # Not an OPT_FIELD until holdout pays for the grid cost.
+    vol_ratio_min: float = 0.0
+    # Live adverse-chase ceiling in ATR units (FAZ4). Tick vs signal close;
+    # distinct from autopsy R curve-fits. 0 = off.
+    chase_max_atr: float = 0.25
     cooldown_sec: int = 300          # per-symbol pause after a fill
 
     # ---- trading hours (broker server time) ----
@@ -312,11 +328,26 @@ class SymbolConfig:
             raise TypeError(
                 f"sembol kaydi bir nesne olmali, {type(payload).__name__} bulundu")
         cfg = _coerce(cls, payload)
-        cfg.sessions = [
-            {"start": str(s.get("start", "00:00")), "end": str(s.get("end", "23:59"))}
-            for s in (payload.get("sessions") or [])
-            if isinstance(s, dict)
-        ]
+        cfg.sessions = []
+        for s in (payload.get("sessions") or []):
+            if not isinstance(s, dict):
+                continue
+            row: dict = {
+                "start": str(s.get("start", "00:00")),
+                "end": str(s.get("end", "23:59")),
+            }
+            # Optional weekday mask (1=Mon .. 7=Sun). Absent = every trade_day.
+            # Operator 06.09: SpotBrent Mon 01:00 vs Tue–Thu 03:00, Fri early
+            # close — one start/end for all days cannot express that.
+            raw_days = s.get("days")
+            if isinstance(raw_days, list) and raw_days:
+                valid = sorted({
+                    int(d) for d in raw_days
+                    if str(d).isdigit() and 1 <= int(d) <= 7
+                })
+                if valid:
+                    row["days"] = valid
+            cfg.sessions.append(row)
         days = payload.get("trade_days")
         if days is not None:
             # Two-sided on purpose. _coerce() assigns list-typed fields
@@ -363,12 +394,21 @@ class SymbolConfig:
             cfg.blocked_entry_hours = []
         return cfg
 
-    def session_windows(self) -> list[tuple[int, int]]:
-        out: list[tuple[int, int]] = []
+    def session_windows(self) -> list[tuple[int, int, frozenset[int] | None]]:
+        """``(start_min, end_min, days_or_None)``. None days = all trade_days."""
+        out: list[tuple[int, int, frozenset[int] | None]] = []
         for s in self.sessions:
             start, end = _hhmm(s.get("start", "00:00")), _hhmm(s.get("end", "23:59"))
-            if start != end:
-                out.append((start, end))
+            if start == end:
+                continue
+            raw = s.get("days")
+            dayset: frozenset[int] | None = None
+            if isinstance(raw, list) and raw:
+                valid = {int(d) for d in raw
+                         if str(d).isdigit() and 1 <= int(d) <= 7}
+                if valid:
+                    dayset = frozenset(valid)
+            out.append((start, end, dayset))
         return out
 
 # Fields that engine._update_stop reads live off cfg for a position that is
@@ -388,11 +428,11 @@ class SymbolConfig:
 # as surely as editing trail_step_atr does - it was the one input to that
 # math the mid-trade guard did not cover.
 #
-# Deliberately absent: ``breakeven_at_r``, ``partial_at_r``, ``harvest_at_r``
-# and ``harvest_step_atr``. Overlays re-read cfg every cycle, so a mid-trade
-# PATCH applies to already-open tickets (25.08 GER: partial_at_r 0→1.5, then
-# three slices at 3.66–5.04 R). That is intended, same door as BE. Do not add
-# them here unless the operator accepts API 409 while positions are open.
+# Deliberately absent: ``breakeven_at_r``, ``partial_at_r``, ``harvest_at_r``,
+# ``harvest_step_atr``, and ``mfe_lock*_at_r`` / ``mfe_lock*_to_r``. Overlays
+# re-read cfg every cycle, so a mid-trade PATCH applies to already-open
+# tickets (25.08 GER: partial_at_r 0→1.5). That is intended, same door as BE.
+# Do not add them here unless the operator accepts API 409 while open.
 EXIT_RISK_FIELDS = frozenset({
     "sl_atr_mult", "trail_start_atr", "trail_step_atr", "trail_mode", "trail_lookback",
     "atr_period",
@@ -788,6 +828,10 @@ class SystemConfig:
     # existing holdout number incomparable and the whole book needs
     # re-searching - which is a decision, not a default.
     charge_costs: bool = True
+    # Spread calibration may step the live cap *down* toward a calm-band
+    # reading (Antigravity 07.09). Off restores the F49 one-way ratchet.
+    # Max step per calibrate call is 0.02 ATR units.
+    spread_narrow_on_calm: bool = True
     # Optimizer parallel process cap: 0 = auto (CPU core count - 2, memory
     # permitting). A weaker/shared cloud VM can set this lower so a walk-forward
     # sweep does not starve the live trading loop and MT5 terminal of CPU.

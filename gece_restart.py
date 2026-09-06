@@ -14,8 +14,10 @@ interrupt a position it would otherwise be managing.
 
 The 22.08 incident looked healthy from outside (process up, port bound), so
 an unread book still kills: that is the recovery. An *open* book does not.
-Panel restart is already 409 with tickets; this script used to bypass that
-and first-sight the trail. ``/api/state`` positions > 0 → log and return 0.
+Panel soft-restart is allowed with tickets (operator 02.09 — MT5 keeps the
+fills); this script must not bypass that discipline with a taskkill.
+``/api/state`` positions > 0 → log and return 0. Shutdown and holdout
+capture stay 409 with opens.
 
 Verifies afterwards and says so either way, in its own log, because a
 recovery step whose failure is silent is the thing it was written to prevent.

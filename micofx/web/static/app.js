@@ -964,14 +964,44 @@ function buildSessionEditor(cfg) {
       const end = el("input", { type: "time", value: win.end });
       const commit = () => {
         const next = (cfg.sessions || []).slice();
-        next[index] = { start: start.value || "00:00", end: end.value || "23:59" };
+        const row = { start: start.value || "00:00", end: end.value || "23:59" };
+        if (Array.isArray(win.days) && win.days.length > 0) {
+          row.days = win.days.slice().sort((a, b) => a - b);
+        }
+        next[index] = row;
         cfg.sessions = next;
         saveSymbol(cfg.symbol, { sessions: next }, start);
       };
       start.addEventListener("change", commit);
       end.addEventListener("change", commit);
+
+      const daysWrap = el("div", { class: "session-days" });
+      DAY_LABEL.forEach((label, i) => {
+        const day = i + 1;
+        const isSel = Array.isArray(win.days) ? win.days.includes(day) : true;
+        const chip = el("span", {
+          class: "session-day-chip" + (isSel ? " sel" : ""),
+          text: label,
+          title: `${label} gununu ac/kapa`,
+          onclick: () => {
+            let cur = Array.isArray(win.days) ? win.days.slice() : [1, 2, 3, 4, 5, 6, 7];
+            const set = new Set(cur);
+            if (set.has(day)) {
+              set.delete(day);
+            } else {
+              set.add(day);
+            }
+            win.days = Array.from(set).sort((a, b) => a - b);
+            commit();
+            redraw();
+          },
+        });
+        daysWrap.appendChild(chip);
+      });
+
       wrap.appendChild(el("div", { class: "session-row" }, [
-        start, el("span", { class: "arrow", text: "-" }), end,
+        el("div", { class: "session-times" }, [start, el("span", { class: "arrow", text: "-" }), end]),
+        daysWrap,
         el("button", {
           class: "btn btn-sm btn-ghost", text: "sil",
           onclick: () => {
@@ -985,7 +1015,7 @@ function buildSessionEditor(cfg) {
     wrap.appendChild(el("button", {
       class: "btn btn-sm", text: "+ Saat araligi ekle",
       onclick: () => {
-        cfg.sessions = (cfg.sessions || []).concat([{ start: "09:00", end: "18:00" }]);
+        cfg.sessions = (cfg.sessions || []).concat([{ start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5] }]);
         saveSymbol(cfg.symbol, { sessions: cfg.sessions });
         redraw();
       },
@@ -1057,8 +1087,8 @@ function buildSymbolCard(cfg) {
         el("label", { text: "Saat filtresi" }),
         el("label", { class: "chk" }, [useSessions, el("span", { text: "Sadece belirtilen saatlerde islem ac" })]),
       ]), "use_sessions"),
-      el("div", { class: "field" }, [el("label", { text: "Araliklar" }), buildSessionEditor(cfg)]),
-      el("div", { class: "field" }, [el("label", { text: "Gunler" }), buildDayPicker(cfg)]),
+      el("div", { class: "field field-wide" }, [el("label", { text: "Saat Araliklari ve Gecerli Gunler" }), buildSessionEditor(cfg)]),
+      el("div", { class: "field" }, [el("label", { text: "Genel Islem Gunleri" }), buildDayPicker(cfg)]),
       titled(el("div", { class: "field" }, [el("label", { text: "Kapanistan X dk once kapat" }), flat]),
         "flat_before_close_min"),
     ]),

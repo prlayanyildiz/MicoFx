@@ -4,6 +4,7 @@ import calendar
 import copy
 import json
 import math
+import os
 import threading
 import time
 from pathlib import Path
@@ -128,7 +129,7 @@ def _chase_trade_log_bit(
     side: Any,
     sl_dist: Any,
 ) -> str:
-    """Measure-only chase fragment for TRADE logs. Never gates entry."""
+    """Chase fragment for TRADE logs (measure). Entry gate is separate."""
     try:
         from scripts.chase_r_log import chase_r, chase_r_abs, format_chase_log
     except ImportError:
@@ -573,6 +574,27 @@ class Engine:
         self._weekend_pending: set[int] = {
             int(t) for t in (as_list(store.get_setting("weekend_pending_tickets"), "weekend_pending_tickets")) if str(t).isdigit()
         }
+        # Restore close-fail order_send backoff across soft-restart so a stuck
+        # weekend ticket does not re-hammer the broker on every process boot
+        # (XAU #325114801 06.09 09:40 one loud 10018 after reload).
+        now = time.time()
+        restored_retry: dict[int, float] = {}
+        for k, v in as_dict(store.get_setting("close_retry_after"), "close_retry_after").items():
+            try:
+                ticket = int(k)
+                until = float(v)
+            except (TypeError, ValueError):
+                continue
+            if ticket > 0 and until > now:
+                restored_retry[ticket] = until
+        self.client._close_retry_after = restored_retry
+
+        def _persist_close_retry(blob: dict[int, float]) -> None:
+            clean = {str(int(t)): float(u) for t, u in blob.items()
+                     if int(t) > 0 and float(u) > time.time()}
+            self.store.set_setting("close_retry_after", clean)
+
+        self.client._persist_close_retry = _persist_close_retry  # type: ignore[method-assign]
         # Session / day-end flatten sticky: should_flatten / day_end_close are
         # time windows - a DONE_PARTIAL True during the window used to look
         # "handled", then once the window flipped off the remainder fell into
@@ -777,6 +799,12 @@ class Engine:
 
         Bridge file is the watcher source of truth (no second sqlite reader).
         Settings mirror for panel/debug. scripts/ are excluded by the watcher.
+
+        Under pytest, skip the repo ``.bridge/`` write: a temp-Store Engine
+        still resolves ``Path(__file__)`` into the live tree and was stomping
+        the real soft-restart stamp (06.09 09:40 → suite 09:44), so
+        stale_runtime_watch compared disk mtimes against a fake boot epoch.
+        Store settings for that temp DB still update (harmless).
         """
         root = Path(__file__).resolve().parent.parent
         micofx = root / "micofx"
@@ -796,6 +824,8 @@ class Engine:
             self.store.set_setting("runtime_manifest", manifest)
         except Exception:
             pass
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
         bridge = root / ".bridge" / "RUNTIME_BOOT_MANIFEST.json"
         try:
             bridge.parent.mkdir(parents=True, exist_ok=True)
@@ -1473,6 +1503,51 @@ class Engine:
             pass
 
     # ----------------------------------------------------- entry diagnostics
+
+    def _live_spread_scale(self, symbol: str) -> float:
+        """Same floor/ceiling as ``Optimizer._spread_scale`` (search identity).
+
+        Under-1 medians clamp to 1.0 so the live gate never cheers cheaper
+        than the bars; thin histograms stay 1.0 until
+        ``SPREAD_RATIO_MIN_SAMPLES``.
+        """
+        counts = self._spread_ratio.get(str(symbol))
+        if not isinstance(counts, (list, tuple)):
+            return 1.0
+        cleaned = [int(v) for v in counts
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if (len(cleaned) != SPREAD_RATIO_BUCKETS
+                or sum(cleaned) < SPREAD_RATIO_MIN_SAMPLES):
+            return 1.0
+        median = _ratio_percentile(cleaned, 0.50)
+        if not median or median <= 0:
+            return 1.0
+        return float(min(5.0, max(1.0, median)))
+
+    def _forming_bar_spread_price(self, cfg: SymbolConfig,
+                                  state: SymbolState) -> float | None:
+        """MT5 forming-bar spread in price units, or None if unavailable.
+
+        Raw ``bars.spread * point`` — scale is applied in ``gate_spread_price``
+        so a zero bar still falls through to the tick (no median impute).
+        """
+        try:
+            bars = state.bars
+            if bars is None:
+                return None
+            spread = getattr(bars, "spread", None)
+            if spread is None or len(spread) < 1:
+                return None
+            info = self.client.info(cfg.symbol) or {}
+            point = float(info.get("point", 0.0) or 0.0)
+            if point <= 0:
+                return None
+            raw = float(spread[-1])
+            if not math.isfinite(raw) or raw < 0:
+                return None
+            return raw * point
+        except Exception:
+            return None
 
     def _sample_spread_ratio(self, cfg: SymbolConfig, state: SymbolState,
                              tick: dict[str, Any] | None) -> None:
@@ -2962,13 +3037,23 @@ class Engine:
             state.entry_block = "fiyat_yok"
             return
 
-        if cfg.max_spread_atr > 0 and tick["spread"] > atr * cfg.max_spread_atr:
-            state.note = f"spread genis ({tick['spread'] / atr:.2f}xATR)"
+        # Walk-forward gates on the entry BAR's spread; live used to gate on
+        # the tick and refuse breakouts the search had already counted
+        # (SpotBrent fill%0 / 1777 retries — Claude EK34). Prefer forming-bar
+        # spread when we have it; tick only as fallback / cost stamp.
+        from .spread_gate import gate_spread_price, spread_over_cap
+        bar_spread = self._forming_bar_spread_price(cfg, state)
+        gate_px = gate_spread_price(
+            tick_spread=float(tick.get("spread", 0.0) or 0.0),
+            bar_spread=bar_spread,
+            spread_scale=self._live_spread_scale(cfg.symbol),
+        )
+        if spread_over_cap(gate_px, atr, float(cfg.max_spread_atr or 0.0)):
+            state.note = f"spread genis ({gate_px / atr:.2f}xATR)"
             state.entry_block = "spread"
             return
-        # Autopsy used to keep evaluate-time spread_atr while this gate used a
-        # later tick — US30/JPN225 losers then looked over-cap when the gate
-        # had actually passed (Claude 03.09 night). Stamp the gate tick.
+        # Autopsy / cost: always the live tick (what we actually pay). Gate
+        # decision above may have used the bar.
         if atr > 0 and tick.get("spread") is not None:
             state.spread = float(tick["spread"])
             state.spread_atr = float(tick["spread"]) / atr
@@ -2993,6 +3078,25 @@ class Engine:
             getattr(self, "_trade_autopsies", None),
             since_ts=float(getattr(cfg, "opt_updated_at", 0.0) or 0.0))
         sl_dist = max(atr * sl_mult, min_stop)
+        # Structure / hybrid: widen the *entry* hard stop behind the last
+        # swing when that is farther than ATR×mult (Antigravity FAZ3).
+        # Trail still uses the same swing series in _update_stop.
+        mode = str(getattr(cfg, "trail_mode", "atr") or "atr")
+        if mode in ("structure", "hybrid") and state.bars is not None:
+            try:
+                from . import indicators as _ind
+                lb = max(2, int(getattr(cfg, "trail_lookback", 5) or 5))
+                px = float(tick["ask"] if side == "buy" else tick["bid"])
+                if side == "buy":
+                    sw = float(_ind.swing_lows(state.bars.low, lb)[-1])
+                    struct_dist = px - (sw - atr * 0.15)
+                else:
+                    sw = float(_ind.swing_highs(state.bars.high, lb)[-1])
+                    struct_dist = (sw + atr * 0.15) - px
+                if math.isfinite(struct_dist) and struct_dist > 0:
+                    sl_dist = max(sl_dist, struct_dist)
+            except Exception:
+                pass
         # Size the lot against the stop that is actually sent. Using the raw
         # cfg.sl_atr_mult distance while shakeout widened sl_dist overstated
         # 1R risk on every widened fill (Claude C1).
@@ -3050,6 +3154,25 @@ class Engine:
             state.entry_block = "stop"
             return
 
+        # Live chase ceiling (ATR units). Signal close is the just-closed bar
+        # that armed this fill; tick ask/bid is what we would pay now.
+        bars = state.bars
+        if bars is not None and getattr(bars, "close", None) is not None and len(bars.close):
+            try:
+                from scripts.chase_r_log import chase_blocks
+                sig_close = float(bars.close[-1])
+                if chase_blocks(
+                        entry, sig_close, side,
+                        atr=atr, max_atr=getattr(cfg, "chase_max_atr", 0.0)):
+                    vs = abs(entry - sig_close)
+                    state.note = (
+                        f"kovalama asimi ({vs / atr:.2f}xATR > "
+                        f"{float(cfg.chase_max_atr):g})")
+                    state.entry_block = "kovalama_asimi"
+                    return
+            except Exception:
+                pass
+
         # Held across the actual order_send + position bookkeeping so a
         # concurrent DELETE/magic-PATCH (web thread) cannot pass its own
         # open-position check in the gap between "no position exists yet"
@@ -3089,17 +3212,26 @@ class Engine:
                 state.note = "sembol silindi/degisti - islem iptal"
                 state.entry_block = "sembol_degisti"
                 return
-            # Fill-time widen: gate passed, then spread blew out before send
-            # (Claude 03.09 US30/JPN225 -38.8R bucket). Refuse; do not send.
+            # Fill-time recheck: same yardstick as the primary gate (bar when
+            # known). Tick-only blowout still refuses when bars are missing
+            # (Claude 03.09 US30/JPN225 -38.8R bucket).
             if cfg.max_spread_atr > 0 and atr > 0:
                 fresh = self.client.tick(cfg.symbol)
                 if fresh is not None:
                     tick = fresh
                     state.spread = float(tick["spread"])
                     state.spread_atr = float(tick["spread"]) / atr
-                    if tick["spread"] > atr * cfg.max_spread_atr:
+                    from .spread_gate import gate_spread_price, spread_over_cap
+                    bar_spread = self._forming_bar_spread_price(cfg, state)
+                    gate_px = gate_spread_price(
+                        tick_spread=float(tick.get("spread", 0.0) or 0.0),
+                        bar_spread=bar_spread,
+                        spread_scale=self._live_spread_scale(cfg.symbol),
+                    )
+                    if spread_over_cap(
+                            gate_px, atr, float(cfg.max_spread_atr or 0.0)):
                         state.note = (
-                            f"spread genis (gonderim {tick['spread'] / atr:.2f}xATR)")
+                            f"spread genis (gonderim {gate_px / atr:.2f}xATR)")
                         state.entry_block = "spread"
                         return
                     entry = tick["ask"] if side == "buy" else tick["bid"]
@@ -3108,6 +3240,25 @@ class Engine:
                         state.note = "stop seviyesi gecersiz"
                         state.entry_block = "stop"
                         return
+                    bars = state.bars
+                    if (bars is not None
+                            and getattr(bars, "close", None) is not None
+                            and len(bars.close)):
+                        try:
+                            from scripts.chase_r_log import chase_blocks
+                            sig_close = float(bars.close[-1])
+                            if chase_blocks(
+                                    entry, sig_close, side,
+                                    atr=atr,
+                                    max_atr=getattr(cfg, "chase_max_atr", 0.0)):
+                                vs = abs(entry - sig_close)
+                                state.note = (
+                                    f"kovalama asimi (gonderim "
+                                    f"{vs / atr:.2f}xATR)")
+                                state.entry_block = "kovalama_asimi"
+                                return
+                        except Exception:
+                            pass
             result = self.client.open_market(
                 cfg.symbol, side, lot, sl, tp, cfg.magic,
                 slippage=self.store.system.slippage_points,
@@ -4453,6 +4604,13 @@ class Engine:
         be_r = float(getattr(cfg, "breakeven_at_r", 0.0) or 0.0)
         harvest_at = float(getattr(cfg, "harvest_at_r", 0.0) or 0.0)
         harvest_step = float(getattr(cfg, "harvest_step_atr", 0.0) or 0.0)
+        peak_profit = None
+        try:
+            mfe_px = float(pos.get("mfe_px") or 0.0)
+            if mfe_px > 0:
+                peak_profit = max(profit_dist, mfe_px)
+        except (TypeError, ValueError):
+            peak_profit = None
         target = overlay_stop(
             is_buy=is_buy, entry=entry, ref=ref, atr=atr,
             trail_start_atr=float(cfg.trail_start_atr),
@@ -4460,7 +4618,12 @@ class Engine:
             trail_mode=str(cfg.trail_mode or "atr"),
             struct_sl=struct_sl, breakeven_at_r=be_r,
             original_risk=original_risk, be_offset=0.0,
-            harvest_at_r=harvest_at, harvest_step_atr=harvest_step)
+            harvest_at_r=harvest_at, harvest_step_atr=harvest_step,
+            mfe_lock1_at_r=float(getattr(cfg, "mfe_lock1_at_r", 0.0) or 0.0),
+            mfe_lock1_to_r=float(getattr(cfg, "mfe_lock1_to_r", 0.0) or 0.0),
+            mfe_lock2_at_r=float(getattr(cfg, "mfe_lock2_at_r", 0.0) or 0.0),
+            mfe_lock2_to_r=float(getattr(cfg, "mfe_lock2_to_r", 0.0) or 0.0),
+            peak_profit=peak_profit)
 
         if target is None:
             return settled

@@ -746,6 +746,19 @@ class Supervisor:
                 v.reason += (
                     f" | karar {watch_n} islem PF {watch_pf_val:.2f}"
                 )
+        elif (watch_n > 0 and watch_wins == 0
+                and watch_pf_val < float(cfgs["watch_pf"])
+                and float(v.expected_r or 0.0) > 0.0):
+            # Thin all-loss with a stamped positive edge (live JPN: n=1,
+            # PF 0.00, expected_r>0 @ scale 1.0). watch_min_trades and
+            # count_is_damning both miss n=1 when holdout WR is ~37%.
+            # Unstamped thin all-loss stays ok (USDJPY n=4).
+            v.state = "watch"
+            v.risk_scale = float(cfgs["watch_risk_scale"])
+            v.reason = (
+                f"kenar var (beklenen {v.expected_r:+.2f}R) ama canli "
+                f"{watch_n} islemde 0 kazanc (PF {watch_pf_val:.2f}); lot kisildi"
+            )
         else:
             v.state = "ok"
             if v.trades:

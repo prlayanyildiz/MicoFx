@@ -1,9 +1,38 @@
 ﻿# AGENTS.md
 
 Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
-`MASTER_PROMPT.md` Â§19. Do not port remaining `D:\MicoAi` extras
+`MASTER_PROMPT.md` §19. Do not port remaining `D:\MicoAi` extras
 (`orb_retest`, Ai score formula, `autostart_mt5`) unasked.
 `trail_mode` / `hour_risk_scales` / `max_combos=2000` are already here.
+
+## Operator charter — 07.09 (full agent authority)
+
+Operator granted **full operator authority** to Cursor / Claude /
+Antigravity (Gemini), including rewriting this constitution and
+MASTER_PROMPT, **with one hard gate**:
+
+1. **Mutual approval.** A material change (anayasa, risk, sizing,
+   unfreeze, session, opt apply, live flatten, leverage-adjacent)
+   needs a brief ACK from the other bridge peer(s) before land —
+   Cursor ↔ Gemini via `FOR_GEMINI.md`, Cursor ↔ Claude via
+   `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
+   after a clear ask is not an ACK. Yellow/red that used to wait on the
+   human now wait on **peer ACK** unless the operator overrides in chat.
+2. **Book is 7 symbols, forever open.** Live set stays
+   `BTCUSD GER40 JPN225 NAS100 SpotBrent US30 XAUUSD`. Do **not**
+   disable, delete, or “close for bleed” any of them to raise income.
+   Improve fill / exits / gates / sizing / search instead (“kapatma
+   geliştir”).
+3. **Full capacity + full auto.** Goal is maximum useful throughput
+   under honest WFO/fill gates and a hands-off loop (autopilot,
+   quarantine reopt, calibrate, watches). Prefer measured automations
+   over panel babysitting. Until Thursday: continue with **Gemini
+   (Antigravity)** as the active peer; Claude joins the recurring loop
+   Thursday with Cursor. Push to GitHub when a peer-ACK’d package lands
+   (operator 07.09).
+4. **Safety floor still binds the process:** one Python, live owns
+   DB/MT5, Origin on writes, no second `mt5.initialize()`, no LLM in
+   engine/optimizer/supervisor. Peer ACK does not waive these.
 
 ## Must-follow constraints
 
@@ -19,15 +48,12 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 - Exit model is hard ATR stop + ATR trail. Do not bring back
   `tp_atr_mult`, `partial_tp_r` ladders, `max_bars_in_trade`,
   `stale_exit_ratio`, `breakeven_atr`. Overlays (0 = off):
- `breakeven_at_r` (live 1.5, not 0.5 â€” BE-2 GER40 âˆ’32 R), one-shot
- `partial_at_r` (ticket lot Ã— 1/3, broker min/step; costed loser at every
- rung, F44 â€” POST accepts **0 only**, no writer can turn it back on), and
- `harvest_at_r` / `harvest_step_atr` (tighten trail_step once paid;
- live off book-wide â€” costed across 10 windows 31.08 (F41): off
- +86.4 R, every setting far worse (âˆ’129 to âˆ’498 R). It lifts win rate
- and trade count while crushing payoff, i.e. it cuts winners and
- re-enters. A give-back chart makes switching this on look obvious;
- do not). None is an `OPT_FIELDS` axis.
+  `breakeven_at_r` (live 1.5), one-shot `partial_at_r` (POST 0 only),
+  `harvest_at_r`/`harvest_step_atr` (live off; F41 costed loser), and
+  MFE locks `mfe_lock1_at_r`/`mfe_lock1_to_r` + `mfe_lock2_*`
+  (Antigravity 07.09 defaults 1.5→0.75R / 2.0→1.25R; not hard TP;
+  not OPT). Optional `stale_flat_bars` (0=off) is momentum-flat flatten,
+  not banned `max_bars_in_trade`. None is an `OPT_FIELDS` axis.
 - `exits.overlay_stop` is the closed-bar trail/BE level. Live still owns
   broker clamp + modify. Change the helper or both callers. Cover
   identity tests.
@@ -44,12 +70,10 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   deliberately **not** in that set.
 - Watch mode never opens. Wrong `broker_symbol` â†’ unavailable, no fuzzy
  fallback.
-- `spread_calibration.cap_from_bands` is **one-way: it widens, never
- narrows** â€” a qualifying band below the live cap returns `daraltilmadi`.
- With the old 0.05 grid floor that made the cost gate a ratchet toward
- loose, which is where F49 measured the loss. The grid side is fixed
- (F50); this side is still one-way on purpose. Do not flip it without
- its own measurement.
+- `spread_calibration.cap_from_bands` defaults widen-only
+  (`daraltilmadi` when calm band is under live). System
+  `spread_narrow_on_calm` (default on, 07.09) may step the cap down
+  by at most 0.02 ATR units per calibrate — not a free fall (F49).
 - Session / day-end / daily-loss flatten are settled (owner 09.08).
 - `trail_start_atr <= trail_step_atr` is legal; do not ban it.
 - Do not holdout-capture with positions open. `POST /api/holdout/capture`
@@ -66,11 +90,15 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
   `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` retired 01.09
   (flip/zero-win class). `nr_break` / `roc_pace` **fully deleted** 03.09
   (matrix: never best; operator full-delete). `band_fade` /
-  `keltner_break` not shipped. Live set: `burst`, `mtf_pullback`,
-  `channel_break`. Leftover DB names fail closed.
-- **No restart while positions are open.** `POST /api/app/restart` and
-  `/api/app/shutdown` are **409** while this process's magics still have
-  tickets (MT5 down still allowed so a wedged bind can recover).
+  `keltner_break` not shipped.   Live set: `burst`, `mtf_pullback`,
+  `channel_break`. `sweep_fade` / `range_fade` stay in code/STRATEGIES but
+  are **not** in the live search list (dormant; do not ship unasked).
+  Leftover DB names fail closed.
+- **Soft-restart with open tickets is allowed** (operator 02.09):
+  `POST /api/app/restart` keeps MT5 fills; `track()` / `open_original_sl`
+  reattach after bind. `/api/app/shutdown` and `POST /api/holdout/capture`
+  are still **409** while this process's magics have tickets (MT5 down
+  still allowed on shutdown/restart so a wedged bind can recover).
   `gece_restart` skips the midnight taskkill when `/api/state` shows
   tickets; unread/wedged still kills (22.08 recovery). `track()` first-sights
   missing `open_original_sl` to the *current trail*.
@@ -97,8 +125,11 @@ Fail-first: write the test, watch it fail, then implement.
  `{**shipped, **stored}` per axis, so a stored axis keeps its values
  unless the shipped list has extras (those append: trail_step 2.8).
  Only a brand-new axis back-fills the whole list.
-- **Yellow** (ask): supervisor. **Red** (explicit):
-  leverage, account lock, daily brake, live flatten-all.
+- **Yellow** (peer ACK): supervisor knobs, AI soft-size, session widen,
+  opt run/apply, unfreeze checklist, concurrent/lot bumps.
+  **Red** (peer ACK + explicit risk note in the brief): leverage,
+  account_lock rebind, daily_loss, live flatten-all. Operator chat
+  still overrides peers.
 - HTTP writes match the panel. Symbol POST: sessions +
   `enabled` / `group` / `broker_symbol`.
   `partial_at_r` (0 only, F44).
@@ -123,20 +154,26 @@ Fail-first: write the test, watch it fail, then implement.
   still defaults true.
 - Holdout `capture = net_r / sum(mfe_r)` is a visible column. **Not** a
   score input and **not** an apply gate.
-- Cursor is project lead and codes, **full authority vs Claude**.
-  Claude executes Cursor briefs, scans on its own, and if the operator
-  asks Claude, Claude does it and writes `claude/FOR_CURSOR.md`.
-  No Antigravity auto-bridge. Yellow/red stay operator.
+- Cursor is project lead and codes, **full authority vs Claude and
+  Antigravity (Gemini)**. Claude/Gemini scan and write briefs; Cursor
+  decides and lands. Yellow/red wait on **peer ACK** (operator chat
+  overrides). Thursday: Cursor **and Claude** join the recurring loop
+  with Gemini.
 - Commit/push only when the operator asks. Named files; no secrets; no
   `--no-verify`. `cursor/`, `claude/`, `antigravity/` are gitignored.
 
 ## Important locations (only non-obvious)
 
 - Runtime: `data/micofx.db`, `logs/micofx.log` (gitignored).
-- Bridge (gitignored): Cursor writes `cursor/FOR_CLAUDE.md`; Claude
-  writes `claude/FOR_CURSOR.md`. Shared wake `.bridge/WAKE.txt`.
-  Cursor arms `cursor/ARM.bat` (watches Claude inbox). Claude arms
-  `claude/ARM.bat` (watches Cursor inbox). Do not watch a file you write.
+- Bridge (gitignored):
+  - Claude: Cursor → `cursor/FOR_CLAUDE.md`; Claude → `claude/FOR_CURSOR.md`.
+  - Gemini: Antigravity → `antigravity/FOR_GEMINI.md` (and/or
+    `FOR_CURSOR.md`); Cursor → `cursor/FOR_GEMINI.md`.
+  - Shared wake `.bridge/WAKE.txt`. Cursor arms
+    `cursor/watch_bridges.ps1` (watches `antigravity/FOR_GEMINI.md` +
+    Claude inbox; emits `AGENT_LOOP_WAKE_gemini_bridge` within 5s).
+    Antigravity arms `antigravity/WATCH.ps1` (watches
+    `cursor/FOR_GEMINI.md`). Do not watch a file you write.
 - Installer: `KUR.bat` â†’ `KUR.ps1`. Launchers stay at repo root.
 - Audit notes (not executable): `OPTIMIZATIONS.md`. Trust the closed
   ledger at the top.
@@ -176,9 +213,11 @@ Fail-first: write the test, watch it fail, then implement.
  *before* any size increase because `lot_for` is `min(margin share, auto
  1R cap)` and that 2% cap is the only thing holding the book off the 90%
  margin allowance. Search still scores `max_open=1`.
-- Do not add an adverse-fill entry gate on `fill_vs_signal_close_r`.
-  Walk-forward is fill-next-open (zero variance). Claude 18:45: Q4
-  looks cursed in-sample; threshold scan is a curve-fit; unverifiable.
+- Do not add an adverse-fill entry gate on autopsy
+  `fill_vs_signal_close_r` *R thresholds* (Claude 18:45: Q4 in-sample
+  curve-fit; unverifiable). Live `chase_max_atr` (default 0.25) is a
+  separate ATR-unit tick-vs-signal-close ceiling in `_try_entry`; 0 = off.
+  Walk-forward stays fill-next-open (zero variance).
 - `GET /api/ai` and `POST /api/logs/clear` are gone. Panel reads
   `STATE.ai`; Temizle is DOM-only. Do not restore the ring-wipe POST.
 - Autopsy R divides by `|entry âˆ’ original_sl|`. Do not rewrite pre-fix

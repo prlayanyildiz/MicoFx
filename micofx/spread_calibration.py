@@ -119,7 +119,9 @@ def read_bands(bars, point: float, percentiles=(50.0, 90.0)) -> list[BandReading
     return out
 
 
-def cap_from_bands(bands: list[BandReading], current: float) -> tuple[float, str]:
+def cap_from_bands(bands: list[BandReading], current: float,
+                   *, allow_narrow: bool = False,
+                   narrow_step: float = 0.02) -> tuple[float, str]:
     """The widest band whose direction has not decayed sets the ceiling.
 
     Read as a slope, not a level. The absolute continuation rate sits within a
@@ -130,26 +132,12 @@ def cap_from_bands(bands: list[BandReading], current: float) -> tuple[float, str
     47.7 -> 45.0, GER40 49.0 -> 49.4 -> 50.2. Only the second shape earns room.
 
     Loosening needs a band beyond the cheapest to qualify; nothing else can widen
-    a live gate. A symbol that qualifies nowhere past the first bucket keeps the
-    cap it has - deliberately not a tightening, because the gate is not what is
-    wrong with such a symbol and cutting it would only trade less of the same
-    thing. So this can open a gate on evidence and can never close one without.
+    a live gate. With ``allow_narrow`` (system ``spread_narrow_on_calm``) a
+    qualifying calm reading may step the cap down by at most ``narrow_step``
+    per call — not a free fall to the floor (F49 ratchet lesson kept).
     """
     if not bands:
         return current, "olcum yok - mevcut cap korundu"
-    # Both readings have to agree. Continuation alone was the first version and
-    # it opened two gates it should not have: on the full series GER40's slope
-    # is -0.22pp and NAS100's band was empty, while a windowed read (4 x 5000
-    # bars) flipped GER40's sign in one window and US30's in three - and moving
-    # the horizon from 8 bars to 16 reversed GER40 outright. A signal that
-    # changes with the window is not a signal.
-    #
-    # net_atr - the follow-through actually left after paying the spread - is
-    # the quantity the gate is supposed to protect, and it decays on both of
-    # those symbols where continuation did not. Requiring the two to agree
-    # costs nothing when the case is real and refuses every case measured so
-    # far, which is the right answer for a book whose marginal bands priced
-    # out at -0.035 R (FRA40) and -0.126 R (US30).
     base_cont, base_net = bands[0].continuation, bands[0].net_atr
     reached = None
     for band in bands[1:]:
@@ -157,6 +145,15 @@ def cap_from_bands(bands: list[BandReading], current: float) -> tuple[float, str
             break
         reached = band
     if reached is None:
+        if allow_narrow and current > MIN_CAP:
+            calm = round(min(MAX_CAP, max(MIN_CAP, bands[0].upper_ratio)), 2)
+            if calm < current - 1e-12:
+                step = max(0.01, float(narrow_step))
+                stepped = round(max(calm, current - step), 2)
+                if stepped < current - 1e-12:
+                    return stepped, (
+                        f"sakin bant kademeli daraltildi "
+                        f"({current:g} -> {stepped:g})")
         if len(bands) < 2:
             return current, "tek bant - cap degismedi"
         nxt = bands[1]
@@ -166,11 +163,13 @@ def cap_from_bands(bands: list[BandReading], current: float) -> tuple[float, str
                          f"net {base_net:+.3f} -> {nxt.net_atr:+.3f}) - cap degismedi")
     cap = round(min(MAX_CAP, max(MIN_CAP, reached.upper_ratio)), 2)
     if cap <= current:
-        # The asymmetry, enforced rather than merely intended: a band that
-        # qualifies can still sit below the cap already in place, and returning
-        # it would narrow a live gate on a reading that was only ever trusted to
-        # widen one. GER40 is exactly that case - both readings hold through
-        # p50-p90, whose ceiling is 0.09 against a live 0.11.
+        if allow_narrow and cap < current - 1e-12:
+            step = max(0.01, float(narrow_step))
+            stepped = round(max(cap, current - step), 2)
+            if stepped < current - 1e-12:
+                return stepped, (
+                    f"{reached.name} sakin - kademeli daraltildi "
+                    f"({current:g} -> {stepped:g})")
         return current, (f"{reached.name} tutuyor ama tavani mevcut cap'in altinda "
                          f"({cap:g} <= {current:g}) - daraltilmadi")
     return cap, (f"{reached.name} bandina kadar ikisi de tutuyor "
@@ -179,8 +178,8 @@ def cap_from_bands(bands: list[BandReading], current: float) -> tuple[float, str
 
 
 def calibrate(symbol: str, timeframe: str, bars, point: float,
-              current_cap: float) -> Calibration:
+              current_cap: float, *, allow_narrow: bool = False) -> Calibration:
     bands = read_bands(bars, point)
-    cap, reason = cap_from_bands(bands, current_cap)
+    cap, reason = cap_from_bands(bands, current_cap, allow_narrow=allow_narrow)
     return Calibration(symbol=symbol, timeframe=timeframe, bands=bands,
                        cap=cap, reason=reason)

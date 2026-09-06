@@ -144,6 +144,7 @@ _SYMBOL_RISK_BOUNDS = {
     "partial_close_frac": (0.0, 0.9, True),
     "harvest_at_r": (0.0, 5.0, True),
     "harvest_step_atr": (0.0, 20.0, True),
+    "max_spread_atr": (0.01, 1.0, True),
     # The per-symbol daily loss gate, and the only live-risk field the panel
     # let through unbounded (found 15.08, audit slice 7). Zero disables it, so
     # the minimum is inclusive; above 100 it can never fire, which reads as
@@ -307,6 +308,16 @@ def _validate_sessions(patch: dict[str, Any]) -> None:
                     400, f"sessions[{i}] baslangic ve bitis ayni ({item['start']}) - "
                          f"sifir uzunluklu pencere 7/24 islem anlamina gelir; "
                          f"seansi kapatmak icin use_sessions yerine trade_days kullanin")
+            raw_days = item.get("days")
+            if raw_days is not None:
+                if not isinstance(raw_days, list) or not raw_days:
+                    raise HTTPException(
+                        400, f"sessions[{i}].days bos olamaz (1=Pazartesi .. 7=Pazar)")
+                for d in raw_days:
+                    if not isinstance(d, int) or isinstance(d, bool) or not 1 <= d <= 7:
+                        raise HTTPException(
+                            400, f"sessions[{i}].days gecersiz gun ({d!r}) - "
+                                 f"1..7 arasi olmali")
 
     days = patch.get("trade_days")
     if days is not None:
@@ -494,6 +505,11 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
     "enabled", "group", "broker_symbol",
     # 0 = off. POST accepts 0 only (F44). harvest stays hands-off (F41).
     "partial_at_r",
+    # Operator charter 07.09: peer-ACK capacity knobs (no symbol disable).
+    # sl_atr_mult still hits EXIT_RISK 409 while this magic has a ticket.
+    "sl_atr_mult", "vol_ratio_min", "chase_max_atr", "max_spread_atr",
+    "mfe_lock1_at_r", "mfe_lock1_to_r", "mfe_lock2_at_r", "mfe_lock2_to_r",
+    "stale_flat_bars", "stale_max_abs_r",
 })
 # NOT here, deliberately: ``symbol_daily_loss_pct``. A 05.09 audit reported it
 # as "a protection that cannot be armed" - true as a description (no path sets
@@ -1100,8 +1116,13 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         broker_changing = (current is not None and "broker_symbol" in patch
                            and str(patch["broker_symbol"] or "").strip()
                            != str(current.broker_symbol or "").strip())
+        # Session clock (use_sessions / windows) used to only restamp holdout
+        # while open - 09-04 XAU flipped use_sessions under #325114801 then
+        # hit 10018; 06.09 live book was truncated mid-ticket the same way.
+        # Same hazard class as magic/primary/exit: refuse while this magic
+        # still has tickets (Claude TEYIT Py #3).
         guarded = (magic_changing or primary_changing or exit_fields_changing
-                   or broker_changing)
+                   or broker_changing or clock_changed)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -1168,6 +1189,17 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                         note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
                         raise HTTPException(
                             409, f"{symbol}: cikis/risk parametreleri ({', '.join(changed_fields)}) "
+                                 f"degistirilemedi, {len(open_here)} acik pozisyon var{note} "
+                                 f"(once kapatin veya pozisyon kapanmasini bekleyin)")
+                if (clock_changed
+                        and not (magic_changing or primary_changing
+                                 or exit_fields_changing or broker_changing)):
+                    open_here = _open_under_magic(current.magic)
+                    pending_scan = _pending_orphan_scan(current.magic, symbol)
+                    if open_here or pending_scan:
+                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
+                        raise HTTPException(
+                            409, f"{symbol}: seans saati / use_sessions "
                                  f"degistirilemedi, {len(open_here)} acik pozisyon var{note} "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
             if primary_changing:
@@ -2131,10 +2163,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
     def _refuse_if_bot_open(detail: str) -> None:
         """409 while this process's magics still have tickets.
 
-        Capture must not pin across live fills. Restart/shutdown with opens
-        first-sights the trail and killed tonight's search (21:20 / 21:43 /
-        ~21:59). A wedged MT5 bind (connected False) skips the check so the
-        recovery POST can still run.
+        Used by shutdown and holdout capture. Soft-restart is deliberately
+        NOT gated here (operator 02.09): MT5 keeps fills and track()
+        reattaches. A wedged MT5 bind (connected False) skips the check so
+        the recovery POST can still run.
         """
         if not client.connected:
             return
@@ -2494,6 +2526,18 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # Operator 02.09: restart with open tickets is allowed — MT5 keeps
         # the fills; track()/open_original_sl reattach after bind. Holdout
         # capture and shutdown stay refused while tickets are open.
+        # Double-click / double-POST used to spawn two restart.bat — latch.
+        if getattr(app.state, "_restarting", False):
+            return {"ok": True, "message": "Yeniden baslatma zaten devam ediyor."}
+        # Claude 06.09 12:38: mid-search restart cancels the scan and can
+        # leave session-WFO candidate windows on the live book (Friday hole).
+        # Wait for idle; do not cancel+kill a running 7-symbol job.
+        if optimizer.busy:
+            raise HTTPException(
+                409,
+                "optimizasyon suruyor - tarama bitmeden yeniden baslatma yok "
+                "(seans WFO aday pencereyi canlida birakabilir)")
+        app.state._restarting = True
         if client.connected:
             magics = {c.magic for c in list(store.symbols.values())}
             pos = client.positions()

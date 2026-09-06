@@ -1141,6 +1141,7 @@ class RiskManager:
         projected_costed_negative = False
         short_windows: list[str] = []
         fat_1r: list[str] = []
+        zero_lot_fallback: list[str] = []
         sys_cfg = self.store.system
         for cfg in list(self.store.symbols.values()):
             if not getattr(cfg, "enabled", False):
@@ -1166,6 +1167,10 @@ class RiskManager:
                 risk = 0.0
             if risk <= 0:
                 risk = self._configured_r_dollars(cfg, balance)
+                if risk > 0:
+                    # Sunday/restart: lot not sized yet (no tick) → silent
+                    # risk% base inflates the chip (Claude 06.09: %72 vs ~%50).
+                    zero_lot_fallback.append(cfg.symbol)
             if risk <= 0:
                 continue
             # Live min-lot concurrent can make 1R 3-4x the 2% auto cap
@@ -1195,6 +1200,10 @@ class RiskManager:
             note_bits.append("kisa holdout penceresi: " + ", ".join(short_windows))
         if fat_1r:
             note_bits.append("canli 1R min-lot sisirme: " + ", ".join(fat_1r))
+        if zero_lot_fallback:
+            n = len(zero_lot_fallback)
+            note_bits.append(
+                f"{n} sembolde canli lot yok, 1R risk%'ten tahmin edildi")
         headline_pct = costed_pct if costed_m else monthly_pct
         if headline_pct > _PROJ_PLAUSIBLE_MONTHLY_PCT:
             note_bits.append(f"projeksiyon %{headline_pct:.0f}/ay (iyimser)")

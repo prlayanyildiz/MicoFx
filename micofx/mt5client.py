@@ -2143,6 +2143,12 @@ class MT5Client:
                 if after is None:
                     after = self._close_retry_after = {}
                 after[ticket_i] = now + float(CLOSE_RETRY_BACKOFF_SEC)
+                persist = getattr(self, "_persist_close_retry", None)
+                if callable(persist):
+                    try:
+                        persist(dict(after))
+                    except Exception:
+                        pass
             seen = getattr(self, "_close_fail_logged", None)
             if seen is None:
                 seen = self._close_fail_logged = {}
@@ -2175,8 +2181,14 @@ class MT5Client:
             return False
         # Landed: drop any prior fail backoff / log throttle for this ticket.
         after = getattr(self, "_close_retry_after", None)
-        if isinstance(after, dict):
+        if isinstance(after, dict) and ticket_i in after:
             after.pop(ticket_i, None)
+            persist = getattr(self, "_persist_close_retry", None)
+            if callable(persist):
+                try:
+                    persist(dict(after))
+                except Exception:
+                    pass
         seen = getattr(self, "_close_fail_logged", None)
         if isinstance(seen, dict):
             for key in [k for k in seen if k[0] == ticket_i]:

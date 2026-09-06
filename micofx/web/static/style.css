@@ -458,8 +458,17 @@ select#group-filter { width: 150px; }
   border-bottom: 1px solid var(--line-soft); padding-bottom: 5px;
 }
 
-.sessions { display: flex; flex-direction: column; gap: 6px; }
-.session-row { display: flex; align-items: center; gap: 7px; }
+.sessions { display: flex; flex-direction: column; gap: 8px; }
+.session-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 0; border-bottom: 1px dashed var(--line-soft); }
+.session-row:last-child { border-bottom: none; }
+.session-times { display: inline-flex; align-items: center; gap: 5px; }
+.session-days { display: inline-flex; gap: 3px; align-items: center; }
+.session-day-chip {
+  padding: 2px 6px; border-radius: 4px; font-size: 10.5px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--dim); cursor: pointer; user-select: none; transition: .12s;
+}
+.session-day-chip:hover { border-color: #33587c; color: var(--text); }
+.session-day-chip.sel { border-color: var(--green); color: var(--green); background: rgba(36, 209, 126, .12); font-weight: 600; }
 .session-row .arrow { color: var(--dim); }
 .days { display: flex; gap: 4px; flex-wrap: wrap; }
 .day-chip {

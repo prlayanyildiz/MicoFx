@@ -19,7 +19,11 @@ $PingCursor = Join-Path $Root ".bridge\last_ping_cursor.txt"
 $PingClaude = Join-Path $Root ".bridge\last_ping_claude.txt"
 $ClaudeBusy = Join-Path $Root ".bridge\claude_spawn.lock"
 $ClaudeLog = Join-Path $Root "logs\claude_spawn.log"
-$ClaudeExe = "C:\Users\Administrator\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude-code\2.1.258\claude.exe"
+$claudeCandidates = @(
+    Get-ChildItem -Path "$env:LOCALAPPDATA\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude-code\*\claude.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending,
+    Get-ChildItem -Path "$env:APPDATA\Claude\claude-code\*\claude.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+) | Select-Object -ExpandProperty FullName
+$ClaudeExe = if ($claudeCandidates.Count -gt 0) { $claudeCandidates[0] } else { "claude.exe" }
 $MaxTurns = 40
 $WatchdogMinutes = 5
 $HeartbeatMinutes = 5

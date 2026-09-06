@@ -34,9 +34,8 @@ MIN_SLICE_TRADES = 15
 MIN_VALID_SLICES = 4
 
 # Claude 04.09 03:36 — freeze micro-tune lands.
-# 03:50 Claude: gate sign-off ≠ unfreeze. Keep frozen until measured
-# target + manual run + Claude 6-slice review. Do not flip this casually.
-EXEC_PIPELINE_FROZEN = True
+# 07.09 Operator charter: full operator authority unfreezes the pipeline.
+EXEC_PIPELINE_FROZEN = False
 _FREEZE_FLAG = Path(__file__).resolve().parents[1] / ".bridge" / "EXEC_PIPELINE_FROZEN"
 
 

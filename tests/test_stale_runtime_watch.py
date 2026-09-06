@@ -122,6 +122,28 @@ def test_maybe_alert_arms_restart_flag_only_when_flat(tmp_path: Path):
     assert "flat" in body.lower() or "restart" in body.lower()
 
 
+def test_maybe_alert_arms_on_first_flat_after_open_alert(tmp_path: Path):
+    """Open-book alert must still arm restart the first time the book flats."""
+    state = tmp_path / "st.json"
+    wake = tmp_path / "WAKE.txt"
+    inbox = tmp_path / "FOR_CLAUDE.md"
+    restart_flag = tmp_path / "STALE_RUNTIME_RESTART_WHEN_FLAT"
+    boot = {
+        "engine_started_at": time.time() - 3600,
+        "manifest": {"micofx/engine.py": 10.0},
+    }
+    snap = evaluate(boot=boot, current={"micofx/engine.py": 99.0})
+    maybe_alert(
+        snap, state_path=state, wake_path=wake, cursor_inbox=inbox,
+        n_open=1, restart_flag=restart_flag)
+    assert not restart_flag.exists()
+    notes = maybe_alert(
+        snap, state_path=state, wake_path=wake, cursor_inbox=inbox,
+        n_open=0, restart_flag=restart_flag)
+    assert restart_flag.is_file()
+    assert any("restart" in n.lower() for n in notes)
+
+
 def test_write_boot_stamp_roundtrip(tmp_path: Path):
     mic = tmp_path / "micofx"
     mic.mkdir()

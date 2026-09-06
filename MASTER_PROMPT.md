@@ -294,11 +294,11 @@ Optimizer does **not** guess which family fits a symbol: it searches **all enabl
 - `_trend_gate`: if `htf_mode=="t3"` and `htf_factor>1`, higher-TF T3 must agree; else allow both sides.
 - `Params`: flat dataclass view of SymbolConfig fields + overrides for grid search.
 
-### `burst` (range-expansion scalp)
-> Was described here as "M5-native" until 05.09. That bar is **emekli / retired**:
-> `burst` now only ever runs M15/M30, so the family's own premise — that scalps
-> need fast bars — no longer describes what it does. It stays live on measured
-> results, not on that argument.
+### `burst` (M15/M30 volume-confirmable range expansion)
+> Was described as "M5-native scalp" until 05.09. That bar is **emekli /
+> retired**. Official posture (07.09 Antigravity): **M15/M30 hacim onaylı
+> menzil genişlemesi** — optional `vol_ratio_min` confirms tick-volume;
+> M5 must stay closed (0/7 OOS pick; cost drag).
 
 Continuation off a single **range-expansion** bar: range above `mean + brst_range_z * sd`
 of the trailing `brst_lookback` distribution, closing inside the top/bottom

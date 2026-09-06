@@ -76,9 +76,12 @@ def test_the_comment_in_app_py_matches_what_the_script_does():
     """The pair that drifted: the comment promised a wait the script did not
     perform. One number, two places, is the drift this codebase keeps finding -
     here it was one guarantee in two places."""
-    spawn = APP[APP.index("restart.bat"):][:400]
-    assert "polls until the port" in spawn or "port is actually free" in spawn
-    assert "waits for this process to release the port before" not in spawn
+    # Anchor on the Popen spawn, not an earlier "restart.bat" mention in
+    # comments (busy-opt 409 note also names the bat).
+    spawn = APP[APP.index("polls until the port"):][:400]
+    assert "port is actually free" in spawn or "polls until the port" in spawn
+    assert "waits for this process to release the port before" not in APP[
+        APP.index("def app_restart"):APP.index("return app")]
 
 
 def test_restart_cancels_a_running_search_before_mt5_dies():

@@ -262,14 +262,16 @@ def evaluate(cfg: SymbolConfig, server_epoch: float,
 
     best_close: int | None = None
     active = ""
-    for start, end in windows:
+    trade_day_set = frozenset(cfg.trade_days or [1, 2, 3, 4, 5])
+    for start, end, dayset in windows:
+        allowed = dayset if dayset is not None else trade_day_set
         if start < end:
-            inside = start <= minute < end and day in cfg.trade_days
+            inside = start <= minute < end and day in allowed
             remaining = end - minute
         else:
             # Window rolls over midnight: evening leg belongs to today, morning leg to yesterday.
-            evening = minute >= start and day in cfg.trade_days
-            morning = minute < end and _prev_day(day) in cfg.trade_days
+            evening = minute >= start and day in allowed
+            morning = minute < end and _prev_day(day) in allowed
             inside = evening or morning
             remaining = (end + _DAY - minute) if evening else (end - minute)
         if inside:
@@ -341,14 +343,19 @@ def _minutes_to_next_day(day: int, minute: int, trade_days: list) -> int:
     return 0
 
 
-def _minutes_to_next_window(day: int, minute: int, windows: list[tuple[int, int]],
+def _minutes_to_next_window(day: int, minute: int,
+                            windows: list[tuple[int, int, frozenset[int] | None]],
                             trade_days: list) -> int:
+    trade_day_set = frozenset(trade_days or [1, 2, 3, 4, 5])
     best = None
     for ahead in range(0, 8):
         d = ((day - 1 + ahead) % 7) + 1
-        if d not in trade_days:
+        if d not in trade_day_set:
             continue
-        for start, _end in windows:
+        for start, _end, dayset in windows:
+            allowed = dayset if dayset is not None else trade_day_set
+            if d not in allowed:
+                continue
             delta = ahead * _DAY + start - minute
             if delta > 0 and (best is None or delta < best):
                 best = delta
@@ -416,4 +423,13 @@ def describe(cfg: SymbolConfig) -> str:
     windows = cfg.session_windows()
     if not cfg.use_sessions or not windows:
         return "7/24"
-    return ", ".join(f"{_fmt(s)}-{_fmt(e)}" for s, e in windows)
+    _DAY_NAMES = {1: "Pzt", 2: "Sal", 3: "Car", 4: "Per", 5: "Cum", 6: "Cmt", 7: "Paz"}
+    parts: list[str] = []
+    for start, end, dayset in windows:
+        label = f"{_fmt(start)}-{_fmt(end)}"
+        if dayset is not None:
+            names = [_DAY_NAMES[d] for d in sorted(dayset) if d in _DAY_NAMES]
+            if names:
+                label = f"{','.join(names)} {label}"
+        parts.append(label)
+    return ", ".join(parts)

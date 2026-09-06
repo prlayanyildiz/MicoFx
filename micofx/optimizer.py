@@ -48,6 +48,15 @@ SEARCH_SESSION_WINDOWS: list[list[dict[str, str]]] = [
     [{"start": "01:00", "end": "23:59"}],  # broker-true full day (ops 04.09)
     [{"start": "00:00", "end": "09:00"}],
     [{"start": "08:00", "end": "16:00"}],
+    # Claude 06.09 14:4x: signals cluster just outside KEEP clocks.
+    # Targeted extensions (not 7/24) — must still clear shortlist + WFO+F6.
+    [{"start": "08:00", "end": "18:00"}],
+    [{"start": "08:00", "end": "20:00"}],
+    [{"start": "08:00", "end": "22:00"}],
+    [{"start": "09:00", "end": "23:00"}],
+    [{"start": "09:00", "end": "23:59"}],
+    [{"start": "12:00", "end": "23:59"}],
+    [{"start": "13:00", "end": "23:00"}],
     [{"start": "14:00", "end": "22:00"}],
     [{"start": "15:00", "end": "21:00"}],
     [{"start": "23:00", "end": "08:00"}],
@@ -223,7 +232,7 @@ def premature_sl_count_from_autopsy(
 
 def floor_sl_atr_search_axis(
         values: list | None,
-        floor: float = 0.9,
+        floor: float = 1.0,
         *,
         fallback: list[float] | None = None,
         keep: list | None = None) -> list[float]:
@@ -232,14 +241,13 @@ def floor_sl_atr_search_axis(
     Stored opt_params keep 0.5 via widen-merge, so editing defaults.json alone
     cannot retire them on a live book (Claude 03.09 premature-stop −58R).
 
-    ``keep`` re-injects exceptions below the floor (live SL, one mid-step toward
-    the floor). JPN 04.09: floor 0.9 cliffs at −33R while live 0.7→0.8 is the
-    sweet spot — without ``keep``, WFO cannot name 0.8 at all.
+    Floor is 1.0 ATR (Antigravity FAZ3 / dead-entry noise). ``keep`` still
+    re-injects live SL and one mid-step so cliffs like JPN 0.8 stay searchable.
     """
     try:
         floor_f = float(floor)
     except (TypeError, ValueError):
-        floor_f = 0.9
+        floor_f = 1.0
     out: list[float] = []
     seen: set[float] = set()
     for raw in values or []:
@@ -268,11 +276,22 @@ def floor_sl_atr_search_axis(
         out.append(v)
     if out:
         return out
-    fb = fallback if fallback is not None else [0.9, 1.2, 1.5, 2.0]
-    return [float(x) for x in fb]
+    if fallback is not None:
+        return [float(x) for x in fallback]
+    seed = [floor_f, 1.2, 1.5, 2.0]
+    # Dedup if floor already equals a seed step.
+    seen_fb: set[float] = set()
+    fb_out: list[float] = []
+    for v in seed:
+        key = round(float(v), 4)
+        if key in seen_fb:
+            continue
+        seen_fb.add(key)
+        fb_out.append(float(v))
+    return fb_out
 
 
-def sl_atr_search_keep(live_sl: float, floor: float = 0.9) -> list[float]:
+def sl_atr_search_keep(live_sl: float, floor: float = 1.0) -> list[float]:
     """Live SL plus one mid-step below the floor (JPN 0.7→0.8 cliff)."""
     try:
         live = float(live_sl)
@@ -281,7 +300,7 @@ def sl_atr_search_keep(live_sl: float, floor: float = 0.9) -> list[float]:
     try:
         floor_f = float(floor)
     except (TypeError, ValueError):
-        floor_f = 0.9
+        floor_f = 1.0
     keep: list[float] = []
     if live > 0:
         keep.append(live)
@@ -369,11 +388,15 @@ def _hashable(value):
     return value
 
 
-def _sessions_key(windows: list | None) -> tuple[tuple[str, str], ...]:
-    out: list[tuple[str, str]] = []
+def _sessions_key(windows: list | None) -> tuple[tuple[str, str, tuple[int, ...]], ...]:
+    out: list[tuple[str, str, tuple[int, ...]]] = []
     for row in windows or []:
         if isinstance(row, dict):
-            out.append((str(row.get("start") or ""), str(row.get("end") or "")))
+            raw = row.get("days")
+            days = tuple(sorted(int(d) for d in raw
+                                if str(d).isdigit() and 1 <= int(d) <= 7)) \
+                if isinstance(raw, list) else ()
+            out.append((str(row.get("start") or ""), str(row.get("end") or ""), days))
     return tuple(out)
 
 
@@ -420,8 +443,10 @@ def _is_all_hours_sessions(windows: list | None) -> bool:
     session_mask with start<end uses minutes < end, so 23:59 itself is
     dropped. Persist that window with use_sessions=True would skip the last
     minute of every day; False uses weekday minutes in full (Claude 03.09).
+
+    ``_sessions_key`` is ``(start, end, days)`` — empty days matches all-day.
     """
-    return _sessions_key(windows) == (("00:00", "23:59"),)
+    return _sessions_key(windows) == (("00:00", "23:59", ()),)
 
 
 def _holdout_span_days(bars, lo: int, hi: int) -> float:
@@ -675,10 +700,11 @@ def run_combo_budget(
     """Panel combo_total must match walk_forward spend, including family caps.
 
     Progress used to count every sweep as ``sweep_budget(max_combos, …)``.
-    That was honest only while every family shared the global cap. A live
-    ``strategy_max_combos.stoch_flip = 28800`` against a 2000 global cap
-    spends 14× on that family; the bar still reported 2000. Percentage
-    stayed consistent; wall-clock and the absolute number did not.
+    That was honest only while every family shared the global cap. An
+    explicit ``strategy_max_combos.<family>`` above the global cap (example
+    shape historically: retired ``stoch_flip`` at 28800 vs 2000) spends
+    many× on that family; the bar still reported 2000. Percentage stayed
+    consistent; wall-clock and the absolute number did not.
     """
     table = allow if isinstance(allow, dict) else STRATEGY_TIMEFRAMES
     per_sweep: dict[str, int] = {}
@@ -2752,14 +2778,18 @@ class Optimizer:
             info = self.client.info(symbol)
             if bars is None or not info:
                 return
-            result = calibrate(symbol, timeframe, bars, float(info["point"]),
-                               float(getattr(cfg, "max_spread_atr", 0.0) or 0.0))
+            sys = getattr(self.store, "system", None)
+            allow_narrow = bool(
+                getattr(sys, "spread_narrow_on_calm", False)) if sys else False
+            result = calibrate(
+                symbol, timeframe, bars, float(info["point"]),
+                float(getattr(cfg, "max_spread_atr", 0.0) or 0.0),
+                allow_narrow=allow_narrow)
             if abs(result.cap - float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)) < 1e-9:
                 return
             old_cap = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)
             new_cap = float(result.cap)
             if new_cap > old_cap + 1e-9:
-                sys = getattr(self.store, "system", None)
                 charging = True if sys is None else bool(
                     getattr(sys, "charge_costs", True))
                 if charging:
@@ -2825,6 +2855,11 @@ class Optimizer:
                     LOG.emit(
                         f"{symbol}: 6-slice makas kapisi atlandi ({exc})",
                         "OPT", symbol)
+            elif new_cap < old_cap - 1e-9 and allow_narrow:
+                # Calm step-narrow (Antigravity): no widen holdout theater.
+                pass
+            else:
+                return
             summary = dict(getattr(cfg, "opt_summary", None) or {})
             summary["spread_recalibrated_from"] = old_cap
             summary["spread_recalibrated_to"] = new_cap

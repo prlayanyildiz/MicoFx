@@ -286,13 +286,15 @@ def test_magic_is_not_writable():
     assert store.symbols["XAUUSD"].magic == 1
 
 
-def test_exit_readout_is_not_writable():
+def test_exit_sl_atr_is_writable_under_charter():
+    """07.09 operator charter: peer-ACK capacity may POST sl_atr_mult when flat.
+
+    Mid-trade still 409 via EXIT_RISK_FIELDS. Harvest overlay stays hands-off.
+    """
     tc, store, _ = _client()
-    before = store.symbols["XAUUSD"].sl_atr_mult
-    res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
-    assert res.status_code == 400
-    assert "sl_atr_mult" in res.json()["detail"]
-    assert store.symbols["XAUUSD"].sl_atr_mult == before
+    res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 1.2})
+    assert res.status_code == 200, res.text
+    assert store.symbols["XAUUSD"].sl_atr_mult == 1.2
 
 
 def test_harvest_overlay_is_not_writable():

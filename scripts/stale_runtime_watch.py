@@ -207,8 +207,41 @@ def maybe_alert(
     if state.get("alerted"):
         state["stale"] = rep.get("stale") or []
         state["last_seen_at"] = datetime.now().isoformat(timespec="seconds")
+        # First flat after an open-book alert: arm restart without re-waking.
+        open_n = n_open
+        if open_n is None:
+            try:
+                open_n = fetch_n_open(panel)
+            except Exception:
+                open_n = -1
+        flag = restart_flag if restart_flag is not None else RESTART_FLAG
+        if open_n == 0 and not flag.is_file():
+            detail = ", ".join(
+                f"{s.get('path')}(+{s.get('hours_newer')}h)"
+                for s in (rep.get("stale") or [])[:6])
+            try:
+                flag.parent.mkdir(parents=True, exist_ok=True)
+                flag.write_text(
+                    "stale runtime: restart when flat "
+                    "(armed on first flat after open alert)\n"
+                    f"detail={detail}\n"
+                    f"at={datetime.now().isoformat(timespec='seconds')}\n",
+                    encoding="utf-8",
+                )
+                lines.append(f"restart flag -> {flag}")
+                state["restart_armed"] = True
+                state["n_open"] = 0
+            except OSError as exc:
+                lines.append(f"restart flag fail: {exc}")
+        elif open_n and open_n > 0 and flag.is_file():
+            try:
+                flag.unlink()
+            except OSError:
+                pass
+            state["restart_armed"] = False
+            state["n_open"] = open_n
         _save(path, state)
-        return []
+        return lines
 
     open_n = n_open
     if open_n is None:
@@ -239,8 +272,8 @@ def maybe_alert(
         "Book FLAT — restart arm flag yazildi; land edilmis kod canliya "
         "girsin diye restart uygun."
         if flat else
-        f"Book OPEN ({open_n}) — restart YOK; ilk flat'te arm. "
-        "Mid-trade restart yasak."
+        f"Book OPEN ({open_n}) — watch otomatik arm YOK; ilk flat'te arm. "
+        "Operator soft-restart acik ticket ile serbest (02.09)."
     )
     if flat:
         try:
