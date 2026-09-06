@@ -1250,7 +1250,8 @@ class RiskManager:
                 lot_note = "risk (ATR bekleniyor)"
             elif sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
                 lot_note = f"risk (SL x{sl_mult:g} shakeout, lot x{cfg.sl_atr_mult:g})"
-            slot_left = max(0, 1 - len(open_now)) if cfg.enabled else 0
+            pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+            slot_left = max(0, pos_cap - len(open_now)) if cfg.enabled else 0
             margin = self.client.margin_for(cfg.symbol, lot, "buy")
             if margin <= 0 and slot_left and sl_dist > 0:
                 probe = self.client.margin_for(cfg.symbol, float(

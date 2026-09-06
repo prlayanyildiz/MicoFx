@@ -67,11 +67,19 @@ class _FakeStore:
             size_by_edge=False,
         )
 
+        self.settings: dict[str, Any] = {}
+
     def get_setting(self, key: str, default: Any = None) -> Any:
-        return default
+        return self.settings.get(key, default)
 
     def set_setting(self, key: str, value: Any) -> None:
-        pass
+        self.settings[key] = value
+
+    def update_system(self, patch: dict[str, Any], source: str = "") -> SystemConfig:
+        d = self.system.to_dict()
+        d.update({k: v for k, v in patch.items() if v is not None})
+        self.system = SystemConfig.from_dict(d)
+        return self.system
 
     def update_symbol(self, symbol: str, patch: dict[str, Any], source: str = "") -> SymbolConfig:
         cfg = self.symbols[symbol]
@@ -201,3 +209,35 @@ def test_http_api_accepts_symbol_max_positions_1_to_5():
     # System max_positions remains 400
     res = tc.post("/api/system", json={"max_positions": 5})
     assert res.status_code == 400
+
+
+def test_kasa_auto_enabled_clears_pins():
+    store = _FakeStore({"XAUUSD": SymbolConfig(symbol="XAUUSD", magic=1)})
+    client = _FakeClient()
+    app = create_app(store, client, engine=None, optimizer=None)
+    tc = TestClient(app)
+
+    store.set_setting("kasa_pin_lot_until", 9999999999.0)
+    store.set_setting("kasa_pin_conc_until", 9999999999.0)
+    assert store.get_setting("kasa_pin_lot_until") > 0
+
+    res = tc.post("/api/system", json={"kasa_auto_enabled": True})
+    assert res.status_code == 200
+    assert store.get_setting("kasa_pin_lot_until") == 0
+    assert store.get_setting("kasa_pin_conc_until") == 0
+
+
+def test_capacity_slot_left_respects_pos_cap():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=3)
+    store = _FakeStore({"XAUUSD": cfg})
+    client = _FakeClient()
+    rm = RiskManager(store, client)
+
+    # 1 position open on a 3-position cap -> slot_left should be 2
+    positions = [{"magic": 1, "symbol": "XAUUSD", "profit": 0.0, "swap": 0.0}]
+    account = {"equity": 1000.0, "balance": 1000.0, "margin_free": 1000.0, "margin": 50.0}
+    cap = rm.capacity(positions, account, atr_by_symbol={"XAUUSD": 10.0})
+    row = cap["rows"][0]
+    assert row["open_positions"] == 1
+    assert row["free_slots"] == 2
+

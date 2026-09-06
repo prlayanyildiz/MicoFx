@@ -1954,6 +1954,9 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             store.set_setting("kasa_pin_lot_until", pin_until)
         if "max_concurrent_risk_pct" in patch:
             store.set_setting("kasa_pin_conc_until", pin_until)
+        if patch.get("kasa_auto_enabled") is True and "lot_multiplier" not in patch and "max_concurrent_risk_pct" not in patch:
+            store.set_setting("kasa_pin_lot_until", 0)
+            store.set_setting("kasa_pin_conc_until", 0)
         result: dict[str, Any] = {"ok": True, "system": updated.to_dict()}
         if "mt5_terminal_path" in patch:
             client.set_terminal_path(updated.mt5_terminal_path)
