@@ -2959,6 +2959,20 @@ class Optimizer:
                 continue
             challengers.append((_session_rank(hold), windows))
         challengers.sort(key=lambda t: t[0], reverse=True)
+        if not challengers:
+            # Fallback when incumbent is losing/broken: incumbent params fail
+            # the strict holdout gate under all windows, creating a catch-22
+            # that traps the symbol in its current (losing) session forever.
+            # Fan out to the least-damaging / highest-ranking liquid windows.
+            candidates: list[tuple[float, list]] = []
+            for windows, hold in scored:
+                if _sessions_key(windows) == live_key:
+                    continue
+                n = int((hold or {}).get("trades") or 0)
+                if n >= 25:
+                    candidates.append((_session_rank(hold), windows))
+            candidates.sort(key=lambda t: t[0], reverse=True)
+            challengers = candidates
         for _, windows in challengers:
             if len(out) >= _SESSION_SEARCH_MAX:
                 break

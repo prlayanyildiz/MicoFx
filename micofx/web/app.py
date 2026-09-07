@@ -329,6 +329,15 @@ def _validate_sessions(patch: dict[str, Any]) -> None:
                     400, f"trade_days gecersiz gun ({d!r}) - 1..7 arasi olmali "
                          f"(1=Pazartesi, 7=Pazar)")
 
+    blocked = patch.get("blocked_entry_hours")
+    if blocked is not None:
+        if not isinstance(blocked, list):
+            raise HTTPException(400, "blocked_entry_hours bir liste olmali")
+        for h in blocked:
+            if not isinstance(h, int) or isinstance(h, bool) or not 0 <= h <= 23:
+                raise HTTPException(
+                    400, f"blocked_entry_hours gecersiz saat ({h!r}) - 0..23 arasi tamsayi olmali")
+
 
 def _session_clock_changed(cfg, patch: dict[str, Any]) -> bool:
     """True when the live trade mask (use_sessions / windows) actually moved."""
@@ -502,7 +511,7 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
 })
 _OPERATOR_SYMBOL_FIELDS = frozenset({
     "use_sessions", "sessions", "trade_days", "flat_before_close_min",
-    "enabled", "group", "broker_symbol",
+    "enabled", "group", "broker_symbol", "blocked_entry_hours",
     # 0 = off. POST accepts 0 only (F44). harvest stays hands-off (F41).
     "partial_at_r",
     # Operator charter 07.09: peer-ACK capacity knobs (no symbol disable).
