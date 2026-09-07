@@ -203,13 +203,16 @@ Fail-first: write the test, watch it fail, then implement.
   Do not flush either blob before `_stop.set()` â€” the last in-flight
   cycle then hits a fresh window and drops its rows.
 - Live count allows **scale-in tickets up to `cfg.max_positions` (clipped 1..5)**
-  (operator + peer ACK 07.09, deployed first on XAUUSD=5; other names default 1).
+  (operator + peer ACK 07.09; live caps are edge-weighted, NAS stays 1).
   Guarded against 13.08 restack via: (1) ATR spacing >= 1.0 ATR from nearest open
-  ticket, (2) max 1 new fill per symbol per closed bar (`_filled_bars`), (3) risk-splitting
-  where each ticket risks `risk_percent / max_positions` and 1R cap is divided by
-  `max_positions`, (4) book-wide `max_concurrent_risk_pct` and daily loss bounds remain
-  active, (5) no hedging (opposite side blocked). System `max_positions` and symbol
-  `max_lot` / `max_margin_pct` remain unread/400. Search still scores `max_open=1` for honest WFO.
+  ticket (profit-direction only — losers do not add), (2) max 1 new fill per symbol
+  per closed bar (`_filled_bars`), (3) **each ticket sized at full nominal 1R**
+  (`risk_percent` / auto-1R / margin share — not divided by `max_positions`;
+  dividing ate baseline income on single-ticket fills, fixed 07.09 `406d3b2`),
+  (4) book-wide `max_concurrent_risk_pct` and daily loss bounds remain the stack
+  governor when several full tickets are open, (5) no hedging (opposite side
+  blocked). System `max_positions` and symbol `max_lot` / `max_margin_pct` remain
+  unread/400. Search still scores `max_open=1` for honest WFO.
 - Do not add an adverse-fill entry gate on autopsy
   `fill_vs_signal_close_r` *R thresholds* (Claude 18:45: Q4 in-sample
   curve-fit; unverifiable). Live `chase_max_atr` (default 0.25) is a
