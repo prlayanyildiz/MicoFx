@@ -54,6 +54,10 @@ class Params:
     sweep_pierce_atr: float = 0.25
     sweep_close_pct: float = 0.6
 
+    # ---- dynamic volatility band (super_trend) ----
+    sup_period: int = 10
+    sup_mult: float = 3.0
+
     # ---- adaptive cost-regime gate (burst) ----
     cost_rank_max: float = 0.0       # 0 disables; percentile ceiling on cost/range
 
@@ -130,6 +134,7 @@ class Params:
                 self.chan_lookback, self.chan_buffer_atr,
                 self.fade_adx_max, self.fade_ema_len, self.fade_band_atr,
                 self.sweep_lookback, self.sweep_pierce_atr, self.sweep_close_pct,
+                self.sup_period, self.sup_mult,
                 self.cost_rank_max)
 
 
@@ -165,6 +170,7 @@ class IndicatorCache:
         self.volume = volume if volume is not None else np.ones(close.size)
         self._src = ind.t3_source(high, low, close)
         self._vol_ratio: dict[int, np.ndarray] = {}
+        self._supertrend: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
 
     # ---- transaction cost -------------------------------------------------
 
@@ -247,6 +253,47 @@ class IndicatorCache:
         if key not in self._atr:
             self._atr[key] = ind.atr(self.high, self.low, self.close, key)
         return self._atr[key]
+
+    def supertrend(self, period: int, mult: float) -> tuple[np.ndarray, np.ndarray]:
+        key = (max(2, int(period)), round(float(mult), 4))
+        cached = self._supertrend.get(key)
+        if cached is not None:
+            return cached
+        atr = self.atr(key[0])
+        hl2 = (self.high + self.low) / 2.0
+        basic_up = hl2 + key[1] * atr
+        basic_lo = hl2 - key[1] * atr
+        n = self.close.size
+        up = np.copy(basic_up)
+        lo = np.copy(basic_lo)
+        trend = np.ones(n, dtype=np.int32)
+        st = np.zeros(n, dtype=np.float64)
+        for i in range(1, n):
+            if basic_up[i] < up[i - 1] or self.close[i - 1] > up[i - 1]:
+                up[i] = basic_up[i]
+            else:
+                up[i] = up[i - 1]
+            if basic_lo[i] > lo[i - 1] or self.close[i - 1] < lo[i - 1]:
+                lo[i] = basic_lo[i]
+            else:
+                lo[i] = lo[i - 1]
+            if trend[i - 1] == 1:
+                if self.close[i] < lo[i]:
+                    trend[i] = -1
+                    st[i] = up[i]
+                else:
+                    trend[i] = 1
+                    st[i] = lo[i]
+            else:
+                if self.close[i] > up[i]:
+                    trend[i] = 1
+                    st[i] = lo[i]
+                else:
+                    trend[i] = -1
+                    st[i] = up[i]
+        out = (trend, st)
+        self._supertrend[key] = out
+        return out
 
     # ---- python-list views ------------------------------------------------
     # The backtest's trade-management loop is inherently sequential and reads a
@@ -704,10 +751,52 @@ def _sweep_fade(cache: IndicatorCache, p: Params) -> Signals:
                    buy=buy, sell=sell, htf_up=zero, htf_down=zero)
 
 
+def _super_trend(cache: IndicatorCache, p: Params) -> Signals:
+    """Supertrend dynamic volatility envelope trend breakouts.
+
+    Flips bullish when close exceeds upper ATR band; bearish when close breaks below
+    lower ATR band. Uses hard ATR stop and ATR trail.
+    """
+    close = cache.close
+    size = close.size
+    t3, k, d, atr_series, adx_series = _common(cache, p)
+    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
+    regime = _regime(p, adx_series, size)
+
+    period = max(3, int(p.sup_period))
+    mult = max(0.5, float(p.sup_mult))
+    trend, st = cache.supertrend(period, mult)
+
+    buy = (trend == 1) & (np.roll(trend, 1) == -1) & regime & allow_long
+    sell = (trend == -1) & (np.roll(trend, 1) == 1) & regime & allow_short
+    buy[0] = False
+    sell[0] = False
+
+    if p.min_body_ratio > 0:
+        body = cache.body_ratio()
+        buy &= body >= p.min_body_ratio
+        sell &= body >= p.min_body_ratio
+    if p.atr_pct_min > 0:
+        buy &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
+        sell &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
+
+    warmup = min(size, max(period * 5, p.atr_period * 3, 60))
+    buy[:warmup] = False
+    sell[:warmup] = False
+
+    buy = ind.first_of_run(buy)
+    sell = ind.first_of_run(sell)
+    buy, sell = _resolve_conflicts(buy, sell)
+    return Signals(t3=st, k=k, d=d, atr=atr_series, adx=adx_series,
+                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down,
+                   t3_kind="level")
+
+
 _FAMILIES = {
     "mtf_pullback": _mtf_pullback,
     "burst": _burst,
     "channel_break": _channel_break,
+    "super_trend": _super_trend,
     "sweep_fade": _sweep_fade,
     "range_fade": _range_fade,
 }
@@ -804,4 +893,6 @@ def required_bars(p: Params) -> int:
                    # range_fade: EMA warm-up + ADX.
                    int(p.fade_ema_len) * 3 + 2,
                    # sweep_fade: prior N-bar extreme + ADX.
-                   int(p.sweep_lookback) + 2))
+                   int(p.sweep_lookback) + 2,
+                   # super_trend: ATR period + volatility bands.
+                   int(p.sup_period) * 5 + 60))

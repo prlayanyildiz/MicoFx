@@ -947,6 +947,7 @@ const STRATEGY_LABEL = {
   mtf_pullback: "Ust TF Trend Geri Cekilmesi",
   burst: "Momentum Patlamasi Devami",
   channel_break: "N barlik kanal kirilimi (Donchian)",
+  super_trend: "SuperTrend (Dinamik Volatilite)",
   sweep_fade: "Basarisiz kirilim fade (sweep)",
   range_fade: "Sessiz bant fade (ADX dusuk)",
 };

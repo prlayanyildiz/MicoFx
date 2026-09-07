@@ -139,6 +139,10 @@ class SymbolConfig:
     sweep_pierce_atr: float = 0.25
     sweep_close_pct: float = 0.6
 
+    # ---- dynamic volatility band (super_trend) ----
+    sup_period: int = 10
+    sup_mult: float = 3.0
+
     # ---- adaptive cost-regime gate (scalping families only) ----
     # Percentile ceiling on the bar's cost-to-range ratio inside its own trailing
     # distribution. Unlike ``max_spread_atr`` this is not a fixed number: it
@@ -555,6 +559,7 @@ OPT_FIELDS = [
     "chan_lookback", "chan_buffer_atr",
     "fade_adx_max", "fade_ema_len", "fade_band_atr",
     "sweep_lookback", "sweep_pierce_atr", "sweep_close_pct",
+    "sup_period", "sup_mult",
     "cost_rank_max",
     # Spread is a far larger fraction of a scalp's target than of a swing's, so
     # the search is allowed to tune the spread/ATR entry gate per symbol rather
@@ -596,9 +601,9 @@ PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
 # range_fade added 04.09 (Claude 12:38): US30 quiet fade — kept as 5th slot,
 # not preferred after 13:16 retract (trail vs mean-reversion mismatch).
 # sweep_fade added 04.09 (Claude 13:16): failed-breakout fade; book-wide.
-# Neither is in the default opt strategies list until unfreeze + WFO.
+# super_trend added 07.09: dynamic volatility envelope breakout / continuation.
 STRATEGIES = [
-    "mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade",
+    "mtf_pullback", "burst", "channel_break", "super_trend", "sweep_fade", "range_fade",
 ]
 
 # True scalps: cost-scaled micro entries. ``micro_rev`` was the other member

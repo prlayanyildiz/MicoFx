@@ -130,7 +130,7 @@ def test_the_registry_is_the_whole_book():
     # Named rather than counted: a bare count pin here went red for a reason
     # that had nothing to do with the retirements this file guards.
     assert set(FAMILIES) == {
-        "burst", "channel_break", "mtf_pullback", "range_fade", "sweep_fade",
+        "burst", "channel_break", "mtf_pullback", "super_trend", "range_fade", "sweep_fade",
     }, f"aile kitabi degisti: {FAMILIES}"
 
 
