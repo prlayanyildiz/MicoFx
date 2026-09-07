@@ -171,6 +171,7 @@ ENTRY_BLOCKS_ROLL_SEC = 7 * 86400
 # it flushed on every poll. A close without a row here is the defect POST-1
 # exists to catch.
 TRADE_AUTOPSY_LIMIT = 2000
+MISSED_TRADES_LIMIT = 500
 
 
 def _bar_key_json(bar_key: Any) -> list | str | int | float | None:
@@ -719,6 +720,11 @@ class Engine:
         self._trade_autopsies_since = time.time()
         self._load_trade_autopsies()
         self._rebuild_autopsy_pending()
+        self._missed_trades_limit = MISSED_TRADES_LIMIT
+        self._missed_trades: list[dict[str, Any]] = []
+        self._missed_trades_dirty = False
+        self._missed_trades_flushed_at = 0.0
+        self._load_missed_trades()
         self._entry_blocks_flushed_at = 0.0
         # How much wider the live tick's spread runs than the bar spread the
         # walk-forward charges, per symbol, as a coarse histogram of the ratio.
@@ -1747,6 +1753,19 @@ class Engine:
             if new_episode:
                 seen[leg] = episode
                 self._record_entry_event(str(symbol), key, bar_key)
+                if key != "acildi":
+                    st = getattr(self, "states", {}).get(str(symbol))
+                    sig_side = getattr(st, "signal", "") or getattr(st, "primary_signal", "")
+                    self._record_missed_trade(
+                        symbol=str(symbol),
+                        category="gate_blocked",
+                        reason=f"kapi_engeli: {key}",
+                        side=str(sig_side or ""),
+                        price=None,
+                        bar_key=bar_key,
+                        details={"gate": key, "source": source or "primary"},
+                    )
+                    LOG.emit(f"KACAN ISLEM (Engel) {symbol}: {key} - {sig_side.upper() if sig_side else 'Sinyal'}", "INFO")
 
             def _bump(tree: dict[str, dict[str, dict[str, dict[str, int]]]]) -> None:
                 legs = tree.setdefault(str(symbol), {})
@@ -1944,6 +1963,7 @@ class Engine:
                 self._entry_events_dirty = False
             self._entry_blocks_flushed_at = now
             self._flush_ok("entry_blocks")
+            self._flush_missed_trades(force=force)
         except Exception as exc:
             self._flush_failed("entry_blocks", exc)
 
@@ -2023,6 +2043,94 @@ class Engine:
         self._entry_blocks_dirty = True
         self._entry_events_dirty = True
         self._flush_entry_blocks(force=True)
+
+    def _load_missed_trades(self) -> None:
+        try:
+            limit = int(getattr(self, "_missed_trades_limit", MISSED_TRADES_LIMIT) or MISSED_TRADES_LIMIT)
+            items = as_list(self.store.get_setting("missed_trades"), "missed_trades")
+            self._missed_trades = items[-limit:] if items else []
+        except Exception:
+            self._missed_trades = []
+
+    def _record_missed_trade(self, symbol: str, category: str, reason: str,
+                             side: str = "", price: float | None = None,
+                             bar_key: Any = None, details: dict | None = None) -> None:
+        """Record a missed trade or candidate near-miss into the bounded circular buffer."""
+        events = getattr(self, "_missed_trades", None)
+        if events is None:
+            self._missed_trades = []
+            events = self._missed_trades
+        now = time.time()
+        bk = _bar_key_json(bar_key)
+        # Deduplicate consecutive identical notifications for the same bar episode
+        if events:
+            last_e = events[-1]
+            if (last_e.get("symbol") == symbol
+                    and last_e.get("bar_key") == bk
+                    and last_e.get("reason") == reason):
+                return
+        entry = {
+            "symbol": str(symbol),
+            "category": str(category),
+            "reason": str(reason),
+            "side": str(side or ""),
+            "price": round(float(price), 5) if price is not None else None,
+            "bar_key": bk,
+            "epoch": now,
+            "details": details or {},
+        }
+        events.append(entry)
+        limit = int(getattr(self, "_missed_trades_limit", MISSED_TRADES_LIMIT) or MISSED_TRADES_LIMIT)
+        if len(events) > limit:
+            self._missed_trades = events[-limit:]
+        self._missed_trades_dirty = True
+
+    def _flush_missed_trades(self, force: bool = False) -> None:
+        try:
+            dirty = getattr(self, "_missed_trades_dirty", False)
+            if not dirty:
+                return
+            now = time.time()
+            last = float(getattr(self, "_missed_trades_flushed_at", 0.0) or 0.0)
+            if not force and last and now - last < _ENTRY_BLOCK_FLUSH_SEC:
+                return
+            events = list(getattr(self, "_missed_trades", []) or [])
+            limit = int(getattr(self, "_missed_trades_limit", MISSED_TRADES_LIMIT) or MISSED_TRADES_LIMIT)
+            self._missed_trades = events[-limit:]
+            self.store.set_setting("missed_trades", self._missed_trades)
+            self._missed_trades_dirty = False
+            self._missed_trades_flushed_at = now
+            self._flush_ok("missed_trades")
+        except Exception as exc:
+            self._flush_failed("missed_trades", exc)
+
+    def missed_trades(self, limit: int = 50) -> dict[str, Any]:
+        """Summary and recent events for missed trades and candidate near-misses."""
+        events = list(getattr(self, "_missed_trades", []) or [])
+        by_symbol: dict[str, int] = {}
+        by_reason: dict[str, int] = {}
+        by_category: dict[str, int] = {}
+        for e in events:
+            s = str(e.get("symbol", "unknown"))
+            r = str(e.get("reason", "unknown"))
+            c = str(e.get("category", "unknown"))
+            by_symbol[s] = by_symbol.get(s, 0) + 1
+            by_reason[r] = by_reason.get(r, 0) + 1
+            by_category[c] = by_category.get(c, 0) + 1
+        lim = max(1, min(int(limit), 500))
+        return {
+            "ok": True,
+            "total": len(events),
+            "by_symbol": by_symbol,
+            "by_reason": by_reason,
+            "by_category": by_category,
+            "events": events[-lim:],
+        }
+
+    def reset_missed_trades(self) -> None:
+        self._missed_trades = []
+        self._missed_trades_dirty = True
+        self._flush_missed_trades(force=True)
 
     def _broker_now_int(self) -> int:
         """Broker wall-clock as a naive epoch, same stamps as deal.time.
@@ -2926,6 +3034,21 @@ class Engine:
             state.primary_signal = "sell"
         else:
             state.primary_signal = ""
+            near_miss = snap.get("near_miss")
+            if near_miss:
+                reasons_str = ", ".join(near_miss.get("reasons", []))
+                cand_side = str(near_miss.get("side", ""))
+                px = float(bars.close[-1]) if len(bars) else None
+                self._record_missed_trade(
+                    symbol=cfg.symbol,
+                    category="near_miss",
+                    reason=f"filtre_engeli: {reasons_str}",
+                    side=cand_side,
+                    price=px,
+                    bar_key=state.last_bar,
+                    details=near_miss.get("metrics", {}),
+                )
+                LOG.emit(f"KACAN ISLEM (Ramak Kala) {cfg.symbol}: {cand_side.upper()} - {reasons_str}", "INFO")
         if state.primary_signal:
             state.last_signal_at = time.time()
             # Only the readings this family actually measures. The fixed

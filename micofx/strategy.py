@@ -354,6 +354,7 @@ class Signals:
     # on any of it - it is the live status view - but the view was reading
     # all three as one number. See ``last()``.
     t3_kind: str = "level"
+    near_miss: dict[str, Any] | None = None
 
     def last(self) -> dict[str, Any]:
         if self.t3.size < 2:
@@ -392,6 +393,7 @@ class Signals:
             "buy": buy,
             "sell": sell,
             "htf": 1 if self.htf_up[i] else (-1 if self.htf_down[i] else 0),
+            "near_miss": self.near_miss,
         }
 
 
@@ -601,8 +603,51 @@ def _burst(cache: IndicatorCache, p: Params) -> Signals:
     buy = ind.first_of_run(buy)
     sell = ind.first_of_run(sell)
     buy, sell = _resolve_conflicts(buy, sell)
+
+    near_miss = None
+    if close.size > 0 and not (bool(buy[-1]) or bool(sell[-1])) and close.size >= warmup:
+        last_span = float(span[-1])
+        last_mean = float(mean[-1])
+        last_sd = float(sd[-1])
+        last_z = (last_span - last_mean) / max(last_sd, 1e-12) if last_sd > 0 else 0.0
+        last_clv = float(clv[-1])
+        last_vr = float(cache.volume_ratio(20)[-1]) if p.vol_ratio_min > 0 else 1.0
+        req_z = max(0.0, float(p.brst_range_z))
+        req_edge = float(edge)
+        cand_long = (last_clv >= req_edge * 0.8) and (close[-1] > open_[-1])
+        cand_short = (last_clv <= 1.0 - req_edge * 0.8) and (close[-1] < open_[-1])
+        if (cand_long or cand_short) and (last_z >= req_z * 0.6):
+            reasons = []
+            if last_z < req_z:
+                reasons.append(f"range_z ({last_z:.2f} < {req_z:.2f})")
+            if cand_long:
+                if last_clv < req_edge:
+                    reasons.append(f"clv ({last_clv:.2f} < {req_edge:.2f})")
+                if not bool(allow_long[-1]):
+                    reasons.append("htf_trend_not_bullish")
+            elif cand_short:
+                if (1.0 - last_clv) < req_edge:
+                    reasons.append(f"clv ({1.0 - last_clv:.2f} < {req_edge:.2f})")
+                if not bool(allow_short[-1]):
+                    reasons.append("htf_trend_not_bearish")
+            if p.vol_ratio_min > 0 and last_vr < float(p.vol_ratio_min):
+                reasons.append(f"vol_ratio ({last_vr:.2f} < {p.vol_ratio_min:.2f})")
+            if not regime[-1]:
+                reasons.append(f"adx_regime ({float(adx_series[-1]):.1f})")
+            if reasons:
+                near_miss = {
+                    "strategy": "burst",
+                    "side": "buy" if cand_long else "sell",
+                    "reasons": reasons,
+                    "metrics": {
+                        "range_z": round(last_z, 2),
+                        "clv": round(last_clv, 2),
+                        "vol_ratio": round(last_vr, 2),
+                    },
+                }
+
     return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series, buy=buy, sell=sell,
-                   htf_up=htf_up, htf_down=htf_down)
+                   htf_up=htf_up, htf_down=htf_down, near_miss=near_miss)
 
 
 def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
@@ -666,8 +711,56 @@ def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
     buy = ind.first_of_run(buy)
     sell = ind.first_of_run(sell)
     buy, sell = _resolve_conflicts(buy, sell)
+
+    near_miss = None
+    if size > 0 and not (bool(buy[-1]) or bool(sell[-1])) and size >= warmup:
+        last_close = float(close[-1])
+        hi_target = float(prev_hi[-1] + pad[-1])
+        lo_target = float(prev_lo[-1] - pad[-1])
+        atr_val = float(atr_series[-1]) if float(atr_series[-1]) > 0 else 1.0
+        dist_hi_atr = (hi_target - last_close) / atr_val
+        dist_lo_atr = (last_close - lo_target) / atr_val
+        last_vr = float(cache.volume_ratio(20)[-1]) if p.vol_ratio_min > 0 else 1.0
+
+        broke_hi = last_close > hi_target
+        broke_lo = last_close < lo_target
+        close_to_hi = broke_hi or (0 <= dist_hi_atr <= 0.3)
+        close_to_lo = broke_lo or (0 <= dist_lo_atr <= 0.3)
+
+        if close_to_hi or close_to_lo:
+            candidate_side = "buy" if close_to_hi else "sell"
+            reasons = []
+            if candidate_side == "buy":
+                if not broke_hi:
+                    reasons.append(f"kanal_kirilmadi ({dist_hi_atr:.2f} ATR kaldi)")
+                if not bool(allow_long[-1]):
+                    reasons.append("htf_trend_not_bullish")
+            elif candidate_side == "sell":
+                if not broke_lo:
+                    reasons.append(f"kanal_kirilmadi ({dist_lo_atr:.2f} ATR kaldi)")
+                if not bool(allow_short[-1]):
+                    reasons.append("htf_trend_not_bearish")
+            if p.vol_ratio_min > 0 and last_vr < float(p.vol_ratio_min):
+                reasons.append(f"vol_ratio ({last_vr:.2f} < {p.vol_ratio_min:.2f})")
+            if not regime[-1]:
+                reasons.append(f"adx_regime ({float(adx_series[-1]):.1f})")
+            if p.atr_pct_min > 0 and not bool(cache.atr_rank(p.atr_period)[-1] >= p.atr_pct_min):
+                reasons.append("atr_pct_min")
+            if reasons:
+                near_miss = {
+                    "strategy": "channel_break",
+                    "side": candidate_side,
+                    "reasons": reasons,
+                    "metrics": {
+                        "dist_hi_atr": round(dist_hi_atr, 2),
+                        "dist_lo_atr": round(dist_lo_atr, 2),
+                        "vol_ratio": round(last_vr, 2),
+                    },
+                }
+
     return Signals(t3=t3, k=k, d=d, atr=atr_series, adx=adx_series,
-                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down)
+                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down,
+                   near_miss=near_miss)
 
 
 def _range_fade(cache: IndicatorCache, p: Params) -> Signals:
@@ -836,9 +929,42 @@ def _keltner_break(cache: IndicatorCache, p: Params) -> Signals:
     buy = ind.first_of_run(buy)
     sell = ind.first_of_run(sell)
     buy, sell = _resolve_conflicts(buy, sell)
+
+    near_miss = None
+    if size > 0 and not (bool(buy[-1]) or bool(sell[-1])) and size >= warmup:
+        last_close = float(close[-1])
+        up_val = float(upper[-1])
+        lo_val = float(lower[-1])
+        atr_val = float(atr_series[-1]) if float(atr_series[-1]) > 0 else 1.0
+        dist_up_atr = (up_val - last_close) / atr_val
+        dist_lo_atr = (last_close - lo_val) / atr_val
+        broke_up = last_close > up_val
+        broke_lo = last_close < lo_val
+        near_up = broke_up or (0 <= dist_up_atr <= 0.3)
+        near_lo = broke_lo or (0 <= dist_lo_atr <= 0.3)
+        if (near_up and bool(allow_long[-1])) or (near_lo and bool(allow_short[-1])):
+            candidate_side = "buy" if near_up else "sell"
+            reasons = []
+            if candidate_side == "buy" and not broke_up:
+                reasons.append(f"bant_kirilmadi ({dist_up_atr:.2f} ATR kaldi)")
+            elif candidate_side == "sell" and not broke_lo:
+                reasons.append(f"bant_kirilmadi ({dist_lo_atr:.2f} ATR kaldi)")
+            if not regime[-1]:
+                reasons.append(f"adx_regime ({float(adx_series[-1]):.1f})")
+            if reasons:
+                near_miss = {
+                    "strategy": "keltner_break",
+                    "side": candidate_side,
+                    "reasons": reasons,
+                    "metrics": {
+                        "dist_up_atr": round(dist_up_atr, 2),
+                        "dist_lo_atr": round(dist_lo_atr, 2),
+                    },
+                }
+
     return Signals(t3=mid, k=k, d=d, atr=atr_series, adx=adx_series,
                    buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down,
-                   t3_kind="level")
+                   t3_kind="level", near_miss=near_miss)
 
 
 _FAMILIES = {

@@ -519,6 +519,7 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
     "sl_atr_mult", "vol_ratio_min", "chase_max_atr", "max_spread_atr",
     "mfe_lock1_at_r", "mfe_lock1_to_r", "mfe_lock2_at_r", "mfe_lock2_to_r",
     "stale_flat_bars", "stale_max_abs_r", "max_positions",
+    "brst_range_z", "chan_lookback", "kelt_ema_len", "kelt_atr_mult",
 })
 # NOT here, deliberately: ``symbol_daily_loss_pct``. A 05.09 audit reported it
 # as "a protection that cannot be armed" - true as a description (no path sets
@@ -1618,6 +1619,29 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             + top_prem
         )
         return {"ok": True, **data}
+
+    @app.get("/api/analysis/missed-trades")
+    def missed_trades(limit: int = 50) -> dict[str, Any]:
+        """Candidate near-misses and gate-refused setups. Read-only."""
+        data = engine.missed_trades(limit=limit)
+        total = data.get("total", 0)
+        by_cat = data.get("by_category", {})
+        near = by_cat.get("near_miss", 0)
+        gate = by_cat.get("gate_blocked", 0)
+        data["note"] = (
+            "Henuz kacan islem veya ramak kala sinyal kaydedilmedi."
+            if not total else
+            f"Toplam {total} kacan/engellenen sinyal ({near} ramak kala filtre engeli, {gate} motor kapi engeli)"
+        )
+        return data
+
+    @app.post("/api/analysis/missed-trades/reset")
+    def missed_trades_reset() -> dict[str, Any]:
+        engine.reset_missed_trades()
+        return {
+            "ok": True,
+            "message": "Kacan islem ve ramak kala kayitlari sifirlandi.",
+        }
 
     @app.post("/api/analysis/entry-blocks/reset")
     def entry_blocks_reset() -> dict[str, Any]:
