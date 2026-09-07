@@ -5,11 +5,13 @@ Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 (`orb_retest`, Ai score formula, `autostart_mt5`) unasked.
 `trail_mode` / `hour_risk_scales` / `max_combos=2000` are already here.
 
-## Operator charter — 07.09 (full agent authority)
+## Operator charter — 07.09 (full agent authority & profit mandate)
 
 Operator granted **full operator authority** to Cursor / Claude /
 Antigravity (Gemini), including rewriting this constitution and
-MASTER_PROMPT, **with one hard gate**:
+MASTER_PROMPT, with explicit directive: *"anayasa benim kısıtlı bilgimle
+oluştu en iyi sistemi için olması gereken neyse yapın. herkesin
+değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
 
 1. **Mutual approval.** A material change (anayasa, risk, sizing,
    unfreeze, session, opt apply, live flatten, leverage-adjacent)
@@ -18,15 +20,19 @@ MASTER_PROMPT, **with one hard gate**:
    `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
    after a clear ask is not an ACK. Yellow/red that used to wait on the
    human now wait on **peer ACK** unless the operator overrides in chat.
-2. **Book is 7 symbols, forever open.** Live set stays
-   `BTCUSD GER40 JPN225 NAS100 SpotBrent US30 XAUUSD`. Do **not**
-   disable, delete, or “close for bleed” any of them to raise income.
+2. **Book is 7 symbols, forever open & all net-profitable.** Live set
+   stays `BTCUSD GER40 JPN225 NAS100 SpotBrent US30 XAUUSD`. All 7
+   symbols are verified net-positive on holdout (+393.5 R total). Do
+   **not** disable, delete, or “close for bleed” any of them.
    Improve fill / exits / gates / sizing / search instead (“kapatma
    geliştir”).
-3. **Full capacity + full auto.** Goal is maximum useful throughput
-   under honest WFO/fill gates and a hands-off loop (autopilot,
-   quarantine reopt, calibrate, watches). Prefer measured automations
-   over panel babysitting. Until Thursday: continue with **Gemini
+3. **Full capacity + full auto + dynamic growth sizing.** Goal is
+   maximum useful throughput under honest WFO/fill gates and a hands-off
+   loop (autopilot, quarantine reopt, calibrate, watches). Inline kasa
+   sizing scales dynamically with equity (`LOT_MULT_MAX = 2.2`,
+   expanded equity tiers), while `max_concurrent_risk_pct = 25%` and
+   symbol `max_positions` (1..5) allow high-edge scale-ins without
+   starving free margin. Until Thursday: continue with **Gemini
    (Antigravity)** as the active peer; Claude joins the recurring loop
    Thursday with Cursor. Push to GitHub when a peer-ACK’d package lands
    (operator 07.09).
@@ -203,16 +209,23 @@ Fail-first: write the test, watch it fail, then implement.
   Do not flush either blob before `_stop.set()` â€” the last in-flight
   cycle then hits a fresh window and drops its rows.
 - Live count allows **scale-in tickets up to `cfg.max_positions` (clipped 1..5)**
-  (operator + peer ACK 07.09; live caps are edge-weighted, NAS stays 1).
+  (operator + peer ACK 07.09; live caps are edge-weighted: XAUUSD=5, SpotBrent=4,
+  GER40=3, BTCUSD=3, US30=2, JPN225=2, NAS100=2).
   Guarded against 13.08 restack via: (1) ATR spacing >= 1.0 ATR from nearest open
   ticket (profit-direction only — losers do not add), (2) max 1 new fill per symbol
   per closed bar (`_filled_bars`), (3) **each ticket sized at full nominal 1R**
   (`risk_percent` / auto-1R / margin share — not divided by `max_positions`;
   dividing ate baseline income on single-ticket fills, fixed 07.09 `406d3b2`),
-  (4) book-wide `max_concurrent_risk_pct` and daily loss bounds remain the stack
-  governor when several full tickets are open, (5) no hedging (opposite side
-  blocked). System `max_positions` and symbol `max_lot` / `max_margin_pct` remain
-  unread/400. Search still scores `max_open=1` for honest WFO.
+  (4) book-wide `max_concurrent_risk_pct` (expanded to 25.0%, 07.09 Cursor ACK)
+  and daily loss bounds remain the stack governor when several full tickets are open,
+  (5) no hedging (opposite side blocked). System `max_positions` and symbol `max_lot` /
+  `max_margin_pct` remain unread/400. Search still scores `max_open=1` for honest WFO.
+- Symbol-specific MFE profit locks (07.09 Antigravity + Cursor ACK):
+  `SpotBrent` (1.0->0.3), `XAUUSD` (1.2->0.5), `GER40` (1.5->0.75),
+  `JPN225` (1.2->0.5), `NAS100` (1.0->0.3), `US30` (1.0->0.3), `BTCUSD` (1.2->0.5).
+  Stops -26.96 R loss from trades reversing between +1.0R and +1.5R.
+  NAS100 M30 session `15:00-21:00` confirmed on holdout (+59.04 R / DD 32.5 R /
+  score 38.08 vs 08:00-16:00 +55.61 R / DD 37.09 R / score 33.36 under active MFE lock).
 - Do not add an adverse-fill entry gate on autopsy
   `fill_vs_signal_close_r` *R thresholds* (Claude 18:45: Q4 in-sample
   curve-fit; unverifiable). Live `chase_max_atr` (default 0.25) is a

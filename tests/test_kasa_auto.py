@@ -51,3 +51,16 @@ def test_lot_blocks_do_not_widen_when_counters_stale():
         max_margin_usage_pct=78, lot_multiplier=0.92, max_concurrent_risk_pct=46,
     )
     assert blocked["targets"]["lot_multiplier"] == clean["targets"]["lot_multiplier"]
+
+
+def test_equity_tiers_and_expanded_lot_ceiling():
+    # Equity $2350 with 80% margin dial should reach 1.50x
+    mid = _plan(eq=2350.0, marj=80.0)
+    assert mid["targets"]["lot_multiplier"] == 1.50
+    # Aggressive margin %95 reaches 1.78x
+    mid_hi = _plan(eq=2350.0, marj=95.0)
+    assert mid_hi["targets"]["lot_multiplier"] == 1.78
+    # High equity ($6000+) scales up toward expanded 2.2 ceiling
+    top = _plan(eq=10500.0, marj=95.0)
+    assert top["targets"]["lot_multiplier"] == 2.20
+

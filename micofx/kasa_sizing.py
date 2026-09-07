@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 LOT_MULT_MIN = 0.3
-LOT_MULT_MAX = 1.6
+LOT_MULT_MAX = 2.2
 # Equity-tier lot at this margin% reads as 1.0× aggression.
 MARGIN_REF_PCT = 80.0
 RISK_PCT = 2.0
@@ -26,9 +26,13 @@ def equity_lot_base(eq: float) -> float:
         return 1.0
     if eq < 1200:
         return 1.15
-    if eq < 3000:
+    if eq < 2000:
         return 1.3
-    return min(LOT_MULT_MAX, 1.3 + (eq - 3000) / 8000.0)
+    if eq < 3500:
+        return 1.5
+    if eq < 6000:
+        return 1.75
+    return min(LOT_MULT_MAX, 1.75 + (eq - 6000) / 10000.0)
 
 
 def quantize_lot_mult(value: float, step: float = 0.02) -> float:
