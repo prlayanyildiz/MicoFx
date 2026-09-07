@@ -224,12 +224,20 @@ Fail-first: write the test, watch it fail, then implement.
   and daily loss bounds remain the stack governor when several full tickets are open,
   (5) no hedging (opposite side blocked). System `max_positions` and symbol `max_lot` /
   `max_margin_pct` remain unread/400. Search still scores `max_open=1` for honest WFO.
-- Symbol-specific MFE profit locks (07.09 Antigravity + Cursor ACK):
-  `SpotBrent` (1.0->0.3), `XAUUSD` (1.2->0.5), `GER40` (1.5->0.75),
-  `JPN225` (1.2->0.5), `NAS100` (1.0->0.3), `US30` (1.0->0.3), `BTCUSD` (1.2->0.5).
-  Stops -26.96 R loss from trades reversing between +1.0R and +1.5R.
+- Symbol-specific MFE profit locks (07.09 evening Antigravity + Cursor ACK;
+  earlier same-day 1.0–1.5 bands left ~$885 / 69 givebacks that peaked ≥0.70R
+  then full-SL'd): `XAUUSD` (0.75→0.15 / 1.2→0.5), `NAS100` (0.70→0.15 / 1.1→0.4),
+  `US30` (0.75→0.15 / 1.1→0.4), `JPN225` (0.75→0.15 / 1.2→0.5),
+  `GER40` (0.80→0.20 / 1.4→0.7), `BTCUSD` (0.80→0.20 / 1.3→0.6),
+  `SpotBrent` (1.0→0.3 / 1.6→0.8). Watch capture if 0.15R L1 scratches runners.
   NAS100 M30 session `15:00-21:00` confirmed on holdout (+59.04 R / DD 32.5 R /
   score 38.08 vs 08:00-16:00 +55.61 R / DD 37.09 R / score 33.36 under active MFE lock).
+- Entry hour gates optimized on holdout (07.09 evening Antigravity + Cursor ACK):
+  `JPN225` blanket block `[13..18]` removed (was strangling holdout to -4.86R, killing +55.37R
+  in hours 15/17/18) → tightened to toxic-only `[3, 16, 20]`, holdout explodes to +59.29R / score 45.53.
+  `GER40` blanket block `[6,8,14,18,19,20]` removed (18/19 evening trend restored) → tightened to
+  chop-only `[10, 15, 16]`, holdout rises +37.12R → +57.74R / score 45.84. US30 `[0,1,16,19,21]`
+  and NAS100 `15:00-21:00` [17] confirmed protective and preserved.
 - Do not add an adverse-fill entry gate on autopsy
   `fill_vs_signal_close_r` *R thresholds* (Claude 18:45: Q4 in-sample
   curve-fit; unverifiable). Live `chase_max_atr` (default 0.25) is a
