@@ -1336,6 +1336,7 @@ async function saveOptParams() {
 
 async function runOptimizer(symbols) {
   const tfs = Array.from(optTfSelection);
+  const force = $("#opt-force") ? $("#opt-force").checked : false;
   try {
     await api("/api/opt/run", {
       method: "POST",
@@ -1343,6 +1344,7 @@ async function runOptimizer(symbols) {
         symbols: symbols && symbols.length ? symbols : null,
         apply_best: $("#opt-apply").checked,
         timeframes: tfs.length ? tfs : null,
+        force: force,
       },
     });
     toast(`Optimizasyon basladi (${symbols && symbols.length ? symbols.join(", ") : "tum semboller"}`
@@ -1463,7 +1465,7 @@ function renderOptJob() {
             const res = await api("/api/opt/apply", {
               method: "POST",
               body: { symbol: r.symbol, params: r.best.params, score: r.best.score,
-                      timeframe: r.timeframe, strategy: r.strategy },
+                      timeframe: r.timeframe, strategy: r.strategy, force: true },
             });
             // An apply that bypassed the walk-forward still succeeds, so a
             // plain green toast read exactly like a validated one. Surface
@@ -1522,7 +1524,7 @@ async function loadOptHistory() {
           e.target.disabled = true;
           try {
             const res = await api("/api/opt/apply",
-                                  { method: "POST", body: { symbol: h.symbol, run_id: h.id } });
+                                  { method: "POST", body: { symbol: h.symbol, run_id: h.id, force: true } });
             // Same reasoning as the results table above - this is the path a
             // force override actually comes in on.
             if (res && res.warning) toast(`${h.symbol}: ${res.warning}`, "warn");
