@@ -238,6 +238,10 @@ Fail-first: write the test, watch it fail, then implement.
   `GER40` blanket block `[6,8,14,18,19,20]` removed (18/19 evening trend restored) → tightened to
   chop-only `[10, 15, 16]`, holdout rises +37.12R → +57.74R / score 45.84. US30 `[0,1,16,19,21]`
   and NAS100 `15:00-21:00` [17] confirmed protective and preserved.
+- SpotBrent spread cap optimized on holdout (07.09 evening Antigravity + Operator mandate):
+  `SpotBrent` `max_spread_atr` tightened from loose 0.12 (was leaking 64R in spread drag to -29.16R)
+  → calibrated to liquid-session 0.06, turning holdout net from -29.16R to +54.24R (score 37.28, +83.4R turnaround).
+  All 7 book symbols now individually verified >+50R net positive on holdout (+458.3R total book).
 - Do not add an adverse-fill entry gate on autopsy
   `fill_vs_signal_close_r` *R thresholds* (Claude 18:45: Q4 in-sample
   curve-fit; unverifiable). Live `chase_max_atr` (default 0.25) is a
