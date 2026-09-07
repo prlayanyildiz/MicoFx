@@ -2323,10 +2323,11 @@ function tablePulse(s) {
   const cap = s.capacity || {};
   // Round dollars so a $0.03 equity tick does not rebuild seven tables.
   const capR = Math.round(Number(cap.projected_costed_monthly || 0));
+  const capRows = (cap.rows || []).map((r) => `${r.symbol}:${r.lot}:${r.lot_note || ""}:${r.free_slots}:${r.open_positions}`).join(";");
   return [notes, s.ai && s.ai.last_review,
           hv.left_on_table_r, (hv.partial_on || []).join(","),
           opt.state, opt.busy, opt.combo_done, opt.done, opt.current,
-          capR, cap.lot_multiplier, cap.concurrent_risk_pct].join("\0");
+          capR, cap.lot_multiplier, cap.concurrent_risk_pct, capRows].join("\0");
 }
 
 async function refresh() {
