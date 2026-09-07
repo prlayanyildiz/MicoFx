@@ -691,7 +691,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         peak = max(peak, equity)
         res.max_dd_r = max(res.max_dd_r, peak - equity)
 
-    def _trail_one(is_buy, entry, sl, trailing, j, s, sl_dist):
+    def _trail_one(is_buy, entry, sl, trailing, j, s, sl_dist,
+                   peak_profit: float | None = None):
         c = close[j]
         a = atr[j]
         struct_sl = None
@@ -709,7 +710,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             mfe_lock1_at_r=float(getattr(p, "mfe_lock1_at_r", 0.0) or 0.0),
             mfe_lock1_to_r=float(getattr(p, "mfe_lock1_to_r", 0.0) or 0.0),
             mfe_lock2_at_r=float(getattr(p, "mfe_lock2_at_r", 0.0) or 0.0),
-            mfe_lock2_to_r=float(getattr(p, "mfe_lock2_to_r", 0.0) or 0.0))
+            mfe_lock2_to_r=float(getattr(p, "mfe_lock2_to_r", 0.0) or 0.0),
+            peak_profit=peak_profit)
         if target is None:
             return sl, trailing
         breakeven_locked = (sl >= entry) if is_buy else (sl <= entry)
@@ -802,7 +804,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                     continue
                 sl, trailing = _trail_one(pos["is_buy"], pos["entry"], pos["sl"],
                                           pos["trailing"], j, pos["s"],
-                                          pos["sl_dist"])
+                                          pos["sl_dist"],
+                                          peak_profit=pos.get("mfe_px", 0.0))
                 pos["sl"] = sl
                 pos["trailing"] = trailing
                 scaled, weight, banked = _scale_one(
@@ -1037,7 +1040,8 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                         continue
                     break
 
-            sl, trailing = _trail_one(is_buy, entry, sl, trailing, j, s, sl_dist)
+            sl, trailing = _trail_one(is_buy, entry, sl, trailing, j, s, sl_dist,
+                                      peak_profit=mfe_px)
             scaled, weight, banked = _scale_one(
                 is_buy, entry, sl_dist, j, scaled, weight, banked)
             exit_bar = j

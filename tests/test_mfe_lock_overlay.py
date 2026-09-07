@@ -50,3 +50,71 @@ def test_mfe_lock_uses_peak_after_giveback():
 
 def test_mfe_lock_off_when_at_r_zero():
     assert overlay_stop(**_kw(mfe_lock1_at_r=0.0, mfe_lock1_to_r=0.75)) is None
+
+
+def test_engine_update_stop_reads_execution_mfe():
+    import numpy as np
+
+    from micofx.engine import Engine
+
+    class _Client:
+        def __init__(self, bid=102.0):
+            self.bid = bid
+            self.modifies = []
+        def tick(self, sym):
+            return {"bid": self.bid, "ask": self.bid + 0.01}
+        def min_stop_distance(self, sym):
+            return 0.1
+        def modify_position(self, ticket, sl, tp, sym):
+            self.modifies.append(sl)
+            return True
+
+    class _Execution:
+        def __init__(self, mfe=0.0):
+            self._mfe = mfe
+        def snapshot(self, ticket):
+            return {"mfe": self._mfe}
+
+    class _Bars:
+        def __init__(self, close=100.5):
+            self.close = np.array([close])
+        @property
+        def last_closed_time(self):
+            return 1_000_000
+
+    class _Cfg:
+        symbol = "XAUUSD"
+        magic = 1
+        timeframe = "M15"
+        sl_atr_mult = 1.0
+        trail_start_atr = 10.0
+        trail_step_atr = 0.4
+        trail_mode = "atr"
+        trail_lookback = 5
+        breakeven_at_r = 0.0
+        mfe_lock1_at_r = 1.5
+        mfe_lock1_to_r = 0.75
+        mfe_lock2_at_r = 0.0
+        mfe_lock2_to_r = 0.0
+
+    eng = Engine.__new__(Engine)
+    client = _Client(bid=102.0)
+    eng.client = client
+    eng.states = {}
+    eng.execution = _Execution(mfe=1.6)
+
+    # Raw MT5 position dict - contains NO 'mfe_px' field!
+    pos = {
+        "ticket": 999, "symbol": "XAUUSD", "side": "buy", "sl": 99.0,
+        "tp": 0.0, "price_open": 100.0, "volume": 0.1, "magic": 1,
+        "time": 1_000_010,
+    }
+
+    # Reference bar closed at 100.5 (+0.5R, below mfe_lock1 threshold 1.5R).
+    # But peak excursion in ExecutionMonitor reached 1.6R.
+    # _update_stop MUST read mfe from eng.execution.snapshot and ratchet SL to 100.75!
+    res = eng._update_stop(_Cfg(), pos, 1.0, _Bars(close=100.5))
+    assert res is True
+    assert client.modifies == [pytest.approx(100.75)]
+    assert pos["sl"] == pytest.approx(100.75)
+

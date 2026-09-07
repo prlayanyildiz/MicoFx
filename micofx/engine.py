@@ -4608,7 +4608,13 @@ class Engine:
         harvest_step = float(getattr(cfg, "harvest_step_atr", 0.0) or 0.0)
         peak_profit = None
         try:
-            mfe_px = float(pos.get("mfe_px") or 0.0)
+            ticket_no = int(pos.get("ticket") or 0)
+            exec_mfe = 0.0
+            if getattr(self, "execution", None) and ticket_no:
+                snap = self.execution.snapshot(ticket_no)
+                if snap:
+                    exec_mfe = float(snap.get("mfe") or 0.0)
+            mfe_px = max(float(pos.get("mfe_px") or 0.0), exec_mfe)
             if mfe_px > 0:
                 peak_profit = max(profit_dist, mfe_px)
         except (TypeError, ValueError):
