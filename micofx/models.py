@@ -143,6 +143,10 @@ class SymbolConfig:
     sup_period: int = 10
     sup_mult: float = 3.0
 
+    # ---- keltner channel breakout (keltner_break) ----
+    kelt_ema_len: int = 20
+    kelt_atr_mult: float = 1.5
+
     # ---- adaptive cost-regime gate (scalping families only) ----
     # Percentile ceiling on the bar's cost-to-range ratio inside its own trailing
     # distribution. Unlike ``max_spread_atr`` this is not a fixed number: it
@@ -560,6 +564,7 @@ OPT_FIELDS = [
     "fade_adx_max", "fade_ema_len", "fade_band_atr",
     "sweep_lookback", "sweep_pierce_atr", "sweep_close_pct",
     "sup_period", "sup_mult",
+    "kelt_ema_len", "kelt_atr_mult",
     "cost_rank_max",
     # Spread is a far larger fraction of a scalp's target than of a swing's, so
     # the search is allowed to tune the spread/ATR entry gate per symbol rather
@@ -602,8 +607,9 @@ PRIMARY_LAND_KEYS = frozenset(OPT_FIELDS) | {
 # not preferred after 13:16 retract (trail vs mean-reversion mismatch).
 # sweep_fade added 04.09 (Claude 13:16): failed-breakout fade; book-wide.
 # super_trend added 07.09: dynamic volatility envelope breakout / continuation.
+# keltner_break added 07.09: dynamic Keltner Channel EMA+ATR envelope breakout.
 STRATEGIES = [
-    "mtf_pullback", "burst", "channel_break", "super_trend", "sweep_fade", "range_fade",
+    "mtf_pullback", "burst", "channel_break", "super_trend", "keltner_break", "sweep_fade", "range_fade",
 ]
 
 # True scalps: cost-scaled micro entries. ``micro_rev`` was the other member

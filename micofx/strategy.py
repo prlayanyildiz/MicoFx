@@ -58,6 +58,10 @@ class Params:
     sup_period: int = 10
     sup_mult: float = 3.0
 
+    # ---- dynamic volatility channel (keltner_break) ----
+    kelt_ema_len: int = 20
+    kelt_atr_mult: float = 1.5
+
     # ---- adaptive cost-regime gate (burst) ----
     cost_rank_max: float = 0.0       # 0 disables; percentile ceiling on cost/range
 
@@ -792,11 +796,57 @@ def _super_trend(cache: IndicatorCache, p: Params) -> Signals:
                    t3_kind="level")
 
 
+def _keltner_break(cache: IndicatorCache, p: Params) -> Signals:
+    """Keltner Channel dynamic volatility envelope breakout.
+
+    Enters long when close breaks above Upper Keltner Channel (EMA + mult * ATR);
+    enters short when close breaks below Lower Keltner Channel (EMA - mult * ATR).
+    Uses hard ATR stop and ATR trail. No hard TP.
+    """
+    close = cache.close
+    size = close.size
+    t3, k, d, atr_series, adx_series = _common(cache, p)
+    htf_up, htf_down, allow_long, allow_short = _trend_gate(cache, p)
+    regime = _regime(p, adx_series, size)
+
+    ema_len = max(3, int(p.kelt_ema_len))
+    mult = max(0.5, float(p.kelt_atr_mult))
+    mid = cache.ema(ema_len)
+    band = mult * atr_series
+    upper = mid + band
+    lower = mid - band
+
+    buy = (close > upper) & (np.roll(close, 1) <= np.roll(upper, 1)) & regime & allow_long
+    sell = (close < lower) & (np.roll(close, 1) >= np.roll(lower, 1)) & regime & allow_short
+    buy[0] = False
+    sell[0] = False
+
+    if p.min_body_ratio > 0:
+        body = cache.body_ratio()
+        buy &= body >= p.min_body_ratio
+        sell &= body >= p.min_body_ratio
+    if p.atr_pct_min > 0:
+        buy &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
+        sell &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
+
+    warmup = min(size, max(ema_len * 3, int(p.atr_period) * 3, 60))
+    buy[:warmup] = False
+    sell[:warmup] = False
+
+    buy = ind.first_of_run(buy)
+    sell = ind.first_of_run(sell)
+    buy, sell = _resolve_conflicts(buy, sell)
+    return Signals(t3=mid, k=k, d=d, atr=atr_series, adx=adx_series,
+                   buy=buy, sell=sell, htf_up=htf_up, htf_down=htf_down,
+                   t3_kind="level")
+
+
 _FAMILIES = {
     "mtf_pullback": _mtf_pullback,
     "burst": _burst,
     "channel_break": _channel_break,
     "super_trend": _super_trend,
+    "keltner_break": _keltner_break,
     "sweep_fade": _sweep_fade,
     "range_fade": _range_fade,
 }
@@ -895,4 +945,6 @@ def required_bars(p: Params) -> int:
                    # sweep_fade: prior N-bar extreme + ADX.
                    int(p.sweep_lookback) + 2,
                    # super_trend: ATR period + volatility bands.
-                   int(p.sup_period) * 5 + 60))
+                   int(p.sup_period) * 5 + 60,
+                   # keltner_break: EMA warm-up + ATR.
+                   int(p.kelt_ema_len) * 3 + 60))

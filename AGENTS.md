@@ -92,16 +92,17 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
 - Hands-off keys (system plumbing, cost toggles, AI knobs, strategy guts)
   return **400** on POST. Search `apply()` still writes `OPT_FIELDS`.
   Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
-- **4 families.** `ichimoku` retired 02.09 (no symbol/TF holdout win).
+- **5 families.** `ichimoku` retired 02.09 (no symbol/TF holdout win).
   `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` retired 01.09
   (flip/zero-win class). `nr_break` / `roc_pace` **fully deleted** 03.09
-  (matrix: never best; operator full-delete). `band_fade` /
-  `keltner_break` not shipped.   Live set: `burst`, `mtf_pullback`,
-  `channel_break`, `super_trend` (added 07.09: dynamic volatility envelope
-  breakout / continuation, 7/7 holdout net profitable +341.85 R total).
-  `sweep_fade` / `range_fade` stay in code/STRATEGIES but
-  are **not** in the live search list (dormant; do not ship unasked).
-  Leftover DB names fail closed.
+  (matrix: never best; operator full-delete). `band_fade` not shipped.
+  Live search set: `burst`, `mtf_pullback`, `channel_break`, `super_trend`
+  (added 07.09: dynamic volatility envelope breakout / continuation, 7/7
+  holdout net profitable +341.85 R total), `keltner_break` (added 07.09:
+  dynamic Keltner Channel EMA+ATR envelope breakout, 7/7 holdout net
+  profitable +392.7 R total). `sweep_fade` / `range_fade` stay in
+  code/STRATEGIES but are **not** in the live search list (dormant; do not
+  ship unasked). Leftover DB names fail closed.
 - **Soft-restart with open tickets is allowed** (operator 02.09):
   `POST /api/app/restart` keeps MT5 fills; `track()` / `open_original_sl`
   reattach after bind. `/api/app/shutdown` and `POST /api/holdout/capture`

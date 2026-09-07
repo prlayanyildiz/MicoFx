@@ -67,3 +67,13 @@ def test_a_closed_ticket_is_dropped_from_the_blob():
     blob = store.settings["open_original_sl"]
     assert "7" in blob
     assert "8" not in blob
+
+
+def test_note_fill_does_not_wipe_existing_mfe_in_originals():
+    store = _Store({"open_original_sl": {"7": {"original_sl": 99.0, "risk_dist": 1.0, "mfe": 2.5, "mae": 0.2}}})
+    mon = ExecutionMonitor(store)
+    mon.note_fill(7, original_sl=99.0, risk_dist=1.0)
+    blob = store.settings["open_original_sl"]["7"]
+    assert blob.get("mfe") == 2.5
+    assert blob.get("mae") == 0.2
+

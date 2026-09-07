@@ -462,10 +462,13 @@ class ExecutionMonitor:
             originals = getattr(self, "_originals", None)
             if originals is None:
                 self._originals = {}
-            self._originals[int(ticket)] = {
-                "original_sl": float(sl or 0.0),
-                "risk_dist": float(rd or 0.0),
-            }
+            orig_blob = self._originals.setdefault(int(ticket), {})
+            orig_blob["original_sl"] = float(sl or 0.0)
+            orig_blob["risk_dist"] = float(rd or 0.0)
+            if "mfe" in book:
+                orig_blob["mfe"] = max(float(orig_blob.get("mfe") or 0.0), float(book["mfe"]))
+            if "mae" in book:
+                orig_blob["mae"] = max(float(orig_blob.get("mae") or 0.0), float(book["mae"]))
             persist = getattr(self, "_persist_originals", None)
             if callable(persist):
                 persist()

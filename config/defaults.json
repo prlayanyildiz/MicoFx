@@ -402,7 +402,8 @@
       "burst",
       "mtf_pullback",
       "channel_break",
-      "super_trend"
+      "super_trend",
+      "keltner_break"
     ],
     "strategy_grids": {
       "mtf_pullback": {
@@ -650,6 +651,40 @@
           1.0,
           1.5,
           2.0
+        ],
+        "max_spread_atr": [
+          0.04,
+          0.08,
+          0.12
+        ]
+      },
+      "keltner_break": {
+        "kelt_ema_len": [
+          10,
+          15,
+          20,
+          30
+        ],
+        "kelt_atr_mult": [
+          1.0,
+          1.5,
+          2.0,
+          2.5
+        ],
+        "sl_atr_mult": [
+          1.0,
+          1.5,
+          2.0
+        ],
+        "trail_start_atr": [
+          0.8,
+          1.2,
+          1.5
+        ],
+        "trail_step_atr": [
+          0.6,
+          1.0,
+          1.5
         ],
         "max_spread_atr": [
           0.04,

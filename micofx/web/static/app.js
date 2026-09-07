@@ -948,6 +948,7 @@ const STRATEGY_LABEL = {
   burst: "Momentum Patlamasi Devami",
   channel_break: "N barlik kanal kirilimi (Donchian)",
   super_trend: "SuperTrend (Dinamik Volatilite)",
+  keltner_break: "Keltner Kanali Kirilimi (EMA + ATR)",
   sweep_fade: "Basarisiz kirilim fade (sweep)",
   range_fade: "Sessiz bant fade (ADX dusuk)",
 };

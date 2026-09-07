@@ -4558,7 +4558,21 @@ class Engine:
             settled = False
         entry = pos["price_open"]
         profit_dist = (ref - entry) if is_buy else (entry - ref)
-        if profit_dist <= 0:
+        peak_profit = None
+        try:
+            ticket_no = int(pos.get("ticket") or 0)
+            exec_mfe = 0.0
+            if getattr(self, "execution", None) and ticket_no:
+                snap = self.execution.snapshot(ticket_no)
+                if snap:
+                    exec_mfe = float(snap.get("mfe") or 0.0)
+            mfe_px = max(float(pos.get("mfe_px") or 0.0), exec_mfe)
+            if mfe_px > 0:
+                peak_profit = max(profit_dist, mfe_px)
+        except (TypeError, ValueError):
+            peak_profit = None
+
+        if profit_dist <= 0 and (peak_profit is None or peak_profit <= 0):
             return settled
 
         min_stop = self.client.min_stop_distance(cfg.symbol)
@@ -4606,19 +4620,6 @@ class Engine:
         be_r = float(getattr(cfg, "breakeven_at_r", 0.0) or 0.0)
         harvest_at = float(getattr(cfg, "harvest_at_r", 0.0) or 0.0)
         harvest_step = float(getattr(cfg, "harvest_step_atr", 0.0) or 0.0)
-        peak_profit = None
-        try:
-            ticket_no = int(pos.get("ticket") or 0)
-            exec_mfe = 0.0
-            if getattr(self, "execution", None) and ticket_no:
-                snap = self.execution.snapshot(ticket_no)
-                if snap:
-                    exec_mfe = float(snap.get("mfe") or 0.0)
-            mfe_px = max(float(pos.get("mfe_px") or 0.0), exec_mfe)
-            if mfe_px > 0:
-                peak_profit = max(profit_dist, mfe_px)
-        except (TypeError, ValueError):
-            peak_profit = None
         target = overlay_stop(
             is_buy=is_buy, entry=entry, ref=ref, atr=atr,
             trail_start_atr=float(cfg.trail_start_atr),
@@ -4646,11 +4647,12 @@ class Engine:
         # ticket must stay eligible for another attempt before the bar closes.
         if target != wanted:
             settled = False
-        if breakeven_locked and (target < entry if is_buy else target > entry):
+        wanted_past_entry = wanted >= entry if is_buy else wanted <= entry
+        if (breakeven_locked or wanted_past_entry) and (target < entry if is_buy else target > entry):
             # Price has retraced enough since the bar closed that even a stop
             # placed exactly at entry would violate the broker's min-stop
             # distance from the current live quote right now - moving it
-            # anyway would place a stop worse than breakeven. Skip this
+            # anyway would place a stop worse than breakeven / lock. Skip this
             # cycle; retry once price allows it.
             return False
         active_step = harvest_trail_step(
