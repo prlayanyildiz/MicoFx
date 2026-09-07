@@ -695,7 +695,7 @@ class RiskManager:
             scale = 1.0
         whole = budget * scale
         pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
-        share = (whole * self._budget_share_frac(cfg, positions)) / pos_cap
+        share = whole * self._budget_share_frac(cfg, positions)
         unit = floor if floor > 0 else 0.01
         try:
             need = float(self.client.margin_for(cfg.symbol, unit, side) or 0.0)
@@ -758,8 +758,8 @@ class RiskManager:
         # "aday", not the chosen size. On the account path below, ``raw`` is
         # NOT what gets traded: the lot is min(margin share, auto-1R cap,
         # volume_max) and this number never enters it.
-        note_pct = (cfg.risk_percent / pos_cap) * multiplier
-        note_extra = f" (kademe 1/{pos_cap})" if pos_cap > 1 else ""
+        note_pct = cfg.risk_percent * multiplier
+        note_extra = f" (kademe {pos_cap})" if pos_cap > 1 else ""
         note = f"risk aday %{note_pct:.3g}{note_extra} -> {raw:.3f}"
         if note_edge_capped:
             note += " (SL broker min'e yapisik, avantaj carpani kisildi)"
@@ -784,7 +784,7 @@ class RiskManager:
                 stored = float(getattr(cfg, "risk_percent", 0.0) or 0.0)
             except (TypeError, ValueError):
                 stored = 0.0
-            r_pct = max(stored, self.AUTO_R_PCT) / pos_cap
+            r_pct = max(stored, self.AUTO_R_PCT)
             # Deliberately NOT ``multiplier``: that already carries edge_scale
             # (up to EDGE_MAX 2.2), so scaling the ceiling by the same push it
             # exists to bound made the "auto 1R" cap ~4.4% of balance instead
@@ -906,8 +906,7 @@ class RiskManager:
         edge_capped = min_stop > 0 and sl_distance <= min_stop * 1.05 and edge > 1.0
         if edge_capped:
             multiplier /= edge
-        pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
-        risk_pct = (float(cfg.risk_percent) / pos_cap) if pos_cap > 0 else float(cfg.risk_percent)
+        risk_pct = float(cfg.risk_percent)
         risk_money = balance * risk_pct / 100.0 * multiplier
         return risk_money / (sl_distance * money_per_unit), multiplier, edge_capped, money_per_unit
 

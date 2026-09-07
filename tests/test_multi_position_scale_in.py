@@ -168,7 +168,7 @@ def test_can_open_refuses_unmeasurable_spacing():
     assert _risk_block_key(verdict.reason) == "risk_kademe_aralik"
 
 
-def test_lot_for_splits_risk_by_max_positions():
+def test_lot_for_preserves_full_risk_per_ticket():
     cfg_single = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=1, risk_percent=2.0, sl_atr_mult=1.0)
     cfg_multi = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=5, risk_percent=2.0, sl_atr_mult=1.0)
 
@@ -181,11 +181,10 @@ def test_lot_for_splits_risk_by_max_positions():
     lot_single, note_single = risk.lot_for(cfg_single, sl_distance=10.0, balance=10_000.0, account=account)
     lot_multi, note_multi = risk.lot_for(cfg_multi, sl_distance=10.0, balance=10_000.0, account=account)
 
-    # Multi should be ~1/5th of single
+    # Both tickets maintain full sizing so baseline income is not eaten
     assert lot_single > 0
-    assert lot_multi > 0
-    assert round(lot_multi * 5, 2) == round(lot_single, 2)
-    assert "kademe 1/5" in note_multi
+    assert lot_multi == lot_single
+    assert "kademe 5" in note_multi
 
 
 def test_http_api_accepts_symbol_max_positions_1_to_5():
