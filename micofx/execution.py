@@ -383,7 +383,8 @@ class ExecutionMonitor:
                         saved_rd = float(saved.get("risk_dist") or 0.0)
                     except (TypeError, ValueError):
                         saved_rd = 0.0
-                side = str(pos.get("side") or "")
+                raw_side = str(pos.get("side") or "").strip().lower()
+                side = "buy" if raw_side in ("buy", "al") else ("sell" if raw_side in ("sell", "sat") else raw_side)
                 if saved_rd > 0 and entry > 0 and side in ("buy", "sell"):
                     healed = (entry - saved_rd) if side == "buy" else (entry + saved_rd)
                     if healed <= 0:
@@ -407,7 +408,8 @@ class ExecutionMonitor:
             # frozen risk_dist at close. Trailing must not shrink that R.
             cur = float(pos.get("price_current") or 0)
             if cur > 0 and entry > 0:
-                fav = (cur - entry) if pos["side"] == "buy" else (entry - cur)
+                p_buy = str(pos.get("side") or "").strip().lower() in ("buy", "al")
+                fav = (cur - entry) if p_buy else (entry - cur)
                 book["mfe"] = max(float(book.get("mfe") or 0.0), max(0.0, fav))
                 book["mae"] = max(float(book.get("mae") or 0.0), max(0.0, -fav))
         originals = getattr(self, "_originals", None)
@@ -585,7 +587,7 @@ class ExecutionMonitor:
                 book["symbol"], "stop" if is_stop else "target",
                 expected, float(price),
                 # The closing leg trades the opposite way to the position.
-                deal_is_buy=(book["side"] == "sell"),
+                deal_is_buy=(str(book.get("side") or "").strip().lower() in ("sell", "sat")),
                 risk_dist=float(book.get("risk_dist", 0.0)),
                 point=float(info.get("point", 0.0) or 0.0),
                 volume=float(volume),

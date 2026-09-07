@@ -997,7 +997,8 @@ class RiskManager:
             return 0.0
         if sl <= 0:
             return float("inf")
-        dist = (entry - sl) if pos.get("side") == "buy" else (sl - entry)
+        pos_side = str(pos.get("side") or "").strip().lower()
+        dist = (entry - sl) if pos_side in ("buy", "al") else (sl - entry)
         if dist <= 0:
             return 0.0
         return self.risk_dollars(str(pos.get("symbol") or ""), volume, dist)
@@ -1008,6 +1009,7 @@ class RiskManager:
                  positions: list[dict[str, Any]], account: dict[str, Any],
                  sl_distance: float = 0.0, entry_price: float = 0.0,
                  atr: float = 0.0) -> Verdict:
+        norm_side = "buy" if str(side or "").strip().lower() in ("buy", "al") else ("sell" if str(side or "").strip().lower() in ("sell", "sat") else str(side or "").strip().lower())
         sys_cfg = self.store.system
         magics = {c.magic for c in list(self.store.symbols.values())}
         mine = [p for p in positions if p["magic"] in magics]
@@ -1022,7 +1024,7 @@ class RiskManager:
             return Verdict(False, "stopsuz acik pozisyon")
 
         same_symbol = [p for p in mine if p["symbol"] == self.client.resolve(cfg.symbol)]
-        if any(p["side"] != side for p in same_symbol):
+        if any((str(p.get("side") or "").strip().lower() in ("buy", "al")) != (norm_side == "buy") for p in same_symbol):
             return Verdict(False, "ters yonde acik pozisyon var")
         cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
         if len(same_symbol) >= cap:
@@ -1037,14 +1039,14 @@ class RiskManager:
             if eff_px <= 0:
                 tick = self.client.tick(cfg.symbol)
                 if tick:
-                    eff_px = float(tick.get("ask" if side == "buy" else "bid") or 0.0)
+                    eff_px = float(tick.get("ask" if norm_side == "buy" else "bid") or 0.0)
             if eff_atr <= 0 or eff_px <= 0:
                 return Verdict(False, "kademe araligi hesaplanamadi")
             open_prices = [float(p.get("price_open") or 0.0) for p in same_symbol
                            if float(p.get("price_open") or 0.0) > 0]
             if not open_prices:
                 return Verdict(False, "kademe araligi hesaplanamadi")
-            if side == "buy":
+            if norm_side == "buy":
                 max_open = max(open_prices)
                 diff = eff_px - max_open
                 if diff < 0:
@@ -1079,7 +1081,7 @@ class RiskManager:
         equity = float(account.get("equity", 0.0))
         free = float(account.get("margin_free", 0.0))
         used = float(account.get("margin", 0.0))
-        need = self.client.margin_for(cfg.symbol, lot, side)
+        need = self.client.margin_for(cfg.symbol, lot, norm_side)
 
         if need <= 0:
             return Verdict(False, "marj hesaplanamadi")

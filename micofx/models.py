@@ -77,9 +77,22 @@ def _coerce(cls, payload: dict[str, Any]):
                 # preserves the type), but this function is also the landing
                 # point for anything read back out of the SQLite JSON blobs
                 # and any future string-based input path, so the string
-                # footgun is worth closing here rather than trusting callers.
-                kwargs[key] = value.strip().lower() not in ("false", "0", "", "no")  \
-                    if isinstance(value, str) else bool(value)
+                if isinstance(value, str):
+                    v_norm = (value.strip()
+                                   .replace("İ", "i")
+                                   .replace("I", "i")
+                                   .replace("Ş", "s").replace("ş", "s")
+                                   .replace("Ğ", "g").replace("ğ", "g")
+                                   .replace("Ü", "u").replace("ü", "u")
+                                   .replace("Ö", "o").replace("ö", "o")
+                                   .replace("Ç", "c").replace("ç", "c")
+                                   .lower()
+                                   .replace("ı", "i")
+                                   .replace("\u0307", ""))
+                    falsy = ("false", "0", "", "no", "off", "hayir", "kapali", "yanlis", "pasif", "none", "yok", "kapat")
+                    kwargs[key] = v_norm not in falsy
+                else:
+                    kwargs[key] = bool(value)
             elif name.startswith("int"):
                 kwargs[key] = int(value)
             elif name.startswith("float"):

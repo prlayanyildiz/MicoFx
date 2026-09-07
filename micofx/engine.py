@@ -2264,7 +2264,8 @@ class Engine:
             risk = abs(entry - orig_sl)
         else:
             risk = self._autopsy_float(book.get("risk_dist")) or 0.0
-        side = str(book.get("side") or "")
+        raw_side = str(book.get("side") or "").strip().lower()
+        side = "buy" if raw_side in ("buy", "al") else ("sell" if raw_side in ("sell", "sat") else raw_side)
         mfe = self._autopsy_float(book.get("mfe"))
         mae = self._autopsy_float(book.get("mae"))
         mfe_r = (mfe / risk) if mfe is not None and risk > 0 else None
@@ -4499,7 +4500,7 @@ class Engine:
             return False
         if entry <= 0:
             return False
-        is_buy = pos.get("side") == "buy"
+        is_buy = str(pos.get("side") or "").strip().lower() in ("buy", "al")
         side = "buy" if is_buy else "sell"
         sent_sl = entry - risk_dist if is_buy else entry + risk_dist
         if sent_sl <= 0:
@@ -4543,7 +4544,7 @@ class Engine:
         tick = self.client.tick(cfg.symbol)
         if tick is None:
             return False
-        is_buy = pos["side"] == "buy"
+        is_buy = str(pos.get("side") or "").strip().lower() in ("buy", "al")
         # Broker distance checks need the live bid/ask; BE/trail *math* must use
         # the closed bar's close - same input the walk-forward advances on. Using
         # the tick here used to ratchet stops on wicks the backtest never saw.
@@ -4768,7 +4769,7 @@ class Engine:
         if (opened_at and closed_at is not None
                 and int(closed_at) + timeframe_seconds(cfg.timeframe) <= opened_at):
             return False
-        is_buy = pos["side"] == "buy"
+        is_buy = str(pos.get("side") or "").strip().lower() in ("buy", "al")
         ref = float(bars.close[-1])
         entry = pos["price_open"]
         profit_dist = (ref - entry) if is_buy else (entry - ref)
@@ -4917,7 +4918,8 @@ class Engine:
         back to the live stop — same first-sight rule as ``track()``.
         """
         book = book or {}
-        side = str(pos.get("side") or "")
+        raw_side = str(pos.get("side") or "").strip().lower()
+        side = "buy" if raw_side in ("buy", "al") else ("sell" if raw_side in ("sell", "sat") else raw_side)
         try:
             entry = float(pos.get("price_open") or 0)
             cur = float(pos.get("price_current") or 0)

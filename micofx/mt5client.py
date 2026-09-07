@@ -1243,6 +1243,7 @@ class MT5Client:
         return max(broker, spread * 1.5, point * 10)
 
     def margin_for(self, symbol: str, volume: float, side: str = "buy") -> float:
+        side = "buy" if str(side or "").strip().lower() in ("buy", "al") else ("sell" if str(side or "").strip().lower() in ("sell", "sat") else str(side or "").strip().lower())
         real = self.select(symbol)
         tick = self.tick(symbol)
         if real is None or tick is None:
@@ -1452,6 +1453,7 @@ class MT5Client:
     def open_market(self, symbol: str, side: str, volume: float, sl: float, tp: float,
                     magic: int, slippage: int = 20, comment: str = "MicoFX",
                     defer_verify: bool = False) -> dict[str, Any]:
+        side = "buy" if str(side or "").strip().lower() in ("buy", "al") else ("sell" if str(side or "").strip().lower() in ("sell", "sat") else str(side or "").strip().lower())
         real = self.select(symbol)
         if real is None:
             return {"ok": False, "error": f"{symbol}: sembol bulunamadi"}
@@ -1926,6 +1928,7 @@ class MT5Client:
         tick the order was built from; distances are measured from that tick
         to the sent levels, then applied at ``fill_price``.
         """
+        side = "buy" if str(side or "").strip().lower() in ("buy", "al") else ("sell" if str(side or "").strip().lower() in ("sell", "sat") else str(side or "").strip().lower())
         if not side or ticket <= 0 or fill_price <= 0:
             return sent_sl, sent_tp, False
         ref = float(anchor_price) if anchor_price > 0 else float(fill_price)

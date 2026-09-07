@@ -1055,8 +1055,7 @@ class Optimizer:
                     "WARN")
             # One-off restriction of this run to a subset of the configured
             # timeframes (e.g. "just scan M5 today") - None/empty means the
-            # saved opt_params selection, same as before this existed.
-            requested = [str(t) for t in (timeframes or [])]
+            requested = [str(t).strip().upper() for t in (timeframes or [])]
             if requested:
                 dropped = [t for t in requested if t not in TIMEFRAMES]
                 kept = [t for t in requested if t in TIMEFRAMES]
@@ -1076,7 +1075,7 @@ class Optimizer:
             # Same one-off door as timeframes. store.opt_params() re-appends
             # every shipped family, so a saved subset cannot actually restrict
             # a sweep - so a one-off subset is not persisted into opt_params.
-            requested_fam = [str(s) for s in (strategies or [])]
+            requested_fam = [str(s).strip().lower() for s in (strategies or [])]
             if requested_fam:
                 # Filtered against the SEARCHED set, not ``models.STRATEGIES``.
                 # Since 04.09 that constant also carries sweep_fade and

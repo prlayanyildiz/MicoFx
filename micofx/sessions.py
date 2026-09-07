@@ -196,7 +196,17 @@ def refuse_block_key(reason: str) -> str:
     window label (e.g. ``7/24``). Tallying those as ``seans_disi`` hid the
     real gate from fill watches and the income board (JPN225 14-15).
     """
-    r = (reason or "").strip().lower()
+    r = ((reason or "").strip()
+         .replace("İ", "i")
+         .replace("I", "i")
+         .replace("Ş", "s").replace("ş", "s")
+         .replace("Ğ", "g").replace("ğ", "g")
+         .replace("Ü", "u").replace("ü", "u")
+         .replace("Ö", "o").replace("ö", "o")
+         .replace("Ç", "c").replace("ç", "c")
+         .lower()
+         .replace("ı", "i")
+         .replace("\u0307", ""))
     if r == "saat kapali":
         return "saat_kapali"
     if r == "gun kapali":

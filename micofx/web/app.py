@@ -2108,10 +2108,11 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             raw = body["timeframes"]
             if not isinstance(raw, list) or not raw:
                 raise HTTPException(400, "timeframes bos olamaz")
-            unknown = [str(t) for t in raw if str(t) not in TIMEFRAMES]
+            norm_tfs = [str(t).strip().upper() for t in raw]
+            unknown = [t for t in norm_tfs if t not in TIMEFRAMES]
             if unknown:
                 raise HTTPException(400, f"timeframes gecersiz: {', '.join(unknown)}")
-            body["timeframes"] = [str(t) for t in raw]
+            body["timeframes"] = norm_tfs
         # These parameters drive the walk-forward search that ultimately
         # writes live trading params via apply() - same NaN/Infinity class of
         # risk as the symbol-level fields. strategy_grids/grid nest their
@@ -2204,11 +2205,12 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                 if not isinstance(raw, list) or not raw:
                     raise HTTPException(400, "timeframes bos olamaz")
                 from micofx.models import TIMEFRAMES
-                bad = [str(t) for t in raw if str(t) not in TIMEFRAMES]
+                norm_tfs = [str(t).strip().upper() for t in raw]
+                bad = [t for t in norm_tfs if t not in TIMEFRAMES]
                 if bad:
                     raise HTTPException(
                         400, f"bilinmeyen timeframe: {', '.join(bad)}")
-                tfs = [str(t) for t in raw]
+                tfs = norm_tfs
         if not _holdout_capture_lock.acquire(blocking=False):
             raise HTTPException(409, "holdout capture zaten calisiyor")
         try:

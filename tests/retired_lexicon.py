@@ -30,7 +30,6 @@ RETIRED_FAMILIES = (
     "parabolic_flip",
     "ichimoku",
     "nr_break",
-    "keltner_break",
     "roc_pace",
     "band_fade",
 )
