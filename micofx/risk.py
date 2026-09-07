@@ -694,7 +694,6 @@ class RiskManager:
         except (TypeError, ValueError):
             scale = 1.0
         whole = budget * scale
-        pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
         share = whole * self._budget_share_frac(cfg, positions)
         unit = floor if floor > 0 else 0.01
         try:
@@ -707,8 +706,8 @@ class RiskManager:
         # account: if one share cannot fund min lot but the whole book can,
         # size this signal on remaining budget share. can_open() and
         # max_concurrent_risk_pct still bind when several names fill.
-        if share + 1e-12 < need and (whole / pos_cap) + 1e-12 >= need:
-            share = whole / pos_cap
+        if share + 1e-12 < need and whole + 1e-12 >= need:
+            share = whole
         return min(broker_ceiling, unit * (share / need))
 
     def lot_for(self, cfg: SymbolConfig, sl_distance: float, balance: float,
