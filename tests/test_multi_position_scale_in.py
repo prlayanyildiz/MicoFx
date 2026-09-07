@@ -168,6 +168,40 @@ def test_can_open_refuses_unmeasurable_spacing():
     assert _risk_block_key(verdict.reason) == "risk_kademe_aralik"
 
 
+def test_can_open_refuses_scale_in_loss_direction_buy():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=5, sl_atr_mult=1.0)
+    store = _FakeStore({"XAUUSD": cfg})
+    client = _FakeClient()
+    risk = RiskManager(store, client)
+
+    # 1 open buy @ 2000.0, ATR=10.0
+    existing = [{"ticket": 101, "symbol": "XAUUSD", "magic": 1, "side": "buy", "price_open": 2000.0, "sl": 1990.0, "volume": 0.01}]
+    account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 10.0}
+
+    # New buy entry @ 1980.0: price moved down by 20.0 (distance >= 1.0 ATR, but LOSS direction!)
+    verdict = risk.can_open(cfg, "buy", 0.01, existing, account, sl_distance=10.0, entry_price=1980.0, atr=10.0)
+    assert not verdict.ok
+    assert "kademe araligi kar yonunde yetersiz" in verdict.reason
+    assert _risk_block_key(verdict.reason) == "risk_kademe_aralik"
+
+
+def test_can_open_refuses_scale_in_loss_direction_sell():
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=5, sl_atr_mult=1.0)
+    store = _FakeStore({"XAUUSD": cfg})
+    client = _FakeClient()
+    risk = RiskManager(store, client)
+
+    # 1 open sell @ 2000.0, ATR=10.0
+    existing = [{"ticket": 101, "symbol": "XAUUSD", "magic": 1, "side": "sell", "price_open": 2000.0, "sl": 2010.0, "volume": 0.01}]
+    account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 10.0}
+
+    # New sell entry @ 2020.0: price moved up by 20.0 (distance >= 1.0 ATR, but LOSS direction!)
+    verdict = risk.can_open(cfg, "sell", 0.01, existing, account, sl_distance=10.0, entry_price=2020.0, atr=10.0)
+    assert not verdict.ok
+    assert "kademe araligi kar yonunde yetersiz" in verdict.reason
+    assert _risk_block_key(verdict.reason) == "risk_kademe_aralik"
+
+
 def test_lot_for_preserves_full_risk_per_ticket():
     cfg_single = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=1, risk_percent=2.0, sl_atr_mult=1.0)
     cfg_multi = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=5, risk_percent=2.0, sl_atr_mult=1.0)

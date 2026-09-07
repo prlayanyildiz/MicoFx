@@ -1044,9 +1044,20 @@ class RiskManager:
                            if float(p.get("price_open") or 0.0) > 0]
             if not open_prices:
                 return Verdict(False, "kademe araligi hesaplanamadi")
-            min_dist = min(abs(eff_px - px) for px in open_prices)
-            if min_dist < (1.0 * eff_atr - 1e-9):
-                return Verdict(False, f"kademe araligi yetersiz (< 1.0 ATR: {min_dist / eff_atr:.2f} ATR)")
+            if side == "buy":
+                max_open = max(open_prices)
+                diff = eff_px - max_open
+                if diff < 0:
+                    return Verdict(False, f"kademe araligi kar yonunde yetersiz (fiyat acilisin altinda: {diff / eff_atr:.2f} ATR)")
+                if diff < (1.0 * eff_atr - 1e-9):
+                    return Verdict(False, f"kademe araligi yetersiz (< 1.0 ATR: {diff / eff_atr:.2f} ATR)")
+            else:
+                min_open = min(open_prices)
+                diff = min_open - eff_px
+                if diff < 0:
+                    return Verdict(False, f"kademe araligi kar yonunde yetersiz (fiyat acilisin ustunde: {diff / eff_atr:.2f} ATR)")
+                if diff < (1.0 * eff_atr - 1e-9):
+                    return Verdict(False, f"kademe araligi yetersiz (< 1.0 ATR: {diff / eff_atr:.2f} ATR)")
 
         # Leftover max_total_positions is unread. Another *name* may still
         # open until margin / STOPSUZ (and scalp/swing only when those
