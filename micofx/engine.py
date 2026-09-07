@@ -546,7 +546,8 @@ class Engine:
         # duplicate open_market's verifier exists to prevent. So the retry
         # carries its own check now: if our count has grown since the failed
         # send, the entry landed and there is nothing left to retry.
-        self._unfilled_probe: dict[str, tuple[tuple[int, int], int]] = {}
+        # (bar_key, probe_count[, attempts]) — attempts caps same-bar retries.
+        self._unfilled_probe: dict[str, tuple] = {}
         # Diagnostic flushes that have failed and not yet succeeded again.
         # The three _flush_* methods swallow their exceptions on purpose: a
         # transient sqlite lock should retry silently, and the dirty bit is
@@ -1512,7 +1513,10 @@ class Engine:
         than the bars; thin histograms stay 1.0 until
         ``SPREAD_RATIO_MIN_SAMPLES``.
         """
-        counts = self._spread_ratio.get(str(symbol))
+        spread_ratio = getattr(self, "_spread_ratio", None)
+        if not isinstance(spread_ratio, dict):
+            return 1.0
+        counts = spread_ratio.get(str(symbol))
         if not isinstance(counts, (list, tuple)):
             return 1.0
         cleaned = [int(v) for v in counts
@@ -3186,26 +3190,40 @@ class Engine:
         # acquired - a fresh orphan from the other side of the same race. The
         # re-check below closes that direction too.
         before_tickets = {p["ticket"] for p in self._positions if p["magic"] == base.magic}
-        probe = self._unfilled_probe.pop(cfg.symbol, None)
+        probe = self._unfilled_probe.get(cfg.symbol)
         if probe is not None:
-            probe_bar, probe_count = probe
+            probe_bar = probe[0]
+            probe_count = probe[1]
+            attempts = probe[2] if len(probe) > 2 else 0
             here = (int(state.last_bar or 0), int(state.pending_bar_key[1] or 0))
-            if probe_bar == here and len(before_tickets) > probe_count:
-                # A previous send on this same bar came back "verified
-                # unfilled" - and since then a position of ours has appeared.
-                # The order did reach the market, just later than the two
-                # seconds the verifier watched for. Sending again would give
-                # this one signal a second entry, which the position limit
-                # used to prevent only because it was set to one.
-                LOG.emit(f"onceki emir gec dolmus (acik {probe_count} -> "
-                         f"{len(before_tickets)}) - ayni bar icin ikinci emir "
-                         f"gonderilmedi.", "WARN", cfg.symbol)
-                self._mark_bar_filled(cfg.symbol, state.signal_source, state.last_bar)
-                state.signal = ""
-                state.signal_source = ""
-                state.note = "onceki emir gec dolmus - tekrar gonderilmedi"
-                state.entry_block = "gec_dolum"
-                return
+            if probe_bar == here:
+                if len(before_tickets) > probe_count:
+                    # A previous send on this same bar came back "verified
+                    # unfilled" - and since then a position of ours has appeared.
+                    # The order did reach the market, just later than the two
+                    # seconds the verifier watched for. Sending again would give
+                    # this one signal a second entry, which the position limit
+                    # used to prevent only because it was set to one.
+                    self._unfilled_probe.pop(cfg.symbol, None)
+                    LOG.emit(f"onceki emir gec dolmus (acik {probe_count} -> "
+                             f"{len(before_tickets)}) - ayni bar icin ikinci emir "
+                             f"gonderilmedi.", "WARN", cfg.symbol)
+                    self._mark_bar_filled(cfg.symbol, state.signal_source, state.last_bar)
+                    state.signal = ""
+                    state.signal_source = ""
+                    state.note = "onceki emir gec dolmus - tekrar gonderilmedi"
+                    state.entry_block = "gec_dolum"
+                    return
+                if attempts >= 1:
+                    LOG.emit("bu bar icin tekrar deneme limiti (1) doldu - "
+                             "ayni bar icin baska emir gonderilmedi.", "WARN", cfg.symbol)
+                    state.entry_block = "tekrar_deneme_limiti"
+                    state.note = "tekrar deneme limiti doldu - yeni bar bekleniyor"
+                    return
+                # Spend the 1 allowed retry: pin attempt count to 1 without dropping the probe
+                self._unfilled_probe[cfg.symbol] = (probe_bar, probe_count, attempts + 1)
+            else:
+                self._unfilled_probe.pop(cfg.symbol, None)
         orphan_closed = False
         unresolved_ticket = False
         with self.entry_lock:
@@ -3438,9 +3456,13 @@ class Engine:
             if result.get("verified_unfilled"):
                 # Remember what "nothing landed" was counted against, so the
                 # retry can tell a late fill from a genuine miss.
+                here = (int(state.last_bar or 0), int(state.pending_bar_key[1] or 0))
+                prev = self._unfilled_probe.get(cfg.symbol)
+                attempts = (prev[2] if prev and len(prev) > 2 and prev[0] == here else 0)
                 self._unfilled_probe[cfg.symbol] = (
-                    (int(state.last_bar or 0), int(state.pending_bar_key[1] or 0)),
+                    here,
                     sum(1 for p in self._positions if p["magic"] == cfg.magic),
+                    attempts,
                 )
             # Verified-flat is the gate working: book readable, nothing filled,
             # symbol parked. WARN so fault scans do not treat a successful
@@ -3506,6 +3528,7 @@ class Engine:
         state.cooldown_until = time.time() + _cooldown_for(cfg)
         self._save_cooldown(cfg.symbol, state.cooldown_until)
         self._mark_bar_filled(cfg.symbol, state.signal_source, state.last_bar)
+        self._unfilled_probe.pop(cfg.symbol, None)
         state.signal = ""
         state.signal_source = ""
         state.primary_signal = ""

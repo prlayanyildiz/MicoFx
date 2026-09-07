@@ -723,15 +723,16 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
             harvest_step_atr=float(getattr(p, "harvest_step_atr", 0.0) or 0.0),
             profit=profit, original_risk=sl_dist)
         step = trail_min_step(ms, a, active_step)
+        wanted_past_entry = (target >= entry) if is_buy else (target <= entry)
         if is_buy and target > sl:
             new_sl = min(target, c - ms)
             if (new_sl - sl >= step
-                    and not (breakeven_locked and new_sl < entry)):
+                    and not ((breakeven_locked or wanted_past_entry) and new_sl < entry)):
                 return new_sl, True
         elif not is_buy and target < sl:
             new_sl = max(target, c + ms)
             if (sl - new_sl >= step
-                    and not (breakeven_locked and new_sl > entry)):
+                    and not ((breakeven_locked or wanted_past_entry) and new_sl > entry)):
                 return new_sl, True
         return sl, trailing
 

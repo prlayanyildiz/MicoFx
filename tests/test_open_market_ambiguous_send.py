@@ -383,6 +383,48 @@ def test_the_check_does_not_swallow_a_genuine_retry():
     assert client.open_market_calls > before, "gercek kacirma tekrar denenmeliydi"
     assert state.entry_block != "gec_dolum"
 
+
+def test_unfilled_probe_caps_retries_at_one_per_bar_and_preserves_probe_for_late_fill():
+    """Finding 4: After verified_unfilled, at most 1 retry per bar is allowed.
+    The probe is pinned (not popped before retry), preventing infinite retries
+    and catching late fills even after a retry was dispatched.
+    """
+    engine, client, state, cfg = _entry_harness({
+        "ok": False,
+        "retcode": -10001,
+        "verified_unfilled": True,
+        "error": "EURUSD: dogrulandi: yeni pozisyon olusmamis",
+    })
+
+    # Call 1: Initial entry send returns verified_unfilled.
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+    assert client.open_market_calls == 1
+    assert "EURUSD" in engine._unfilled_probe
+
+    # 30 seconds pass: backoff expires within the same bar.
+    engine._link_backoff = {}
+
+    # Call 2: First retry on the same bar - permitted.
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+    assert client.open_market_calls == 2
+
+    # 30 seconds pass again: backoff expires again within the same bar.
+    engine._link_backoff = {}
+
+    # Call 3: Second retry on the same bar - MUST BE REFUSED (capped at 1 retry per bar).
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+    assert client.open_market_calls == 2, "Ayni bar icin 2. bir tekrar deneme gonderilmemeli"
+    assert state.entry_block == "tekrar_deneme_limiti"
+
+    # Now verify that if a late fill appears, the pinned probe STILL catches it!
+    engine._positions = [{"ticket": 5001, "magic": cfg.magic, "symbol": "EURUSD",
+                          "side": "buy", "volume": 0.1, "sl": 0.9, "tp": 0.0,
+                          "price_open": 1.0, "time": 0, "profit": 0.0, "swap": 0.0}]
+    engine._try_entry(cfg, state, account={"balance": 1000.0})
+    assert client.open_market_calls == 2
+    assert state.entry_block == "gec_dolum"
+    assert state.signal == ""
+
 # --------------------------------------------------------------- engine harness
 
 def _entry_harness(open_market_result):
@@ -455,6 +497,9 @@ def _entry_harness(open_market_result):
     eng._orphan_scan = {}
     eng._link_backoff = {}   # real Engine always has it
     eng._unfilled_probe = {}   # real Engine always has it
+    eng._spread_ratio = {}
+    eng._filled_bars = {}
+    eng._cooldowns = {}
     eng.states = {}
 
     state = SymbolState("EURUSD")
