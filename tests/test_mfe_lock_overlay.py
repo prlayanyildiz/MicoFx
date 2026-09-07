@@ -186,3 +186,72 @@ def test_engine_update_stop_giveback_preserves_mfe_lock():
     assert pos["sl"] == pytest.approx(100.75)
 
 
+def test_engine_update_stop_reads_bar_extreme_mfe():
+    import numpy as np
+
+    from micofx.engine import Engine
+
+    class _Client:
+        def __init__(self, bid=101.5):
+            self.bid = bid
+            self.modifies = []
+        def tick(self, sym):
+            return {"bid": self.bid, "ask": self.bid + 0.01}
+        def min_stop_distance(self, sym):
+            return 0.1
+        def modify_position(self, ticket, sl, tp, sym):
+            self.modifies.append(sl)
+            return True
+
+    class _Execution:
+        def __init__(self, mfe=0.5):
+            self._mfe = mfe
+        def snapshot(self, ticket):
+            return {"mfe": self._mfe}
+
+    class _Bars:
+        def __init__(self, close=100.5, high=101.6, low=100.2):
+            self.close = np.array([close])
+            self.high = np.array([high])
+            self.low = np.array([low])
+        @property
+        def last_closed_time(self):
+            return 1_000_900  # Bar started at 1_000_000, closed at 1_000_900 (M15 = 900s)
+
+    class _Cfg:
+        symbol = "XAUUSD"
+        magic = 1
+        timeframe = "M15"
+        sl_atr_mult = 1.0
+        trail_start_atr = 10.0
+        trail_step_atr = 0.4
+        trail_mode = "atr"
+        trail_lookback = 5
+        breakeven_at_r = 0.0
+        mfe_lock1_at_r = 1.5
+        mfe_lock1_to_r = 0.75
+        mfe_lock2_at_r = 0.0
+        mfe_lock2_to_r = 0.0
+
+    eng = Engine.__new__(Engine)
+    client = _Client(bid=101.5)
+    eng.client = client
+    eng.states = {}
+    # Execution tick monitor only sampled up to 0.5R excursion
+    eng.execution = _Execution(mfe=0.5)
+
+    pos = {
+        "ticket": 999, "symbol": "XAUUSD", "side": "buy", "sl": 99.0,
+        "tp": 0.0, "price_open": 100.0, "volume": 0.1, "magic": 1,
+        "time": 999_000,  # Opened BEFORE the bar started
+    }
+
+    # The closed candle's high was 101.6 (+1.6R), which backtest sees!
+    # _update_stop MUST read the closed bar extreme and ratchet SL to 100.75!
+    res = eng._update_stop(_Cfg(), pos, 1.0, _Bars(close=100.5, high=101.6, low=100.2))
+    assert res is True
+    assert client.modifies == [pytest.approx(100.75)]
+    assert pos["sl"] == pytest.approx(100.75)
+
+
+

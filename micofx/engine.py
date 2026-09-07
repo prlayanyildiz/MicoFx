@@ -4567,6 +4567,23 @@ class Engine:
                 if snap:
                     exec_mfe = float(snap.get("mfe") or 0.0)
             mfe_px = max(float(pos.get("mfe_px") or 0.0), exec_mfe)
+            if bars is not None and hasattr(bars, "high") and hasattr(bars, "low") and len(bars.high) > 0:
+                opened_at = int(pos.get("time", 0) or 0)
+                closed_at = getattr(bars, "last_closed_time", None)
+                if opened_at and closed_at is not None and opened_at <= int(closed_at):
+                    # Short MFE matches backtest coverable-ask (print low + pad),
+                    # not the print low alone (AGENTS: pre-26.08 short MFE bug).
+                    if is_buy:
+                        bar_peak = float(bars.high[-1]) - entry
+                    else:
+                        pad = float(self.client.min_stop_distance(cfg.symbol) or 0.0)
+                        bar_peak = entry - (float(bars.low[-1]) + pad)
+                    if bar_peak > 0:
+                        mfe_px = max(mfe_px, bar_peak)
+                        if getattr(self, "execution", None) and ticket_no:
+                            open_book = getattr(self.execution, "_open", {}).get(ticket_no)
+                            if isinstance(open_book, dict):
+                                open_book["mfe"] = max(float(open_book.get("mfe") or 0.0), mfe_px)
             if mfe_px > 0:
                 peak_profit = max(profit_dist, mfe_px)
         except (TypeError, ValueError):
