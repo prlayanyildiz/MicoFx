@@ -63,7 +63,8 @@ def _run(peak_atr: float, trail_step: float, sl_mult: float = 1.0,
     res = backtest.simulate(
         cache, sig, open_, np.zeros(N), point=0.01,
         p=Params(sl_atr_mult=sl_mult, trail_start_atr=trail_start,
-                 trail_step_atr=trail_step),
+                 trail_step_atr=trail_step,
+                 mfe_lock1_at_r=0.0, mfe_lock2_at_r=0.0),
         entries=np.array([ENTRY_BAR]))
     assert res.trades == 1
     return res.trade_rs[0]
