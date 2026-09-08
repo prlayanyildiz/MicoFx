@@ -111,6 +111,13 @@ def test_evaluate_needles_the_two_silent_halts():
     assert "_tally_evaluate_refuse" in eval_body
     assert '"bar_bosluk"' in eval_body
     assert '"bar_doldu"' in eval_body
+    # 08.09 hard audit: flatten / day-end / cooldown / broker wipe used to
+    # refuse a live signal with only a note — invisible to entry_blocks.
+    assert '"kapanis_oncesi"' in eval_body
+    assert '"gun_sonu"' in eval_body
+    assert '"cooldown"' in eval_body
+    assert '"broker_eslesmedi"' in eval_body
+    assert '"saat_bayat"' in eval_body
     assert "refuse_block_key" in eval_body
     assert '"piyasa_kapali"' in eval_body
     assert 'state.entry_block = ""' in eval_body.split("if not sess.open", 1)[0], (

@@ -2678,6 +2678,8 @@ class Engine:
             # Same stale-signal hazard as the other gates - clear the whole
             # chain, not just state.signal, so a fixed mapping doesn't revive
             # a signal from before resolution broke.
+            self._tally_evaluate_refuse(cfg, state, "broker_eslesmedi",
+                                        int(state.last_bar or 0))
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
@@ -2690,6 +2692,8 @@ class Engine:
             state.note = "broker saati bayat"
             state.session = {"open": False, "window": "saat bayat",
                              "minutes_to_close": None, "minutes_to_open": None}
+            self._tally_evaluate_refuse(cfg, state, "saat_bayat",
+                                        int(state.last_bar or 0))
             state.signal = ""
             state.signal_source = ""
             state.primary_signal = ""
@@ -2797,12 +2801,15 @@ class Engine:
             return False
         if sessions.should_flatten(cfg, server_now, all_hours):
             state.note = "kapanis oncesi giris yok"
+            self._tally_evaluate_refuse(cfg, state, "kapanis_oncesi", bar_key)
             return False
         if sessions.day_end_close(server_now, self.store.system.day_end_flatten_min):
             state.note = "gun sonu - giris yok"
+            self._tally_evaluate_refuse(cfg, state, "gun_sonu", bar_key)
             return False
         if time.time() < state.cooldown_until:
             state.note = f"cooldown {int(state.cooldown_until - time.time())}sn"
+            self._tally_evaluate_refuse(cfg, state, "cooldown", bar_key)
             return False
         symbol_halt = self._symbol_daily_halt(cfg)
         if symbol_halt:
