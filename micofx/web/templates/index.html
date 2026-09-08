@@ -238,11 +238,43 @@
                 <th class="num">Oran</th>
                 <th>Engelleyen kapilar</th></tr>
           </thead>
-          <tbody></tbody>
+          <tbody>          </tbody>
         </table>
       </div>
     </div>
 
+    <div class="panel">
+      <div class="panel-head"><h2>Kacan / Ramak Kala</h2>
+        <div class="panel-note" id="missed-note">Yukleniyor...</div>
+        <button class="btn btn-sm" id="btn-missed-refresh">Yenile</button>
+        <button class="btn btn-sm" id="btn-missed-reset" title="Kacan ve ramak-kala kayitlarini sifirla">Sifirla</button>
+      </div>
+      <div class="panel-note dim" style="padding:0 12px 6px">
+        Filtre engeli = sinyal uretildi ama aile sarti tutmadi (near_miss).
+        Kapi engeli = motor reddi (seans, spread, bar_doldu, saat…).
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="missed-summary-table">
+          <thead>
+            <tr><th>Sembol</th><th class="num">Adet</th><th>Kategoriler</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="table-wrap table-wrap-scroll" style="margin-top:8px">
+        <table class="grid" id="missed-table">
+          <thead>
+            <tr>
+              <th>Sembol</th>
+              <th>Kat</th>
+              <th>Yon</th>
+              <th>Sebep</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
 
     <div class="panel">
       <div class="panel-head"><h2>Spread Kalibrasyonu</h2>

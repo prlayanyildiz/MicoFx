@@ -202,7 +202,7 @@ function selectTab(name) {
     else syncOptPicker();
   }
   if (name === "tani") {
-    loadGates(); loadBlocks(); loadSpreadRatio(); loadAutopsies();
+    loadGates(); loadBlocks(); loadMissed(); loadSpreadRatio(); loadAutopsies();
     renderExecution(); renderLive();
   }
   if (name === "panel" && STATE && STATE.bot) {
@@ -428,6 +428,53 @@ async function loadBlocks() {
     (data.cumulative && data.cumulative.rows) || [],
     "Tum-zaman henuz bos",
   );
+  if (note) note.textContent = data.note || "";
+}
+
+async function loadMissed() {
+  const note = $("#missed-note");
+  let data;
+  try {
+    data = await api("/api/analysis/missed-trades?limit=40");
+  } catch (err) {
+    if (note) note.textContent = `Kacan islemler okunamadi: ${err.message || err}`;
+    return;
+  }
+  const bySym = data.by_symbol || {};
+  const events = [...(data.events || [])].reverse();
+  const catOf = {};
+  for (const e of events) {
+    const s = e.symbol || "?";
+    const c = e.category || "?";
+    if (!catOf[s]) catOf[s] = {};
+    catOf[s][c] = (catOf[s][c] || 0) + 1;
+  }
+  const sumRows = Object.entries(bySym)
+    .sort((a, b) => b[1] - a[1])
+    .map(([sym, n]) => {
+      const tr = el("tr");
+      const cats = Object.entries(catOf[sym] || {})
+        .map(([k, v]) => `<span class="pill off">${esc(k)} ${v}</span>`)
+        .join(" ") || '<span class="dim">-</span>';
+      tr.innerHTML = `
+        <td class="sym">${esc(sym)}</td>
+        <td class="num">${n}</td>
+        <td>${cats}</td>`;
+      return tr;
+    });
+  rowsInto($("#missed-summary-table"), sumRows, "Kayit yok", 3);
+  const detail = events.map((e) => {
+    const tr = el("tr");
+    const cat = e.category || "";
+    const cls = cat === "near_miss" ? "warn-text" : "neg";
+    tr.innerHTML = `
+      <td class="sym">${esc(e.symbol || "")}</td>
+      <td class="${cls}">${esc(cat)}</td>
+      <td>${esc(e.side || "")}</td>
+      <td>${esc(e.reason || "")}</td>`;
+    return tr;
+  });
+  rowsInto($("#missed-table"), detail, "Henuz kacan/ramak-kala yok", 4);
   if (note) note.textContent = data.note || "";
 }
 
@@ -2422,6 +2469,16 @@ function wire() {
   if (ratioBtn) ratioBtn.onclick = () => loadSpreadRatio();
   const autopsyBtn = $("#btn-autopsy-refresh");
   if (autopsyBtn) autopsyBtn.onclick = () => loadAutopsies();
+  const missedBtn = $("#btn-missed-refresh");
+  if (missedBtn) missedBtn.onclick = () => loadMissed();
+  const missedReset = $("#btn-missed-reset");
+  if (missedReset) missedReset.onclick = async () => {
+    try {
+      const res = await api("/api/analysis/missed-trades/reset", { method: "POST" });
+      toast(res.message || "Sifirlandi", "ok");
+      loadMissed();
+    } catch (e) { toast(e.message, "err"); }
+  };
   const blocksReset = $("#btn-blocks-reset");
   if (blocksReset) blocksReset.onclick = async () => {
     try {
