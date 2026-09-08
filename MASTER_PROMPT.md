@@ -581,6 +581,9 @@ walk-forward opt, web UI, SQLite, group presets, watch vs trade modes.
 - Trailing: `trail_mode` (atr|structure|hybrid) + `trail_lookback` are **in this tree** (`OPT_FIELDS`; live rows `'atr'`). Do not treat their presence as a licence to copy the rest of Ai.
 - Supervisor: `hour_risk_scales` **in this tree**. Scoring/models stay FX (no Ai DD-penalty score).
 - `autostart_mt5` / wait are **in this tree** (defaults on). Still not here, do not port: `orb_retest`, Ai score formula.
+- **Entry blocks / Tanı (08.09):** soft vs capacity vs actionable gates; Hard fill
+  excludes soft; autopilot spread-calibrate + chase nudge (≤0.40); SpotBrent
+  `max_spread_atr` keeper **0.06**. Do not disable the 7-symbol book for bleed.
 
 ### Variant `orj` → `D:\MicoFX Orj`
 - Same models/defaults/supervisor as FX lean core.

@@ -168,14 +168,26 @@ def auto_hint(row: dict[str, Any] | None) -> str:
 
 
 def annotate_entry_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Copy row with honesty + auto fields for API / autopilot."""
+    """Copy row with honesty + auto fields for API / autopilot.
+
+    When pressure says spread/chase, ``dominant_class`` follows the hint so
+    Tanı does not label SpotBrent ``soft`` merely because ``hafta_sonu``
+    outcounts unique ``spread`` blocks while retries scream spread.
+    """
     out = dict(row)
     out["action_fill_rate"] = action_fill_rate(row)
     out["spread_pressure"] = spread_pressure(row)
     out["chase_pressure"] = chase_pressure(row)
-    out["auto_hint"] = auto_hint(row)
+    hint = auto_hint(row)
+    out["auto_hint"] = hint
     blocks = row.get("blocks") or {}
-    if blocks:
+    if hint == "spread_kalibre":
+        out["dominant_gate"] = "spread"
+        out["dominant_class"] = "actionable"
+    elif hint == "chase_nudge":
+        out["dominant_gate"] = "kovalama_asimi"
+        out["dominant_class"] = "actionable"
+    elif blocks:
         try:
             top_code = max(blocks.items(), key=lambda kv: int(kv[1] or 0))[0]
         except (TypeError, ValueError):

@@ -47,6 +47,8 @@ def test_brent_spread_retry_storm_hints_calibrate():
     ann = annotate_entry_row(row)
     assert ann["spread_pressure"] >= 10
     assert ann["auto_hint"] == "spread_kalibre"
+    assert ann["dominant_class"] == "actionable"
+    assert ann["dominant_gate"] == "spread"
     assert competing_block_top(row["blocks"]) == 4  # kovalama beats spread unique
 
 

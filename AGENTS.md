@@ -248,9 +248,17 @@ Fail-first: write the test, watch it fail, then implement.
   All 7 book symbols now individually verified >+50R net positive on holdout (+458.3R total book).
 - Do not add an adverse-fill entry gate on autopsy
   `fill_vs_signal_close_r` *R thresholds* (Claude 18:45: Q4 in-sample
-  curve-fit; unverifiable). Live `chase_max_atr` (default 0.25) is a
-  separate ATR-unit tick-vs-signal-close ceiling in `_try_entry`; 0 = off.
+  curve-fit; unverifiable). Live `chase_max_atr` (book **0.35** on all 7;
+  shipped default still 0.25) is a separate ATR-unit tick-vs-signal-close
+  ceiling in `_try_entry`; 0 = off. Autopilot may nudge +0.05 toward **0.40**
+  from `kovalama_asimi` pressure; never re-arms chase when 0.
   Walk-forward stays fill-next-open (zero variance).
+- **Entry-block taxonomy (08.09 Gemini ACK):** soft (`seans_disi`, `bar_doldu`,
+  weekend/clock…) vs capacity (`risk_sembol_limiti`, `risk_kademe_aralik`…)
+  vs actionable (`spread`, `kovalama_asimi`). Tanı **Hard fill** ignores soft.
+  AP: spread calibrate + chase nudge; **SpotBrent `max_spread_atr` pin 0.06**
+  (no blind widen). Do not treat soft/capacity as MSA fodder; never disable
+  symbols for bleed. `dominant_class` follows `auto_hint` when actionable.
 - `GET /api/ai` and `POST /api/logs/clear` are gone. Panel reads
   `STATE.ai`; Temizle is DOM-only. Do not restore the ring-wipe POST.
 - `rsi_length`, `stoch_length`, `smooth_k`, `smooth_d` are **NOT dead code**.
