@@ -74,6 +74,10 @@ class _SeqClient:
     def money_per_price_unit(self, symbol, volume):
         return 1.0
 
+    def account(self):
+        return {"balance": 1000.0, "equity": 1000.0, "margin_free": 900.0,
+                "margin": 0.0, "login": 1, "server": "demo"}
+
 
 class _Risk:
     def lot_for(self, cfg, sl_distance, balance, ai_scale=1.0, **_):
@@ -130,6 +134,9 @@ def _engine(client, cfg):
     eng._mark_bar_filled = lambda *a, **k: None
     eng._save_cooldown = lambda *a, **k: None
     eng._broker_now_int = lambda: 0
+    eng._account = {"balance": 1000.0, "equity": 1000.0, "margin_free": 900.0}
+    eng._account_at = 0.0
+    eng._enforce_account_lock = lambda *a, **k: None
     return eng
 
 

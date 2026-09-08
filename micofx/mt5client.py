@@ -1976,8 +1976,16 @@ class MT5Client:
         # Caller asked for a stop but normalization collapsed it (e.g. negative
         # level on an index). Do not send sl=0 and treat NO_CHANGES as success.
         if sl > 0 and sent_sl <= 0:
+            self._emit_sltp_fail(
+                int(ticket), symbol, "normalize_sl_collapsed",
+                f"istenen_sl={sl:.5f} normalize={sent_sl} <= 0",
+            )
             return False
         if tp > 0 and sent_tp <= 0:
+            self._emit_sltp_fail(
+                int(ticket), symbol, "normalize_tp_collapsed",
+                f"istenen_tp={tp:.5f} normalize={sent_tp} <= 0",
+            )
             return False
         request = {
             "action": mt5.TRADE_ACTION_SLTP,

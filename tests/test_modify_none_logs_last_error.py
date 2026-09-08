@@ -163,3 +163,17 @@ def test_a_bare_zero_without_done_is_still_a_failure(monkeypatch):
     assert ok is False
     assert _warns()[before:], "retcode=0 without comment=Done must still warn"
 
+
+def test_collapsed_sl_normalization_warns_and_refuses():
+    client = _client()
+    # Mock normalize_price returning 0.0 for a positive requested level
+    client.normalize_price = lambda symbol, price: 0.0
+    before = len(_warns())
+    ok = MT5Client.modify_position(client, TICKET, 53040.0, 0.0, "US30")
+    assert ok is False
+    warns = _warns()[before:]
+    assert len(warns) == 1
+    assert "istenen_sl=53040" in warns[0]
+    assert "<= 0" in warns[0]
+
+

@@ -3410,6 +3410,40 @@ class Engine:
                                 return
                         except Exception:
                             pass
+            # Parallel-audit HIGH #1 (Gemini ACK 08.09): outer can_open ran
+            # before the lock. Reload the book (+ forced account) and re-gate
+            # so a deferred fill / sibling ticket cannot race past
+            # max_positions, concurrent risk, or scale-in spacing.
+            if not self._reload_positions():
+                state.note = "pozisyon listesi yenilenemedi - giris ertelendi"
+                state.entry_block = "baglanti"
+                return
+            try:
+                fresh_acct = self.refresh_account(force=True)
+            except Exception:
+                fresh_acct = None
+            if fresh_acct:
+                account = fresh_acct
+            elif not account:
+                state.note = "hesap okunamadi - giris ertelendi"
+                state.entry_block = "hesap"
+                return
+            entry = float(tick["ask"] if side == "buy" else tick["bid"])
+            sl = entry - sl_dist if side == "buy" else entry + sl_dist
+            if sl <= 0:
+                state.note = "stop seviyesi gecersiz"
+                state.entry_block = "stop"
+                return
+            verdict = self.risk.can_open(
+                cfg, side, lot, self._positions, account,
+                sl_distance=sl_dist, entry_price=entry, atr=atr)
+            if not verdict.ok:
+                state.note = verdict.reason
+                state.entry_block = _risk_block_key(verdict.reason)
+                return
+            before_tickets = {
+                p["ticket"] for p in self._positions if p["magic"] == base.magic
+            }
             result = self.client.open_market(
                 cfg.symbol, side, lot, sl, tp, cfg.magic,
                 slippage=self.store.system.slippage_points,
