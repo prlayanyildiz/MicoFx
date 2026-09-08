@@ -535,18 +535,17 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 
 ## 17. Known correctness invariants (must hold)
 
-1. Buy∧sell same bar → neither trades (strategy + backtest + live). With the
-   optional per-symbol ensemble this extends *across* strategies: if the primary
-   and secondary signals disagree on the same symbol at the same time, neither
-   side trades.
+1. Buy∧sell same bar → neither trades (strategy + backtest + live).
+   Ensemble / secondary legs are **retired** — do not revive
+   `ensemble_enabled` or cross-strategy veto pairs.
 2. Forming candle never enters IndicatorCache for signals.
 3. Opt apply never writes non-OPT_FIELDS silently.
 4. Validated UI label ⇔ apply gate `_slice_ok` on both OOS slices.
 5. Watch mode never opens positions.
 6. Wrong `broker_symbol` → symbol unavailable, no fuzzy fallback.
 7. Daily halt survives process restart until resume.
-8. Opt apply may write `SECONDARY_FIELDS`, but never `ensemble_enabled` —
-   storing a second candidate must not start trading it.
+8. Opt apply never enables `ensemble_enabled` (field gone from live
+   SymbolConfig; leftover `pending_secondary_exit_patch` is rejected).
 9. Apply uses `_slice_ok` / `reject_reason` / `_beats_incumbent`; it never
    force-applies. FX calendar reopt is gone (quarantine search only).
 

@@ -431,6 +431,7 @@ def audit(c: sqlite3.Connection) -> dict[str, Any]:
             "max_margin_usage_pct": system.get("max_margin_usage_pct"),
             "max_concurrent_risk_pct": system.get("max_concurrent_risk_pct"),
             "autostart_bot": system.get("autostart_bot"),
+            "autopilot_enabled": system.get("autopilot_enabled", True),
         },
         "supervisor": {
             "enabled": supervisor.get("enabled"),
@@ -1370,26 +1371,37 @@ def main() -> int:
             "xau_sl_live": None,
         }
     if args.auto and panel_up:
+        sys_blob = report.get("system") or {}
+        ap_on = bool(sys_blob.get("autopilot_enabled", True))
         import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "kasa_auto", ROOT / "scripts" / "kasa_auto.py")
-        kasa_mod = importlib.util.module_from_spec(spec)
-        assert spec.loader is not None
-        spec.loader.exec_module(kasa_mod)
-        applied.extend(kasa_mod.apply_kasa_tune(headers))
-        applied.extend(apply_trust_entries(report))
-        applied.extend(apply_spread_calibration(report))
-        applied.extend(_run_charged_tunes(headers))
-        applied.extend(_run_holdout_live_sync(headers))
-        applied.extend(_run_family_audit(headers))
-        applied.extend(_run_signal_health(headers))
-        import importlib.util as _ilu
-        spec_cf = _ilu.spec_from_file_location(
-            "cost_free_mode", ROOT / "scripts" / "cost_free_mode.py")
-        cf_mod = _ilu.module_from_spec(spec_cf)
-        assert spec_cf.loader is not None
-        spec_cf.loader.exec_module(cf_mod)
-        applied.extend(cf_mod.apply_cost_free_mode(headers))
+        if ap_on:
+            # In-process AP owns spread/msa/chase/charged axes — avoid dual land.
+            applied.append(
+                "auto: autopilot_enabled — charged/spread/holdout-sync atlandi "
+                "(tek yazar AP)")
+            applied.extend(apply_trust_entries(report))
+            applied.extend(_run_family_audit(headers))
+            applied.extend(_run_signal_health(headers))
+        else:
+            spec = importlib.util.spec_from_file_location(
+                "kasa_auto", ROOT / "scripts" / "kasa_auto.py")
+            kasa_mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(kasa_mod)
+            applied.extend(kasa_mod.apply_kasa_tune(headers))
+            applied.extend(apply_trust_entries(report))
+            applied.extend(apply_spread_calibration(report))
+            applied.extend(_run_charged_tunes(headers))
+            applied.extend(_run_holdout_live_sync(headers))
+            applied.extend(_run_family_audit(headers))
+            applied.extend(_run_signal_health(headers))
+            import importlib.util as _ilu
+            spec_cf = _ilu.spec_from_file_location(
+                "cost_free_mode", ROOT / "scripts" / "cost_free_mode.py")
+            cf_mod = _ilu.module_from_spec(spec_cf)
+            assert spec_cf.loader is not None
+            spec_cf.loader.exec_module(cf_mod)
+            applied.extend(cf_mod.apply_cost_free_mode(headers))
 
     md = render_markdown(report, applied)
     latest_path.write_text(md, encoding="utf-8")

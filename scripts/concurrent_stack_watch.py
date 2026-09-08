@@ -1,7 +1,7 @@
-"""Concurrent per-symbol ticket alarm — Claude 20:04.
+"""Concurrent per-symbol ticket alarm.
 
-Live rule is one ticket per name (can_open cap=1 since 45decd0). This monitor
-only wakes when that rule is violated. Report-only; never writes config.
+Fires only when open tickets for a name exceed that symbol's live
+``max_positions`` (1..5). Legal scale-ins are not breaches. Report-only.
 """
 from __future__ import annotations
 
@@ -42,25 +42,51 @@ def counts_by_symbol(positions: list[dict[str, Any]]) -> dict[str, int]:
     return dict(c)
 
 
-def evaluate(counts: dict[str, int]) -> dict[str, Any]:
-    offenders = {k: int(v) for k, v in counts.items() if int(v) > 1}
+def _clip_cap(raw: Any) -> int:
+    try:
+        n = int(raw or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return max(1, min(5, n))
+
+
+def evaluate(
+    counts: dict[str, int],
+    caps: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """``fire`` when count > per-symbol max_positions (default cap 5 if unknown)."""
+    caps = caps or {}
+    offenders: dict[str, int] = {}
+    for k, v in counts.items():
+        limit = _clip_cap(caps[k]) if k in caps else 5
+        if int(v) > limit:
+            offenders[k] = int(v)
     mx = max((int(v) for v in counts.values()), default=0)
     return {
         "counts": {k: int(v) for k, v in counts.items()},
+        "caps": {k: _clip_cap(caps[k]) for k in counts if k in caps},
         "offenders": offenders,
         "max_concurrent": mx,
         "fire": bool(offenders),
     }
 
 
-def snapshot_from_positions(positions: list[dict[str, Any]]) -> dict[str, Any]:
-    return evaluate(counts_by_symbol(positions))
+def snapshot_from_positions(
+    positions: list[dict[str, Any]],
+    caps: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    return evaluate(counts_by_symbol(positions), caps)
 
 
-def fetch_positions(panel: str = PANEL) -> list[dict[str, Any]]:
+def _panel_opener(panel: str = PANEL):
     cj = http.cookiejar.CookieJar()
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
     op.open(panel + "/")
+    return op
+
+
+def fetch_positions(panel: str = PANEL) -> list[dict[str, Any]]:
+    op = _panel_opener(panel)
     body = json.loads(
         op.open(
             urllib.request.Request(
@@ -73,8 +99,32 @@ def fetch_positions(panel: str = PANEL) -> list[dict[str, Any]]:
     return list(pos) if isinstance(pos, list) else []
 
 
+def fetch_max_positions(panel: str = PANEL) -> dict[str, int]:
+    op = _panel_opener(panel)
+    body = json.loads(
+        op.open(
+            urllib.request.Request(
+                panel + "/api/symbols",
+                headers={"Origin": panel},
+            )
+        ).read().decode()
+    )
+    rows = body.get("symbols") if isinstance(body, dict) else None
+    out: dict[str, int] = {}
+    if not isinstance(rows, list):
+        return out
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        sym = str(row.get("symbol") or "")
+        if not sym:
+            continue
+        out[sym] = _clip_cap(row.get("max_positions"))
+    return out
+
+
 def snapshot(panel: str = PANEL) -> dict[str, Any]:
-    return snapshot_from_positions(fetch_positions(panel))
+    return snapshot_from_positions(fetch_positions(panel), fetch_max_positions(panel))
 
 
 def _ts(row: dict[str, Any], *keys: str) -> float | None:
@@ -129,24 +179,23 @@ def max_concurrent_from_autopsy(
 
 
 def maybe_alert(
-    snap: dict[str, Any] | None = None,
+    report: dict[str, Any],
     *,
-    panel: str = PANEL,
     state_path: Path | None = None,
     wake_path: Path | None = None,
     cursor_inbox: Path | None = None,
 ) -> list[str]:
-    """Wake once while any name holds >1 ticket; clear latch when back to 1."""
-    path = state_path if state_path is not None else STATE_PATH
-    rep = snap if snap is not None else snapshot(panel)
-    state = _load(path)
     lines: list[str] = []
+    path = state_path if state_path is not None else STATE_PATH
+    state = _load(path)
+    rep = report or {}
     if not rep.get("fire"):
-        if state.get("alerted") or state.get("offenders"):
-            state["alerted"] = False
-            state["cleared_at"] = datetime.now().isoformat(timespec="seconds")
-            state["offenders"] = {}
-            state["max_concurrent"] = int(rep.get("max_concurrent") or 0)
+        if state.get("alerted"):
+            state = {
+                "alerted": False,
+                "cleared_at": datetime.now().isoformat(timespec="seconds"),
+                "counts": rep.get("counts") or {},
+            }
             _save(path, state)
         return []
     if state.get("alerted"):
@@ -162,7 +211,9 @@ def maybe_alert(
     inbox = cursor_inbox if cursor_inbox is not None else (
         ROOT / "cursor" / "FOR_CLAUDE.md")
     offenders = rep.get("offenders") or {}
-    detail = ", ".join(f"{k}={v}" for k, v in sorted(offenders.items()))
+    caps = rep.get("caps") or {}
+    detail = ", ".join(
+        f"{k}={v}/{caps.get(k, '?')}" for k, v in sorted(offenders.items()))
     try:
         wake.parent.mkdir(parents=True, exist_ok=True)
         wake.write_text("WAKE concurrent stack\n", encoding="utf-8")
@@ -172,9 +223,8 @@ def maybe_alert(
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     body = (
         f"# Cursor -> Claude -- {ts} -- CONCURRENT STACK ALARM ({detail}).\n\n"
-        "Live rule is 1 ticket/name (`can_open` cap=1). This is a silent-expected "
-        "monitor — fire means the gate was bypassed or the book desynced. "
-        "Config dokunma; investigate tickets.\n\n"
+        "Fire = open tickets exceed that symbol's live ``max_positions`` "
+        "(1..5). Legal scale-ins are OK. Config dokunma; investigate tickets.\n\n"
         "MICO MOLA yok.\n"
     )
     try:

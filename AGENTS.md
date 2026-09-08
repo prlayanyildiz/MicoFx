@@ -2,7 +2,7 @@
 
 Live **fx** bot, `C:\Users\Administrator\MicoFx`. Constitution:
 `MASTER_PROMPT.md` §19. Do not port remaining `D:\MicoAi` extras
-(`orb_retest`, Ai score formula, `autostart_mt5`) unasked.
+(`orb_retest`, Ai score formula) unasked. `autostart_mt5` /
 `trail_mode` / `hour_risk_scales` / `max_combos=2000` are already here.
 
 ## Operator charter — 07.09 (full agent authority & profit mandate)
