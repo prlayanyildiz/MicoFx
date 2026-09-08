@@ -876,6 +876,9 @@ def _super_trend(cache: IndicatorCache, p: Params) -> Signals:
     if p.atr_pct_min > 0:
         buy &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
         sell &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
+    cost_gate = cache.cost_ok(p.cost_rank_max)
+    buy &= cost_gate
+    sell &= cost_gate
 
     warmup = min(size, max(period * 5, p.atr_period * 3, 60))
     buy[:warmup] = False
@@ -921,6 +924,9 @@ def _keltner_break(cache: IndicatorCache, p: Params) -> Signals:
     if p.atr_pct_min > 0:
         buy &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
         sell &= cache.atr_rank(p.atr_period) >= p.atr_pct_min
+    cost_gate = cache.cost_ok(p.cost_rank_max)
+    buy &= cost_gate
+    sell &= cost_gate
 
     warmup = min(size, max(ema_len * 3, int(p.atr_period) * 3, 60))
     buy[:warmup] = False
