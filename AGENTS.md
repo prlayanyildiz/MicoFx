@@ -214,8 +214,9 @@ Fail-first: write the test, watch it fail, then implement.
 - Live count allows **scale-in tickets up to `cfg.max_positions` (clipped 1..5)**
   (operator + peer ACK 07.09; live caps are edge-weighted: XAUUSD=5, SpotBrent=4,
   GER40=3, BTCUSD=3, US30=2, JPN225=2, NAS100=2).
-  Guarded against 13.08 restack via: (1) ATR spacing >= 1.0 ATR from nearest open
-  ticket (strictly profit-direction only — BUY: eff_px >= max(opens)+1ATR, SELL: eff_px <= min(opens)-1ATR;
+  Guarded against 13.08 restack via: (1) ATR spacing >= 0.75 ATR from nearest open
+  ticket (strictly profit-direction only — BUY: eff_px >= max(opens)+0.75ATR, SELL: eff_px <= min(opens)-0.75ATR;
+  was 1.0 ATR until 08.09 — entry_blocks showed risk_kademe_aralik blocking 0.7–0.85 ATR trends;
   losers do not add — bug fixed and regression tested 07.09 dc61af5), (2) max 1 new fill per symbol
   per closed bar (`_filled_bars`), (3) **each ticket sized at full nominal 1R**
   (`risk_percent` / auto-1R / margin share — not divided by `max_positions`;
