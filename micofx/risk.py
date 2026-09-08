@@ -28,6 +28,10 @@ _SHAKEOUT_SL_FLOOR = 2.0
 # F8: widen by 1.5× the searched stop, never past the absolute floor, and
 # never pull a wider searched stop inward.
 _SHAKEOUT_SL_REL = 1.5
+# Scale-in: profit-direction spacing vs nearest open ticket (ATR units).
+# 1.0 was blocking strong trends at 0.7–0.85 ATR (entry_blocks dominant);
+# 0.75 keeps losers-do-not-add + same-bar 1-fill (operator + Gemini 08.09).
+SCALE_IN_MIN_ATR = 0.75
 
 # Soft-restart / tiny original_sl stamped NAS flatten at r≈−195. Cash is
 # truth; |R| past this is not a trade outcome (F FLAG1 / autopsy stats).
@@ -1030,7 +1034,7 @@ class RiskManager:
         if len(same_symbol) >= cap:
             return Verdict(False, f"sembol pozisyon limiti ({cap})")
         if same_symbol:
-            # Scale-in ticket: require ATR spacing >= 1.0 ATR from nearest existing ticket.
+            # Scale-in: ATR spacing from nearest open ticket (profit direction only).
             eff_atr = float(atr) if (atr is not None and atr > 0) else 0.0
             if eff_atr <= 0 and sl_distance > 0:
                 mult = max(0.1, float(getattr(cfg, "sl_atr_mult", 1.0) or 1.0))
@@ -1046,20 +1050,21 @@ class RiskManager:
                            if float(p.get("price_open") or 0.0) > 0]
             if not open_prices:
                 return Verdict(False, "kademe araligi hesaplanamadi")
+            need = SCALE_IN_MIN_ATR * eff_atr
             if norm_side == "buy":
                 max_open = max(open_prices)
                 diff = eff_px - max_open
                 if diff < 0:
                     return Verdict(False, f"kademe araligi kar yonunde yetersiz (fiyat acilisin altinda: {diff / eff_atr:.2f} ATR)")
-                if diff < (1.0 * eff_atr - 1e-9):
-                    return Verdict(False, f"kademe araligi yetersiz (< 1.0 ATR: {diff / eff_atr:.2f} ATR)")
+                if diff < (need - 1e-9):
+                    return Verdict(False, f"kademe araligi yetersiz (< {SCALE_IN_MIN_ATR:g} ATR: {diff / eff_atr:.2f} ATR)")
             else:
                 min_open = min(open_prices)
                 diff = min_open - eff_px
                 if diff < 0:
                     return Verdict(False, f"kademe araligi kar yonunde yetersiz (fiyat acilisin ustunde: {diff / eff_atr:.2f} ATR)")
-                if diff < (1.0 * eff_atr - 1e-9):
-                    return Verdict(False, f"kademe araligi yetersiz (< 1.0 ATR: {diff / eff_atr:.2f} ATR)")
+                if diff < (need - 1e-9):
+                    return Verdict(False, f"kademe araligi yetersiz (< {SCALE_IN_MIN_ATR:g} ATR: {diff / eff_atr:.2f} ATR)")
 
         # Leftover max_total_positions is unread. Another *name* may still
         # open until margin / STOPSUZ (and scalp/swing only when those

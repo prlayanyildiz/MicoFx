@@ -8,6 +8,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient
+import pytest
 
 from micofx.engine import _risk_block_key
 from micofx.models import SymbolConfig, SystemConfig
@@ -145,11 +146,36 @@ def test_can_open_refuses_when_atr_spacing_is_too_tight():
     existing = [{"ticket": 101, "symbol": "XAUUSD", "magic": 1, "side": "buy", "price_open": 2000.0, "sl": 1990.0, "volume": 0.01}]
     account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 10.0}
 
-    # New entry @ 2005.0 -> distance 5.0 < 1.0 * ATR 10.0
+    # New entry @ 2005.0 -> distance 5.0 < 0.75 * ATR 10.0
     verdict = risk.can_open(cfg, "buy", 0.01, existing, account, sl_distance=10.0, entry_price=2005.0, atr=10.0)
     assert not verdict.ok
     assert "kademe araligi yetersiz" in verdict.reason
     assert _risk_block_key(verdict.reason) == "risk_kademe_aralik"
+
+
+def test_can_open_allows_scale_in_at_075_atr_spacing():
+    """08.09: 0.75 ATR is enough in profit direction (was 1.0 — blocked 0.7–0.85 trends)."""
+    from micofx.risk import SCALE_IN_MIN_ATR
+    assert SCALE_IN_MIN_ATR == pytest.approx(0.75)
+
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=5, sl_atr_mult=1.0)
+    store = _FakeStore({"XAUUSD": cfg})
+    client = _FakeClient()
+    risk = RiskManager(store, client)
+    existing = [{"ticket": 101, "symbol": "XAUUSD", "magic": 1, "side": "buy",
+                 "price_open": 2000.0, "sl": 1990.0, "volume": 0.01}]
+    account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 10.0}
+
+    # 7.5 price units = 0.75 ATR — must allow
+    ok = risk.can_open(cfg, "buy", 0.01, existing, account,
+                       sl_distance=10.0, entry_price=2007.5, atr=10.0)
+    assert ok.ok, ok.reason
+
+    # Just under — still refuse
+    tight = risk.can_open(cfg, "buy", 0.01, existing, account,
+                          sl_distance=10.0, entry_price=2007.4, atr=10.0)
+    assert not tight.ok
+    assert "kademe araligi yetersiz" in tight.reason
 
 
 def test_can_open_refuses_unmeasurable_spacing():
