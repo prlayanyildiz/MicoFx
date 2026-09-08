@@ -1411,6 +1411,12 @@ class Engine:
                 if cfg is None:
                     continue
                 self._book_deferred_fill(cfg, state, result, item)
+                # Cycle tallied only ``emir_dogrulaniyor`` at send time; the
+                # real open/fail lands here off the ready-loop path.
+                self._tally_entry(
+                    symbol, "acildi",
+                    bar_key=item.get("bar_key"),
+                    source=str(item.get("signal_source") or "primary"))
                 continue
             state.note = result.get("error", "emir hatasi")
             state.entry_block = "emir_hatasi"
@@ -1430,6 +1436,10 @@ class Engine:
                 state.pending_bar_key = (0, 0)
                 state.note = "emir sonucu belirsiz - tekrar denenmeyecek, MT5'i kontrol edin"
                 state.entry_block = "emir_belirsiz"
+            self._tally_entry(
+                symbol, state.entry_block,
+                bar_key=item.get("bar_key"),
+                source=str(item.get("signal_source") or "primary"))
 
     def _book_deferred_fill(self, cfg: SymbolConfig, state: SymbolState,
                             result: dict[str, Any], item: dict[str, Any]) -> None:

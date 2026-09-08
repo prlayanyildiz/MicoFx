@@ -17,6 +17,17 @@ def test_keltner_break_opt_fields():
     assert "kelt_atr_mult" in OPT_FIELDS
 
 
+def test_keltner_params_key_includes_kelt_axes():
+    """WFO signal cache must not reuse series when kelt_* changes."""
+    a = Params(strategy="keltner_break", kelt_ema_len=10, kelt_atr_mult=1.0)
+    b = Params(strategy="keltner_break", kelt_ema_len=20, kelt_atr_mult=1.0)
+    c = Params(strategy="keltner_break", kelt_ema_len=10, kelt_atr_mult=2.5)
+    assert a.key() != b.key()
+    assert a.key() != c.key()
+    assert a.kelt_ema_len in a.key()
+    assert a.kelt_atr_mult in a.key()
+
+
 def test_keltner_break_signals_generation():
     assert "keltner_break" in _FAMILIES
     n = 200

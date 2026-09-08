@@ -139,6 +139,8 @@ class Params:
                 self.fade_adx_max, self.fade_ema_len, self.fade_band_atr,
                 self.sweep_lookback, self.sweep_pierce_atr, self.sweep_close_pct,
                 self.sup_period, self.sup_mult,
+                self.kelt_ema_len, self.kelt_atr_mult,
+                self.vol_ratio_min,
                 self.cost_rank_max)
 
 

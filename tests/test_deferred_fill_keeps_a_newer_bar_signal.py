@@ -14,11 +14,13 @@ and only clears the live chain when last_bar is still the filled one.
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from micofx.engine import Engine, SymbolState
+from micofx.engine import Engine, SymbolState, _signal_close_for_bar
 from micofx.models import SymbolConfig
 
 BAR_T = 1_786_400_000
@@ -134,9 +136,6 @@ def test_the_same_bar_is_still_consumed():
 
 def test_deferred_fill_pins_signal_close_to_booked_bar_not_live_last():
     """Verifier sleep across a bar close must not use T+1 close for chase/R."""
-    from types import SimpleNamespace
-    from micofx.engine import _signal_close_for_bar
-
     bars = SimpleNamespace(
         time=[BAR_T, BAR_T1],
         close=[29100.0, 29200.0],
@@ -161,3 +160,24 @@ def test_deferred_fill_pins_signal_close_to_booked_bar_not_live_last():
     )
     assert eng.execution.fills[0][1]["signal_close"] == 29100.0
     assert eng.execution.fills[0][1]["signal_bar_time"] == BAR_T
+
+
+def test_drain_deferred_fill_tallies_acildi():
+    cfg = SymbolConfig(symbol="NAS100", magic=1, timeframe="M30", cooldown_sec=120)
+    eng = _engine(cfg)
+    eng._fill_verify_lock = threading.Lock()
+    eng._fill_verify_done = [{
+        **_pending(bar=BAR_T),
+        "result": {"ok": True, "price": 29110.0, "volume": 0.2,
+                   "position": 42, "requested": 29100.0, "sl": 29060.0, "tp": 0.0},
+    }]
+    eng._verify_inflight = {"NAS100"}
+    tallies: list[tuple] = []
+    eng._tally_entry = lambda *a, **k: tallies.append((a, k))
+    state = SymbolState("NAS100")
+    state.last_bar = BAR_T
+    eng.states["NAS100"] = state
+    eng._book_deferred_fill = lambda *a, **k: None
+    eng._drain_fill_verify()
+    assert tallies and tallies[0][0][1] == "acildi"
+    assert "NAS100" not in eng._verify_inflight
