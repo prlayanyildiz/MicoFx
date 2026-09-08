@@ -12,7 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from micofx.entry_pressure import spread_pressure  # noqa: E402
+from micofx.entry_pressure import (  # noqa: E402
+    aggregate_entry_block_rows,
+    spread_pressure,
+)
 from scripts.spread_exec import apply_spread_widen  # noqa: E402
 
 DB_PATH = ROOT / "data" / "micofx.db"
@@ -29,38 +32,20 @@ def _get(path: str, headers: dict[str, str]) -> dict[str, Any]:
         return json.loads(resp.read().decode())
 
 
-def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """By-symbol map with retries + pressure — built on shared merge."""
     out: dict[str, dict[str, Any]] = {}
-    for row in rows:
+    for row in aggregate_entry_block_rows(rows):
         sym = str(row.get("symbol") or "")
         if not sym:
             continue
-        agg = out.setdefault(sym, {"signals": 0, "opened": 0, "spread": 0})
-        agg["signals"] += int(row.get("signals") or 0)
-        agg["opened"] += int(row.get("opened") or 0)
-        # Keep the row's retries so spread_pressure can see them after merge.
-        prev = int(agg.get("spread") or 0)
-        pressure = spread_pressure(row)
-        agg["spread"] = max(prev, pressure)
-        # Stash last retries for pressure on the merged dict shape.
-        retries = dict(agg.get("retries") or {})
-        row_retries = row.get("retries") or {}
-        if isinstance(row_retries, dict):
-            for k, v in row_retries.items():
-                try:
-                    retries[k] = int(retries.get(k) or 0) + int(v or 0)
-                except (TypeError, ValueError):
-                    continue
-        agg["retries"] = retries
-        blocks = dict(agg.get("blocks") or {})
-        row_blocks = row.get("blocks") or {}
-        if isinstance(row_blocks, dict):
-            for k, v in row_blocks.items():
-                try:
-                    blocks[k] = int(blocks.get(k) or 0) + int(v or 0)
-                except (TypeError, ValueError):
-                    continue
-        agg["blocks"] = blocks
+        out[sym] = {
+            "signals": int(row.get("signals") or 0),
+            "opened": int(row.get("opened") or 0),
+            "blocks": dict(row.get("blocks") or {}),
+            "retries": dict(row.get("retries") or {}),
+            "spread": spread_pressure(row),
+        }
     return out
 
 

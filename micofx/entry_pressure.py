@@ -46,6 +46,48 @@ MSA_CEILING_KEEPERS: dict[str, float] = {
 }
 
 
+def aggregate_entry_block_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge buy/sell legs per symbol; keep retries for spread/chase pressure.
+
+    Single source for autopilot, income_dev_loop, and holdout sync — do not
+    fork a copy that drops ``retries`` (US30 879-retry blind spot).
+    """
+    by_sym: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        sym = str(row.get("symbol") or "")
+        if not sym:
+            continue
+        agg = by_sym.setdefault(
+            sym, {"signals": 0, "opened": 0, "blocks": {}, "retries": {}})
+        agg["signals"] += int(row.get("signals") or 0)
+        agg["opened"] += int(row.get("opened") or 0)
+        for k, v in (row.get("blocks") or {}).items():
+            try:
+                agg["blocks"][str(k)] = (
+                    int(agg["blocks"].get(str(k), 0)) + int(v or 0))
+            except (TypeError, ValueError):
+                continue
+        for k, v in (row.get("retries") or {}).items():
+            try:
+                agg["retries"][str(k)] = (
+                    int(agg["retries"].get(str(k), 0)) + int(v or 0))
+            except (TypeError, ValueError):
+                continue
+    out: list[dict[str, Any]] = []
+    for sym, agg in sorted(by_sym.items()):
+        total = int(agg["signals"])
+        opened = int(agg["opened"])
+        out.append({
+            "symbol": sym,
+            "signals": total,
+            "opened": opened,
+            "fill_rate": round(opened / total, 3) if total else 0.0,
+            "blocks": agg["blocks"],
+            "retries": agg["retries"],
+        })
+    return out
+
+
 def gate_class(code: str) -> str:
     key = str(code or "")
     if key in SOFT_BLOCKS:

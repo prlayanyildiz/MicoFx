@@ -401,7 +401,7 @@ def give_back_post_restart(
 
 
 def fill_focus(rows_eb: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    from scripts.us30_fill_watch import SOFT_BLOCKS
+    from micofx.entry_pressure import SOFT_BLOCKS
 
     out: dict[str, dict[str, Any]] = {}
     for row in rows_eb:

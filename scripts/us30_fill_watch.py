@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in __import__("sys").path:
+    __import__("sys").path.insert(0, str(ROOT))
 PANEL = "http://127.0.0.1:8900"
 STATE_PATH = ROOT / ".bridge" / "US30_FILL_BASELINE.json"
 DEFAULT_SYMBOL = "US30"
@@ -24,10 +26,9 @@ MIN_SIGNALS = 8
 # Claude 07:20: US30 closest shrink candidate — earlier trigger in session open.
 SESSION_OPEN_MIN_SIGNALS = 4
 POOR_FILL = 0.35  # below this with spread-dominant blocks → alert
-# Pre-entry refuses — count in panel totals but not as fill-gate evidence.
-SOFT_BLOCKS = frozenset({
-    "seans_disi", "piyasa_kapali", "saat_kapali", "gun_kapali", "hafta_sonu",
-})
+# Canonical taxonomy: micofx.entry_pressure (includes bar_doldu, weekend…).
+from micofx.entry_pressure import SOFT_BLOCKS  # noqa: E402
+
 _SOFT_BLOCKS = SOFT_BLOCKS  # back-compat alias
 
 

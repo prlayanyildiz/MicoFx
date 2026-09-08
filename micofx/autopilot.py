@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .entry_pressure import (
+    aggregate_entry_block_rows,
     chase_pressure,
     clamp_msa_cap,
     competing_block_top,
@@ -240,41 +241,8 @@ def kasa_leverage(sys: Any, account: dict[str, Any] | None) -> float:
 
 
 def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Merge buy/sell legs per symbol (same shape as income_dev_loop)."""
-    by_sym: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        sym = str(row.get("symbol") or "")
-        if not sym:
-            continue
-        agg = by_sym.setdefault(
-            sym, {"signals": 0, "opened": 0, "blocks": {}, "retries": {}})
-        agg["signals"] += int(row.get("signals") or 0)
-        agg["opened"] += int(row.get("opened") or 0)
-        for k, v in (row.get("blocks") or {}).items():
-            try:
-                agg["blocks"][str(k)] = (
-                    int(agg["blocks"].get(str(k), 0)) + int(v or 0))
-            except (TypeError, ValueError):
-                continue
-        for k, v in (row.get("retries") or {}).items():
-            try:
-                agg["retries"][str(k)] = (
-                    int(agg["retries"].get(str(k), 0)) + int(v or 0))
-            except (TypeError, ValueError):
-                continue
-    out: list[dict[str, Any]] = []
-    for sym, agg in sorted(by_sym.items()):
-        total = int(agg["signals"])
-        opened = int(agg["opened"])
-        out.append({
-            "symbol": sym,
-            "signals": total,
-            "opened": opened,
-            "fill_rate": round(opened / total, 3) if total else 0.0,
-            "blocks": agg["blocks"],
-            "retries": agg["retries"],
-        })
-    return out
+    """Back-compat alias — prefer ``aggregate_entry_block_rows``."""
+    return aggregate_entry_block_rows(rows)
 
 
 def spread_auto_targets(

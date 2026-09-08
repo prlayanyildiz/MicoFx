@@ -25,7 +25,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from micofx.entry_pressure import spread_pressure  # noqa: E402
+from micofx.autopilot import spread_auto_targets  # noqa: E402
+from micofx.entry_pressure import (  # noqa: E402
+    aggregate_entry_block_rows,
+    competing_block_top,
+    spread_pressure,
+)
 from micofx.paths import DB_PATH, LOG_DIR  # noqa: E402
 
 PANEL = "http://127.0.0.1:8900"
@@ -259,29 +264,8 @@ def _enabled_symbols(syms: dict[str, dict[str, Any]]) -> list[str]:
 
 
 def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Merge buy/sell legs per symbol."""
-    by_sym: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        sym = str(row.get("symbol") or "")
-        if not sym:
-            continue
-        agg = by_sym.setdefault(sym, {"signals": 0, "opened": 0, "blocks": {}})
-        agg["signals"] += int(row.get("signals") or 0)
-        agg["opened"] += int(row.get("opened") or 0)
-        for k, v in (row.get("blocks") or {}).items():
-            agg["blocks"][str(k)] = agg["blocks"].get(str(k), 0) + int(v)
-    out: list[dict[str, Any]] = []
-    for sym, agg in sorted(by_sym.items()):
-        total = int(agg["signals"])
-        opened = int(agg["opened"])
-        out.append({
-            "symbol": sym,
-            "signals": total,
-            "opened": opened,
-            "fill_rate": round(opened / total, 3) if total else 0.0,
-            "blocks": agg["blocks"],
-        })
-    return out
+    """Back-compat — retries-preserving merge lives in ``entry_pressure``."""
+    return aggregate_entry_block_rows(rows)
 
 
 def fetch_entry_blocks(headers: dict[str, str]) -> list[dict[str, Any]]:
@@ -292,7 +276,7 @@ def fetch_entry_blocks(headers: dict[str, str]) -> list[dict[str, Any]]:
     if since > 0 and (time.time() - since) > _ENTRY_BLOCKS_MAX_AGE_SEC:
         # Stale lifetime tallies poison spread/lot auto actions.
         return []
-    return _aggregate_entry_blocks(list(data.get("rows") or []))
+    return aggregate_entry_block_rows(list(data.get("rows") or []))
 
 
 def fetch_live(headers: dict[str, str]) -> dict[str, Any]:
@@ -355,7 +339,7 @@ def spread_recovery_actions(entry_rows: list[dict[str, Any]],
         fill = float(row.get("fill_rate") or 0.0)
         if spread_n < 5 or signals < 10:
             continue
-        top = max(int(v or 0) for v in blocks.values()) if blocks else 0
+        top = competing_block_top(blocks)
         spread_dominant = spread_n >= max(top, 1)
         low_fill = fill < _SPREAD_FILL_ALERT
         if spread_dominant and (low_fill or spread_n >= 15):
@@ -369,29 +353,6 @@ def spread_recovery_actions(entry_rows: list[dict[str, Any]],
                 f"— ikincil; once baskin engeli coz"
             )
     return actions
-
-
-def spread_auto_targets(entry_rows: list[dict[str, Any]],
-                        open_symbols: set[str],
-                        active: set[str]) -> list[str]:
-    """Flat enabled symbols where spread is the dominant blocker with evidence."""
-    out: list[str] = []
-    for row in entry_rows:
-        sym = str(row.get("symbol") or "")
-        if sym not in active or sym in open_symbols:
-            continue
-        blocks = row.get("blocks") or {}
-        spread_n = spread_pressure(row)
-        signals = int(row.get("signals") or 0)
-        fill = float(row.get("fill_rate") or 0.0)
-        if spread_n < _SPREAD_AUTO_MIN or signals < 5:
-            continue
-        top = max(int(v or 0) for v in blocks.values()) if blocks else 0
-        if spread_n >= max(top, _SPREAD_AUTO_MIN) and fill < 0.35:
-            out.append(sym)
-        elif spread_n >= _SPREAD_AUTO_MIN and fill < 0.25:
-            out.append(sym)
-    return out
 
 
 def audit(c: sqlite3.Connection) -> dict[str, Any]:
@@ -967,31 +928,12 @@ def _run_holdout_live_sync(headers: dict[str, str]) -> list[str]:
 
 
 def _run_session_upgrades(headers: dict[str, str]) -> list[str]:
-    """Charged session-window upgrades on flat enabled names (SpotBrent pattern)."""
-    import importlib.util
-    st = _api_get("/api/state", headers) or {}
-    if (st.get("opt") or {}).get("busy"):
-        return ["seans: opt busy — atlandi"]
-    open_syms = {str(p.get("symbol") or "") for p in st.get("positions") or []}
-    body = _api_get("/api/symbols", headers) or {}
-    rows = body.get("symbols") if isinstance(body, dict) else None
-    if not isinstance(rows, list):
-        return ["seans: symbols okunamadi"]
-    spec = importlib.util.spec_from_file_location(
-        "session_exec", ROOT / "scripts" / "session_exec.py")
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(mod)
-    done: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict) or not row.get("enabled"):
-            continue
-        sym = str(row.get("symbol") or "")
-        if not sym or sym in open_syms:
-            continue
-        ok, msg = mod.apply_session_upgrade(headers, panel=PANEL, row=row)
-        done.append(msg if ok else f"FAIL {msg}")
-    return done
+    """Sessions are operator-authoritative (charter 07.09) — same as AP.
+
+    income ``--auto`` must not rewrite windows the in-process autopilot
+    already forces ``sess_pick = None`` for.
+    """
+    return ["seans: operator charter — upgrade kapali (AP ile ayni)"]
 
 
 def _run_msa_upgrades(headers: dict[str, str]) -> list[str]:
@@ -1114,7 +1056,6 @@ def _run_charged_tunes(headers: dict[str, str]) -> list[str]:
     if not isinstance(rows, list):
         return ["tune: symbols okunamadi"]
 
-    sess = _load_exec("session_exec", ROOT / "scripts" / "session_exec.py")
     msa = _load_exec("msa_exec", ROOT / "scripts" / "msa_exec.py")
     cr = _load_exec("cost_rank_exec", ROOT / "scripts" / "cost_rank_exec.py")
     adx = _load_exec("adx_exec", ROOT / "scripts" / "adx_exec.py")
@@ -1135,12 +1076,8 @@ def _run_charged_tunes(headers: dict[str, str]) -> list[str]:
         flat = sym not in open_syms
         landed = False
 
+        # Sessions: operator charter — no session_exec (matches AP sess_pick=None).
         if flat:
-            ok, msg = sess.apply_session_upgrade(headers, panel=PANEL, row=row)
-            done.append(msg if ok else f"FAIL {msg}")
-            if ok and "->" in msg and "degismedi" not in msg:
-                landed = True
-        if not landed and flat:
             ok, msg = msa.apply_msa_upgrade(headers, panel=PANEL, row=row)
             done.append(msg if ok else f"FAIL {msg}")
             if ok and "->" in msg and "degismedi" not in msg:
