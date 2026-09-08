@@ -69,6 +69,7 @@ def _engine(cfg):
     eng.states = {}
     eng._filled_bars = {}
     eng._cooldowns = {}
+    eng.entry_lock = threading.Lock()
     return eng
 
 

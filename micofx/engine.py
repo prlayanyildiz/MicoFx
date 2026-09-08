@@ -1841,8 +1841,9 @@ class Engine:
         Found 15.08 after the perpetuals were deleted: everything else was clean
         and settings.filled_bars still held BRENTOIL-PERP.
         """
-        if self._filled_bars.pop(str(symbol), None) is not None:
-            self.store.set_setting("filled_bars", self._filled_bars)
+        with self.entry_lock:
+            if self._filled_bars.pop(str(symbol), None) is not None:
+                self.store.set_setting("filled_bars", self._filled_bars)
 
     def forget_spread_ratio(self, symbol: str) -> None:
         """Drop one symbol's spread histogram now, not at the next flush.
@@ -2847,7 +2848,11 @@ class Engine:
         if not state.signal:
             state.note = state.note if state.note else "sinyal yok"
             return False
-        if self._filled_bars.get(cfg.symbol, {}).get(state.signal_source) == bar_key:
+        with self.entry_lock:
+            already_filled = (
+                self._filled_bars.get(cfg.symbol, {}).get(state.signal_source)
+                == bar_key)
+        if already_filled:
             # This bar's signal has already been filled once. Held in the
             # store, because it is the only thing standing between a restart
             # and a second position on the same signal: SymbolState is rebuilt
@@ -4036,8 +4041,10 @@ class Engine:
             atr = state.atr if state else 0.0
 
             ticket_no = int(pos["ticket"])
+            repaired_stopless = False
             if live_stop_level(pos.get("sl")) <= 0:
                 if self._repair_stopless_stop(cfg, pos, atr):
+                    repaired_stopless = True
                     LOG.emit(f"#{ticket_no} STOPSUZ pozisyona stop eklendi "
                              f"@ {float(pos['sl']):.5f}",
                              "WARN", cfg.symbol)
@@ -4151,15 +4158,10 @@ class Engine:
                     except (TypeError, ValueError):
                         last_bar = 0
                 if last_bar:
-                    # Always re-run overlay_stop on this closed bar. The level
-                    # does not move until last_bar does, so a same-target retry
-                    # is a no-op (min_step). What used to skip here was a BE /
-                    # harvest PATCH after overlay_stop had returned None: the
-                    # bar was marked settled and the new overlay sat idle until
-                    # the next candle, which is the opposite of "overlays apply
-                    # to open tickets". False still means "ask again this bar"
-                    # because the live quote, not the close, blocked placement.
-                    self._update_stop(cfg, pos, atr, bars)
+                    # After a same-cycle stopless repair, skip trail/BE once so
+                    # attach and overlay do not fight on the same poll (Yellow B).
+                    if not repaired_stopless:
+                        self._update_stop(cfg, pos, atr, bars)
                 else:
                     # No closed-bar pin at all: trail/BE/partial/harvest skip
                     # and the ticket runs on its broker stop alone. Reachable
@@ -4413,21 +4415,22 @@ class Engine:
         try:
             if not bar:
                 return
-            current = getattr(self, "_filled_bars", None)
-            if not isinstance(current, dict):
-                current = {}
-            # Per LEG. A single slot per symbol let a secondary fill erase the
-            # primary's record (and the reverse), leaving an already-taken bar
-            # unguarded against the restart this whole record exists for.
-            legs = current.get(symbol)
-            if not isinstance(legs, dict):
-                legs = {}
-            legs[str(source)] = int(bar)
-            current[symbol] = legs
-            # Bounded: only symbols still in the portfolio are worth keeping.
-            live = set(self.store.symbols)
-            self._filled_bars = {s: v for s, v in current.items() if s in live}
-            self.store.set_setting("filled_bars", self._filled_bars)
+            with self.entry_lock:
+                current = getattr(self, "_filled_bars", None)
+                if not isinstance(current, dict):
+                    current = {}
+                # Per LEG. A single slot per symbol let a secondary fill erase the
+                # primary's record (and the reverse), leaving an already-taken bar
+                # unguarded against the restart this whole record exists for.
+                legs = current.get(symbol)
+                if not isinstance(legs, dict):
+                    legs = {}
+                legs[str(source)] = int(bar)
+                current[symbol] = legs
+                # Bounded: only symbols still in the portfolio are worth keeping.
+                live = set(self.store.symbols)
+                self._filled_bars = {s: v for s, v in current.items() if s in live}
+                self.store.set_setting("filled_bars", self._filled_bars)
         except Exception as exc:
             LOG.emit(f"Dolum bar kaydi yazilamadi: {exc}", "WARN", symbol)
 

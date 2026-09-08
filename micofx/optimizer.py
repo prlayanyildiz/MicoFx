@@ -3747,7 +3747,11 @@ class Optimizer:
                     # forever unless another apply() happened to land later
                     # while the symbol was flat. Engine._apply_pending_exits
                     # writes this the moment this magic is next seen flat.
-                    patch["pending_exit_patch"] = pending
+                    # Merge onto any already-queued EXIT_RISK keys (Yellow C)
+                    # so a second apply does not wipe an earlier holdback.
+                    prior = dict(getattr(cfg, "pending_exit_patch", None) or {})
+                    prior.update(pending)
+                    patch["pending_exit_patch"] = prior
                     if "opt_summary" in patch:
                         # opt_summary.params otherwise claimed the held-back
                         # exit values were live immediately - drop them from

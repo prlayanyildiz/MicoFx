@@ -132,12 +132,18 @@ def shakeout_sl_atr_mult(base: float, symbol: str,
     bumped = min(floor_base * _SHAKEOUT_SL_REL, _SHAKEOUT_SL_FLOOR)
     return round(max(floor_base, bumped), 4)
 
-def size_sl_distance(cfg: SymbolConfig, atr: float, client: MT5Client) -> float:
-    """SL distance for lot sizing — searched multiple, not shakeout floor."""
+def size_sl_distance(cfg: SymbolConfig, atr: float, client: MT5Client,
+                     *, sl_atr_mult: float | None = None) -> float:
+    """SL distance for lot sizing / capacity — use shakeout mult when known.
+
+    Capacity used to call this with raw ``cfg.sl_atr_mult`` while live entry
+    sizes on ``shakeout_sl_atr_mult`` — panel overstated lot when the floor
+    was active. Pass the same mult entry used.
+    """
     if not math.isfinite(atr) or atr <= 0:
         return 0.0
     try:
-        base = float(cfg.sl_atr_mult or 0.0)
+        base = float(sl_atr_mult if sl_atr_mult is not None else (cfg.sl_atr_mult or 0.0))
     except (TypeError, ValueError):
         return 0.0
     if base <= 0:
@@ -1259,7 +1265,7 @@ class RiskManager:
             sl_mult = shakeout_sl_atr_mult(
                 cfg.sl_atr_mult, cfg.symbol, autopsies,
                 since_ts=float(getattr(cfg, "opt_updated_at", 0.0) or 0.0))
-            sl_dist = size_sl_distance(cfg, atr, self.client)
+            sl_dist = size_sl_distance(cfg, atr, self.client, sl_atr_mult=sl_mult)
             lot, lot_note = self.lot_for(cfg, sl_dist, balance, account=account,
                                          positions=mine)
             if sl_dist <= 0:

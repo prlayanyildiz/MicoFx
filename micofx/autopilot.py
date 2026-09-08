@@ -413,8 +413,28 @@ class AutoPilot:
         }
 
     def _open_symbols(self) -> set[str]:
+        """Config symbol names with open tickets (not raw broker names).
+
+        Remaps / suffixes made broker ``symbol`` miss AP open checks so trail
+        tunes could land mid-trade. Prefer ``config_symbol``, then magic map.
+        """
         out: set[str] = set()
+        by_magic = {
+            int(c.magic): str(c.symbol)
+            for c in self.store.symbols.values()
+        }
         for p in list(getattr(self.engine, "_positions", None) or []):
+            cfg_sym = str(p.get("config_symbol") or "")
+            if cfg_sym:
+                out.add(cfg_sym)
+                continue
+            try:
+                magic = int(p.get("magic") or 0)
+            except (TypeError, ValueError):
+                magic = 0
+            if magic in by_magic:
+                out.add(by_magic[magic])
+                continue
             sym = str(p.get("symbol") or "")
             if sym:
                 out.add(sym)

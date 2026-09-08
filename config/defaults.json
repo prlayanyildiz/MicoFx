@@ -36,7 +36,7 @@
       "lot_mode": "risk",
       "fixed_lot": 0.01,
       "max_lot": 0.05,
-      "max_positions": 1,
+      "max_positions": 2,
       "risk_percent": 0.5,
       "timeframe": "M30",
       "t3_length": 5,
@@ -79,7 +79,7 @@
       "lot_mode": "risk",
       "fixed_lot": 0.1,
       "max_lot": 0.3,
-      "max_positions": 1,
+      "max_positions": 2,
       "risk_percent": 0.5,
       "timeframe": "M30",
       "t3_length": 6,
@@ -122,7 +122,7 @@
       "lot_mode": "risk",
       "fixed_lot": 0.01,
       "max_lot": 0.05,
-      "max_positions": 1,
+      "max_positions": 4,
       "risk_percent": 0.5,
       "timeframe": "M30",
       "t3_length": 7,
@@ -165,7 +165,7 @@
       "lot_mode": "risk",
       "fixed_lot": 0.01,
       "max_lot": 0.05,
-      "max_positions": 1,
+      "max_positions": 3,
       "risk_percent": 0.4,
       "timeframe": "M15",
       "t3_length": 8,
@@ -263,6 +263,11 @@
         }
       ],
       "max_spread_atr": 0.18,
+      "max_positions": 3,
+      "mfe_lock1_at_r": 0.8,
+      "mfe_lock1_to_r": 0.2,
+      "mfe_lock2_at_r": 1.3,
+      "mfe_lock2_to_r": 0.6,
       "enabled": true
     },
     {
@@ -282,6 +287,11 @@
         }
       ],
       "max_spread_atr": 0.05,
+      "max_positions": 3,
+      "mfe_lock1_at_r": 0.8,
+      "mfe_lock1_to_r": 0.2,
+      "mfe_lock2_at_r": 1.4,
+      "mfe_lock2_to_r": 0.7,
       "enabled": true
     },
     {
@@ -301,6 +311,11 @@
         }
       ],
       "max_spread_atr": 0.08,
+      "max_positions": 2,
+      "mfe_lock1_at_r": 0.75,
+      "mfe_lock1_to_r": 0.15,
+      "mfe_lock2_at_r": 1.2,
+      "mfe_lock2_to_r": 0.5,
       "enabled": true
     },
     {
@@ -314,6 +329,11 @@
         }
       ],
       "max_spread_atr": 0.06,
+      "max_positions": 2,
+      "mfe_lock1_at_r": 0.7,
+      "mfe_lock1_to_r": 0.15,
+      "mfe_lock2_at_r": 1.1,
+      "mfe_lock2_to_r": 0.4,
       "enabled": true
     },
     {
@@ -333,6 +353,11 @@
         }
       ],
       "max_spread_atr": 0.08,
+      "max_positions": 2,
+      "mfe_lock1_at_r": 0.75,
+      "mfe_lock1_to_r": 0.15,
+      "mfe_lock2_at_r": 1.1,
+      "mfe_lock2_to_r": 0.4,
       "enabled": true
     },
     {
@@ -357,6 +382,11 @@
         }
       ],
       "max_spread_atr": 0.06,
+      "max_positions": 4,
+      "mfe_lock1_at_r": 1.0,
+      "mfe_lock1_to_r": 0.3,
+      "mfe_lock2_at_r": 1.6,
+      "mfe_lock2_to_r": 0.8,
       "enabled": true
     },
     {
@@ -376,6 +406,11 @@
         }
       ],
       "max_spread_atr": 0.25,
+      "max_positions": 5,
+      "mfe_lock1_at_r": 0.75,
+      "mfe_lock1_to_r": 0.15,
+      "mfe_lock2_at_r": 1.2,
+      "mfe_lock2_to_r": 0.5,
       "enabled": true
     }
   ],
