@@ -309,17 +309,11 @@
       "magic": 990014,
       "sessions": [
         {
-          "start": "01:00",
-          "end": "23:59",
-          "days": [1, 2, 3, 4]
-        },
-        {
-          "start": "01:00",
-          "end": "23:55",
-          "days": [5]
+          "start": "15:00",
+          "end": "21:00"
         }
       ],
-      "max_spread_atr": 0.05,
+      "max_spread_atr": 0.06,
       "enabled": true
     },
     {
@@ -338,7 +332,7 @@
           "days": [5]
         }
       ],
-      "max_spread_atr": 0.12,
+      "max_spread_atr": 0.08,
       "enabled": true
     },
     {
@@ -362,7 +356,7 @@
           "days": [5]
         }
       ],
-      "max_spread_atr": 0.08,
+      "max_spread_atr": 0.06,
       "enabled": true
     },
     {
@@ -482,17 +476,20 @@
         ],
         "brst_range_z": [
           1.0,
+          1.2,
           1.5,
           2.0,
           2.5
         ],
         "brst_close_pct": [
+          0.5,
           0.6,
           0.7,
           0.8,
           0.9
         ],
         "cost_rank_max": [
+          0.1,
           0.3,
           0.5,
           0.7

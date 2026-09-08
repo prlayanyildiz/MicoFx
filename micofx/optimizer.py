@@ -47,6 +47,7 @@ SEARCH_SESSION_WINDOWS: list[list[dict[str, str]]] = [
     [{"start": "00:00", "end": "23:59"}],
     [{"start": "01:00", "end": "23:59"}],  # broker-true full day (ops 04.09)
     [{"start": "00:00", "end": "09:00"}],
+    [{"start": "03:15", "end": "22:59"}],  # DAX Frankfurt pre-market + day (ops 08.09)
     [{"start": "08:00", "end": "16:00"}],
     # Claude 06.09 14:4x: signals cluster just outside KEEP clocks.
     # Targeted extensions (not 7/24) — must still clear shortlist + WFO+F6.
