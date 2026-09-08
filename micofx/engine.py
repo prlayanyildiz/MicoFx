@@ -2050,6 +2050,8 @@ class Engine:
                         ((k, v) for k, v in attempts.items() if k != "acildi"),
                         key=lambda kv: -kv[1])),
                 })
+        from .entry_pressure import annotate_entry_row
+        rows = [annotate_entry_row(r) for r in rows]
         rows.sort(key=lambda r: (-r["signals"], -r["attempts"]))
         totals: dict[str, int] = {}
         for row in rows:

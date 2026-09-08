@@ -399,35 +399,59 @@ async function loadBlocks() {
     if (note) note.textContent = `Sayaclar okunamadi: ${err.message || err}`;
     return;
   }
-  const paint = (tableSel, rowsIn, emptyMsg) => {
-    const rows = (rowsIn || []).map((r) => {
-      const blocks = Object.entries(r.blocks || {});
-      const tr = el("tr");
-      tr.innerHTML = `
+  const blockPills = (r) => {
+    const blocks = Object.entries(r.blocks || {});
+    if (!blocks.length) return '<span class="dim">-</span>';
+    return blocks.map(([k, v]) => {
+      const poll = (r.retries || {})[k];
+      const tip = poll != null
+        ? `${esc(k)}: ${v} sinyal, ${poll} poll`
+        : esc(k);
+      return `<span class="pill off" title="${tip}">${esc(k)} ${v}</span>`;
+    }).join(" ");
+  };
+  const hintLabel = (h) => {
+    const map = {
+      spread_kalibre: "spread kalibre",
+      chase_nudge: "chase nudge",
+      beklenen_soft: "beklenen soft",
+      beklenen_kapasite: "beklenen kap",
+      izle: "izle",
+    };
+    return map[h] || h || "izle";
+  };
+  const rows7 = (data.rows || []).map((r) => {
+    const tr = el("tr");
+    const hint = r.auto_hint || "izle";
+    const hintCls = (hint === "spread_kalibre" || hint === "chase_nudge")
+      ? "warn-text" : "dim";
+    const hard = r.action_fill_rate;
+    tr.innerHTML = `
       <td class="sym">${esc(r.symbol)} <span class="dim">${esc(r.leg || "")}</span></td>
       <td class="num">${r.signals}</td>
       <td class="num ${r.opened ? "pos" : "dim"}">${r.opened}</td>
       <td class="num ${r.fill_rate != null && r.fill_rate < 0.25 ? "neg" : "dim"}">${
         r.fill_rate != null ? num(r.fill_rate, 2) : "-"}</td>
-      <td>${blocks.length
-        ? blocks.map(([k, v]) => {
-            const poll = (r.retries || {})[k];
-            const tip = poll != null
-              ? `${esc(k)}: ${v} sinyal, ${poll} poll`
-              : esc(k);
-            return `<span class="pill off" title="${tip}">${esc(k)} ${v}</span>`;
-          }).join(" ")
-        : '<span class="dim">-</span>'}</td>`;
-      return tr;
-    });
-    rowsInto($(tableSel), rows, emptyMsg, 5);
-  };
-  paint("#blocks-table", data.rows, "Henuz giris denemesi yok");
-  paint(
-    "#blocks-cum-table",
-    (data.cumulative && data.cumulative.rows) || [],
-    "Tum-zaman henuz bos",
-  );
+      <td class="num ${hard != null && hard < 0.35 ? "neg" : "dim"}">${
+        hard != null ? num(hard, 2) : "-"}</td>
+      <td class="${hintCls}">${esc(hintLabel(hint))}</td>
+      <td>${blockPills(r)}</td>`;
+    return tr;
+  });
+  rowsInto($("#blocks-table"), rows7, "Henuz giris denemesi yok", 7);
+  const rowsCum = ((data.cumulative && data.cumulative.rows) || []).map((r) => {
+    const tr = el("tr");
+    tr.innerHTML = `
+      <td class="sym">${esc(r.symbol)} <span class="dim">${esc(r.leg || "")}</span></td>
+      <td class="num">${r.signals}</td>
+      <td class="num ${r.opened ? "pos" : "dim"}">${r.opened}</td>
+      <td class="num ${r.fill_rate != null && r.fill_rate < 0.25 ? "neg" : "dim"}">${
+        r.fill_rate != null ? num(r.fill_rate, 2) : "-"}</td>
+      <td>${blockPills(r)}</td>`;
+    return tr;
+  });
+  rowsInto(
+    $("#blocks-cum-table"), rowsCum, "Tum-zaman henuz bos", 5);
   if (note) note.textContent = data.note || "";
 }
 

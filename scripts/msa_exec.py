@@ -131,6 +131,7 @@ def _score_msa(row: dict[str, Any], caps: tuple[float, ...]) -> dict[float, dict
 
 
 def propose_msa_upgrade(row: dict[str, Any]) -> dict[str, Any] | None:
+    from micofx.entry_pressure import clamp_msa_cap
     from scripts.exec_gates import gate_pick
     try:
         live_msa = float(row.get("max_spread_atr") or 0.0)
@@ -138,9 +139,20 @@ def propose_msa_upgrade(row: dict[str, Any]) -> dict[str, Any] | None:
         return None
     caps = tuple(sorted(set(MSA_CANDIDATES) | {live_msa}))
     scored = _score_msa(row, caps)
-    return gate_pick(
+    pick = gate_pick(
         row, best_msa_upgrade(live_msa, scored),
         field="max_spread_atr", value_key="max_spread_atr")
+    if pick is None:
+        return None
+    sym = str(row.get("symbol") or "")
+    raw = float(pick["max_spread_atr"])
+    pinned = clamp_msa_cap(sym, raw)
+    if pinned + 1e-9 < raw:
+        # Keeper refused widen (SpotBrent 0.06) — treat as no upgrade.
+        return None
+    pick = dict(pick)
+    pick["max_spread_atr"] = pinned
+    return pick
 
 
 def apply_msa_upgrade(

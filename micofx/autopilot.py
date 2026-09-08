@@ -12,11 +12,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .entry_pressure import spread_pressure
+from .entry_pressure import (
+    chase_pressure,
+    clamp_msa_cap,
+    competing_block_top,
+    spread_pressure,
+)
 from .logbus import LOG
 from .supervisor import Supervisor
 
 _SPREAD_AUTO_MIN = 10
+_CHASE_AUTO_MIN = 8
+_CHASE_AUTO_CAP = 0.40
+_CHASE_AUTO_STEP = 0.05
 _ENTRY_BLOCKS_MAX_AGE_SEC = 7 * 86400
 # Session/msa charged sweeps are heavier than calibrate — run at most hourly.
 _TUNE_MIN_INTERVAL_SEC = 3600.0
@@ -274,7 +282,11 @@ def spread_auto_targets(
     open_symbols: set[str],
     active: set[str],
 ) -> list[str]:
-    """Flat enabled symbols where spread is the dominant blocker with evidence."""
+    """Flat enabled symbols where spread is the dominant blocker with evidence.
+
+    Soft/capacity unique-blocks (seans, bar_doldu, kademe) do not veto a
+    retry-storm spread calibrate — they are intentional governors.
+    """
     out: list[str] = []
     for row in entry_rows:
         sym = str(row.get("symbol") or "")
@@ -286,12 +298,37 @@ def spread_auto_targets(
         fill = float(row.get("fill_rate") or 0.0)
         if spread_n < _SPREAD_AUTO_MIN or signals < 5:
             continue
-        top = max(int(v or 0) for v in blocks.values()) if blocks else 0
+        top = competing_block_top(blocks)
         # Retries can outrank unique blocks (US30 seans_disi=6 vs spread
         # blocks=2 but pressure=17 from retries).
         if spread_n >= max(top, _SPREAD_AUTO_MIN) and fill < 0.35:
             out.append(sym)
         elif spread_n >= _SPREAD_AUTO_MIN and fill < 0.25:
+            out.append(sym)
+    return out
+
+
+def chase_auto_targets(
+    entry_rows: list[dict[str, Any]],
+    open_symbols: set[str],
+    active: set[str],
+) -> list[str]:
+    """Flat enabled symbols where chase (kovalama) dominates with evidence."""
+    out: list[str] = []
+    for row in entry_rows:
+        sym = str(row.get("symbol") or "")
+        if sym not in active or sym in open_symbols:
+            continue
+        blocks = row.get("blocks") or {}
+        chase_n = chase_pressure(row)
+        signals = int(row.get("signals") or 0)
+        fill = float(row.get("fill_rate") or 0.0)
+        if chase_n < _CHASE_AUTO_MIN or signals < 4:
+            continue
+        top = competing_block_top(blocks)
+        if chase_n >= max(top, _CHASE_AUTO_MIN) and fill < 0.40:
+            out.append(sym)
+        elif chase_n >= _CHASE_AUTO_MIN and fill < 0.30:
             out.append(sym)
     return out
 
@@ -399,6 +436,7 @@ class AutoPilot:
         done.extend(self._apply_kasa())
         # Spread before cost_free: turning charge_costs off would skip widen.
         done.extend(self._apply_spread())
+        done.extend(self._apply_chase())
         done.extend(self._apply_session_msa_trail_tune())
         done.extend(self._apply_cost_free())
         done.extend(self._apply_opt_lifecycle())
@@ -419,10 +457,14 @@ class AutoPilot:
         tunes could land mid-trade. Prefer ``config_symbol``, then magic map.
         """
         out: set[str] = set()
-        by_magic = {
-            int(c.magic): str(c.symbol)
-            for c in self.store.symbols.values()
-        }
+        by_magic: dict[int, str] = {}
+        for c in self.store.symbols.values():
+            try:
+                magic = int(getattr(c, "magic", 0) or 0)
+            except (TypeError, ValueError):
+                magic = 0
+            if magic:
+                by_magic[magic] = str(getattr(c, "symbol", "") or "")
         for p in list(getattr(self.engine, "_positions", None) or []):
             cfg_sym = str(p.get("config_symbol") or "")
             if cfg_sym:
@@ -432,7 +474,7 @@ class AutoPilot:
                 magic = int(p.get("magic") or 0)
             except (TypeError, ValueError):
                 magic = 0
-            if magic in by_magic:
+            if magic in by_magic and by_magic[magic]:
                 out.add(by_magic[magic])
                 continue
             sym = str(p.get("symbol") or "")
@@ -547,6 +589,52 @@ class AutoPilot:
                 done.append(f"{sym} spread degismedi")
         return done
 
+    def _apply_chase(self) -> list[str]:
+        """Evidence-only chase_max_atr nudge from kovalama pressure (cap 0.40)."""
+        try:
+            import sys
+            if str(_ROOT) not in sys.path:
+                sys.path.insert(0, str(_ROOT))
+            from scripts.exec_gates import pipeline_frozen
+            if pipeline_frozen():
+                return ["chase: exec pipeline FREEZE"]
+        except Exception:
+            pass
+
+        active = set(self._enabled_symbols())
+        open_syms = self._open_symbols()
+        targets = chase_auto_targets(self._entry_rows(), open_syms, active)
+        if not targets:
+            return []
+
+        done: list[str] = []
+        for sym in targets:
+            if sym in open_syms:
+                continue
+            cfg = self.store.symbols.get(sym)
+            if cfg is None:
+                continue
+            try:
+                before = float(getattr(cfg, "chase_max_atr", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                before = 0.0
+            if before <= 0:
+                # 0 = chase off by design; do not re-arm unasked.
+                continue
+            if before >= _CHASE_AUTO_CAP - 1e-9:
+                continue
+            after = min(_CHASE_AUTO_CAP, round(before + _CHASE_AUTO_STEP, 2))
+            if after <= before + 1e-9:
+                continue
+            updated = self.store.update_symbol(
+                sym, {"chase_max_atr": after}, source="autopilot chase")
+            if updated is not None:
+                done.append(f"{sym} chase {before:g}->{after:g}")
+                forget = getattr(self.engine, "forget_entry_blocks", None)
+                if callable(forget):
+                    forget(sym)
+        return done
+
     def _apply_session_msa_trail_tune(self) -> list[str]:
         """Hourly charged session/msa/cost_rank/trail self-tune via snapshots.
 
@@ -642,7 +730,8 @@ class AutoPilot:
 
             # Fixed order; at most ONE successful land per symbol per tune
             # cycle so session→msa→trail cannot compound-overfit in one hour
-            # (Claude 04.09 03:05).
+            # (Claude 04.09 03:05). SpotBrent msa keeper may clear msa_pick
+            # so the next axis can still land in the same cycle.
             landed = False
             if sess_pick is not None:
                 updated = self.store.update_symbol(
@@ -665,37 +754,51 @@ class AutoPilot:
                     f"{sess_pick['net_r']:+.1f}R)"
                 )
                 landed = True
-            elif msa_pick is not None and opt is not None:
-                cap = float(msa_pick["max_spread_atr"])
+            if not landed and msa_pick is not None and opt is not None:
+                raw_cap = float(msa_pick["max_spread_atr"])
+                cap = clamp_msa_cap(sym, raw_cap)
                 try:
-                    score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
+                    live_msa = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)
                 except (TypeError, ValueError):
-                    score = 0.0
-                prev_force = bool(getattr(opt, "_force_apply", False))
-                opt._force_apply = True
-                try:
-                    result = opt.apply(
-                        sym, {"max_spread_atr": cap}, score, None, None, None)
-                finally:
-                    opt._force_apply = prev_force
-                if result.get("ok"):
-                    try:
-                        opt.refresh_live_costed_stamp(sym)
-                    except Exception:
-                        pass
-                    forget = getattr(self.engine, "forget_entry_blocks", None)
-                    if callable(forget):
-                        forget(sym)
+                    live_msa = 0.0
+                if abs(cap - live_msa) < 1e-9 and raw_cap > live_msa + 1e-9:
                     done.append(
-                        f"{sym} msa {msa_pick['live_msa']:g}->{cap:g} "
-                        f"({msa_pick['live_net_r']:+.1f}R->"
-                        f"{msa_pick['net_r']:+.1f}R)"
-                    )
-                    landed = True
+                        f"{sym} msa keeper pin ({live_msa:g}) - genisleme yok")
+                elif abs(cap - live_msa) < 1e-9:
+                    pass  # propose matched live; try next axis
                 else:
-                    done.append(
-                        f"{sym} msa fail: {result.get('error', 'uygulanamadi')}")
-            elif cr_pick is not None and opt is not None:
+                    if cap + 1e-9 < raw_cap:
+                        done.append(
+                            f"{sym} msa {raw_cap:g}->{cap:g} (keeper tavan)")
+                    try:
+                        score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        score = 0.0
+                    prev_force = bool(getattr(opt, "_force_apply", False))
+                    opt._force_apply = True
+                    try:
+                        result = opt.apply(
+                            sym, {"max_spread_atr": cap}, score, None, None, None)
+                    finally:
+                        opt._force_apply = prev_force
+                    if result.get("ok"):
+                        try:
+                            opt.refresh_live_costed_stamp(sym)
+                        except Exception:
+                            pass
+                        forget = getattr(self.engine, "forget_entry_blocks", None)
+                        if callable(forget):
+                            forget(sym)
+                        done.append(
+                            f"{sym} msa {msa_pick['live_msa']:g}->{cap:g} "
+                            f"({msa_pick['live_net_r']:+.1f}R->"
+                            f"{msa_pick['net_r']:+.1f}R)"
+                        )
+                        landed = True
+                    else:
+                        done.append(
+                            f"{sym} msa fail: {result.get('error', 'uygulanamadi')}")
+            if not landed and cr_pick is not None and opt is not None:
                 cr = float(cr_pick["cost_rank_max"])
                 try:
                     score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
@@ -723,7 +826,7 @@ class AutoPilot:
                     done.append(
                         f"{sym} cost_rank fail: "
                         f"{result.get('error', 'uygulanamadi')}")
-            elif adx_pick is not None and opt is not None:
+            elif not landed and adx_pick is not None and opt is not None:
                 adx = float(adx_pick["adx_min"])
                 try:
                     score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
@@ -751,7 +854,7 @@ class AutoPilot:
                     done.append(
                         f"{sym} adx_min fail: "
                         f"{result.get('error', 'uygulanamadi')}")
-            elif atr_pct_pick is not None and opt is not None:
+            elif not landed and atr_pct_pick is not None and opt is not None:
                 ap = float(atr_pct_pick["atr_pct_min"])
                 try:
                     score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
@@ -780,7 +883,7 @@ class AutoPilot:
                     done.append(
                         f"{sym} atr_pct_min fail: "
                         f"{result.get('error', 'uygulanamadi')}")
-            elif body_pick is not None and opt is not None:
+            elif not landed and body_pick is not None and opt is not None:
                 bv = float(body_pick["min_body_ratio"])
                 try:
                     score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
@@ -809,7 +912,7 @@ class AutoPilot:
                     done.append(
                         f"{sym} min_body_ratio fail: "
                         f"{result.get('error', 'uygulanamadi')}")
-            elif trail_pick is not None and opt is not None:
+            elif not landed and trail_pick is not None and opt is not None:
                 step = float(trail_pick["trail_step_atr"])
                 try:
                     score = float(getattr(cfg, "opt_score", 0.0) or 0.0)
@@ -837,7 +940,7 @@ class AutoPilot:
                     done.append(
                         f"{sym} trail_step fail: "
                         f"{result.get('error', 'uygulanamadi')}")
-            elif trail_start_pick is not None and opt is not None:
+            elif not landed and trail_start_pick is not None and opt is not None:
                 start = float(trail_start_pick["trail_start_atr"])
                 try:
                     score = float(getattr(cfg, "opt_score", 0.0) or 0.0)

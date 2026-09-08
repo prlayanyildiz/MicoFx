@@ -2789,6 +2789,19 @@ class Optimizer:
                 return
             old_cap = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)
             new_cap = float(result.cap)
+            try:
+                from .entry_pressure import clamp_msa_cap
+                pinned = clamp_msa_cap(symbol, new_cap)
+                if pinned + 1e-9 < new_cap:
+                    LOG.emit(
+                        f"{symbol}: makas kalibrasyonu keeper pin "
+                        f"{new_cap:g}->{pinned:g}",
+                        "OPT", symbol)
+                    new_cap = pinned
+            except Exception:
+                pass
+            if abs(new_cap - old_cap) < 1e-9:
+                return
             if new_cap > old_cap + 1e-9:
                 charging = True if sys is None else bool(
                     getattr(sys, "charge_costs", True))
