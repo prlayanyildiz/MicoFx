@@ -95,3 +95,32 @@ def test_blocked_entry_hours_api_allows_and_validates():
     res = tc.post("/api/symbols/XAUUSD", json={"blocked_entry_hours": "14"})
     assert res.status_code == 400
 
+
+def test_brst_close_pct_http_writable():
+    """Burst close% is an operator income knob (peer ACK 08.09 JPN 0.60→0.50)."""
+    cfg = SymbolConfig(symbol="JPN225", magic=2, strategy="burst", brst_close_pct=0.6)
+
+    class _FakeStore:
+        def __init__(self):
+            self.symbols = {"JPN225": cfg}
+            self.system = MagicMock()
+            self.defaults = {"symbols": [], "group_presets": {}}
+
+        def get_setting(self, k, d=None):
+            return d
+
+        def opt_params(self):
+            return {}
+
+        def update_symbol(self, sym, patch, **kwargs):
+            for k, v in patch.items():
+                setattr(self.symbols[sym], k, v)
+            return self.symbols[sym]
+
+    store = _FakeStore()
+    app = create_app(store, MagicMock(), MagicMock(), MagicMock(), api_token="tok")
+    tc = TestClient(app, cookies={"mico_session": "tok"}, headers={"origin": "http://testserver"})
+    res = tc.post("/api/symbols/JPN225", json={"brst_close_pct": 0.5})
+    assert res.status_code == 200, res.text
+    assert cfg.brst_close_pct == 0.5
+

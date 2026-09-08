@@ -519,7 +519,7 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
     "sl_atr_mult", "vol_ratio_min", "chase_max_atr", "max_spread_atr",
     "mfe_lock1_at_r", "mfe_lock1_to_r", "mfe_lock2_at_r", "mfe_lock2_to_r",
     "stale_flat_bars", "stale_max_abs_r", "max_positions",
-    "brst_range_z", "chan_lookback", "kelt_ema_len", "kelt_atr_mult",
+    "brst_range_z", "brst_close_pct", "chan_lookback", "kelt_ema_len", "kelt_atr_mult",
 })
 # NOT here, deliberately: ``symbol_daily_loss_pct``. A 05.09 audit reported it
 # as "a protection that cannot be armed" - true as a description (no path sets
