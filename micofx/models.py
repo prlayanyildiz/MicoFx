@@ -172,8 +172,9 @@ class SymbolConfig:
 
     # lot_for: remaining-margin share across vacant names, clipped by
     # auto 1R (max stored risk_percent, 2%) × denetci. Leftover max_lot /
-    # max_margin_pct / max_positions unread. Live count is 1 ticket/name.
-    # Search still scores max_open=1. SystemConfig.max_positions / max_lot unread.
+    # max_margin_pct unread (0=off). Symbol max_positions (1..5) IS live in
+    # can_open (scale-in + ATR spacing). Search still scores max_open=1.
+    # SystemConfig.max_positions / max_lot remain HTTP-off / unread.
     lot_mode: str = "risk"
     fixed_lot: float = 0.01
     risk_percent: float = 0.5        # % of balance at 1R (the live size knob)
@@ -770,9 +771,9 @@ class SystemConfig:
     # on whatever stop distance each position already had. Default on: a
     # "daily loss limit" should stop the daily loss, not just further ones.
     daily_loss_flatten: bool = True
-    # Live 1R sum leftover. Unread by can_open (27.08). Kept so old DB
-    # rows load; 0 or 30 both mean nothing. Default 8 is historical.
-    max_concurrent_risk_pct: float = 8.0
+    # Live book-wide concurrent 1R budget (can_open). Charter floor 25%.
+    # 0 would disable; shipped default matches live AGENTS cap.
+    max_concurrent_risk_pct: float = 25.0
     daily_profit_pct: float = 0.0     # 0 disables the profit stop
     min_free_margin: float = 50.0
 

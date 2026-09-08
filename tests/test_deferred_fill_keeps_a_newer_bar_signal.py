@@ -130,3 +130,34 @@ def test_the_same_bar_is_still_consumed():
     assert eng._filled_bars["NAS100"]["primary"] == BAR_T
     assert state.signal == ""
     assert state.signal_source == ""
+
+
+def test_deferred_fill_pins_signal_close_to_booked_bar_not_live_last():
+    """Verifier sleep across a bar close must not use T+1 close for chase/R."""
+    from types import SimpleNamespace
+    from micofx.engine import _signal_close_for_bar
+
+    bars = SimpleNamespace(
+        time=[BAR_T, BAR_T1],
+        close=[29100.0, 29200.0],
+    )
+    assert _signal_close_for_bar(bars, BAR_T) == 29100.0
+    assert _signal_close_for_bar(bars, BAR_T1) == 29200.0
+    assert _signal_close_for_bar(bars, 0) == 29200.0
+
+    cfg = SymbolConfig(symbol="NAS100", magic=1, timeframe="M30", cooldown_sec=120)
+    eng = _engine(cfg)
+    state = SymbolState("NAS100")
+    state.last_bar = BAR_T1
+    state.bars = bars
+    state.atr = 60.0
+    eng.states["NAS100"] = state
+
+    eng._book_deferred_fill(
+        cfg, state,
+        {"ok": True, "price": 29110.0, "volume": 0.2, "position": 42,
+         "requested": 29100.0, "sl": 29060.0, "tp": 0.0},
+        _pending(bar=BAR_T),
+    )
+    assert eng.execution.fills[0][1]["signal_close"] == 29100.0
+    assert eng.execution.fills[0][1]["signal_bar_time"] == BAR_T

@@ -567,7 +567,10 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 ## 19. Variant matrix (enable only matching tree)
 
 ### Shared core (always)
-4 strategies, ATR risk/exits (basic trail), sessions, DailyGuard, supervisor quarantine/bad hours/reopt_on_decay, walk-forward opt, web UI, SQLite, group presets, watch vs trade modes.
+5 live search families (`burst`, `mtf_pullback`, `channel_break`, `super_trend`,
+`keltner_break`), ATR risk/exits (hard stop + trail; overlays optional),
+sessions, DailyGuard, supervisor quarantine/bad hours/quarantine-reopt only,
+walk-forward opt, web UI, SQLite, group presets, watch vs trade modes.
 
 ### Variant `fx` → `C:\Users\Administrator\MicoFx` (also `D:\MicoFX` if that checkout still exists)
 - Dynamic portfolio: add/remove symbols, broker mapping UI, wipe+seed defaults, purge orphan opt_runs.
@@ -577,7 +580,7 @@ Commission is round-turn per lot on a Pepperstone raw/ECN account: **forex 8.0**
 - defaults: `max_combos=2000`, `refine_rounds=5`, no `orb_retest`.
 - Trailing: `trail_mode` (atr|structure|hybrid) + `trail_lookback` are **in this tree** (`OPT_FIELDS`; live rows `'atr'`). Do not treat their presence as a licence to copy the rest of Ai.
 - Supervisor: `hour_risk_scales` **in this tree**. Scoring/models stay FX (no Ai DD-penalty score).
-- Still not here, do not port: `orb_retest`, Ai score formula, `autostart_mt5` / terminal watchdog, `stale_exit_ratio`.
+- `autostart_mt5` / wait are **in this tree** (defaults on). Still not here, do not port: `orb_retest`, Ai score formula.
 
 ### Variant `orj` → `D:\MicoFX Orj`
 - Same models/defaults/supervisor as FX lean core.

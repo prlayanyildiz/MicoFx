@@ -249,6 +249,26 @@ def _risk_block_key(reason: str) -> str:
     return "risk_limiti"
 
 
+def _signal_close_for_bar(bars: Any, bar_time: int) -> float | None:
+    """Close of the armed signal bar — not necessarily ``close[-1]``.
+
+    Deferred verify drains after evaluate→drain→entries; T+1 may already be
+    the live last close. Chase / fill_vs_signal_close must pin the send bar.
+    """
+    if bars is None:
+        return None
+    close = getattr(bars, "close", None)
+    if close is None or len(close) == 0:
+        return None
+    times = getattr(bars, "time", None)
+    bt = int(bar_time or 0)
+    if bt and times is not None and len(times) == len(close):
+        for i in range(len(times) - 1, -1, -1):
+            if int(times[i]) == bt:
+                return float(close[i])
+    return float(close[-1])
+
+
 def _ratio_percentile(counts: list[int], q: float) -> float | None:
     """Percentile of the bucketed tick/bar spread ratio, or None when empty.
 
@@ -1452,9 +1472,7 @@ class Engine:
         state.entry_block = "acildi"
         ticket = int(result.get("position", 0) or 0)
         fill_px = _fill_log_price(result, entry)
-        sig_close = None
-        if state.bars is not None and len(state.bars.close):
-            sig_close = float(state.bars.close[-1])
+        sig_close = _signal_close_for_bar(state.bars, booked_bar)
         note_fill = getattr(self.execution, "note_fill", None)
         if ticket and callable(note_fill):
             point = float(info.get("point") or 0)
@@ -3307,8 +3325,11 @@ class Engine:
                         f"{float(cfg.chase_max_atr):g})")
                     state.entry_block = "kovalama_asimi"
                     return
-            except Exception:
-                pass
+            except Exception as exc:
+                # Fail closed: a broken chase import must not open uncapped.
+                state.note = f"kovalama kontrol hatasi ({exc})"
+                state.entry_block = "kovalama_hata"
+                return
 
         # Held across the actual order_send + position bookkeeping so a
         # concurrent DELETE/magic-PATCH (web thread) cannot pass its own
@@ -3408,8 +3429,10 @@ class Engine:
                                     f"{vs / atr:.2f}xATR)")
                                 state.entry_block = "kovalama_asimi"
                                 return
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            state.note = f"kovalama kontrol hatasi ({exc})"
+                            state.entry_block = "kovalama_hata"
+                            return
             # Parallel-audit HIGH #1 (Gemini ACK 08.09): outer can_open ran
             # before the lock. Reload the book (+ forced account) and re-gate
             # so a deferred fill / sibling ticket cannot race past
@@ -3713,9 +3736,7 @@ class Engine:
         # Not ``note``: that name already holds the lot-sizing explanation this
         # method logs a few lines down. Rebinding it printed a bound method in
         # place of "risk %1.09 -> 0.515" on every fill.
-        sig_close = None
-        if state.bars is not None and len(state.bars.close):
-            sig_close = float(state.bars.close[-1])
+        sig_close = _signal_close_for_bar(state.bars, int(state.last_bar or 0))
         note_fill = getattr(self.execution, "note_fill", None)
         if ticket and callable(note_fill):
             # Fill-time facts the close path cannot reconstruct: the signal
