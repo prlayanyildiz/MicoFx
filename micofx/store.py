@@ -22,7 +22,9 @@ from .paths import DB_PATH, ensure_dirs, load_defaults
 RETIRED_PAYLOAD_KEYS = frozenset({
     "nr_lookback", "nr_buffer_atr", "nr_min_range_atr",
     "rp_lookback", "rp_threshold", "rp_smooth",
-    "kelt_mult", "kelt_lookback", "kelt_atr_mult",
+    # kelt_mult/lookback = pre-keltner_break leftovers; kelt_atr_mult is LIVE
+    # for keltner_break (07.09) and must NOT strip (dirty-rewrite loop).
+    "kelt_mult", "kelt_lookback",
     "stoch_extreme", "stoch_k", "stoch_d", "stoch_smooth",
 })
 

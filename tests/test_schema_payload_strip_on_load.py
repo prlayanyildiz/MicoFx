@@ -14,6 +14,8 @@ from micofx.store import RETIRED_PAYLOAD_KEYS, Store
 def test_retired_payload_keys_cover_deleted_families():
     for key in ("nr_lookback", "stoch_extreme", "rp_lookback", "kelt_mult"):
         assert key in RETIRED_PAYLOAD_KEYS
+    # Live keltner_break axis — stripping it dirties every symbol load.
+    assert "kelt_atr_mult" not in RETIRED_PAYLOAD_KEYS
 
 
 def test_load_strips_retired_and_rewrites(tmp_path, monkeypatch):
