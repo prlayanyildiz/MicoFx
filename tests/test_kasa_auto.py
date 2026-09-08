@@ -60,7 +60,7 @@ def test_equity_tiers_and_expanded_lot_ceiling():
     # Aggressive margin %95 reaches 1.78x
     mid_hi = _plan(eq=2350.0, marj=95.0)
     assert mid_hi["targets"]["lot_multiplier"] == 1.78
-    # High equity ($6000+) scales up toward expanded 2.2 ceiling
+    # High equity ($6000+) scales up toward expanded 2.5 ceiling
     top = _plan(eq=10500.0, marj=95.0)
-    assert top["targets"]["lot_multiplier"] == 2.20
+    assert top["targets"]["lot_multiplier"] == 2.50
 

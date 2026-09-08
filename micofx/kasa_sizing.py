@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 LOT_MULT_MIN = 0.3
-LOT_MULT_MAX = 2.2
+LOT_MULT_MAX = 2.5
 # Equity-tier lot at this margin% reads as 1.0× aggression.
 MARGIN_REF_PCT = 80.0
 RISK_PCT = 2.0

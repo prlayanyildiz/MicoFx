@@ -29,13 +29,15 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
 3. **Full capacity + full auto + dynamic growth sizing.** Goal is
    maximum useful throughput under honest WFO/fill gates and a hands-off
    loop (autopilot, quarantine reopt, calibrate, watches). Inline kasa
-   sizing scales dynamically with equity (`LOT_MULT_MAX = 2.2`,
-   expanded equity tiers), while `max_concurrent_risk_pct = 25%` and
+   sizing scales dynamically with equity (`LOT_MULT_MAX = 2.5`,
+   expanded equity tiers — `kasa_sizing.py` basamakları: under $2K=1.15-1.3x,
+   $2K-$3.5K=1.5x, $3.5K-$6K=1.75x, $8K≈1.95x, $10.5K=2.2x tier,
+   $13.5K+=2.5x tavan; Yellow ACK Cursor+Gemini 08.09),
+   while `max_concurrent_risk_pct = 25%` and
    symbol `max_positions` (1..5) allow high-edge scale-ins without
-   starving free margin. Until Thursday: continue with **Gemini
-   (Antigravity)** as the active peer; Claude joins the recurring loop
-   Thursday with Cursor. Push to GitHub when a peer-ACK’d package lands
-   (operator 07.09).
+   starving free margin. **Gemini (Antigravity)** is the active peer;
+   **Claude** joins NOW (operator directive 08.09 — do not defer to Thursday).
+   Push to GitHub when a peer-ACK'd package lands (operator 07.09).
 4. **Safety floor still binds the process:** one Python, live owns
    DB/MT5, Origin on writes, no second `mt5.initialize()`, no LLM in
    engine/optimizer/supervisor. Peer ACK does not waive these.
@@ -223,8 +225,9 @@ Fail-first: write the test, watch it fail, then implement.
   dividing ate baseline income on single-ticket fills, fixed 07.09 `406d3b2`),
   (4) book-wide `max_concurrent_risk_pct` (expanded to 25.0%, 07.09 Cursor ACK)
   and daily loss bounds remain the stack governor when several full tickets are open,
-  (5) no hedging (opposite side blocked). System `max_positions` and symbol `max_lot` /
-  `max_margin_pct` remain unread/400. Search still scores `max_open=1` for honest WFO.
+  (5) no hedging (opposite side blocked). **Symbol** `max_positions` (DB payload,
+  per-symbol 1-5) is live and read by the engine. **System POST**
+  `/api/system max_positions` returns 400 (HTTP-off). Search still scores `max_open=1` for honest WFO.
 - Symbol-specific MFE profit locks (07.09 evening Antigravity + Cursor ACK;
   earlier same-day 1.0–1.5 bands left ~$885 / 69 givebacks that peaked ≥0.70R
   then full-SL'd): `XAUUSD` (0.75→0.15 / 1.2→0.5), `NAS100` (0.70→0.15 / 1.1→0.4),
@@ -250,6 +253,10 @@ Fail-first: write the test, watch it fail, then implement.
   Walk-forward stays fill-next-open (zero variance).
 - `GET /api/ai` and `POST /api/logs/clear` are gone. Panel reads
   `STATE.ai`; Temizle is DOM-only. Do not restore the ring-wipe POST.
+- `rsi_length`, `stoch_length`, `smooth_k`, `smooth_d` are **NOT dead code**.
+  They drive `cache.stoch()` at `strategy.py:449` → `indicators.py:256`
+  (`stoch_rsi()`) → StochRSI oscillator panel display. Removing them breaks
+  the UI panel. (08.09 Gemini audit; confirmed alive.)
 - Autopsy R divides by `|entry âˆ’ original_sl|`. Do not rewrite pre-fix
   `sl`+`r=+1.0` rows; cash is the truth. Flatten rows before
   `fill["profit"]` have empty `profit` â€” **R is still valid**; do not
