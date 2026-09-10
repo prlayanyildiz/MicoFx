@@ -21,7 +21,7 @@ def _opt(cfg: SymbolConfig, *, force: bool = False) -> Optimizer:
     # Soft dwell only — hard settle off so F2 is visible.
     opt.store.get_setting.return_value = {"reopt_min_age_hours": 0.0}
     opt._force_apply = force
-    opt._beats_incumbent = lambda cfg, hold: True
+    opt._beats_incumbent = lambda *a, **k: True
     opt._generalises = lambda best, symbol: True
     return opt
 

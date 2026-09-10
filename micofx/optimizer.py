@@ -2524,7 +2524,7 @@ class Optimizer:
         # auto-applied over strictly stronger incumbents because nothing bare-
         # minimum-passing had anything to lose to. Back in, on real evidence
         # this time, not a stance.
-        if not self._beats_incumbent(cfg, hold):
+        if not self._beats_incumbent(cfg, hold, baseline):
             return "mevcut ayardan zayif"
         # Retention: a candidate can beat a weak/absent incumbent while still
         # having mostly evaporated out of sample - beating the incumbent says
@@ -2679,14 +2679,37 @@ class Optimizer:
         # Same bars the candidate was scored on, and free - it is in the report
         # the rejection is being written into. Nothing beats that as a
         # comparison, so it goes first.
-        if isinstance(baseline, dict):
-            same_run = baseline.get("holdout")
-            if isinstance(same_run, dict) and same_run.get("net_r") is not None:
-                return same_run, "ayni kosu"
-        fresh = self._fresh_incumbent_holdout(cfg)
-        if isinstance(fresh, dict) and fresh.get("net_r") is not None:
-            return fresh, "taze test"
+        measured = self._measured_incumbent(cfg, baseline)
+        if measured is not None:
+            return measured
         return self._incumbent_guard_holdout(cfg), "damga"
+
+    def _measured_incumbent(
+        self, cfg, baseline: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], str] | None:
+        """The incumbent as something actually measured, or None.
+
+        Split out from ``_flip_benchmark`` because the stamp fallback is not
+        always wanted. ``_beats_incumbent``'s unvalidated branch must treat
+        "no measurement" as "no bar at all" - an unvalidated stamp froze
+        NAS100 on a config thirty live days had already judged PF 0.50
+        (GAP-5), and falling back to it there would put that back.
+        """
+        # Either field is enough to count as measured: the two callers read
+        # different ones off the same Result block - F1/F2 compare ``net_r``,
+        # _beats_incumbent compares ``score`` - and a real block always
+        # carries both.
+        def _usable(block: Any) -> bool:
+            return (isinstance(block, dict)
+                    and (block.get("net_r") is not None
+                         or block.get("score") is not None))
+
+        if isinstance(baseline, dict) and _usable(baseline.get("holdout")):
+            return baseline["holdout"], "ayni kosu"
+        fresh = self._fresh_incumbent_holdout(cfg)
+        if _usable(fresh):
+            return fresh, "taze test"  # type: ignore[return-value]
+        return None
 
     def _incumbent_guard_was_charging(self, cfg, previous: dict[str, Any]) -> bool:
         """Whether the chosen incumbent benchmark was measured with costs on."""
@@ -2698,7 +2721,8 @@ class Optimizer:
             return True
         return False
 
-    def _beats_incumbent(self, cfg, hold: dict[str, Any]) -> bool:
+    def _beats_incumbent(self, cfg, hold: dict[str, Any],
+                         baseline: dict[str, Any] | None = None) -> bool:
         """Is this holdout at least as good as the live config's own holdout?
 
         Compared on ``Result.score`` - the same thin-sample and drawdown
@@ -2716,10 +2740,11 @@ class Optimizer:
             # Unvalidated stamp is not a bar (NAS100 GAP-5 +38 vs live PF
             # 0.50). Fresh same-window replay still counts if it pays
             # (GER40, same campaign, actually profitable).
-            fresh = self._fresh_incumbent_holdout(cfg)
-            if fresh is None:
+            # Measurement only. An unvalidated stamp is not a bar.
+            measured = self._measured_incumbent(cfg, baseline)
+            if measured is None:
                 return True
-            old_score = float(fresh.get("score", 0.0) or 0.0)
+            old_score = float(measured[0].get("score", 0.0) or 0.0)
             if old_score <= 0.0:
                 return True
             new_score = float(hold.get("score", 0.0) or 0.0)
@@ -2729,7 +2754,18 @@ class Optimizer:
                      f"(test skoru {new_score:.2f} < {old_score:.2f}), uygulanmadi.",
                      "OPT", cfg.symbol)
             return False
-        previous = self._incumbent_guard_holdout(cfg)
+        # Same three sources, best first, as the flip gates (_flip_benchmark).
+        # This gate had the stale-stamp disease too, one layer down: US30's
+        # keltner_break candidate cleared F6 and F1 on 11.09 and died here,
+        # "mevcut ayardan zayif", at +21.9R holdout against an incumbent the
+        # same run measured at -17.9R. The tail below already preferred a
+        # replay, but ``allow_fetch=False`` returns None on a narrow run whose
+        # bars were never cached, and then the stamp decided.
+        previous, bench_name = self._flip_benchmark(cfg, baseline)
+        # Measured under today's regime - this sweep's own baseline, or a
+        # replay _fresh_incumbent_holdout only produces while costs are
+        # charged - as opposed to a stamp carried over from another run.
+        measured_now = bench_name in ("ayni kosu", "taze test")
         age_days = (time.time() - float(getattr(cfg, "opt_updated_at", 0.0) or 0.0)) / 86400.0
         if not previous or age_days > self.INCUMBENT_GUARD_DAYS:
             return True
@@ -2799,6 +2835,15 @@ class Optimizer:
         #     the incumbent's honest score is the stricter bar. Keep comparing;
         #     skipping here would wave the inflated one through.
         was_charging = self._incumbent_guard_was_charging(cfg, previous)
+        if measured_now:
+            # Same cost regime, same spread scale, same bars - the benchmark
+            # was produced now, not carried over. There is no assumption to
+            # have moved, so neither waiver applies and the comparison stands.
+            # (_incumbent_guard_was_charging answers this by identity against
+            # the stamp's own sub-block, which a measurement is not, so it
+            # cannot answer it for one.)
+            was_charging = charging
+            old_scale = new_scale
         if was_charging and not charging:
             pass
         elif was_charging != charging:
@@ -2817,16 +2862,18 @@ class Optimizer:
         # Stamp and candidate are not the same window (JPN225 160.64 vs a
         # same-slice live replay). Replay the live config here; keep the
         # stamp only when that replay is missing (no client, thin bars).
-        fresh = self._fresh_incumbent_holdout(cfg)
-        if fresh is not None:
-            old_score = float(fresh.get("score", 0.0) or 0.0)
-            if old_score <= 0.0:
-                return True
+        if not measured_now:
+            replay = self._fresh_incumbent_holdout(cfg)
+            if replay is not None:
+                old_score = float(replay.get("score", 0.0) or 0.0)
+                if old_score <= 0.0:
+                    return True
         new_score = float(hold.get("score", 0.0) or 0.0)
         if new_score >= old_score:
             return True
         LOG.emit(f"{cfg.symbol}: yeni aday mevcut ayardan zayif "
-                 f"(test skoru {new_score:.2f} < {old_score:.2f}), uygulanmadi.",
+                 f"(test skoru {new_score:.2f} < {old_score:.2f}, mevcut "
+                 f"{bench_name}), uygulanmadi.",
                  "OPT", cfg.symbol)
         return False
 

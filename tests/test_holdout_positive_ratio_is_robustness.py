@@ -47,7 +47,7 @@ def test_f1_pos_ratio_skips_legacy_one_point_zero():
     opt.store.opt_params.return_value = {"min_positive_ratio": 0.6}
     opt.store.get_setting.return_value = {"reopt_min_age_hours": 0.0}
     opt._force_apply = False
-    opt._beats_incumbent = lambda cfg, hold: True
+    opt._beats_incumbent = lambda *a, **k: True
     opt._generalises = lambda best, symbol: True
     best = {
         "score": 10.0,
@@ -87,7 +87,7 @@ def test_f1_pos_ratio_blocks_weaker_robustness_stamp():
     opt.store.opt_params.return_value = {"min_positive_ratio": 0.6}
     opt.store.get_setting.return_value = {"reopt_min_age_hours": 0.0}
     opt._force_apply = False
-    opt._beats_incumbent = lambda cfg, hold: True
+    opt._beats_incumbent = lambda *a, **k: True
     opt._generalises = lambda best, symbol: True
     best = {
         "score": 10.0,

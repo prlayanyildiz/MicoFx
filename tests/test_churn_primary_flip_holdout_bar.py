@@ -20,7 +20,7 @@ def _opt(cfg: SymbolConfig) -> Optimizer:
     opt.store.opt_params.return_value = {"min_positive_ratio": 0.6}
     opt.store.get_setting.return_value = {"reopt_min_age_hours": 0.0}
     opt._force_apply = False
-    opt._beats_incumbent = lambda cfg, hold: True
+    opt._beats_incumbent = lambda *a, **k: True
     opt._generalises = lambda best, symbol: True
     return opt
 

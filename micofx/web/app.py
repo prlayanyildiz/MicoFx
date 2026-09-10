@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-from .. import APP_NAME, __version__
+from .. import APP_NAME, __version__, backtest
 from ..engine import Engine
 from ..holdout_cost import capture_book
 from ..logbus import LOG
@@ -208,6 +208,13 @@ _OPT_PARAM_BOUNDS = {
     "refine_rounds": (0, 20, True),
     # 0 = no calendar cap; bar_cap alone binds (optimizer._plan_symbol).
     "lookback_days": (0, 3650, True),
+    # F6's robustness floor. Opened to the panel 11.09 because it was pinned
+    # at 0.7 in the store, unreachable from anywhere, and refusing every
+    # candidate the book produced. The floor here is what keeps it a gate: a
+    # session cookie may tune it, not switch it off. backtest.walk_forward's
+    # own default is 0.6 and the panel min matches it downward to 0.3, the
+    # value field_help has always advertised as the low end.
+    "min_positive_ratio": (0.3, 1.0, False),
 }
 
 
@@ -591,6 +598,16 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
 # ordinary losing day for XAUUSD is not one for SpotBrent - not a quiet edit.
 _OPERATOR_OPT_FIELDS = frozenset({
     "lookback_days", "refine_rounds", "max_combos", "timeframes",
+    # Which families the search runs, and how robust a candidate's holdout
+    # has to be. Both were hands-off, both were pinned in the store to values
+    # nothing could change (Store.opt_params merges {**shipped, **stored}, so
+    # editing defaults.json does not reach a live book - the same trap the
+    # note below records for grid axes), and between them they were the
+    # reason no search applied anything: strategies held 5 of the 7 shipped
+    # families, and min_positive_ratio held 0.7. Bounded and validated below;
+    # the operator gets the dial, a session cookie still cannot remove the
+    # gate or invent a family.
+    "strategies", "min_positive_ratio",
     # Charged expectancy ranking (Claude Fix B / 03.09). gap_freq stayed
     # legal; costed_e prefers validation E once n clears min_trades.
     "selection_metric",
@@ -708,6 +725,30 @@ def _reject_internal_fields(patch: dict[str, Any]) -> None:
     found = [k for k in _INTERNAL_ONLY_FIELDS if k in patch]
     if found:
         raise HTTPException(400, f"{', '.join(found)} disaridan yazilamaz (motor ici alan)")
+
+
+def _positive_ratio_note(value: float) -> str:
+    """What ``min_positive_ratio`` will actually mean, when it is not a value.
+
+    The ratio is ``wins / HOLDOUT_ROBUST_PARTS`` over equal holdout
+    sub-windows, so with the shipped 6 parts it only ever takes 0, 1/6, 2/6,
+    ... 1. A floor between two of those rungs silently rounds up to the next
+    one: the store held 0.7, which is not 70% of anything - it is 5/6, 83%.
+    Every candidate at 4/6 died against a bar the operator never chose, which
+    is most of why no search applied anything before 11.09.
+    """
+    parts = int(backtest.HOLDOUT_ROBUST_PARTS)
+    if parts <= 0:
+        return ""
+    steps = [i / parts for i in range(parts + 1)]
+    if any(abs(value - s) < 1e-9 for s in steps):
+        return ""
+    effective = next((s for s in steps if s + 1e-9 >= value), 1.0)
+    wins = int(round(effective * parts))
+    return (f"min_positive_ratio={value:g} bir ara deger - holdout {parts} "
+            f"alt-pencereye bolunuyor, yani gercekte {wins}/{parts} "
+            f"(%{effective * 100:.0f}) uygulanacak. Tam degerler: "
+            + ", ".join(f"{s:g}" for s in steps))
 
 
 def _reject_hands_off_fields(patch: dict[str, Any], allowed: frozenset[str]) -> None:
@@ -2190,6 +2231,19 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # risk as the symbol-level fields. strategy_grids/grid nest their
         # numeric axes inside {strategy: {param: [values...]}}, so this needs
         # the recursive check, not the flat top-level-only one.
+        if "strategies" in body:
+            raw = body["strategies"]
+            if not isinstance(raw, list) or not raw:
+                raise HTTPException(400, "strategies bos olamaz")
+            names = [str(x).strip() for x in raw]
+            unknown = [x for x in names if x not in STRATEGIES]
+            if unknown:
+                raise HTTPException(
+                    400, f"strategies gecersiz: {', '.join(unknown)}")
+            # STRATEGIES is already exactly the living set - retired families
+            # are deleted from it, not flagged - so the unknown check above is
+            # the whole guard.
+            body["strategies"] = names
         _reject_non_finite_deep(body)
         _validate_risk_bounds(body, _OPT_PARAM_BOUNDS)
         metric = body.get("selection_metric")
@@ -2215,7 +2269,18 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             for value in values:
                 _validate_risk_bounds({axis: value}, _INDICATOR_PERIOD_BOUNDS,
                                       label="optimizer grid")
-        return {"ok": True, "params": store.save_opt_params(body)}
+        saved = store.save_opt_params(body)
+        out: dict[str, Any] = {"ok": True, "params": saved}
+        if "min_positive_ratio" in body:
+            # The ratio is wins/HOLDOUT_ROBUST_PARTS, so it only ever takes
+            # six values. 0.7 is not one of them: it silently means 5/6, and
+            # the operator who typed "70%" got 83%. Say so rather than let
+            # the next person rediscover it from a night of empty runs.
+            note = _positive_ratio_note(float(body["min_positive_ratio"]))
+            if note:
+                out["note"] = note
+                LOG.emit(note, "OPT")
+        return out
 
     @app.post("/api/opt/params/reset")
     def reset_opt_params() -> dict[str, Any]:

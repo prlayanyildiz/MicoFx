@@ -42,7 +42,7 @@ def _opt(cfg: SymbolConfig, *, charging: bool = True) -> Optimizer:
     opt.store.opt_params.return_value = {"min_positive_ratio": 0.6}
     opt.store.get_setting.return_value = {"reopt_min_age_hours": 0.0}
     opt._force_apply = False
-    opt._beats_incumbent = lambda cfg, hold: True
+    opt._beats_incumbent = lambda *a, **k: True
     opt._generalises = lambda best, symbol: True
     return opt
 
@@ -233,3 +233,61 @@ def test_the_benchmark_falls_back_rather_than_inventing_a_number():
     block, name = opt._flip_benchmark(cfg)
     assert block["net_r"] == -22.6
     assert name == "taze test"
+
+
+# ------------------------------------- the same disease, one gate further in
+
+def test_beats_incumbent_reads_the_same_benchmark():
+    """US30, 11.09 00:29. The candidate cleared F6 and F1 and died here:
+    "mevcut ayardan zayif", at +21.9R holdout against an incumbent the same
+    run measured at -17.9R.
+
+    The tail of _beats_incumbent already preferred a replay over the stamp,
+    but ``_holdout_costed(allow_fetch=False)`` returns None on a narrow run
+    whose bars were never cached - and then the stamp decided anyway.
+    """
+    cfg = _nas100()
+    opt = Optimizer.__new__(Optimizer)
+    opt.store = MagicMock()
+    opt.store.system = MagicMock(charge_costs=True)
+    opt._spread_scale = lambda symbol: 1.0
+    opt._fresh_incumbent_holdout = lambda c: None      # narrow run, no bars
+    cfg.opt_summary["holdout"] = {"net_r": 68.8, "score": 40.0}
+
+    # Stamp alone: a candidate scoring 8 loses to a stamp of 40.
+    assert opt._beats_incumbent(cfg, {"score": 8.0}) is False
+    # With the sweep's own measurement of the incumbent, it wins.
+    assert opt._beats_incumbent(
+        cfg, {"score": 8.0},
+        {"holdout": {"net_r": -17.9, "score": -6.0}}) is True
+
+
+def test_a_measured_benchmark_skips_the_assumption_waivers():
+    """The two "measured under a different assumption" escapes exist for a
+    stamp carried over from another run. A number produced in this sweep, or
+    replayed now, shares every assumption by construction - and
+    _incumbent_guard_was_charging answers by identity against the stamp's own
+    sub-block, so it cannot answer for a measurement at all."""
+    import inspect
+
+    src = inspect.getsource(Optimizer._beats_incumbent)
+    assert "measured_now" in src
+    assert "if measured_now:" in src
+    assert "was_charging = charging" in src
+
+
+def test_an_unvalidated_stamp_is_still_not_a_bar():
+    """_measured_incumbent exists precisely so this branch cannot fall back
+    to the stamp: an unvalidated one froze NAS100 on a config thirty live
+    days had already judged PF 0.50."""
+    cfg = _nas100()
+    cfg.validated = False
+    cfg.opt_summary["validated"] = False
+    cfg.opt_summary["holdout"] = {"net_r": 500.0, "score": 500.0}
+    opt = Optimizer.__new__(Optimizer)
+    opt.store = MagicMock()
+    opt.store.system = MagicMock(charge_costs=True)
+    opt._spread_scale = lambda symbol: 1.0
+    opt._fresh_incumbent_holdout = lambda c: None
+    assert opt._beats_incumbent(cfg, {"score": 1.0}) is True
+    assert opt._measured_incumbent(cfg, None) is None
