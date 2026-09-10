@@ -13,6 +13,18 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 DB_PATH = DATA_DIR / "micofx.db"
 DEFAULTS_PATH = CONFIG_DIR / "defaults.json"
 
+# Where the live panel answers. Twenty-eight ops scripts under scripts/ each
+# carried their own ``PANEL = "http://127.0.0.1:8900"`` line - one address,
+# twenty-eight places to miss if it ever moves, and nothing that would fail if
+# they disagreed. It lives here now and they import it.
+#
+# config/defaults.json's web_host / web_port are what the server actually
+# binds; these constants are what the scripts dial. The two must agree, and
+# tests/test_one_panel_address.py is what makes them.
+WEB_HOST = "127.0.0.1"
+WEB_PORT = 8900
+PANEL = f"http://{WEB_HOST}:{WEB_PORT}"
+
 
 _LEGACY = [(DATA_DIR / "micoai.db", DB_PATH),
            (LOG_DIR / "micoai.log", LOG_DIR / "micofx.log")]

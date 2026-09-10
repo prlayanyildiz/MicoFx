@@ -35,7 +35,10 @@ from micofx.paths import DB_PATH, LOG_DIR  # noqa: E402
 
 PANEL = "http://127.0.0.1:8900"
 ORIGIN = PANEL
-BOOK = ("BTCUSD", "GER40", "JPN225", "NAS100", "SpotBrent", "US30", "XAUUSD")
+# The traded book. JPN225 and BTCUSD were deleted 10.09 and stay deleted;
+# this tuple must match config/defaults.json's shipped list, which
+# tests/test_the_book_is_spelled_once.py checks.
+BOOK = ("GER40", "NAS100", "SpotBrent", "US30", "XAUUSD")
 BRIDGE = ROOT / ".bridge"
 
 

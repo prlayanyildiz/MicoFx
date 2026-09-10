@@ -484,7 +484,7 @@ Typical defaults:
 
 Groups: `forex`, `index`, `commodity`, `crypto`.
 
-Starter symbols (20): EURUSD, GBPUSD, AUDUSD, USDCAD, USDCHF, GER40, FRA40, UK100, NAS100, US30, US500, HK50, HSTECH, JPN225, AUS200, XAUUSD, SpotBrent, NatGas, BTCUSD, ETHUSD — each with unique magic `99000x`.
+Starter symbols (5): GER40, NAS100, SpotBrent, US30, XAUUSD — each with a unique magic `99001x`/`99002x`. The 20-name starter list this section used to carry was three books out of date; JPN225 and BTCUSD left 10.09 (operator: stay deleted) and are in `tests/retired_lexicon.py: RETIRED_SYMBOLS`, so seeding cannot bring them back.
 
 Group presets set lot floors (FX/commodity/crypto 0.01, index 0.10), sessions, ADX floors, the ATR stop/trail triple, commissions and cooldowns.
 

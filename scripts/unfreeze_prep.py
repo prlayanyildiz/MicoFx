@@ -15,7 +15,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
 OUT_PATH = ROOT / ".bridge" / "UNFREEZE_PREP.json"
-BOOK = ("BTCUSD", "GER40", "JPN225", "NAS100", "SpotBrent", "US30", "XAUUSD")
+# The traded book. JPN225 and BTCUSD were deleted 10.09 and stay deleted;
+# this tuple must match config/defaults.json's shipped list, which
+# tests/test_the_book_is_spelled_once.py checks.
+BOOK = ("GER40", "NAS100", "SpotBrent", "US30", "XAUUSD")
 FILL_FOCUS = ("GER40", "US30", "NAS100")
 
 
