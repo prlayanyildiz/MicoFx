@@ -183,8 +183,10 @@ Fail-first: write the test, watch it fail, then implement.
 - **Yellow** (peer ACK): supervisor knobs, AI soft-size, session widen,
   opt run/apply, unfreeze checklist, concurrent/lot bumps.
   **Red** (peer ACK + explicit risk note in the brief): leverage,
-  account_lock rebind, daily_loss, live flatten-all. Operator chat
-  still overrides peers.
+  daily_loss, live flatten-all, and anything that changes *which* MT5
+  account or which symbols trade (the account lock that used to make the
+  first of those a controlled step is gone — see charter item 5).
+  Operator chat still overrides peers.
 - HTTP writes match the panel. Symbol POST: sessions +
   `enabled` / `group` / `broker_symbol`.
   `partial_at_r` (0 only, F44).

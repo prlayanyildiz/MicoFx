@@ -55,6 +55,12 @@ RETIRED_SYMBOLS = (
     "US500",
     "GOLD_PERP",
     "EURUSD",
+    # Deleted from the panel 10.09 and staying deleted (operator: "silinmis
+    # olarak kalsin"). They were still in the shipped starter book, so one
+    # "varsayilana don" would have rebuilt the portfolio the operator had
+    # just cut - the same hole this tuple was created for on 05.09.
+    "JPN225",
+    "BTCUSD",
 )
 
 # Nearby window contains any of these → the line is documenting removal, not
