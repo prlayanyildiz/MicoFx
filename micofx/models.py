@@ -801,7 +801,7 @@ class SystemConfig:
     # turning backups off a one-click change in the panel instead of a Task
     # Scheduler edit that needs a UAC prompt and cannot be reversed from the
     # UI. Off is a deliberate state, not a failure: the task exits 0.
-    backup_enabled: bool = True
+    backup_enabled: bool = False
     # Deliberately a path that exists on every Windows machine. A drive letter
     # that only exists here (D:, or a USB stick that is not plugged in) turns
     # the nightly backup into a nightly crash on any other install, so the

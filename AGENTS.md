@@ -176,6 +176,16 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
 - Hands-off keys (system plumbing, cost toggles, AI knobs, strategy guts)
   return **400** on POST. Search `apply()` still writes `OPT_FIELDS`.
   Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
+- **No automatic backup** (operator 10.09: "backup.py surecini bastan sona
+  iptal edelim... bununla alakali da surec calismasin"). The
+  `MicoFX Aksam Yedegi` scheduled task is unregistered, `KUR.ps1` step 5 no
+  longer creates it, and `backup_enabled` ships `false`. Do not re-add the
+  task or flip the default back unasked.
+  What it costs, recorded where the decision is: `data/micofx.db` is not in
+  Git, so every symbol config, optimiser result and supervisor verdict now
+  exists in **one copy**. `backup.py` stays in the tree and still works run
+  by hand; nothing schedules it. Pinned by
+  `tests/test_installer_no_longer_creates_the_backup_task.py`.
 - **7 families.** `ichimoku` retired 02.09 (no symbol/TF holdout win).
   `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` retired 01.09
   (flip/zero-win class). `nr_break` / `roc_pace` **fully deleted** 03.09

@@ -74,49 +74,24 @@ uygulanir; degilse mevcut ayar korunur.
 | `MICOFX.bat` · `scripts/micofx.ps1` | Tek komut: start / stop / restart / sync / bridge |
 | `KUR.bat` · `KUR.ps1` | Tek kurulum (`MICOFX install`) |
 | `start.bat` · `stop.bat` · `start_console.bat` | Kod path'i (restart.bat app.py) |
-| `backup.py` | Aksam yedegi (Windows Gorev Zamanlayici) |
+| `backup.py` | Yedekleyici - **zamanlanmis gorev yok**, yalnizca elle |
 | `docs/` | [Kullanim](docs/KULLANIM.md) · [Kurulum ayrintilari](docs/KURULUM.md) |
 | `MASTER_PROMPT.md` | Gelistirici / agent kaynagi |
 
-## Yedek
+## Yedek — KAPALI (operator karari 10.09)
 
-`backup.py` her aksam Windows Gorev Zamanlayici ile calisir ve projeyi
-zaman damgali bir zip'e alir. Ayar veritabani (`data/micofx.db`) zip'e ham
-kopya olarak degil, sqlite'in kendi online-backup API'siyle **tutarli bir
-anlik goruntu** olarak girer - bot yazarken alinsa bile restore edilebilir.
+Otomatik yedek **yok**. `MicoFX Aksam Yedegi` gorevi kaldirildi, `KUR.ps1`
+artik onu kurmuyor ve `backup_enabled` varsayilani `false`.
 
-Sistem sekmesinden ayarlanir:
+Bunun bedeli, kararin durdugu yerde yazili olsun: **`data/micofx.db` Git'e
+girmez.** Her sembol ayari, her optimizasyon sonucu ve AI denetleyicinin
+ogrendigi her sey yalnizca o dosyada durur ve artik **tek kopya**. GitHub
+kodu tutar, bunlarin hicbirini tutmaz.
 
-| Ayar | Ne |
-|---|---|
-| `backup_enabled` | Ana anahtar. Kapatilirsa gece gorevi calisir ama hicbir sey yazmaz |
-| `backup_dir` | Birincil hedef. Varsayilan `C:\MicoFX_Yedek` - her makinede var olan bir yol |
-| `backup_dir_secondary` | Ikincil hedef; bos birakilirsa kapali. Ayni zip buraya da kopyalanir |
-| `backup_keep` | Her iki hedefte tutulacak en yeni yedek sayisi |
+`backup.py` depoda duruyor ve elle calistirilirsa hala calisir - ama
+`backup_enabled` kapali oldugu icin hicbir sey yazmadan cikar. Yedek istersen
+once o anahtari ac (hands-off alan; panelden yazilmaz).
 
-Yedek konumu bu makinede olmayan bir surucuyu gosteriyorsa (D: yok, USB
-takili degil, ag surucusu kopuk) yedek alinmaz ve gorev **okunabilir bir hata**
-verir - once yolu duzeltin, ya da otomatik yedegi kapatin.
-
-**Ikinci hedefi mutlaka farkli bir FIZIKSEL diske ya da bir bulut klasorune
-verin.** `C:` ve `D:` cogu makinede tek bir SSD'nin iki bolumudur - surucu
-harfleri yedeklilik gibi gorunur ama degildir, disk olurse ikisi de gider.
-Bu proje icin onemi ekstra buyuk: `data/micofx.db` Git'e girmez, yani her
-sembol ayari, her optimizasyon sonucu ve AI denetleyicinin ogrendigi her sey
-sadece o dosyada durur. GitHub kodu tutar, bunlarin hicbirini tutmaz.
-
-Geri yuklerken ayar veritabanini **yalnizca** arsiv icindeki kanonik yoldan,
-`data/micofx.db`'den alin. "Adi micofx.db ile biten ilk dosya" diye aramayin:
-gecmiste test artigi kopyalar (`.pytest_tmp/...`) alfabetik siralamada once
-geliyordu. Yedekleyici bu klasorleri artik disarida birakir ve arsivde ikinci
-bir micofx.db gorurse uyarir, ama operatorun kurali sudur - tek dogru yol
-`data/micofx.db`.
-
-Gece gorevi **Interactive** olarak calisir: bilgisayar kilit ekranindayken
-sorun yok, ama oturumu tamamen kapattiysaniz o gece yedek alinmaz. Isterseniz
-Gorev Zamanlayici > "MicoFX Aksam Yedegi" > Ozellikler > **"Kullanici oturum
-acmis olsun ya da olmasin calistir"** secebilirsiniz; bu Windows'a sifrenizi
-kaydettirir, o yuzden karar sizin.
 
 ## Daha fazla
 

@@ -242,71 +242,18 @@ $cleaned = 0
 foreach ($d in $stale) { $cleaned += Remove-StaleShortcuts $d $Desktop }
 if ($cleaned -gt 0) { Say "  $cleaned eski/cift kisayol temizlendi." "Green" }
 
-# --------------------------------------------------- [5] Gece yedegi gorevi
-Step 5 "Aksam yedegi gorevi kuruluyor..."
-# README yedegi calisan bir sey gibi anlatiyor ("backup.py her aksam Windows
-# Gorev Zamanlayici ile calisir"), panel `backup_enabled` ile ana anahtarini
-# gosteriyor, models.py "The Windows task still fires" diyor - ve hicbir sey
-# o gorevi kurmuyordu. docs/KURULUM.md, sifirdan kurulum klavuzu, yedekten hic
-# soz etmiyor. Yani kilavuzu bastan sona uygulayan bir makinede yedek YOKTU ve
-# her belge oldugunu soyluyordu.
+# ------------------------------------------- [5] Gece yedegi - KALDIRILDI
+# Operator 10.09: "backup.py surecini bastan sona iptal edelim, bununla
+# alakali da surec calismasin". The "MicoFX Aksam Yedegi" scheduled task is
+# unregistered on this machine and this step no longer creates it, so a
+# reinstall cannot bring it back.
 #
-# Bedeli en agir yerde: data/micofx.db Git'e girmez. Her sembol ayari, her
-# optimizasyon sonucu ve denetleyicinin ogrendigi her sey yalnizca orada
-# durur - README'nin kendi ifadesiyle "GitHub kodu tutar, bunlarin hicbirini
-# tutmaz".
-#
-# Interactive olarak kurulur (README bunu boyle tarif ediyor): yonetici hakki
-# istemez, kilit ekraninda calisir, oturum tamamen kapaliysa o gece atlar.
-$TaskName = "MicoFX Aksam Yedegi"
-$queryRc = Invoke-Native { schtasks /query /tn "$TaskName" }
-if ($queryRc -eq 0) {
-    Say "  Zaten var, atlaniyor." "Green"
-} else {
-    # Ayni yorumlayici, ayni gerekce: konsolsuz olan, ki gece bir pencere
-    # acilmasin. Tirnaklar schtasks'in kendi ayristiricisi icin.
-    $backupExe = Join-Path $Venv "Scripts\pythonw.exe"
-    if (-not (Test-Path -LiteralPath $backupExe)) { $backupExe = $VenvPy }
-    $action = '"' + $backupExe + '" "' + (Join-Path $Root "backup.py") + '"'
-    $createRc = Invoke-Native { schtasks /create /tn "$TaskName" /tr $action /sc daily /st 22:00 /f }
-    if ($createRc -eq 0) {
-        Say "  Kuruldu - her aksam 22:00." "Green"
-        Say "  Hedef klasor ve ana anahtar panelden (Sistem sekmesi) degistirilir."
-    } else {
-        # Kurulumu dusurmez: yedek olmadan da uygulama calisir, ama bunu
-        # sessizce gecmek README'nin verdigi sozu tekrar bosa cikarir.
-        Say "  Gorev kurulamadi - yedek OTOMATIK ALINMAYACAK." "Yellow"
-        Say "  Gorev Zamanlayici'da elle olusturun:" "Yellow"
-        Say "    $action" "Yellow"
-    }
-}
-
-# Gorevin var olmasi ile is yapmasi ayri seyler - 8. adim test suite icin ayni
-# ayrimi yapiyor. 17-18.08'de gorev "Ready" gorunuyor, her gece koşuyor ve 1
-# donuyordu: pythonw altinda stdout yok, ilk operator satiri betikten disari
-# hata firlatiyordu. Tek kayit gorev cikis koduydu, ona da kimse bakmiyordu.
-# Bir kez calistirip logdan dogrulamak bunu kurulum aninda yakalar.
-$backupLog = Join-Path $Root "logs\yedek.log"
-$before = if (Test-Path -LiteralPath $backupLog) { (Get-Item -LiteralPath $backupLog).Length } else { -1 }
-$runRc = Invoke-Native { schtasks /run /tn "$TaskName" }
-if ($runRc -ne 0) {
-    Say "  Gorev elle baslatilamadi - yedegi bir kez kendiniz calistirip bakin." "Yellow"
-} else {
-    $ok = $false
-    foreach ($i in 1..30) {
-        Start-Sleep -Seconds 2
-        if (Test-Path -LiteralPath $backupLog) {
-            if ((Get-Item -LiteralPath $backupLog).Length -gt $before) { $ok = $true; break }
-        }
-    }
-    if ($ok) {
-        Say "  Dogrulandi: gorev calisti ve loga yazdi." "Green"
-    } else {
-        Say "  GOREV KOSTU AMA LOGA YAZMADI - yedek alinmiyor olabilir." "Yellow"
-        Say "  Elle calistirip ciktiya bakin:" "Yellow"
-        Say ("    " + $VenvPy + " " + (Join-Path $Root "backup.py")) "Yellow"
-    }
-}
+# What that costs, stated where the decision lives: data/micofx.db is not in
+# Git. Every symbol config, every optimiser result and everything the
+# supervisor has learned exists only in that file. There is no automatic copy
+# of it any more. backup.py itself is still in the tree and still works if it
+# is run by hand - nothing schedules it.
+Step 5 "Aksam yedegi: operator karariyla kapali (gorev kurulmuyor)."
 
 # ------------------------------------------------------------------ [6] Git
 Step 6 "Git kimligi ve GitHub erisimi..."

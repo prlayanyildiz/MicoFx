@@ -159,25 +159,15 @@ izin ver" kapali olabilir (bkz. adim 3).
 
 ---
 
-## Yedek gorevi
+## Yedek gorevi — YOK (operator karari 10.09)
 
-`KUR.bat` kurulum sirasinda **"MicoFX Aksam Yedegi"** adinda bir Gorev
-Zamanlayici gorevi olusturur; her aksam 22:00'de `backup.py` calisir ve projeyi
-zaman damgali bir zip'e alir.
+`KUR.bat` artik yedek gorevi **kurmuyor**. `MicoFX Aksam Yedegi` bu
+makinede kaldirildi ve `backup_enabled` varsayilani `false`.
 
 Bunun onemi: `data/micofx.db` **Git'e girmez**. Her sembol ayari, her
-optimizasyon sonucu ve AI denetleyicinin ogrendigi her sey yalnizca o dosyada
-durur - GitHub kodu tutar, bunlarin hicbirini tutmaz.
+optimizasyon sonucu ve AI denetleyicinin ogrendigi her sey yalnizca o
+dosyada durur - GitHub kodu tutar, bunlarin hicbirini tutmaz. Yani o
+dosyanin artik otomatik kopyasi yok; tek kopya.
 
-Kontrol edin (kurulumdan sonra bir kez):
-
-```
-schtasks /query /tn "MicoFX Aksam Yedegi"
-```
-
-Gorunmuyorsa kurulum onu olusturamamistir - KUR.bat ciktisinda sari renkli bir
-uyari ve elle olusturmak icin gereken komut satiri yazar.
-
-Hedef klasor (`backup_dir`), ikinci hedef ve ana anahtar (`backup_enabled`)
-panelin **Sistem** sekmesinden ayarlanir; gorevin kendisine dokunmak gerekmez.
-Ayrintilar icin [README](../README.md#yedek).
+Elle yedek istersen: once `backup_enabled`'i ac (hands-off alan,
+panelden yazilmaz), sonra venv python'u ile `backup.py`'yi calistir.
