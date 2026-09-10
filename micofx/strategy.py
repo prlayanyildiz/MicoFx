@@ -679,8 +679,8 @@ def _channel_break(cache: IndicatorCache, p: Params) -> Signals:
     regime = _regime(p, adx_series, size)
 
     window = max(2, int(p.chan_lookback))
-    _, hi = ind.rolling_min_max(cache.high, window)
-    lo, _ = ind.rolling_min_max(cache.low, window)
+    hi = ind.rolling_max(cache.high, window)
+    lo = ind.rolling_min(cache.low, window)
     # Shift so bar i is compared against the window ending at i-1.
     prev_hi = np.roll(hi, 1)
     prev_lo = np.roll(lo, 1)
@@ -813,8 +813,8 @@ def _sweep_fade(cache: IndicatorCache, p: Params) -> Signals:
     t3, k, d, atr_series, _ = _common(cache, p)
     adx_series = cache.adx(p.adx_period)
     w = max(2, int(p.sweep_lookback))
-    lo, _ = ind.rolling_min_max(low, w)
-    _, hi = ind.rolling_min_max(high, w)
+    lo = ind.rolling_min(low, w)
+    hi = ind.rolling_max(high, w)
     prev_lo = np.roll(lo, 1)
     prev_hi = np.roll(hi, 1)
     prev_lo[0] = -np.inf

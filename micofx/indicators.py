@@ -113,6 +113,44 @@ def rolling_min_max(src: np.ndarray, length: int) -> tuple[np.ndarray, np.ndarra
     return lo, hi
 
 
+def _rolling_one_side(src: np.ndarray, length: int, *, high: bool) -> np.ndarray:
+    """One side of ``rolling_min_max``, for callers that only want one.
+
+    Both breakout families asked for the pair twice and threw half of each
+    answer away:
+
+        _, hi = rolling_min_max(cache.high, window)
+        lo, _ = rolling_min_max(cache.low, window)
+
+    That is four windowed reductions over 90,000 bars to use two. The pair
+    function stays for stoch, which needs both of one series.
+    """
+    length = max(1, int(length))
+    n = src.size
+    out = np.empty(n, dtype=np.float64)
+    if n == 0:
+        return out
+    head = min(length - 1, n)
+    accumulate = np.maximum.accumulate if high else np.minimum.accumulate
+    out[:head] = accumulate(src[:head])
+    if n >= length:
+        win = sliding_window_view(src, length)
+        out[length - 1:] = win.max(axis=1) if high else win.min(axis=1)
+    return out
+
+
+def rolling_max(src: np.ndarray, length: int) -> np.ndarray:
+    """Trailing window maximum (expanding warmup), same values as
+    ``rolling_min_max(src, length)[1]``."""
+    return _rolling_one_side(src, length, high=True)
+
+
+def rolling_min(src: np.ndarray, length: int) -> np.ndarray:
+    """Trailing window minimum (expanding warmup), same values as
+    ``rolling_min_max(src, length)[0]``."""
+    return _rolling_one_side(src, length, high=False)
+
+
 def rolling_rank(src: np.ndarray, window: int) -> np.ndarray:
     """Fraction of the trailing window each value exceeds, in 0..1.
 
