@@ -2040,6 +2040,7 @@ class Optimizer:
             cfg, best,
             strategy=str(report.get("strategy") or ""),
             timeframe=str(report.get("timeframe") or ""),
+            baseline=report.get("baseline"),
         )
         if self._cancel.is_set():
             # Harvest still close_out()s symbols whose last sweep already
@@ -2349,7 +2350,8 @@ class Optimizer:
         return ""
 
     def reject_reason(self, cfg, best: dict[str, Any],
-                      strategy: str = "", timeframe: str = "") -> str:
+                      strategy: str = "", timeframe: str = "",
+                      baseline: dict[str, Any] | None = None) -> str:
         """Why this candidate may not replace the live config; "" means it may.
 
         Same gates as before in the same order - this only names them, so the UI
@@ -2443,7 +2445,7 @@ class Optimizer:
                 # material holdout jump before rewriting the live row.
                 if age_h < self.PRIMARY_FLIP_DWELL_HOURS:
                     prev_net = float(
-                        self._incumbent_guard_holdout(cfg).get("net_r", 0.0)
+                        self._flip_benchmark(cfg, baseline)[0].get("net_r", 0.0)
                         or 0.0)
                     new_net = float(hold.get("net_r", 0.0) or 0.0)
                     if prev_net > 0:
@@ -2462,12 +2464,13 @@ class Optimizer:
                 or (cand_tf in TIMEFRAMES and cand_tf != cfg.timeframe)
             )
             if primary_flip:
-                prev = self._incumbent_guard_holdout(cfg)
+                prev, bench_name = self._flip_benchmark(cfg, baseline)
                 prev_net = float(prev.get("net_r", 0.0) or 0.0)
                 new_net = float(hold.get("net_r", 0.0) or 0.0)
                 if prev_net > 0 and new_net < prev_net * self.PRIMARY_FLIP_HOLDOUT_MULT:
                     return (f"aile/TF flip icin holdout yetersiz "
-                            f"({new_net:.1f}R < {prev_net * self.PRIMARY_FLIP_HOLDOUT_MULT:.1f}R)")
+                            f"({new_net:.1f}R < {prev_net * self.PRIMARY_FLIP_HOLDOUT_MULT:.1f}R"
+                            f" - mevcut {bench_name} {prev_net:+.1f}R)")
                 prev_raw = (getattr(cfg, "opt_summary", None) or {}).get(
                     "positive_ratio")
                 new_raw = best.get("positive_ratio")
@@ -2625,6 +2628,65 @@ class Optimizer:
             return previous
         costed = summary.get("holdout_costed")
         return costed if isinstance(costed, dict) and costed else previous
+
+    def _flip_benchmark(self, cfg,
+                        baseline: dict[str, Any] | None = None,
+                        ) -> tuple[dict[str, Any], str]:
+        """What the incumbent is worth NOW, when that is measurable.
+
+        F1 and F2 used to benchmark against ``cfg.opt_summary["holdout"]`` -
+        the number the incumbent scored on the day it was applied, sometimes
+        weeks earlier. A candidate measured today then had to beat 1.15x a
+        historical figure the live config no longer earns, and two symbols sat
+        frozen behind exactly that on 10.09:
+
+        - NAS100: range_fade/M30 candidate, holdout +21.5R at PF 1.45 and
+          retention 1.855, refused for "21.5R < 79.1R". The same run measured
+          the incumbent on the same window at **-22.6R**, PF 0.85.
+        - XAUUSD: candidate holdout +33.2R refused for "< 162.2R", incumbent
+          measured at **-30.1R**, PF 0.97.
+
+        The system already knew: ``_incumbent_kept_tail`` prints that fresh
+        number in the log line beside the rejection ("taze test -22.6R"). The
+        gate that made the decision read the stamp instead, so the optimizer
+        defended a losing config with a winning config's old scorecard.
+
+        Three benchmarks, best first. The sweep's own ``baseline["holdout"]``
+        is the incumbent replayed on this sweep's holdout slice inside this
+        sweep - the exact bars, window and cost regime the candidate was
+        scored on, already computed, sitting in the report the rejection is
+        written into. A separate ``_fresh_incumbent_holdout`` replay is the
+        next best thing when the report has no baseline. The stamp is last.
+
+        The fresh replay is an honest comparison too - same bars, same window,
+        same cost regime as the candidate, and ``_fresh_incumbent_holdout``
+        already refuses to produce one when the book searches cost-free, so
+        the A1 churn it guards against is unaffected. The stamp stays as the
+        fallback for when no replay is available (no bars cached, no client,
+        cost-free regime): the old behaviour, unchanged, where it is all there
+        is. A negative fresh number is not a bar at all - ``prev_net > 0``
+        fails and F1 stops blocking - which is the point. Everything else
+        still has to hold: retention, F6 fragility, min_trades,
+        ``_beats_incumbent`` and the churn brake above.
+
+        Returns the block and the name of where it came from, so the rejection
+        can say which one it used - "21.5R < 79.1R" read as arithmetic when it
+        was really today's measurement against last month's.
+        """
+        # walk_forward already measured it: ``baseline["holdout"]`` is
+        # ``Params.from_config(cfg)`` replayed on this sweep's own holdout
+        # slice, under this sweep's window and cost regime (backtest.py:1536).
+        # Same bars the candidate was scored on, and free - it is in the report
+        # the rejection is being written into. Nothing beats that as a
+        # comparison, so it goes first.
+        if isinstance(baseline, dict):
+            same_run = baseline.get("holdout")
+            if isinstance(same_run, dict) and same_run.get("net_r") is not None:
+                return same_run, "ayni kosu"
+        fresh = self._fresh_incumbent_holdout(cfg)
+        if isinstance(fresh, dict) and fresh.get("net_r") is not None:
+            return fresh, "taze test"
+        return self._incumbent_guard_holdout(cfg), "damga"
 
     def _incumbent_guard_was_charging(self, cfg, previous: dict[str, Any]) -> bool:
         """Whether the chosen incumbent benchmark was measured with costs on."""

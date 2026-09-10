@@ -20,16 +20,21 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
    after a clear ask is not an ACK. Yellow/red that used to wait on the
    human now wait on **peer ACK** unless the operator overrides in chat.
-2. **Book is 3 symbols: `GER40 NAS100 XAUUSD`.** It went 7 -> 3 in one
-   evening (10.09), all operator calls, all **staying deleted**: JPN225 +
-   BTCUSD (10:42), US30 (21:35), SpotBrent (21:37), BRENTOIL-PERP
-   (22:2x - added and cut the same evening, before it ever traded: every
-   session window the search tried scored negative, -16.1 on all-hours,
-   and its one selection-clearing candidate was refused for a negative
-   costed holdout). All five are in
-   `tests/retired_lexicon.py: RETIRED_SYMBOLS`, so a seed-overwrite
-   cannot rebuild them. Do **not** re-add any of them unasked, and do
-   **not** disable, delete, or “close for bleed” the three that remain.
+2. **Book is 4 rows, 3 of them trading: `GER40 NAS100 XAUUSD` enabled,
+   `US30` disabled.** The book went 7 -> 3 -> 4 in one evening (10.09), all
+   operator calls. **Staying deleted**: JPN225 + BTCUSD (10:42),
+   SpotBrent (21:37), BRENTOIL-PERP (22:2x - added and cut the same
+   evening, before it ever traded: every session window the search tried
+   scored negative, -16.1 on all-hours, and its one selection-clearing
+   candidate was refused for a negative costed holdout). Those four are in
+   `tests/retired_lexicon.py: RETIRED_SYMBOLS`, so a seed-overwrite cannot
+   rebuild them. **US30 came back** at 23:3x ("US30 geri ekledim") on magic
+   990101, index/M30, `use_sessions=false`, disabled and `validated=None`
+   with a search running on it - so `_require_optimised_before_enabling`
+   refuses to switch it on until a search picks its config. That refusal is
+   the guard; do not hand-enable it. Do **not** re-add the retired four
+   unasked, and do
+   **not** disable, delete, or “close for bleed” the three that trade.
    Improve fill / exits / gates / sizing / search instead (“kapatma
    geliştir”).
    The old “7 symbols, +393.5 R holdout” line described account
@@ -102,6 +107,21 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
   `POST /api/opt/run` still starts a search. Family/TF apply while this
   magic has a ticket queues `pending_primary_patch` (same door as
   `pending_exit_patch`); engine lands it when flat. Do not drop the winner.
+- **A flip gate benchmarks what the incumbent earns NOW, never a stamp.**
+  F1/F2 read `_flip_benchmark`, which prefers the sweep's own
+  `baseline["holdout"]` (the live config replayed on that sweep's holdout
+  slice, `backtest.py:1536` - same bars, same window, same cost regime,
+  already computed), then a `_fresh_incumbent_holdout` replay, then the
+  stamp. Until 10.09 they read `cfg.opt_summary["holdout"]` directly and
+  the search froze: NAS100's `range_fade` candidate at **+21.5R** holdout,
+  PF 1.45, retention 1.855, refused for "21.5R < 79.1R" while the same run
+  measured the live config at **-22.6R**, PF 0.85. XAUUSD the same evening,
+  +33.2R refused for "< 162.2R" against a measured **-30.1R**. The system
+  even printed the true number in the log line beside the rejection
+  (`_incumbent_kept_tail`, "taze test"). This is why the operator said
+  "taramada isle yaramiyor aile vs bulamiyr". The rejection now names its
+  benchmark (`ayni kosu` / `taze test` / `damga`); if you ever see `damga`
+  on a symbol that has bars, ask why there was no replay.
 - `EXIT_RISK_FIELDS` mid-trade â†’ **409**. `breakeven_at_r`,
   `partial_at_r`, `harvest_at_r` and `harvest_step_atr` are
   deliberately **not** in that set.
