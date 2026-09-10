@@ -691,6 +691,20 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         peak = max(peak, equity)
         res.max_dd_r = max(res.max_dd_r, peak - equity)
 
+    # Overlay knobs are fixed for the whole simulate, but _trail_one read them
+    # off ``p`` on every trailed bar: eight getattr + eight float per call,
+    # 8,022,278 calls in one GER40 walk_forward. Hoisted, they are read once.
+    # Values, not behaviour - the same numbers reach overlay_stop.
+    _ov_harvest_at = float(getattr(p, "harvest_at_r", 0.0) or 0.0)
+    _ov_harvest_step = float(getattr(p, "harvest_step_atr", 0.0) or 0.0)
+    _ov_mfe1_at = float(getattr(p, "mfe_lock1_at_r", 0.0) or 0.0)
+    _ov_mfe1_to = float(getattr(p, "mfe_lock1_to_r", 0.0) or 0.0)
+    _ov_mfe2_at = float(getattr(p, "mfe_lock2_at_r", 0.0) or 0.0)
+    _ov_mfe2_to = float(getattr(p, "mfe_lock2_to_r", 0.0) or 0.0)
+    _ov_trail_start = p.trail_start_atr
+    _ov_trail_step = p.trail_step_atr
+    _ov_trail_mode = p.trail_mode
+
     def _trail_one(is_buy, entry, sl, trailing, j, s, sl_dist,
                    peak_profit: float | None = None):
         c = close[j]
@@ -701,16 +715,16 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
                 swing_hi[j] + a * 0.15)
         target = overlay_stop(
             is_buy=is_buy, entry=entry, ref=c, atr=a,
-            trail_start_atr=p.trail_start_atr, trail_step_atr=p.trail_step_atr,
-            trail_mode=p.trail_mode, struct_sl=struct_sl,
+            trail_start_atr=_ov_trail_start, trail_step_atr=_ov_trail_step,
+            trail_mode=_ov_trail_mode, struct_sl=struct_sl,
             breakeven_at_r=breakeven_at_r, original_risk=sl_dist,
             be_offset=commission_price,
-            harvest_at_r=float(getattr(p, "harvest_at_r", 0.0) or 0.0),
-            harvest_step_atr=float(getattr(p, "harvest_step_atr", 0.0) or 0.0),
-            mfe_lock1_at_r=float(getattr(p, "mfe_lock1_at_r", 0.0) or 0.0),
-            mfe_lock1_to_r=float(getattr(p, "mfe_lock1_to_r", 0.0) or 0.0),
-            mfe_lock2_at_r=float(getattr(p, "mfe_lock2_at_r", 0.0) or 0.0),
-            mfe_lock2_to_r=float(getattr(p, "mfe_lock2_to_r", 0.0) or 0.0),
+            harvest_at_r=_ov_harvest_at,
+            harvest_step_atr=_ov_harvest_step,
+            mfe_lock1_at_r=_ov_mfe1_at,
+            mfe_lock1_to_r=_ov_mfe1_to,
+            mfe_lock2_at_r=_ov_mfe2_at,
+            mfe_lock2_to_r=_ov_mfe2_to,
             peak_profit=peak_profit)
         if target is None:
             return sl, trailing
@@ -718,9 +732,9 @@ def simulate(cache: IndicatorCache, sig, open_: np.ndarray, spread_pts: np.ndarr
         ms = float(min_stop_at[j])
         profit = (c - entry) if is_buy else (entry - c)
         active_step = harvest_trail_step(
-            trail_step_atr=p.trail_step_atr,
-            harvest_at_r=float(getattr(p, "harvest_at_r", 0.0) or 0.0),
-            harvest_step_atr=float(getattr(p, "harvest_step_atr", 0.0) or 0.0),
+            trail_step_atr=_ov_trail_step,
+            harvest_at_r=_ov_harvest_at,
+            harvest_step_atr=_ov_harvest_step,
             profit=profit, original_risk=sl_dist)
         step = trail_min_step(ms, a, active_step)
         wanted_past_entry = (target >= entry) if is_buy else (target <= entry)

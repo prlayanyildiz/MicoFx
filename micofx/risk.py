@@ -102,8 +102,14 @@ def shakeout_sl_atr_mult(base: float, symbol: str,
         since = float(since_ts or 0.0)
     except (TypeError, ValueError):
         since = 0.0
-    mine = []
-    for row in (autopsies or []):
+    # Backwards, stopping at the window size. The old form built the whole
+    # matching list and then sliced [-WINDOW:], which is the same answer for
+    # O(all closes) work instead of O(10) - and backtest.simulate calls this
+    # once per entry against a list that grows with every trade it books.
+    # A profile of one GER40 walk_forward put it at 717,002 calls and 175s of
+    # 491s: 36% of a search, spent recomputing the same tail.
+    window: list[dict[str, Any]] = []
+    for row in reversed(autopsies or []):
         if not row or str(row.get("symbol") or "") != symbol:
             continue
         if since > 0:
@@ -113,8 +119,10 @@ def shakeout_sl_atr_mult(base: float, symbol: str,
                 continue
             if exit_t < since:
                 continue
-        mine.append(row)
-    window = mine[-_SHAKEOUT_SL_WINDOW:]
+        window.append(row)
+        if len(window) >= _SHAKEOUT_SL_WINDOW:
+            break
+    window.reverse()
     deaths = 0
     for row in window:
         if str(row.get("exit_reason") or "") != "sl":
