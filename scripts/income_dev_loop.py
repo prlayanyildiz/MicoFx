@@ -38,7 +38,7 @@ ORIGIN = PANEL
 # The traded book. JPN225 and BTCUSD were deleted 10.09 and stay deleted;
 # this tuple must match config/defaults.json's shipped list, which
 # tests/test_the_book_is_spelled_once.py checks.
-BOOK = ("GER40", "NAS100", "SpotBrent", "US30", "XAUUSD")
+BOOK = ("BRENTOIL-PERP", "GER40", "NAS100", "XAUUSD")
 BRIDGE = ROOT / ".bridge"
 
 

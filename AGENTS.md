@@ -20,20 +20,31 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
    after a clear ask is not an ACK. Yellow/red that used to wait on the
    human now wait on **peer ACK** unless the operator overrides in chat.
-2. **Book is 5 symbols, forever open & all net-profitable.** Live set
-   is `GER40 NAS100 SpotBrent US30 XAUUSD`. JPN225 and BTCUSD were
-   deleted from the panel 10.09 and **stay deleted** (operator: "silinmis
-   olarak kalsin"). Do **not** re-add them unasked, and do **not**
-   disable, delete, or “close for bleed” any of the remaining five.
+2. **Book is 4 rows, 3 of them trading.** Live set is `GER40 NAS100
+   XAUUSD` enabled, plus `BRENTOIL-PERP` **disabled and unvalidated**
+   (magic 990101, commodity/M30, 10:00-23:30) - the operator added it
+   10.09 21:38 and it has `validated=None`, so
+   `_require_optimised_before_enabling` refuses to switch it on until a
+   search picks its config. That refusal is the guard; do not hand-enable
+   it.
+   Deleted 10.09 and **staying deleted** (operator: "silinmis olarak
+   kalsin", then "bu 4'le devam"): JPN225, BTCUSD (10:42), US30 (21:35),
+   SpotBrent (21:37). All four are in
+   `tests/retired_lexicon.py: RETIRED_SYMBOLS`, so a seed-overwrite
+   cannot rebuild them. Do **not** re-add any of them unasked, and do
+   **not** disable, delete, or “close for bleed” the three that trade.
    Improve fill / exits / gates / sizing / search instead (“kapatma
    geliştir”).
    The old “7 symbols, +393.5 R holdout” line described account
-   61562752. The terminal moved to **61592524 @ Pepperstone-Demo** on
-   10.09, the account lock was re-pointed and opt history cleared, so
-   that R total belongs to an account this book no longer trades. The
-   11:37 search on the new account applied 0/5 — every candidate was
-   weaker than its incumbent or F6-fragile. Treat the five as
-   *unrevalidated on this account* until a search says otherwise.
+   61562752. The terminal is **61592522 @ Pepperstone-Demo** as of 10.09
+   21:27 (its own install, `MetaTrader 5 - 1`, separate from the
+   real-money terminal another project drives), so that R total belongs
+   to an account this book does not trade. Two searches on 10.09 applied
+   0 of 5 — and the reason is measured, not guessed: the incumbents beat
+   the best candidate by 7 / 42 / 58 points on GER40 / US30 / NAS100
+   (`scripts/ab_search.py`). "Zero applied" is the gates working, not a
+   fault. Coverage is *not* the bottleneck: `burst` is searched at 0.005%
+   and it does not matter when the incumbent is 2-3x the best candidate.
 3. **Full capacity + full auto + dynamic growth sizing.** Goal is
    maximum useful throughput under honest WFO/fill gates and a hands-off
    loop (autopilot, quarantine reopt, calibrate, watches). Inline kasa

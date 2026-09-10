@@ -61,6 +61,11 @@ RETIRED_SYMBOLS = (
     # just cut - the same hole this tuple was created for on 05.09.
     "JPN225",
     "BTCUSD",
+    # 10.09 21:35 / 21:37, same session: the book went 5 -> 4 and BRENTOIL-PERP
+    # came in disabled. SpotBrent left carrying the worst fill in the book
+    # (50 signals -> 5 trades, 10%).
+    "US30",
+    "SpotBrent",
 )
 
 # Nearby window contains any of these → the line is documenting removal, not
