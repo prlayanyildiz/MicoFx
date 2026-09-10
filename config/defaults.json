@@ -247,22 +247,6 @@
   },
   "symbols": [
     {
-      "symbol": "BRENTOIL-PERP",
-      "group": "commodity",
-      "magic": 990101,
-      "broker_symbol": "BRENTOIL-PERP",
-      "timeframe": "M30",
-      "sessions": [
-        {
-          "start": "10:00",
-          "end": "23:30"
-        }
-      ],
-      "max_spread_atr": 0.12,
-      "max_positions": 4,
-      "enabled": false
-    },
-    {
       "symbol": "GER40",
       "group": "index",
       "magic": 990011,

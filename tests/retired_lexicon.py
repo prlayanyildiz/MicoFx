@@ -66,6 +66,11 @@ RETIRED_SYMBOLS = (
     # (50 signals -> 5 trades, 10%).
     "US30",
     "SpotBrent",
+    # Added 10.09 21:38 and deleted the same evening, before it ever
+    # traded: every session window the search tried scored NEGATIVE
+    # (-16.1 all-hours, -14.6 on 00:00-09:00) and the one candidate that
+    # cleared selection was refused for a negative costed holdout.
+    "BRENTOIL-PERP",
 )
 
 # Nearby window contains any of these → the line is documenting removal, not

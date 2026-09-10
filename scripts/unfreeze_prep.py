@@ -15,10 +15,11 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
 OUT_PATH = ROOT / ".bridge" / "UNFREEZE_PREP.json"
-# The traded book. JPN225 and BTCUSD were deleted 10.09 and stay deleted;
-# this tuple must match config/defaults.json's shipped list, which
+# The traded book. It went 7 -> 3 over 10.09 (JPN225, BTCUSD, US30,
+# SpotBrent, BRENTOIL-PERP all deleted and all in RETIRED_SYMBOLS).
+# Must match config/defaults.json's shipped list, which
 # tests/test_the_book_is_spelled_once.py checks.
-BOOK = ("BRENTOIL-PERP", "GER40", "NAS100", "XAUUSD")
+BOOK = ("GER40", "NAS100", "XAUUSD")
 FILL_FOCUS = ("GER40", "US30", "NAS100")
 
 

@@ -56,7 +56,7 @@ def _book_literal(rel: str) -> tuple[str, ...]:
 
 
 def test_the_shipped_book_is_what_the_operator_left():
-    assert set(shipped_book()) == {"BRENTOIL-PERP", "GER40", "NAS100", "XAUUSD"}, (
+    assert set(shipped_book()) == {"GER40", "NAS100", "XAUUSD"}, (
         f"kitap degisti: {shipped_book()}")
 
 

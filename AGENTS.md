@@ -20,19 +20,16 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
    after a clear ask is not an ACK. Yellow/red that used to wait on the
    human now wait on **peer ACK** unless the operator overrides in chat.
-2. **Book is 4 rows, 3 of them trading.** Live set is `GER40 NAS100
-   XAUUSD` enabled, plus `BRENTOIL-PERP` **disabled and unvalidated**
-   (magic 990101, commodity/M30, 10:00-23:30) - the operator added it
-   10.09 21:38 and it has `validated=None`, so
-   `_require_optimised_before_enabling` refuses to switch it on until a
-   search picks its config. That refusal is the guard; do not hand-enable
-   it.
-   Deleted 10.09 and **staying deleted** (operator: "silinmis olarak
-   kalsin", then "bu 4'le devam"): JPN225, BTCUSD (10:42), US30 (21:35),
-   SpotBrent (21:37). All four are in
+2. **Book is 3 symbols: `GER40 NAS100 XAUUSD`.** It went 7 -> 3 in one
+   evening (10.09), all operator calls, all **staying deleted**: JPN225 +
+   BTCUSD (10:42), US30 (21:35), SpotBrent (21:37), BRENTOIL-PERP
+   (22:2x - added and cut the same evening, before it ever traded: every
+   session window the search tried scored negative, -16.1 on all-hours,
+   and its one selection-clearing candidate was refused for a negative
+   costed holdout). All five are in
    `tests/retired_lexicon.py: RETIRED_SYMBOLS`, so a seed-overwrite
    cannot rebuild them. Do **not** re-add any of them unasked, and do
-   **not** disable, delete, or “close for bleed” the three that trade.
+   **not** disable, delete, or “close for bleed” the three that remain.
    Improve fill / exits / gates / sizing / search instead (“kapatma
    geliştir”).
    The old “7 symbols, +393.5 R holdout” line described account
