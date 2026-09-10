@@ -40,6 +40,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.strategy import _FAMILIES, IndicatorCache, Params, compute
+from tests.retired_lexicon import LIVING_FAMILIES
 
 FAMILIES = sorted(_FAMILIES)
 TIMEFRAMES = {"M5": 300, "M15": 900, "M30": 1800}
@@ -129,9 +130,10 @@ def test_the_registry_is_the_whole_book():
     # STRATEGIES, absent from the shipped opt list, so nothing can select them.
     # Named rather than counted: a bare count pin here went red for a reason
     # that had nothing to do with the retirements this file guards.
-    assert set(FAMILIES) == {
-        "burst", "channel_break", "mtf_pullback", "super_trend", "range_fade", "sweep_fade",
-    }, f"aile kitabi degisti: {FAMILIES}"
+    # 5 -> 7 on 07.09: super_trend and keltner_break. This file was updated
+    # for super_trend and missed keltner_break the same day, which is why the
+    # book is one shared name (tests/retired_lexicon.py) and not five copies.
+    assert set(FAMILIES) == LIVING_FAMILIES, f"aile kitabi degisti: {FAMILIES}"
 
 
 @pytest.mark.parametrize("family,tf,seconds", CASES, ids=IDS)

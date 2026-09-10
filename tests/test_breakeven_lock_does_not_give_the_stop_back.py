@@ -60,8 +60,14 @@ def _run(peak_atr: float, *, start: float = 0.0, step: float = 1.6,
                   htf_up=np.zeros(N, dtype=bool), htf_down=np.zeros(N, dtype=bool))
     cache = IndicatorCache(high, low, close, times=np.arange(N) * 300,
                            tf_seconds=300, open_=open_, volume=np.ones(N))
+    # MFE locks became Params defaults on 07.09 (1.5 -> 0.75R, 2.0 -> 1.25R).
+    # This file's path peaks past 1.5R, so leaving them on made every case
+    # book +0.75 R and stopped saying anything about breakeven_at_r - the one
+    # overlay it is about. They have their own tests; off here.
     p = Params(sl_atr_mult=1.0, trail_start_atr=start, trail_step_atr=step,
-               breakeven_at_r=breakeven_at_r if via_params else 0.0)
+               breakeven_at_r=breakeven_at_r if via_params else 0.0,
+               mfe_lock1_at_r=0.0, mfe_lock1_to_r=0.0,
+               mfe_lock2_at_r=0.0, mfe_lock2_to_r=0.0)
     kwargs = {} if via_params else {"breakeven_at_r": breakeven_at_r}
     res = backtest.simulate(
         cache, sig, open_, np.zeros(N), point=0.01, p=p,

@@ -18,8 +18,17 @@ from micofx.risk import Verdict
 
 
 class _FakeClient:
-    def __init__(self, positions_after):
+    def __init__(self, positions_after, positions_before=None):
         self._positions_after = list(positions_after)
+        # The book as it stood BEFORE the order. _try_entry re-reads
+        # positions() inside the entry lock now (parallel-audit HIGH #1,
+        # 08.09) and takes its pre-fill snapshot from that read, so a fake
+        # that answers with the post-fill book at every moment makes the
+        # new-ticket diff empty and every candidate look like zero.
+        # Defaults to the after-book: the scan tests call positions() without
+        # ever opening, and must keep seeing the ticket they scan for.
+        self._positions_before = (list(positions_after) if positions_before is None
+                                  else list(positions_before))
         self.closed: list[int] = []
         self.close_ok: set[int] = set()
         # DONE_PARTIAL: close_position returns True but ticket stays in the book.
@@ -45,14 +54,19 @@ class _FakeClient:
                 "sl_tp_reanchored": True}
 
     def positions(self):
-        return list(self._positions_after)
+        return list(self._positions_after if self.open_market_calls
+                    else self._positions_before)
 
     def close_position(self, ticket, slippage_points, comment, volume=None, fill=None):
         self.closed.append(ticket)
         if ticket in self.close_partial:
             return True  # broker said ok, volume still open
         if ticket in self.close_ok:
+            # Out of both books: a closed ticket is gone whether or not this
+            # fake has "opened" yet, and the scan path re-diffs through
+            # positions() after every close.
             self._positions_after = [p for p in self._positions_after if p["ticket"] != ticket]
+            self._positions_before = [p for p in self._positions_before if p["ticket"] != ticket]
             return True
         return False
 
@@ -104,8 +118,8 @@ class _FakeStore:
         self.settings[key] = value
 
 
-def _make_engine(cfg, positions_after):
-    client = _FakeClient(positions_after)
+def _make_engine(cfg, positions_after, positions_before=None):
+    client = _FakeClient(positions_after, positions_before)
     store = _FakeStore(cfg)
     eng = object.__new__(Engine)
     eng.store = store
@@ -319,7 +333,7 @@ def test_unresolved_single_candidate_is_kept_not_tagged_secondary():
     # A3: it is NOT written into leftover secondary_tickets.
     eng, client, store = _make_engine(cfg, positions_after=[
         {"ticket": 301, "magic": 1},
-    ])
+    ], positions_before=[])
     state = _state()
 
     eng._try_entry(cfg, state, account={"balance": 1000.0})
@@ -365,7 +379,7 @@ def test_secondary_unresolved_ticket_multiple_candidates_closes_all():
     # closed for safety.
     eng, client, store = _make_engine(cfg, positions_after=[
         {"ticket": 101, "magic": 1}, {"ticket": 102, "magic": 1},
-    ])
+    ], positions_before=[])
     client.close_ok = {101, 102}
     state = _state()
 
@@ -384,7 +398,7 @@ def test_secondary_unresolved_ticket_multiple_candidates_partial_close_failure()
     cfg = _cfg()
     eng, client, store = _make_engine(cfg, positions_after=[
         {"ticket": 201, "magic": 1}, {"ticket": 202, "magic": 1},
-    ])
+    ], positions_before=[])
     client.close_ok = {201}  # 202 fails to close
 
     state = _state()
@@ -769,7 +783,7 @@ def test_entry_multi_candidate_done_partial_not_orphan_closed():
     cfg = _cfg()
     eng, client, store = _make_engine(cfg, positions_after=[
         {"ticket": 611, "magic": 1}, {"ticket": 612, "magic": 1},
-    ])
+    ], positions_before=[])
     client.close_partial = {611, 612}
     state = _state()
 

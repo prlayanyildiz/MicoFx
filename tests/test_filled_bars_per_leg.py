@@ -25,6 +25,7 @@ restart that installs this change.
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,10 @@ class _Store:
 def _engine(store=None):
     eng = object.__new__(Engine)
     eng.store = store or _Store()
+    # entry_lock guards this map against the web thread; a double built with
+    # __new__ has to carry it rather than have the engine skip the lock when
+    # the attribute is missing.
+    eng.entry_lock = threading.Lock()
     eng._filled_bars = {}
     return eng
 
@@ -60,6 +65,7 @@ def _restore(store):
     """Exactly what Engine.__init__ does with the persisted blob."""
     eng = object.__new__(Engine)
     eng.store = store
+    eng.entry_lock = threading.Lock()
     eng._filled_bars = {}
 
     def ok(bar):

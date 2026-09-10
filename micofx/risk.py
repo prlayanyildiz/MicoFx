@@ -399,6 +399,11 @@ class RiskManager:
     # A class attribute rather than an __init__ field so an instance built
     # without running __init__ still answers it.
     supervisor_blocked: Any = None
+    # Same arrangement, same setter (Engine.__init__): symbol -> edge health.
+    # It was only ever assigned from outside, so nothing declared it and every
+    # assignment was an attr-defined error; _supervisor_edge_health() below
+    # reads it back through getattr and treats None as "no hook".
+    supervisor_edge_health: Any = None
 
     def __init__(self, store: Store, client: MT5Client) -> None:
         self.store = store

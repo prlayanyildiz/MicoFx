@@ -91,3 +91,28 @@ GONE_WORDS = (
     "do not port",
     "unlike",
 )
+
+# The whole family book: searched and dormant, both registries (models
+# STRATEGIES and strategy._FAMILIES, which must agree).
+#
+# It lived as a hand-copied literal in five separate guards. super_trend and
+# keltner_break landed 07.09 and only one of the five was updated, so the
+# other four went red and stayed red - and a red anti-resurrection guard
+# guards nothing: ichimoku could have come back without producing a new
+# failure. One name here, five guards that read it, one edit when the book
+# changes.
+#
+# Named rather than counted on purpose: adding any family still trips the
+# guards, and adding a *retired* one trips them by name.
+#
+# sweep_fade / range_fade are DORMANT - present in both registries, absent
+# from the shipped opt list, so nothing can select them.
+LIVING_FAMILIES = frozenset({
+    "mtf_pullback",
+    "burst",
+    "channel_break",
+    "super_trend",
+    "keltner_break",
+    "sweep_fade",
+    "range_fade",
+})

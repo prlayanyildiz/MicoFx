@@ -127,6 +127,11 @@ def test_leftover_total_slot_cap_does_not_clip_free_slots():
     risk = RiskManager(_Store(), _Client())
     risk.store.system.max_total_positions = 1
     risk.store.symbols["XAUUSD"].enabled = True
+    # Said in the fixture rather than assumed: the shared _Store gives every
+    # symbol max_positions=10, which the gate clamps to 5, so the occupied
+    # name reported four free slots and this assertion read as "the leftover
+    # cap clipped nothing" only by accident. One ticket, one slot, occupied.
+    risk.store.symbols["XAUUSD"].max_positions = 1
     cap = risk.capacity([_pos(sl=1925.0)], ACCOUNT)
     by_sym = {r["symbol"]: r for r in cap["rows"]}
     assert by_sym["XAUUSD"]["free_slots"] == 0

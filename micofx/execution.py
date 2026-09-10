@@ -208,7 +208,7 @@ class ExecutionMonitor:
                     kept = [r for r in rows[-MAX_SAMPLES:] if _usable_sample(r)]
                     if kept:
                         self._samples[str(symbol)] = kept
-        saved = {}
+        saved: Any = {}
         getter = getattr(self.store, "get_setting", None)
         if callable(getter):
             saved = getter("open_original_sl") or {}
@@ -416,11 +416,13 @@ class ExecutionMonitor:
         if isinstance(originals, dict):
             for ticket in seen:
                 blob = originals.get(ticket)
-                book = self._open.get(ticket)
-                if not isinstance(blob, dict) or not isinstance(book, dict):
+                # Own name: ``book`` above is the always-present dict from
+                # setdefault, this one is a lookup that can miss.
+                live_book = self._open.get(ticket)
+                if not isinstance(blob, dict) or not isinstance(live_book, dict):
                     continue
-                new_mfe = float(book.get("mfe") or 0.0)
-                new_mae = float(book.get("mae") or 0.0)
+                new_mfe = float(live_book.get("mfe") or 0.0)
+                new_mae = float(live_book.get("mae") or 0.0)
                 if (new_mfe > float(blob.get("mfe") or 0.0) + 1e-12
                         or new_mae > float(blob.get("mae") or 0.0) + 1e-12):
                     blob["mfe"] = new_mfe

@@ -274,14 +274,15 @@ def evaluate(cfg: SymbolConfig, server_epoch: float,
     active = ""
     trade_day_set = frozenset(cfg.trade_days or [1, 2, 3, 4, 5])
     for start, end, dayset in windows:
-        allowed = dayset if dayset is not None else trade_day_set
+        day_allow: frozenset[int] = (
+            frozenset(dayset) if dayset is not None else trade_day_set)
         if start < end:
-            inside = start <= minute < end and day in allowed
+            inside = start <= minute < end and day in day_allow
             remaining = end - minute
         else:
             # Window rolls over midnight: evening leg belongs to today, morning leg to yesterday.
-            evening = minute >= start and day in allowed
-            morning = minute < end and _prev_day(day) in allowed
+            evening = minute >= start and day in day_allow
+            morning = minute < end and _prev_day(day) in day_allow
             inside = evening or morning
             remaining = (end + _DAY - minute) if evening else (end - minute)
         if inside:

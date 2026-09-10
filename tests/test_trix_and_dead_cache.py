@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from micofx.models import OPT_FIELDS, STRATEGIES, SymbolConfig
 from micofx.strategy import IndicatorCache, Params, compute, required_bars
+from tests.retired_lexicon import LIVING_FAMILIES
 
 
 def test_opt_fields_do_not_search_trix_length():
@@ -63,8 +64,7 @@ def test_every_living_family_still_computes_without_those_helpers():
     high, low, open_ = close + 0.2, close - 0.2, close.copy()
     times = np.arange(n, dtype=np.int64) * 1800
     cache = IndicatorCache(high, low, close, times, 1800, open_, np.ones(n), np.zeros(n))
-    assert sorted(STRATEGIES) == sorted(
-        ["mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade"])
+    assert set(STRATEGIES) == LIVING_FAMILIES
     for family in STRATEGIES:
         sig = compute(cache, Params(strategy=family))
         assert sig.buy.size == n and sig.sell.size == n

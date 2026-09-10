@@ -1042,7 +1042,10 @@ def _load_exec(name: str, path: Path):
 def _run_charged_tunes(headers: dict[str, str]) -> list[str]:
     """One charged land per symbol — fixed axis order (Claude compound gate).
 
-    Order: seans → msa → cost_rank → adx → atr_pct → body → trail_step → trail_start.
+    Order: msa → cost_rank → adx → atr_pct → body → trail_step → trail_start.
+    ``seans`` used to head this list and is gone: windows are operator-
+    authoritative (charter 07.09) and the in-process autopilot forces
+    ``sess_pick = None``, so income must not rewrite them either.
     EXIT_RISK axes (trail_*) skip symbols with open tickets.
     """
     from scripts.exec_gates import pipeline_frozen

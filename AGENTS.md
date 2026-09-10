@@ -84,6 +84,17 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
   by at most 0.02 ATR units per calibrate — not a free fall (F49).
 - Session / day-end / daily-loss flatten are settled (owner 09.08).
 - `trail_start_atr <= trail_step_atr` is legal; do not ban it.
+- No trail axis may cap below where the book lands
+  (`test_trail_grid_reaches_past_the_incumbents`). `keltner_break`
+  `trail_step_atr` shipped `[0.6, 1.0, 1.5]` while all 7 live symbols run
+  2.2–3.6, so the family could not express any trail that has ever won —
+  the ceiling was choosing the parameter. Widened to `2.8` (same top as
+  shared / `channel_break`) 10.09, operator authority in chat. Budget is
+  unchanged (`coverage_budget` splits a fixed pool); the family's own
+  coverage goes 51% → 31%, which is still far above the million-combo
+  families' 0%. `super_trend` had the same defect one notch higher (2.0,
+  which clears the guard but is still under every live value) and took the
+  same `2.8`. Neither family's tight end moved.
 - Do not holdout-capture with positions open. `POST /api/holdout/capture`
   is **409** while this process's magics still have tickets. Do not start
   a live search unasked.

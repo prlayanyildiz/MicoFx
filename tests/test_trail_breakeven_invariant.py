@@ -58,7 +58,15 @@ def _run(sl_mult: float, start: float, step: float, peak_atr: float):
                            tf_seconds=300, open_=open_, volume=np.ones(N))
     res = backtest.simulate(
         cache, sig, open_, np.zeros(N), point=0.01,
-        p=Params(sl_atr_mult=sl_mult, trail_start_atr=start, trail_step_atr=step),
+        # The MFE locks became live Params defaults on 07.09 (1.5 -> 0.75R,
+        # 2.0 -> 1.25R). Every case below rides past 1.5R before collapsing,
+        # so with the defaults left on, this whole file returned +0.75 R and
+        # said nothing at all about the trail. They are a separate overlay
+        # with their own tests; pinned off here so these cases keep measuring
+        # trail_start / trail_step, which is what they exist to pin down.
+        p=Params(sl_atr_mult=sl_mult, trail_start_atr=start, trail_step_atr=step,
+                 mfe_lock1_at_r=0.0, mfe_lock1_to_r=0.0,
+                 mfe_lock2_at_r=0.0, mfe_lock2_to_r=0.0),
         entries=np.array([ENTRY_BAR]))
     assert res.trades == 1
     return res.trade_rs[0]

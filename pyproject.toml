@@ -6,20 +6,30 @@
 # checker that always fails is a checker nobody reads.
 
 [tool.pytest.ini_options]
-# Keep the temp tree inside the project instead of the shared Windows one.
+# The temp tree is chosen in the root conftest.py, not here.
 #
-# Under its default layout pytest writes a "pytest-current" SYMLINK beside the
-# numbered run directories and resolves it during session teardown. Both
-# machines this project runs on refuse that: the laptop returns WinError 5
-# (access denied) and Windows Server returns WinError 1463 (symbolic link
-# cannot be followed, its type is disabled by policy). Every test passes, then
-# pytest itself raises on the way out and exits non-zero - which reads exactly
-# like a failing suite to anything checking the exit code, and KUR.ps1's
-# install check duly reported "TESTLER GECMEDI" on a machine where nothing was
-# wrong.
+# Why it is explicit at all: under pytest's default layout it writes a
+# "pytest-current" SYMLINK beside the numbered run directories and resolves it
+# during session teardown. Both machines this project runs on refuse that: the
+# laptop returns WinError 5 (access denied) and Windows Server returns WinError
+# 1463 (symbolic link cannot be followed, its type is disabled by policy).
+# Every test passes, then pytest itself raises on the way out and exits
+# non-zero - which reads exactly like a failing suite to anything checking the
+# exit code, and KUR.ps1's install check duly reported "TESTLER GECMEDI" on a
+# machine where nothing was wrong.
 #
 # An explicit basetemp skips the numbered/symlink scheme entirely. It lives in
-# .gitignore, and pytest clears it at session start, so nothing else may use it.
+# .gitignore, and pytest CLEARS it at session start - so it is also the reason
+# two pytest sessions cannot share this checkout: the second one wipes the
+# first one's tree mid-run and an unrelated fixture dies on
+# "PermissionError: [WinError 32]", which reads as a real failure and is not
+# one. A second runner (an agent, or a suite started while KUR.ps1's install
+# check is going) passes its own --basetemp on the command line.
+#
+# Not solvable from here: addopts is a static string, and setting it from a
+# root conftest.py does not work - pytest 9 never calls
+# pytest_load_initial_conftests for the rootdir conftest, so the hook is a
+# no-op that silently drops the run back onto the symlink layout above.
 addopts = "--basetemp=.pytest_tmp"
 
 [tool.ruff]

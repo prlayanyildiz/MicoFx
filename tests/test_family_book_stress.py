@@ -30,6 +30,7 @@ from micofx.strategy import (
     _resolve_conflicts,
     compute,
 )
+from tests.retired_lexicon import LIVING_FAMILIES
 
 LIVE_NOW = ("burst", "mtf_pullback", "channel_break")
 RETIRED = ("alpha_trend", "mavilim", "trix_flip", "flow_rev",
@@ -114,9 +115,9 @@ def test_live_book_families_are_still_searchable():
         assert name in _FAMILIES
     # Named, not counted: sweep_fade/range_fade joined as dormant on 04.09 and
     # a "== 3" pin went permanently red, which hides any real resurrection.
-    assert set(STRATEGIES) == {
-        "mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade",
-    }
+    # The names live in tests/retired_lexicon.py: five guards used to keep
+    # their own copy and four of them missed the 07.09 additions.
+    assert set(STRATEGIES) == LIVING_FAMILIES
     assert set(STRATEGIES) == set(_FAMILIES)
 
 

@@ -131,7 +131,10 @@ def test_patch_symbol_exit_field_blocked_by_pending_scan():
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
-    assert res.status_code == 400
+    # 409, same as the primary-side twin: the value is legal, the moment is
+    # not. The 27.08 batch that rewrote every expectation in this family to
+    # 400 left this one red too.
+    assert res.status_code == 409
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 

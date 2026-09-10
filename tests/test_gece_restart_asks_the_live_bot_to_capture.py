@@ -178,6 +178,13 @@ def test_open_tickets_skip_the_midnight_kill(tmp_path, monkeypatch):
     monkeypatch.setattr(gece_restart, "LOG", tmp_path / "gece_restart.log")
     killed = []
     monkeypatch.setattr(gece_restart, "port_owner", lambda: 10888)
+    # panel_session is the argument to live_ticket_count, so it runs first and
+    # has to be stubbed too. Unpatched it opened a real socket to 127.0.0.1:8900
+    # and raised, main() read that as "book unread" and went on to the kill
+    # path - the test then sat through two real 45-second boot waits and
+    # asserted nothing about the guard it is named for. The sibling tests in
+    # this file stub it; this one did not.
+    monkeypatch.setattr(gece_restart, "panel_session", lambda base: "op")
     monkeypatch.setattr(gece_restart, "live_ticket_count", lambda *a: 3)
     monkeypatch.setattr(gece_restart, "stop_tree", lambda pid: killed.append(pid))
     monkeypatch.setattr(gece_restart, "start", lambda: killed.append("start"))

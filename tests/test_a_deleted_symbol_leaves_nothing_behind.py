@@ -150,6 +150,9 @@ def test_the_filled_bar_record_goes_at_delete_too():
     settings.filled_bars still held BRENTOIL-PERP.
     """
     eng = Engine.__new__(Engine)
+    # forget_filled_bars takes entry_lock (the trading thread writes this map
+    # while the web thread deletes the symbol), so the double has to carry it.
+    eng.entry_lock = threading.Lock()
     eng._filled_bars = {"BRENTOIL-PERP": {"primary": 123}, "NAS100": {"primary": 9}}
     written = {}
     eng.store = type("S", (), {"set_setting": lambda self, k, v: written.update({k: v})})()

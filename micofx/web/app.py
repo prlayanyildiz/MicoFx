@@ -6,6 +6,7 @@ import re
 import secrets
 import signal
 import subprocess
+import sys
 import threading
 import time
 from typing import Any
@@ -144,6 +145,9 @@ _SYMBOL_RISK_BOUNDS = {
     "partial_close_frac": (0.0, 0.9, True),
     "harvest_at_r": (0.0, 5.0, True),
     "harvest_step_atr": (0.0, 20.0, True),
+    # 0.01 is the floor for a cap that is ON: below it no entry ever clears,
+    # which reads as "set" and behaves as "closed". Exactly 0 is the separate
+    # thing - the gate off - and is listed in _ZERO_MEANS_OFF below.
     "max_spread_atr": (0.01, 1.0, True),
     # The per-symbol daily loss gate, and the only live-risk field the panel
     # let through unbounded (found 15.08, audit slice 7). Zero disables it, so
@@ -231,6 +235,19 @@ _SYSTEM_RISK_BOUNDS = {
 }
 
 
+# Fields whose floor is a floor for a value that is ON, where 0 is not a
+# smaller value but a different state: the gate switched off.
+#
+# ``max_spread_atr`` is the operator's 13.08 decision - every per-symbol
+# ceiling to 0 - and /api/opt/apply's gates_only branch says so in as many
+# words ("0 = gate off (operator)") before letting 0 through its widen-only
+# check. The bounds table below it never agreed: (0.01, 1.0) 400'd on 0
+# before that branch could run. So the live rows carried a value the API
+# refused to write - the panel could turn a cap on, and nothing but a
+# hand-edited row could turn it back off.
+_ZERO_MEANS_OFF = frozenset({"max_spread_atr"})
+
+
 def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYMBOL_RISK_BOUNDS,
                           label: str = "") -> None:
     """Range-check named numeric fields. ``label`` names a nested blob when
@@ -249,6 +266,8 @@ def _validate_risk_bounds(patch: dict[str, Any], bounds: dict[str, tuple] = _SYM
             # would otherwise sail straight through both bound checks below
             # undetected - json does accept NaN/Infinity by default.
             raise HTTPException(400, f"{name} gecersiz ({value!r})")
+        if value == 0.0 and key in _ZERO_MEANS_OFF:
+            continue
         if (value < lo) if lo_inclusive else (value <= lo):
             raise HTTPException(400, f"{name} gecersiz ({value}) - {lo}'dan buyuk olmali")
         if hi is not None and value > hi:
@@ -1095,6 +1114,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # door to the same field and had no such guard. Both are held across
         # the check so a fill landing in this exact instant (engine thread,
         # same lock) cannot slip through as a fresh orphan.
+        # NOTE: `magic`, `strategy` and `timeframe` are all outside
+        # _OPERATOR_SYMBOL_FIELDS, so _reject_hands_off_fields above already
+        # 400s this request before either flag below can be true - the
+        # magic/family branches are unreachable *through this route* today.
+        # They stay: the hands-off list is a policy that has moved before, and
+        # optimizer.apply() reaches the same fields by its own door. A guard
+        # deleted because something else happens to shadow it is how the hole
+        # reopens the day the shadow moves.
         magic_changing = (current is not None and "magic" in patch
                           and int(patch["magic"]) != current.magic)
         next_strat = patch.get("strategy", current.strategy) if current is not None else None
@@ -1132,7 +1159,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         # Same hazard class as magic/primary/exit: refuse while this magic
         # still has tickets (Claude TEYIT Py #3).
         guarded = (magic_changing or primary_changing or exit_fields_changing
-                   or broker_changing)
+                   or broker_changing or clock_changed)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -1200,6 +1227,25 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                         raise HTTPException(
                             409, f"{symbol}: cikis/risk parametreleri ({', '.join(changed_fields)}) "
                                  f"degistirilemedi, {len(open_here)} acik pozisyon var{note} "
+                                 f"(once kapatin veya pozisyon kapanmasini bekleyin)")
+                if clock_changed and not (magic_changing or primary_changing
+                                          or exit_fields_changing):
+                    # The comment above this block has described this refusal
+                    # since 06.09 and the code never made it: clock_changed
+                    # was left out of ``guarded``, so a session edit under an
+                    # open ticket only restamped holdout and went through.
+                    # 09-04 XAU #325114801 flipped use_sessions mid-ticket and
+                    # then hit 10018; the 06.09 book was truncated the same
+                    # way. The engine re-reads the mask every cycle, so moving
+                    # it under a live position moves the day-end flatten and
+                    # the entry window out from under a trade already on.
+                    open_here = _open_under_magic(current.magic)
+                    pending_scan = _pending_orphan_scan(current.magic, symbol)
+                    if open_here or pending_scan:
+                        note = " (+ tanimlanamayan ticket taramasi devam ediyor)" if pending_scan else ""
+                        raise HTTPException(
+                            409, f"{symbol}: seans saati/penceresi degistirilemedi, "
+                                 f"{len(open_here)} acik pozisyon var{note} "
                                  f"(once kapatin veya pozisyon kapanmasini bekleyin)")
 
             if primary_changing:
@@ -2605,4 +2651,31 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         threading.Thread(target=_restart, daemon=True).start()
         return {"ok": True, "message": "Uygulama yeniden baslatiliyor."}
 
+    @app.post("/api/system/clean-orphans")
+    def clean_orphans() -> dict[str, Any]:
+        """Sweep optimizer pool children an earlier process left behind.
+
+        The whole filter is ``gece_restart.cleanup_orphan_workers`` - the one
+        copy that is guarded (tests/test_orphan_sweep_stays_in_its_own_venv).
+        The first version of this endpoint called that *and then* ran a second
+        PowerShell of its own that selected on process name plus
+        ``--multiprocessing-fork`` and nothing else. That reaches every Python
+        multiprocessing worker on the machine, and because it never checked
+        that the parent was gone, a click during a search would have killed
+        this process's own pool - the button that is supposed to free the CPU
+        would have destroyed the work using it.
+        """
+        killed = 0
+        try:
+            import gece_restart
+            killed = gece_restart.cleanup_orphan_workers(sys.executable)
+        except Exception as exc:
+            LOG.emit(f"Yetim surec temizleme sirasinda hata: {exc}", "WARN")
+
+        msg = (f"{killed} adet yetim Python worker sureci temizlendi."
+               if killed else "Yetim veya asili Python sureci bulunamadi (sistem temiz).")
+        LOG.emit(f"Python surec temizligi: {msg}", "INFO")
+        return {"ok": True, "killed": killed, "message": msg}
+
     return app
+

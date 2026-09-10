@@ -106,7 +106,7 @@ def _score_windows(
     bars = snap["bars"]
     info = snap["info"]
     scored: list[tuple[list[dict[str, str]], dict[str, Any] | None]] = []
-    seen: set[tuple[tuple[str, str], ...]] = set()
+    seen: set[tuple[tuple[str, str, tuple[int, ...]], ...]] = set()
     for windows in windows_list:
         key = _sessions_key(windows)
         if key in seen:

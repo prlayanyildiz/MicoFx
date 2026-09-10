@@ -23,6 +23,8 @@ switch ($Cmd.ToLowerInvariant()) {
     "console" { Invoke-Bat "start_console.bat" }
     "stop" { Invoke-Bat "stop.bat" }
     "restart" { Invoke-Bat "restart.bat" }
+    "clean" { Invoke-Bat "TEMIZLE_PYTHON.bat" }
+    "temizle" { Invoke-Bat "TEMIZLE_PYTHON.bat" }
     "sync" {
         $ps = Join-Path $Root "scripts\auto_git_sync.ps1"
         Start-Process -FilePath "powershell.exe" -WindowStyle Minimized -ArgumentList @(
@@ -47,6 +49,7 @@ MicoFX <cmd>
   console   start_console.bat
   stop      stop.bat (port 8900)
   restart   restart.bat (app.py bunu dogrudan cagirir)
+  clean     TEMIZLE_PYTHON.bat (yetim/zombi worker temizleyici)
   sync      scripts/auto_git_sync.ps1
   bridge    scripts/start_bridge_daemon.ps1 (Task Scheduler yolu ayni)
 
@@ -55,3 +58,4 @@ Gelir dongusu bot icinde (Sistem > Gelir autopilot). GELIR_DONGUSU.bat yok.
         exit 0
     }
 }
+

@@ -136,8 +136,16 @@ def test_the_live_gate_reads_the_symbol_slot_cap():
 
 def test_the_opposite_direction_block_is_still_there():
     """With one position per symbol this rarely fires, but it is the guard that
-    stops a hedge appearing if the limit is ever raised again."""
-    assert 'if any(p["side"] != side for p in same_symbol):' in RISK
+    stops a hedge appearing if the limit is ever raised again.
+
+    Pinned on the refusal, not on the line. The old assertion quoted the
+    comparison verbatim (``p["side"] != side``); it went red when the check
+    grew a normaliser for broker rows that say "al"/"sat" instead of
+    buy/sell - a change that made the guard *stronger*. The veto firing is
+    what matters, and test_multi_position_scale_in drives it end to end.
+    """
+    assert '"ters yonde acik pozisyon var"' in RISK
+    assert "same_symbol" in RISK
 
 
 def test_the_leftover_total_slot_cap_is_unread():

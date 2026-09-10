@@ -86,14 +86,54 @@ def test_the_zeroing_is_in_walk_forward_before_the_cost_series_is_built():
     assert "commission_price = 0.0" in src[zero:assembled], "komisyon sifirlanmiyor"
 
 
+def _r_with_spread(spread_pts_value: float) -> float:
+    """One trade through ``simulate``, priced with and without the spread."""
+    from micofx.strategy import IndicatorCache, Params, Signals
+
+    # A winner that leaves on the trail, not on the stop: a stop-out is -1 R
+    # by construction (the stop is placed off the fill, so it moves with it)
+    # and would be blind to the spread on purpose.
+    n, entry_bar = 260, 30
+    up_end = entry_bar + 60
+    close = np.empty(n)
+    close[:entry_bar + 1] = 100.0
+    close[entry_bar + 1:up_end] = np.linspace(100.0, 103.0, up_end - entry_bar - 1)
+    close[up_end:] = np.linspace(103.0, 80.0, n - up_end)
+    open_ = np.empty(n)
+    open_[0] = close[0]
+    open_[1:] = close[:-1]
+    high, low = close + 0.5, close - 0.5
+    open_ = np.clip(open_, low, high)
+    buy = np.zeros(n, dtype=bool)
+    buy[entry_bar] = True
+    sig = Signals(t3=close, k=close, d=close, atr=np.full(n, 1.0), adx=np.zeros(n),
+                  buy=buy, sell=np.zeros(n, dtype=bool),
+                  htf_up=np.zeros(n, dtype=bool), htf_down=np.zeros(n, dtype=bool))
+    cache = IndicatorCache(high, low, close, times=np.arange(n) * 300,
+                           tf_seconds=300, open_=open_, volume=np.ones(n))
+    res = backtest.simulate(
+        cache, sig, open_, np.full(n, spread_pts_value), point=0.01,
+        # MFE locks off: they exit at a fixed R, which is identical either way
+        # and would hide the very difference this measures.
+        p=Params(sl_atr_mult=1.0, trail_start_atr=0.3, trail_step_atr=0.5,
+                 mfe_lock1_at_r=0.0, mfe_lock1_to_r=0.0,
+                 mfe_lock2_at_r=0.0, mfe_lock2_to_r=0.0),
+        entries=np.array([entry_bar]))
+    assert res.trades == 1
+    return float(res.trade_rs[0])
+
+
 def test_the_fills_really_do_use_the_spread():
     """If simulate ever stops moving fills by ``s``, zeroing the series would
-    become a cosmetic change and this whole switch would need rethinking."""
-    src = (Path(__file__).resolve().parents[1] / "micofx" / "backtest.py").read_text(
-        encoding="utf-8")
-    assert "entry = float(open_[j0] + s) if is_buy else float(open_[j0] - s)" in src
-    assert 'exit_price = close[j] + (0.0 if is_buy else s)' in src
-    # Short stop trigger is ask (high + pad). Fill is SL unless the bar
-    # opened through it — then open. Pad stays on the trigger, not the fill.
-    assert "def stop_fill_price(" in src
-    assert "float(trigger_pad[j])" in src
+    become a cosmetic change and this whole switch would need rethinking.
+
+    Measured, not grepped. This guard used to pin two literal source lines,
+    and one of them (``exit_price = close[j] + (0.0 if is_buy else s)``) was
+    deliberately retired when the exit stopped double-charging the open-side
+    spread already carried in ``entry`` (B3). The guard then failed for a
+    change it was never about, while still proving nothing about the fills.
+    """
+    free = _r_with_spread(0.0)
+    charged = _r_with_spread(40.0)
+    assert charged < free, (
+        "spread fiyatlara girmiyor - seriyi sifirlamak yalnizca kozmetik olur")

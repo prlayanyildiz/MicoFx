@@ -74,7 +74,11 @@ def test_run_charged_tunes_stops_after_first_land():
         with patch.object(loop, "_api_get", fake_get):
             with patch.object(loop, "_load_exec", fake_load):
                 out = loop._run_charged_tunes({})
-    assert calls == ["seans"]
+    # msa is the first rung now. Sessions left the ladder on 09.09 (operator
+    # charter: windows are operator-authoritative, and the in-process
+    # autopilot forces sess_pick=None) - _run_charged_tunes stopped calling
+    # session_exec and this expectation was never moved.
+    assert calls == ["msa"]
     assert any("1 land/sembol" in m for m in out)
 
 
@@ -149,7 +153,7 @@ def test_run_charged_tunes_falls_through_keeps():
             with patch.object(loop, "_load_exec", lambda n, p: mods[n]):
                 out = loop._run_charged_tunes({})
     assert calls == [
-        "seans", "msa", "cr", "adx", "atr_pct", "body",
+        "msa", "cr", "adx", "atr_pct", "body",
         "trail_step", "trail_start"]
     assert any("1/1 KEEP" in m for m in out)
 

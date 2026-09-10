@@ -2663,6 +2663,18 @@ function wire() {
     toast("Yeniden baslatiliyor...", "ok");
   });
 
+  const btnCleanPy = $("#sys-clean-python");
+  if (btnCleanPy) {
+    btnCleanPy.onclick = confirmThen("Arka plandaki yetim veya takili kalan Python worker surecleri temizlenecek. Onayliyor musunuz?", async () => {
+      try {
+        const res = await api("/api/system/clean-orphans", { method: "POST" });
+        toast(res?.message || "Yetim surecler temizlendi", "ok");
+      } catch (e) {
+        toast(e.message || "Surec temizleme hatasi", "err");
+      }
+    });
+  }
+
   $("#btn-close-all").onclick = confirmThen("Tum pozisyonlar kapatilacak. Onayliyor musunuz?",
     () => call("/api/positions-close-all"));
 

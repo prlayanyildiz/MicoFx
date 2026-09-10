@@ -224,6 +224,8 @@ const FIELD_HELP = {
   "th.block.Sinyal": "Ayri sinyal bolumu (bar). Poll tekrar sayisi kapi rozetinin title'inda.",
   "th.block.Acilan": "Islemle sonuclanan.",
   "th.block.Oran": "Acilan / sinyal. Poll tekrar bu oranin paydasi degil.",
+  "th.block.Hard": "Acilan / (sinyal - soft ret). Seans ve bar_doldu gibi tasarim geregi retler paydadan dusulur; dusuk deger gercek bir fill sorunu demektir (0.35 alti kirmizi).",
+  "th.block.Oto": "Otopilotun bu satir icin onerdigi is: spread_kalibre / chase_nudge = aday ayar, beklenen_* = tasarim geregi, izle = dokunma.",
 
   "th.ratio.Ornek": "Toplanan olcum sayisi.",
   "th.ratio.Medyan": "Canli tick spread / bar spread, medyan.",

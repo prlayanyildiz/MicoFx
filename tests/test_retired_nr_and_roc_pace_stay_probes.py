@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import micofx.strategy as strategy
 from micofx.models import OPT_FIELDS, STRATEGIES, SymbolConfig
 from micofx.strategy import _FAMILIES, Params
+from tests.retired_lexicon import LIVING_FAMILIES
 
 
 def test_nr_break_and_roc_pace_are_gone_entirely():
@@ -26,9 +27,7 @@ def test_nr_break_and_roc_pace_are_gone_entirely():
     assert "rp_roc_len" not in SymbolConfig.__dataclass_fields__
     # sweep_fade / range_fade joined 04.09 as dormant - in STRATEGIES, not in
     # the shipped opt list. nr_break and roc_pace must still be absent.
-    assert set(STRATEGIES) == {
-        "mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade",
-    }
+    assert set(STRATEGIES) == LIVING_FAMILIES
 
 
 def test_dead_unstamped_gates_plumbing_is_gone():

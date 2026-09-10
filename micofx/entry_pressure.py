@@ -177,9 +177,10 @@ def auto_hint(row: dict[str, Any] | None) -> str:
     blocks = row.get("blocks") or {}
     if not blocks:
         return "izle"
-    fill = None
+    fill: float | None = None
     try:
-        fill = float(row.get("fill_rate")) if row.get("fill_rate") is not None else None
+        raw_fill = row.get("fill_rate")
+        fill = float(raw_fill) if raw_fill is not None else None
     except (TypeError, ValueError):
         fill = None
     a_fill = action_fill_rate(row)

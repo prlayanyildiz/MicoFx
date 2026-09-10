@@ -275,15 +275,17 @@ class Store:
             extra = set(raw) - known if isinstance(raw, dict) else set()
             if isinstance(raw, dict):
                 extra |= set(raw) & RETIRED_PAYLOAD_KEYS
-            cfg = loaded.get(row["symbol"])
+            # Own name: ``cfg`` in the loop above is a freshly parsed row,
+            # this is a lookup that can miss.
+            live_cfg = loaded.get(row["symbol"])
             unread_cost = (
-                cfg is not None
-                and float(getattr(cfg, "cost_rank_max", 0.0) or 0.0)
-                and "cost_rank_max" not in opt_fields_read(cfg.strategy)
+                live_cfg is not None
+                and float(getattr(live_cfg, "cost_rank_max", 0.0) or 0.0)
+                and "cost_rank_max" not in opt_fields_read(live_cfg.strategy)
             )
             thin_costed = False
-            if cfg is not None:
-                costed = (getattr(cfg, "opt_summary", None) or {}).get(
+            if live_cfg is not None:
+                costed = (getattr(live_cfg, "opt_summary", None) or {}).get(
                     "holdout_costed")
                 try:
                     cn = int((costed or {}).get("trades") or 0)
@@ -292,12 +294,12 @@ class Store:
                 from .supervisor import Supervisor
                 if cn and cn < Supervisor.MIN_COSTED_N:
                     thin_costed = True
-                    summary = dict(getattr(cfg, "opt_summary", None) or {})
+                    summary = dict(getattr(live_cfg, "opt_summary", None) or {})
                     summary.pop("holdout_costed", None)
                     summary.pop("costed_negative", None)
-                    cfg.opt_summary = summary
-            if cfg is not None and (extra or unread_cost or thin_costed):
-                dirty.append(cfg)
+                    live_cfg.opt_summary = summary
+            if live_cfg is not None and (extra or unread_cost or thin_costed):
+                dirty.append(live_cfg)
         for cfg in dirty:
             self.save_symbol(cfg)
 
@@ -775,12 +777,13 @@ class Store:
             # TF. Without a ship-union, soft-restart keeps M5 invisible forever
             # after a park-era blob (Claude 03.09). Prefer shipped order; keep
             # any still-legal stored-only extras after.
-            ship_tfs = shipped.get("timeframes") if isinstance(
-                shipped.get("timeframes"), list) else []
+            raw_ship_tfs = shipped.get("timeframes")
+            ship_tfs: list[Any] = (
+                list(raw_ship_tfs) if isinstance(raw_ship_tfs, list) else [])
             stored_tfs = [t for t in base["timeframes"] if t in TIMEFRAMES]
             ordered: list[str] = []
             seen: set[str] = set()
-            for t in list(ship_tfs) + stored_tfs:
+            for t in ship_tfs + stored_tfs:
                 if t in TIMEFRAMES and t not in seen:
                     seen.add(t)
                     ordered.append(t)

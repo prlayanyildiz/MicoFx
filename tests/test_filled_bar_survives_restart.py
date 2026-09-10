@@ -20,6 +20,8 @@ filled - and that lived only in SymbolState, which a restart rebuilds empty.
 """
 from __future__ import annotations
 
+import threading
+
 from micofx.engine import Engine
 
 
@@ -38,6 +40,12 @@ class _Store:
 def _engine(store):
     eng = Engine.__new__(Engine)
     eng.store = store
+    # _mark_bar_filled and _prune_filled_bars take entry_lock: the map is
+    # written by the trading thread and read by the web thread. A double
+    # built with __new__ has to carry it - the alternative, teaching the
+    # engine to run unlocked when the attribute is missing, would turn "this
+    # double forgot the lock" into "this code path ran without one".
+    eng.entry_lock = threading.Lock()
     # Mirrors Engine.__init__: records are kept per (symbol, leg) so a
     # secondary fill cannot erase the primary's already-taken bar. The old
     # single-slot shape is migrated rather than dropped.

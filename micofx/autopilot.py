@@ -949,7 +949,7 @@ class AutoPilot:
     # -------------------------------------------------------- opt lifecycle
 
     def _operator_disabled(self) -> set[str]:
-        raw = {}
+        raw: Any = {}
         getter = getattr(self.store, "get_setting", None)
         if callable(getter):
             raw = getter(_OPERATOR_DISABLED_KEY, {}) or {}

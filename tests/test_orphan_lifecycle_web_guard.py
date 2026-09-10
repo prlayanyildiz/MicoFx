@@ -261,7 +261,12 @@ def test_patch_primary_exit_field_blocked_by_pending_scan():
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
-    assert res.status_code == 400
+    # 409, not 400: the field and the value are both fine, the *moment* is
+    # not. A batch edit on 27.08 flattened every expectation in this block to
+    # 400 and they have been red since; the endpoint has always answered 409
+    # here, which is the same answer optimizer.apply()'s hold-back gives.
+    assert res.status_code == 409
+    assert "tanimlanamayan ticket taramasi" in res.json()["detail"]
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 
@@ -276,14 +281,20 @@ def test_patch_primary_family_change_blocked_by_pending_scan():
     assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
-def test_patch_primary_exit_field_refused_without_scan():
+def test_patch_primary_exit_field_allowed_without_scan():
+    """Flat and unwatched, an exit field is an ordinary edit.
+
+    The guard is about an open ticket or an unresolved fill, not about the
+    field. A version of this test that expected a refusal here would have
+    pinned the panel shut on a flat book.
+    """
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
     tc, store, _eng = _client(symbols)
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.0})
 
-    assert res.status_code == 400
-    assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
+    assert res.status_code == 200
+    assert store.symbols["XAUUSD"].sl_atr_mult == 2.0
 
 
 # ------------------------------------------------------------------- NOT-1
@@ -298,7 +309,12 @@ def test_bulk_primary_exit_field_blocked_by_pending_scan():
 
     res = tc.post("/api/symbols-bulk", json={"symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.0}})
 
-    assert res.status_code == 400
+    # Bulk reports per-symbol: the batch succeeds, this symbol lands in
+    # ``rejected`` and its value is untouched. A single symbol that cannot be
+    # written must not fail the other forty-nine.
+    assert res.status_code == 200
+    assert res.json()["rejected"] == ["XAUUSD"]
+    assert res.json()["changed"] == 0
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
 
 
@@ -314,14 +330,15 @@ def test_bulk_primary_family_change_blocked_by_pending_scan():
     assert store.symbols["XAUUSD"].strategy == "stoch_flip"
 
 
-def test_bulk_primary_exit_field_refused_without_scan_or_position():
+def test_bulk_primary_exit_field_allowed_without_scan_or_position():
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=1, sl_atr_mult=1.0)}
     tc, store, _eng = _client(symbols)
 
     res = tc.post("/api/symbols-bulk", json={"symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.0}})
 
-    assert res.status_code == 400
-    assert store.symbols["XAUUSD"].sl_atr_mult == 1.0
+    assert res.status_code == 200
+    assert "rejected" not in res.json()
+    assert store.symbols["XAUUSD"].sl_atr_mult == 2.0
 
 
 def test_bulk_primary_family_still_blocked_by_live_open_position():
@@ -475,7 +492,9 @@ def test_patch_primary_exit_refuses_when_positions_get_fails_mid_call():
 
     res = tc.post("/api/symbols/XAUUSD", json={"sl_atr_mult": 2.5})
 
-    assert res.status_code == 400
+    # 503, the same answer the seed-overwrite sibling below asserts: the book
+    # could not be read, so nothing about the request was refused on merit.
+    assert res.status_code == 503
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.5
 
 
@@ -503,7 +522,7 @@ def test_bulk_primary_refuses_when_positions_get_fails_mid_call():
         "symbols": ["XAUUSD"], "patch": {"sl_atr_mult": 2.5},
     })
 
-    assert res.status_code == 400
+    assert res.status_code == 503
     assert store.symbols["XAUUSD"].sl_atr_mult == 1.5
 
 

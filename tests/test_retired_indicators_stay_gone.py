@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import micofx.indicators as ind
+from tests.retired_lexicon import LIVING_FAMILIES
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -18,9 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # added as dormant, and an always-failing anti-resurrection guard guards
 # nothing - ichimoku could have come back without producing a new failure.
 # Adding any family still trips this; adding a *retired* one trips it by name.
-EXPECTED_FAMILIES = frozenset({
-    "mtf_pullback", "burst", "channel_break", "sweep_fade", "range_fade",
-})
+#
+# 07.09 proved the same point about the copy itself: super_trend and
+# keltner_break landed, this literal was one of five hand-kept copies, four of
+# them (this one included) went red and stayed red. The list is
+# tests/retired_lexicon.py now - one edit per book change.
+EXPECTED_FAMILIES = LIVING_FAMILIES
 
 
 def test_retired_indicator_helpers_are_gone():
@@ -148,7 +152,12 @@ def test_retired_family_functions_are_gone():
                  "_t3_accel", "_flip_gates", "_ichimoku"):
         assert not hasattr(strategy, name), name
     from micofx.strategy import IndicatorCache
-    for name in ("supertrend", "stoch_slow", "psar"):
+    # ``supertrend`` left this list on 07.09: the helper came back with the
+    # super_trend family, which is live and holdout-positive on all seven
+    # symbols. It is the cache method that family reads, not a leftover of the
+    # retired ``st_trend``; the retired axes (st_period / st_mult) are still
+    # asserted gone above, and sup_period / sup_mult are the new ones.
+    for name in ("stoch_slow", "psar"):
         assert not hasattr(IndicatorCache, name), name
 
 

@@ -1,11 +1,12 @@
 # Durable book monitor launcher (single-instance).
-# Spawns Python via WMI so it is NOT a child of a Cursor/agent job object —
+# Spawns pythonw via WMI so it is NOT a child of a Cursor/agent job object —
 # those trees get hard-killed (exit=-1) when the parent shell is swept.
+# pythonw.exe (not python.exe): no console, no taskbar flash, survives RDP.
 # Soft reload: touch .bridge/BASELINE_WATCH_RELOAD (watch exits 0).
-# venv python.exe is a trampoline → expect parent+child pair (2 PIDs = 1 watch).
+# venv pythonw.exe is a trampoline → expect parent+child pair (2 PIDs = 1 watch).
 $ErrorActionPreference = "Continue"
 $Root = "C:\Users\Administrator\MicoFx"
-$Py = "C:\MicoFX-venv\Scripts\python.exe"
+$Py = "C:\MicoFX-venv\Scripts\pythonw.exe"
 $Script = Join-Path $Root "scripts\baseline_accumulate_watch.py"
 $MutexName = "Global\MicoFX.BaselineAccumulateWatch"
 $Log = Join-Path $Root "logs\baseline_accumulate.log"
@@ -29,6 +30,18 @@ function Write-LaunchLog([string]$msg) {
     $line = "[$ts] $msg"
     Write-Host $line
     Add-Content -Path $Log -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
+}
+
+function Wait-BaselineWatchGone {
+    # Wait until the whole trampoline+child tree is gone. Waiting only on the
+    # WMI PID used to return when the venv stub exited and then respawn
+    # python.exe every few seconds (taskbar flicker).
+    while ($true) {
+        $alive = @(Get-BaselineWatchPids)
+        if ($alive.Count -eq 0) { return }
+        Wait-Process -Id ([int]$alive[0]) -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 400
+    }
 }
 
 $mutex = New-Object System.Threading.Mutex($false, $MutexName)
@@ -72,21 +85,20 @@ try {
                 Start-Sleep -Seconds 1
                 $roots = @($keep)
             }
-            $procId = [int]$roots[0]
-            Write-LaunchLog "adopt existing watch pid=$procId (no new spawn)"
-            Wait-Process -Id $procId -ErrorAction SilentlyContinue
+            Write-LaunchLog "adopt existing watch pid=$($roots[0]) (no new spawn)"
+            Wait-BaselineWatchGone
             $reason = "unknown"
             if (Test-Path $LastExit) {
                 $reason = ((Get-Content $LastExit -ErrorAction SilentlyContinue) -join " ").Trim()
             }
-            Write-LaunchLog "launcher child exited reason=$reason; retry in 5s"
-            Start-Sleep -Seconds 5
+            Write-LaunchLog "launcher child exited reason=$reason; retry in 15s"
+            Start-Sleep -Seconds 15
             continue
         }
 
-        Write-LaunchLog "launcher start baseline_accumulate_watch (detached)"
+        Write-LaunchLog "launcher start baseline_accumulate_watch (detached pythonw)"
         Remove-Item $LastExit -Force -ErrorAction SilentlyContinue
-        $cmd = "`"$Py`" -u `"$Script`" --interval 900"
+        $cmd = "`"$Py`" `"$Script`" --interval 900"
         $procId = 0
         try {
             $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
@@ -100,20 +112,21 @@ try {
             Write-LaunchLog "WMI Create failed: $($_.Exception.Message)"
         }
         if ($procId -le 0) {
-            $p = Start-Process -FilePath $Py -ArgumentList @("-u", $Script, "--interval", "900") `
+            $p = Start-Process -FilePath $Py -ArgumentList @($Script, "--interval", "900") `
                 -WorkingDirectory $Root -PassThru -WindowStyle Hidden
             $procId = [int]$p.Id
             Write-LaunchLog "fallback Start-Process pid=$procId"
         } else {
-            Write-LaunchLog "watch pid=$procId (WMI detached)"
+            Write-LaunchLog "watch pid=$procId (WMI detached pythonw)"
         }
-        Wait-Process -Id $procId -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+        Wait-BaselineWatchGone
         $reason = "unknown"
         if (Test-Path $LastExit) {
             $reason = ((Get-Content $LastExit -ErrorAction SilentlyContinue) -join " ").Trim()
         }
-        Write-LaunchLog "launcher child exited reason=$reason; retry in 5s"
-        Start-Sleep -Seconds 5
+        Write-LaunchLog "launcher child exited reason=$reason; retry in 15s"
+        Start-Sleep -Seconds 15
     }
 } finally {
     $mutex.ReleaseMutex() | Out-Null

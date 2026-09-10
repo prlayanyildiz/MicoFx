@@ -94,8 +94,16 @@ def test_apply_spread_widen_refuses_six_slice_erosion():
 
 
 def test_apply_spread_widen_skips_when_pipeline_frozen():
-    ok, msg = apply_spread_widen(
-        {}, panel="http://127.0.0.1:8900", symbol="US30",
-        current_cap=0.08, history=[])
+    """The freeze is patched, not borrowed from the machine.
+
+    This test used to call the real ``pipeline_frozen`` and so only passed
+    while a freeze marker happened to exist on disk; with the pipeline
+    running it read the ordinary "tavan degismedi" answer and failed. Every
+    other freeze test in this suite patches the gate - this one now does too.
+    """
+    with patch("scripts.exec_gates.pipeline_frozen", return_value=True):
+        ok, msg = apply_spread_widen(
+            {}, panel="http://127.0.0.1:8900", symbol="US30",
+            current_cap=0.08, history=[])
     assert ok
     assert "FREEZE" in msg

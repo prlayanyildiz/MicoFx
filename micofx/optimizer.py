@@ -112,7 +112,10 @@ def weak_entry_hours_from_autopsy(
             continue
         try:
             t = int(float(row.get("fill_time") or 0))
-            rr = float(row.get("r_realised"))
+            raw_r = row.get("r_realised")
+            if raw_r is None:
+                continue          # was a TypeError into the same continue
+            rr = float(raw_r)
         except (TypeError, ValueError):
             continue
         if t <= 0 or abs(rr) > 50:
@@ -1109,7 +1112,7 @@ class Optimizer:
             else:
                 fam_override = None
             self._cancel.clear()
-            self._incumbent_holdout_cache = {}
+            self._incumbent_holdout_cache: dict[tuple, dict[str, Any] | None] = {}
             self.job = {
                 "state": "running", "started_at": time.time(), "finished_at": 0.0,
                 "symbols": targets, "apply_best": bool(apply_best),
@@ -1571,15 +1574,17 @@ class Optimizer:
                     if axis:
                         grid = {**grid, "max_spread_atr": axis}
                     # Hour blocks: prefer this symbol's autopsy bleed hours.
-                    weak_hours = None
+                    weak_hours: list[int] | None = None
                     try:
                         raw_auto = self.store.get_setting("trade_autopsies")
                     except Exception:
                         raw_auto = None
                     if isinstance(raw_auto, list) and raw_auto:
-                        got = weak_entry_hours_from_autopsy(raw_auto, cfg.symbol)
-                        if got:
-                            weak_hours = got
+                        # Own name: ``got`` up in the bar fetch is a Bars.
+                        weak_got = weak_entry_hours_from_autopsy(
+                            raw_auto, cfg.symbol)
+                        if weak_got:
+                            weak_hours = weak_got
                     hour_axis = blocked_hour_search_axis(
                         weak_hours=weak_hours,
                         live_blocked=list(
@@ -2935,7 +2940,7 @@ class Optimizer:
         if live_key not in {_sessions_key(w) for w in windows_list}:
             windows_list = [live, *windows_list]
         scored: list[tuple[list, dict | None]] = []
-        seen: set[tuple[tuple[str, str], ...]] = set()
+        seen: set[tuple[tuple[str, str, tuple[int, ...]], ...]] = set()
         for windows in windows_list:
             key = _sessions_key(windows)
             if key in seen:
@@ -3016,7 +3021,7 @@ class Optimizer:
                 _sessions_key(w) for w in windows_list}:
             windows_list = [current, *windows_list]
         scored: list[tuple[list, dict | None]] = []
-        seen: set[tuple[tuple[str, str], ...]] = set()
+        seen: set[tuple[tuple[str, str, tuple[int, ...]], ...]] = set()
         for windows in windows_list:
             key = _sessions_key(windows)
             if key in seen:
@@ -3530,8 +3535,9 @@ class Optimizer:
             # land a 3/6 stamp (US30 id662).
             if detail.get("selection_positive_ratio") is not None:
                 try:
-                    min_positive = float(detail.get("min_positive_ratio")) \
-                        if detail.get("min_positive_ratio") is not None else float(
+                    raw_min_pos = detail.get("min_positive_ratio")
+                    min_positive = float(raw_min_pos) \
+                        if raw_min_pos is not None else float(
                             (self.store.opt_params() or {}).get(
                                 "min_positive_ratio", 0.6) or 0.6)
                 except (TypeError, ValueError):

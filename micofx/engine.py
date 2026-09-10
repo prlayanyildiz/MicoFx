@@ -617,7 +617,7 @@ class Engine:
                      if int(t) > 0 and float(u) > time.time()}
             self.store.set_setting("close_retry_after", clean)
 
-        self.client._persist_close_retry = _persist_close_retry  # type: ignore[method-assign]
+        self.client._persist_close_retry = _persist_close_retry
         # Session / day-end flatten sticky: should_flatten / day_end_close are
         # time windows - a DONE_PARTIAL True during the window used to look
         # "handled", then once the window flipped off the remainder fell into
@@ -2261,7 +2261,7 @@ class Engine:
         except Exception:
             self._trade_autopsies = []
             self._trade_autopsies_since = time.time()
-            self._autopsy_pending = {}
+            self._autopsy_pending: dict[str, list[dict[str, Any]]] = {}
 
     def _autopsy_safe(self, **fields: Any) -> None:
         """Record one close for diagnostics, and never let that break a close.
@@ -3332,11 +3332,14 @@ class Engine:
         if bars is not None and getattr(bars, "close", None) is not None and len(bars.close):
             try:
                 from scripts.chase_r_log import chase_blocks
-                sig_close = float(bars.close[-1])
+                # Own name: the fill-time ``sig_close`` further down is the
+                # armed bar's close and may be None; this one is the last
+                # close and is only ever a float.
+                chase_close = float(bars.close[-1])
                 if chase_blocks(
-                        entry, sig_close, side,
+                        entry, chase_close, side,
                         atr=atr, max_atr=getattr(cfg, "chase_max_atr", 0.0)):
-                    vs = abs(entry - sig_close)
+                    vs = abs(entry - chase_close)
                     state.note = (
                         f"kovalama asimi ({vs / atr:.2f}xATR > "
                         f"{float(cfg.chase_max_atr):g})")
@@ -3435,12 +3438,14 @@ class Engine:
                             and len(bars.close)):
                         try:
                             from scripts.chase_r_log import chase_blocks
-                            sig_close = float(bars.close[-1])
+                            # Same distinction as the pre-lock chase check
+                            # above: last close, never None.
+                            chase_close = float(bars.close[-1])
                             if chase_blocks(
-                                    entry, sig_close, side,
+                                    entry, chase_close, side,
                                     atr=atr,
                                     max_atr=getattr(cfg, "chase_max_atr", 0.0)):
-                                vs = abs(entry - sig_close)
+                                vs = abs(entry - chase_close)
                                 state.note = (
                                     f"kovalama asimi (gonderim "
                                     f"{vs / atr:.2f}xATR)")
@@ -4567,7 +4572,7 @@ class Engine:
         land = {k: pending[k] for k in pending if k in PRIMARY_LAND_KEYS}
         next_strat = land.get("strategy", cfg.strategy)
         next_tf = land.get("timeframe", cfg.timeframe)
-        drop = {"pending_primary_patch": {}, "pending_exit_patch": {}}
+        drop: dict[str, Any] = {"pending_primary_patch": {}, "pending_exit_patch": {}}
         if next_strat not in STRATEGIES or next_tf not in TIMEFRAMES:
             self.store.update_symbol(cfg.symbol, drop, source="motor bekleyen-aile")
             LOG.emit(f"{cfg.symbol}: bekletilen aile/TF gecersiz "

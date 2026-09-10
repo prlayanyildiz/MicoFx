@@ -95,8 +95,22 @@ def interpreter_images(executable: str) -> list[str]:
     return seen
 
 
-def cleanup_orphan_workers(executable: str | None = None) -> None:
+def cleanup_orphan_workers(executable: str | None = None) -> int:
     """Kill leftover optimizer pool children whose parent is already gone.
+
+    Returns how many were killed, so a caller that has to *report* a number -
+    the panel's "Yetim Surecleri Temizle" button - can reuse this filter
+    instead of writing a second one. Three near-copies of this WMI query
+    existed (panel endpoint, stop.bat, TEMIZLE_PYTHON.bat) and not one of them
+    carried the two guards below: they matched on process name alone, so they
+    reached every Python multiprocessing worker on the machine, and with no
+    parent-alive check the panel copy would have killed THIS process's own
+    search pool in the middle of a search.
+
+    Two guards, both load-bearing:
+      * the image must belong to this venv or its base interpreter, so the
+        sweep cannot reach another application's pool;
+      * the parent must be gone - that is what makes a worker an orphan.
 
     Best-effort: any failure here must never block a boot or a night restart.
     """
@@ -104,12 +118,14 @@ def cleanup_orphan_workers(executable: str | None = None) -> None:
         images = interpreter_images(executable or sys.executable)
         quoted = ",".join("'" + p.replace("'", "''") + "'" for p in images)
         script = (
-            "Get-CimInstance Win32_Process -Filter \"Name='pythonw.exe' or Name='python.exe'\" "
+            "$targets = @(Get-CimInstance Win32_Process "
+            "-Filter \"Name='pythonw.exe' or Name='python.exe'\" "
             f"| Where-Object {{ ($_.CommandLine -like '*--multiprocessing-fork*' "
             f"-or $_.CommandLine -like '*spawn_main*') "
             f"-and @({quoted}) -contains $_.ExecutablePath "
-            f"-and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) }} "
-            "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            f"-and -not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue) }}); "
+            "$targets | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
+            "Write-Output $targets.Count"
         )
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -128,8 +144,12 @@ def cleanup_orphan_workers(executable: str | None = None) -> None:
                     "WARN")
             except Exception:
                 pass
+            return 0
+        out = (result.stdout or b"").decode("utf-8", errors="replace").strip()
+        tail = out.splitlines()[-1].strip() if out else ""
+        return int(tail) if tail.isdigit() else 0
     except Exception:
-        pass
+        return 0
 
 
 def live_ticket_count(opener, base: str) -> int | None:

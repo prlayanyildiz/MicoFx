@@ -116,7 +116,7 @@ def startup_fail(message: str) -> int:
     return 1
 
 
-def cleanup_orphan_workers() -> None:
+def cleanup_orphan_workers() -> int:
     """Kill leftover optimizer pool children from a previous instance.
 
     The filter lives in gece_restart so the night restart can use it
@@ -124,12 +124,15 @@ def cleanup_orphan_workers() -> None:
     ``--multiprocessing-fork``, and an image that belongs to this venv
     *or* its base interpreter - the Scripts launcher path alone missed
     the 26.08 12:32 pool.
+
+    Returns the number killed; the boot path ignores it, the panel button
+    reports it.
     """
     try:
         import gece_restart
-        gece_restart.cleanup_orphan_workers(sys.executable)
+        return gece_restart.cleanup_orphan_workers(sys.executable)
     except Exception:
-        pass
+        return 0
 
 
 def _resweep_orphans_later() -> None:

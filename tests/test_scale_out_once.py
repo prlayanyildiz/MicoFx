@@ -243,8 +243,13 @@ def test_paper_books_the_rung_then_the_remainder():
                   htf_up=np.zeros(n, dtype=bool), htf_down=np.zeros(n, dtype=bool))
     cache = IndicatorCache(high, low, close, times=np.arange(n) * 300,
                            tf_seconds=300, open_=open_, volume=np.ones(n))
+    # MFE locks are Params defaults since 07.09 and this path peaks at ~3 R;
+    # left on they book +0.75 R and the rung is never what is measured. The
+    # locks are a separate overlay with their own tests.
     p = Params(sl_atr_mult=1.0, trail_start_atr=9.0, trail_step_atr=2.2,
-               partial_at_r=1.5, partial_close_frac=0.5)
+               partial_at_r=1.5, partial_close_frac=0.5,
+               mfe_lock1_at_r=0.0, mfe_lock1_to_r=0.0,
+               mfe_lock2_at_r=0.0, mfe_lock2_to_r=0.0)
     res = backtest.simulate(
         cache, sig, open_, np.zeros(n), point=0.01, p=p,
         entries=np.array([entry_bar]), min_stop=0.01)
@@ -278,9 +283,13 @@ def test_paper_off_still_dies_at_the_hard_stop():
                            tf_seconds=300, open_=open_, volume=np.ones(n))
     res = backtest.simulate(
         cache, sig, open_, np.zeros(n), point=0.01,
-        p=Params(sl_atr_mult=1.0, trail_start_atr=9.0, trail_step_atr=2.2),
+        p=Params(sl_atr_mult=1.0, trail_start_atr=9.0, trail_step_atr=2.2,
+                 mfe_lock1_at_r=0.0, mfe_lock1_to_r=0.0,
+                 mfe_lock2_at_r=0.0, mfe_lock2_to_r=0.0),
         entries=np.array([entry_bar]), min_stop=0.01)
     assert res.trades == 1
+    # "no rung" means the hard stop, not "no overlays": the MFE locks default
+    # on since 07.09 and would have caught this path at +0.75 R.
     assert res.trade_rs[0] == pytest.approx(-1.0, abs=0.15)
 
 

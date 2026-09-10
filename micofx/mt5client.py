@@ -5,6 +5,7 @@ import os
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -214,6 +215,18 @@ class MT5Client:
     The MT5 python binding is not thread safe, so every call funnels through one
     reentrant lock shared by the trading loop, the optimizer and the web API.
     """
+
+    # Late-bound close-retry state. Engine.__init__ restores
+    # ``_close_retry_after`` from settings and installs
+    # ``_persist_close_retry``; ``close_position`` creates whichever is still
+    # missing on first use. Declared (not assigned) so the shapes are stated
+    # once here instead of inferred from the empty literals at the use sites -
+    # which gave dict[Never, Never] and made every read and write of them an
+    # error. A bare annotation binds nothing at runtime, so the
+    # ``getattr(self, ..., None)`` guards still see None on a fresh client.
+    _close_retry_after: dict[int, float]
+    _close_fail_logged: dict[tuple[int, int], tuple[float, float, int]]
+    _persist_close_retry: Callable[[dict[int, float]], None]
 
     def __init__(self, terminal_path: str = "") -> None:
         self._lock = threading.RLock()
