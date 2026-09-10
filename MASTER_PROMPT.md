@@ -166,7 +166,7 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
     mt5client.py    locked MT5 bridge
     sessions.py     broker-time windows
     indicators.py   T3, StochRSI, ATR, ADX, SuperTrend, helpers
-    strategy.py     Params, IndicatorCache, 5 families → Signals
+    strategy.py     Params, IndicatorCache, 7 families → Signals
     backtest.py     bar replay + walk_forward
     optimizer.py    background TF×strategy search + apply gates
     risk.py         DailyGuard + lot_for + can_open + edge_scale

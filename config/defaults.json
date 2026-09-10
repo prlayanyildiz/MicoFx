@@ -389,7 +389,9 @@
       "mtf_pullback",
       "channel_break",
       "super_trend",
-      "keltner_break"
+      "keltner_break",
+      "range_fade",
+      "sweep_fade"
     ],
     "strategy_grids": {
       "mtf_pullback": {
