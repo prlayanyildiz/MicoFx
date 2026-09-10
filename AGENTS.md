@@ -76,6 +76,18 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
 - `EXIT_RISK_FIELDS` mid-trade â†’ **409**. `breakeven_at_r`,
   `partial_at_r`, `harvest_at_r` and `harvest_step_atr` are
   deliberately **not** in that set.
+- The live **trade mask** is four fields, not two:
+  `_SESSION_CLOCK_FIELDS = {use_sessions, sessions, trade_days,
+  flat_before_close_min}`. `session_state()` re-reads `trade_days` and
+  `should_flatten()` re-reads `flat_before_close_min` off the live cfg every
+  cycle, exactly as they re-read the windows, so all four decide whether an
+  open ticket gets truncated *now*. Moving any of them while this magic has
+  tickets (or a pending orphan scan) → **409**, on the per-symbol route
+  **and** on `/api/symbols-bulk` — bulk reached these fields with no check at
+  all, so one batch could truncate the whole book. A mask edit that lands
+  restamps the costed holdout (both routes; the stored number was measured
+  under the old mask). Add a field to the mask → add it to that set, not to a
+  second copy of the check.
 - Watch mode never opens. Wrong `broker_symbol` â†’ unavailable, no fuzzy
  fallback.
 - `spread_calibration.cap_from_bands` defaults widen-only

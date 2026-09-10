@@ -76,6 +76,13 @@ class _Client:
     connected = True
     last_error = ""
 
+    def positions(self, magic=None, symbol=None):
+        # flat_before_close_min joined the guarded trade-mask set: writing it
+        # now reads the book first, because moving it under an open ticket
+        # moves when that ticket is force-closed. Flat here - this file is
+        # about the numeric bound, not the open-position refusal.
+        return []
+
     def set_overrides(self, m):
         pass
 
@@ -95,6 +102,11 @@ class _Engine:
 
 class _Optimizer:
     MAX_COST_PER_TRADE_R = 0.25
+
+    def refresh_live_costed_stamp(self, symbol):
+        # A trade-mask edit restamps the costed holdout: the stored number was
+        # measured under the mask that just moved.
+        return None
 
     def start(self, *a, **k):
         return {"ok": True}

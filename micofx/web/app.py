@@ -358,15 +358,62 @@ def _validate_sessions(patch: dict[str, Any]) -> None:
                     400, f"blocked_entry_hours gecersiz saat ({h!r}) - 0..23 arasi tamsayi olmali")
 
 
+# The four fields that are the live trade mask. Named so the per-symbol and
+# bulk routes cannot drift on which ones count - bulk had none of them.
+_SESSION_CLOCK_FIELDS = frozenset({
+    "use_sessions", "sessions", "trade_days", "flat_before_close_min",
+})
+
+
+def _trade_days_key(raw: Any) -> tuple[int, ...]:
+    """Day mask as a comparable set. Junk entries drop, exactly as sessions.py
+    ignores anything outside 1..7 when it builds ``trade_day_set``."""
+    out: set[int] = set()
+    for day in (raw or []):
+        try:
+            value = int(day)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= value <= 7:
+            out.add(value)
+    return tuple(sorted(out))
+
+
 def _session_clock_changed(cfg, patch: dict[str, Any]) -> bool:
-    """True when the live trade mask (use_sessions / windows) actually moved."""
+    """True when the live trade mask actually moved.
+
+    The mask is four fields, not two. ``use_sessions`` and ``sessions`` are
+    the obvious pair. ``trade_days`` decides whether today trades at all, and
+    ``flat_before_close_min`` decides how many minutes before the window ends
+    an open position is force-closed - ``sessions.session_state()`` and
+    ``sessions.should_flatten()`` re-read both off the live cfg every cycle,
+    exactly as they re-read the windows. Left out, they were two more doors
+    to the same outcome the open-ticket refusal exists to prevent: the same
+    trade truncated, through a different field.
+
+    Each field is checked and falls through rather than returning. ``sessions``
+    used to ``return`` its own comparison, so a patch carrying an unchanged
+    ``sessions`` alongside a changed ``use_sessions`` answered False.
+    """
     if cfg is None:
         return False
     if "use_sessions" in patch and bool(patch["use_sessions"]) != bool(cfg.use_sessions):
         return True
     if "sessions" in patch:
         from ..optimizer import _sessions_key
-        return _sessions_key(patch.get("sessions")) != _sessions_key(cfg.sessions)
+        if _sessions_key(patch.get("sessions")) != _sessions_key(cfg.sessions):
+            return True
+    if "trade_days" in patch and (_trade_days_key(patch.get("trade_days"))
+                                  != _trade_days_key(getattr(cfg, "trade_days", None))):
+        return True
+    if "flat_before_close_min" in patch:
+        try:
+            moved = (int(patch["flat_before_close_min"] or 0)
+                     != int(getattr(cfg, "flat_before_close_min", 0) or 0))
+        except (TypeError, ValueError):
+            moved = True      # unreadable is not "unchanged"
+        if moved:
+            return True
     return False
 
 
@@ -1827,8 +1874,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
             _require_optimised_before_enabling(body.patch, store.symbols.get(target))
             _require_current_cost_basis_before_enabling(
                 body.patch, store.symbols.get(target), optimizer)
+        # The trade-mask fields belong here for the same reason exit_fields do:
+        # bulk is the other door. patch_symbol refuses a session/day-mask edit
+        # while this magic has tickets, and this route reached the same fields
+        # with no check at all - one "Tumunu Ac"-style batch could truncate
+        # every open trade in the book at once.
+        clock_fields = [k for k in _SESSION_CLOCK_FIELDS if k in body.patch]
+        clock_touched: list[str] = []
         guarded = (needs_tf_check or magic_changing or bool(exit_fields)
-                   or "broker_symbol" in body.patch)
+                   or bool(clock_fields) or "broker_symbol" in body.patch)
         if guarded:
             _require_connected()
             engine.entry_lock.acquire()
@@ -1876,6 +1930,14 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     if exit_changing and (current.magic in open_magics or pending_scan):
                         rejected.append(symbol)
                         continue
+                if clock_fields and current is not None:
+                    # Per symbol, not per batch: the mask may already match on
+                    # some rows, and those are not being changed at all.
+                    if _session_clock_changed(current, body.patch):
+                        if current.magic in open_magics or pending_scan:
+                            rejected.append(symbol)
+                            continue
+                        clock_touched.append(symbol)
                 current = store.symbols.get(symbol)
                 was_enabled = bool(current.enabled) if current is not None else False
                 material = current is not None and any(
@@ -1892,6 +1954,15 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         finally:
             if guarded:
                 engine.entry_lock.release()
+        # After the lock, exactly as patch_symbol does it: a charged restamp is
+        # a replay, and running one while holding entry_lock stalls the trading
+        # thread behind it. Bulk did not restamp at all, so a mask edited
+        # through this door left the costed holdout describing a mask that no
+        # longer existed - and that number is what the supervisor and the apply
+        # gates read.
+        if clock_touched and optimizer is not None:
+            for symbol in clock_touched:
+                optimizer.refresh_live_costed_stamp(symbol)
         result = {"ok": True, "changed": changed, "symbols": symbol_payload(force=True)}
         if rejected:
             result["rejected"] = rejected
