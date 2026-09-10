@@ -137,3 +137,46 @@ def test_upgrade_robust_ignores_invalid_slice_wins():
     assert upgrade_robust(live, chal, live_valid=valid, chal_valid=valid) is True
     thin = [False, False, False, True, True, True]
     assert upgrade_robust(live, chal, live_valid=thin, chal_valid=thin) is False
+
+
+# ---------------------------------------------------------- one axis rule
+
+def test_the_axis_modules_only_declare_an_axis():
+    """adx / atr_pct / body / cost_rank must stay declarations, not copies.
+
+    They were four 177-line files that differed only in a field name and a
+    candidate tuple - same thresholds, same neighbour rule, same charged
+    replay, same POST. The rule is scripts/axis_exec.py now. A module that
+    grows its own replay or its own POST has forked it back, and the next
+    person to fix the rule fixes one of five.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    forbidden = ("charged_holdout", "urllib.request", "snapshot_path",
+                 "_neighbor_supported", "MIN_DELTA_R")
+    for name in ("adx_exec", "atr_pct_exec", "body_exec", "cost_rank_exec"):
+        src = (root / "scripts" / f"{name}.py").read_text(encoding="utf-8")
+        body = src.split('"""', 2)[-1]          # past the module docstring
+        for token in forbidden:
+            assert token not in body, (
+                f"{name}.py kurali geri kopyalamis ({token}) - "
+                f"kural scripts/axis_exec.py'de durmali")
+        assert "Axis(" in body, f"{name}.py bir Axis bildirmiyor"
+        assert len(src.splitlines()) < 80, (
+            f"{name}.py {len(src.splitlines())} satir - bildirim olmaktan cikmis")
+
+
+def test_every_axis_declares_a_distinct_field():
+    """A copy-paste that forgot to change the field would tune the wrong key
+    and read as the right one in the log."""
+    import importlib
+
+    seen: dict[str, str] = {}
+    for name in ("adx_exec", "atr_pct_exec", "body_exec", "cost_rank_exec"):
+        axis = importlib.import_module(f"scripts.{name}").AXIS
+        assert axis.field not in seen, (
+            f"{name} ve {seen[axis.field]} ayni alani ({axis.field}) ayarliyor")
+        seen[axis.field] = name
+        assert axis.candidates, f"{name}: aday listesi bos"
+        assert axis.live_key.startswith("live"), axis.live_key
