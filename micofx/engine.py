@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import account_lock, backtest, execution, sessions
+from . import backtest, execution, sessions
 from . import indicators as ind
 from .autopilot import AutoPilot
 from .execution import ExecutionMonitor
@@ -50,6 +50,8 @@ from .supervisor import Supervisor
 _BAR_INTEGRITY_REFRESH = 900.0  # rare full copy_rates with no new bar
 _ENTRY_BLOCK_FLUSH_SEC = 45.0
 _ACCOUNT_TTL = 2.0
+# MetaTrader5.ACCOUNT_TRADE_MODE_REAL. Numeric so nothing here imports mt5.
+_ACCOUNT_TRADE_MODE_REAL = 2
 # Panel polls /api/state every 3s. At 3.0 this TTL expired on every poll,
 # so each tick walked all symbols through order_calc_margin on the MT5 lock
 # the cycle already shares with the worker. 9s still refreshes lot/margin
@@ -627,7 +629,6 @@ class Engine:
             if str(t).isdigit()
         }
         self._netting_warned = False
-        self._account_lock_reason = ""
         # Retired ladder key. The one-shot overlay lives in scale_out_done.
         if store.get_setting("partial_state"):
             store.set_setting("partial_state", {})
@@ -1185,13 +1186,8 @@ class Engine:
                      "takibi) tek ticket = tek pozisyon varsayimina dayaniyor, "
                      "netting'de gecersiz kaliyor. Yeni islem acilmasi guvenlik "
                      "icin durduruldu - hedging hesabina gecin.", "ERROR")
-        lock_reason = getattr(self, "_account_lock_reason", "")
-        if lock_reason:
-            for st in self.states.values():
-                if st.note in ("", "bekliyor", "sinyal yok"):
-                    st.note = lock_reason
         allow_entry = (self._trading and guard.ok and not netting
-                       and self.client.connected and not lock_reason)
+                       and self.client.connected)
         # Two-pass cycle: first refresh every symbol, then fill free slots in
         # priority order so a weak signal does not steal the last seat from a
         # stronger one when several bars close in the same poll.
@@ -5026,39 +5022,34 @@ class Engine:
         pos["volume"] = remain
         return True
 
-    def _enforce_account_lock(self, account: dict[str, Any]) -> str:
-        """Bind on first sight, or block new entries when the terminal moved.
+    def _note_attached_account(self, account: dict[str, Any]) -> None:
+        """Log which account the terminal is on, once per change.
 
-        Open-position management is intentionally not gated on this: leaving
-        an already-open ticket unmanaged is worse than trading the wrong book.
+        What used to sit here was ``_enforce_account_lock``: an expected
+        login+server was bound on first sight and any mismatch blocked new
+        entries until the operator confirmed the new pair from the panel.
+        The operator removed it (10.09) - the bot follows whatever account
+        the terminal has open, which is what "hedefteki MT5 hesap neyse o
+        olsun" asks for.
+
+        The record stays. Following the terminal silently would mean an
+        account switch - including onto real money - leaves no line anywhere,
+        and the first evidence would be a fill. This blocks nothing; it makes
+        the change visible in the same log the fills land in.
         """
-        sys = getattr(self.store, "system", None)
-        decision = account_lock.decide_account_lock(
-            int(getattr(sys, "account_lock_login", 0) or 0),
-            str(getattr(sys, "account_lock_server", "") or ""),
-            int(account.get("login") or 0),
-            str(account.get("server") or ""),
-            trade_mode=int(account.get("trade_mode") or 0),
-        )
-        updater = getattr(self.store, "update_system", None)
-        if decision.bind_login is not None and callable(updater):
-            updater(
-                {
-                    "account_lock_login": decision.bind_login,
-                    "account_lock_server": decision.bind_server or "",
-                },
-                source="hesap-kilidi",
-            )
-            LOG.emit(
-                f"hesap kilidi kuruldu: {decision.bind_login} @ {decision.bind_server}",
-                "WARN",
-            )
-        reason = "" if decision.allow_entry else decision.reason
-        prev = getattr(self, "_account_lock_reason", "")
-        if reason and reason != prev:
-            LOG.emit(reason, "ERROR")
-        self._account_lock_reason = reason
-        return reason
+        login = int(account.get("login") or 0)
+        server = str(account.get("server") or "").strip()
+        if login <= 0:
+            return
+        seen = (login, server)
+        if seen == getattr(self, "_attached_account", None):
+            return
+        self._attached_account = seen
+        real = int(account.get("trade_mode") or 0) == _ACCOUNT_TRADE_MODE_REAL
+        LOG.emit(
+            f"bagli hesap: {login} @ {server}"
+            f"{' - GERCEK PARA' if real else ''}",
+            "ERROR" if real else "WARN")
 
     # ---------------------------------------------------------------- reports
 
@@ -5070,7 +5061,7 @@ class Engine:
         if account:
             self._account = account
             self._account_at = now
-            self._enforce_account_lock(account)
+            self._note_attached_account(account)
             return self._account
         if force:
             # A forced refresh that came back empty means the live call just
@@ -5706,12 +5697,6 @@ class Engine:
                 **self._session_clock_payload(),
             },
             "account": account,
-            "account_lock": {
-                "ok": not getattr(self, "_account_lock_reason", ""),
-                "reason": getattr(self, "_account_lock_reason", ""),
-                "expected_login": int(getattr(self.store.system, "account_lock_login", 0) or 0),
-                "expected_server": str(getattr(self.store.system, "account_lock_server", "") or ""),
-            },
             "day": {
                 "closed_trades": day.get("closed_trades", 0),
                 "win_rate": day.get("win_rate", 0.0),

@@ -136,7 +136,9 @@ def _engine(client, cfg):
     eng._broker_now_int = lambda: 0
     eng._account = {"balance": 1000.0, "equity": 1000.0, "margin_free": 900.0}
     eng._account_at = 0.0
-    eng._enforce_account_lock = lambda *a, **k: None
+    # The account lock is gone (operator 10.09); refresh_account now only
+    # logs which account is attached, and needs nothing stubbed.
+    eng._attached_account = None
     return eng
 
 

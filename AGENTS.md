@@ -20,12 +20,20 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
    after a clear ask is not an ACK. Yellow/red that used to wait on the
    human now wait on **peer ACK** unless the operator overrides in chat.
-2. **Book is 7 symbols, forever open & all net-profitable.** Live set
-   stays `BTCUSD GER40 JPN225 NAS100 SpotBrent US30 XAUUSD`. All 7
-   symbols are verified net-positive on holdout (+393.5 R total). Do
-   **not** disable, delete, or “close for bleed” any of them.
+2. **Book is 5 symbols, forever open & all net-profitable.** Live set
+   is `GER40 NAS100 SpotBrent US30 XAUUSD`. JPN225 and BTCUSD were
+   deleted from the panel 10.09 and **stay deleted** (operator: "silinmis
+   olarak kalsin"). Do **not** re-add them unasked, and do **not**
+   disable, delete, or “close for bleed” any of the remaining five.
    Improve fill / exits / gates / sizing / search instead (“kapatma
    geliştir”).
+   The old “7 symbols, +393.5 R holdout” line described account
+   61562752. The terminal moved to **61592524 @ Pepperstone-Demo** on
+   10.09, the account lock was re-pointed and opt history cleared, so
+   that R total belongs to an account this book no longer trades. The
+   11:37 search on the new account applied 0/5 — every candidate was
+   weaker than its incumbent or F6-fragile. Treat the five as
+   *unrevalidated on this account* until a search says otherwise.
 3. **Full capacity + full auto + dynamic growth sizing.** Goal is
    maximum useful throughput under honest WFO/fill gates and a hands-off
    loop (autopilot, quarantine reopt, calibrate, watches). Inline kasa
@@ -41,6 +49,19 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
 4. **Safety floor still binds the process:** one Python, live owns
    DB/MT5, Origin on writes, no second `mt5.initialize()`, no LLM in
    engine/optimizer/supervisor. Peer ACK does not waive these.
+5. **No account lock — the bot follows the terminal.** Removed 10.09
+   (operator: "hedefteki mt5 hesap neyse o olsun"). `account_lock.py`,
+   `Engine._enforce_account_lock`, `POST /api/account-lock` and
+   `SystemConfig.account_lock_login/_server` are **gone**; do not bring
+   any of them back unasked. Whatever account the terminal has open is
+   the account that trades, demo or real, with no confirmation step.
+   What remains is a record, not a gate: `_note_attached_account` logs
+   the attached account once per change (ERROR + "GERCEK PARA" on a real
+   account) and the Sistem tab shows the account and its type. **This is
+   now the only thing standing between an accidental live login and live
+   fills on a demo-tuned book** — the 06.09 live→demo migration was made
+   safe by the lock refusing entries, and that route no longer exists.
+   Pinned by `tests/test_the_bot_follows_the_attached_account.py`.
 
 ## Must-follow constraints
 

@@ -108,7 +108,9 @@ def _engine(client, cfg, risk):
     eng._mark_bar_filled = lambda *a, **k: None
     eng._save_cooldown = lambda *a, **k: None
     eng._broker_now_int = lambda: 0
-    eng._enforce_account_lock = lambda *a, **k: None
+    # The account lock is gone (operator 10.09); refresh_account now only
+    # logs which account is attached, and needs nothing stubbed.
+    eng._attached_account = None
     return eng
 
 
