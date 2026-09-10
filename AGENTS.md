@@ -112,16 +112,25 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
   `baseline["holdout"]` (the live config replayed on that sweep's holdout
   slice, `backtest.py:1536` - same bars, same window, same cost regime,
   already computed), then a `_fresh_incumbent_holdout` replay, then the
-  stamp. Until 10.09 they read `cfg.opt_summary["holdout"]` directly and
-  the search froze: NAS100's `range_fade` candidate at **+21.5R** holdout,
-  PF 1.45, retention 1.855, refused for "21.5R < 79.1R" while the same run
-  measured the live config at **-22.6R**, PF 0.85. XAUUSD the same evening,
-  +33.2R refused for "< 162.2R" against a measured **-30.1R**. The system
-  even printed the true number in the log line beside the rejection
-  (`_incumbent_kept_tail`, "taze test"). This is why the operator said
-  "taramada isle yaramiyor aile vs bulamiyr". The rejection now names its
-  benchmark (`ayni kosu` / `taze test` / `damga`); if you ever see `damga`
-  on a symbol that has bars, ask why there was no replay.
+  stamp. Until 10.09 they read `cfg.opt_summary["holdout"]` directly, and
+  the bar was four to five times what the incumbent actually delivers on the
+  slice being compared. Candidate vs incumbent **on the same holdout slice**,
+  against the bar that was applied:
+  NAS100 `range_fade`/M30 +21.5R PF 1.45 vs +16.8R PF 1.27, bar **79.1R**;
+  XAUUSD +33.2R PF 1.10 vs +31.0R PF 1.11, bar **162.2R**;
+  US30 `keltner_break`/M30 +26.2R PF 1.15 vs +17.2R PF 1.05, bar **27.0R**.
+  With the measurement in its place those bars are 19.3R, 35.6R and 19.8R -
+  two pass, XAUUSD still fails on a genuine +2R margin, which is what the
+  churn brake is for. This is why the operator said "taramada isle yaramiyor
+  aile vs bulamiyr". The rejection now names its benchmark (`ayni kosu` /
+  `taze test` / `damga`); if you ever see `damga` on a symbol that has bars,
+  ask why there was no replay.
+  **Read the right baseline.** `baseline["net_r"]` is the incumbent over the
+  whole span (-22.6R / -30.1R / -17.9R for those three) and
+  `baseline["holdout"]["net_r"]` is the incumbent on the holdout slice. The
+  gates compare the slice. Quoting the span number as "the incumbent loses
+  money" overstates the case badly - it was quoted that way in this file on
+  11.09 and corrected the same night.
 - `EXIT_RISK_FIELDS` mid-trade â†’ **409**. `breakeven_at_r`,
   `partial_at_r`, `harvest_at_r` and `harvest_step_atr` are
   deliberately **not** in that set.

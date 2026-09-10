@@ -1,25 +1,35 @@
 """Operator, 10.09 23:3x: "taramada isle yaramiyor aile vs bulamiyr".
 
-They were right, and the reason was in the two runs sitting in ``opt_runs``.
+The flip bar was a stamp - ``cfg.opt_summary["holdout"]``, the number the
+incumbent scored on the day it was applied. Nothing ages it, so a candidate
+measured today had to beat 1.15x a figure from another run, another slice and
+sometimes another cost model. What the incumbent scores on *this* sweep's
+holdout slice sits in the same report, in ``baseline["holdout"]``
+(``backtest.py:1536``), and was ignored.
 
-NAS100, M30, candidate ``range_fade``: selection +34.6R at PF 1.36, holdout
-+21.5R at PF 1.45, holdout retention 1.855 - the untouched slice scored
-*better* than the one it was picked on. Refused, ``keep_reason``:
-``aile/TF flip icin holdout yetersiz (21.5R < 79.1R)``.
+The three runs of 10-11.09, candidate vs incumbent **on the same slice**,
+against the bar that was actually applied:
 
-The same report's ``baseline`` block - the live config replayed on the same
-bars, in the same run - was **-22.6R at PF 0.85**. XAUUSD the same evening:
-candidate +33.2R refused for "< 162.2R", incumbent measured at -30.1R.
+    NAS100 range_fade/M30   +21.5R PF 1.45  vs  +16.8R PF 1.27  bar 79.1R
+    XAUUSD mtf_pullback/M30 +33.2R PF 1.10  vs  +31.0R PF 1.11  bar 162.2R
+    US30   keltner_break/M30 +26.2R PF 1.15 vs  +17.2R PF 1.05  bar 27.0R
 
-So F1 was defending a config that loses money, using the scorecard that
-config earned on the day it was applied. ``_incumbent_guard_holdout`` reads
-``cfg.opt_summary["holdout"]``, a stamp; nothing ages it. The system already
-knew better: ``_incumbent_kept_tail`` prints the fresh replay in the log line
-right beside the rejection ("taze test -22.6R"). Only the gate that made the
-decision ignored it.
+The bar was four to five times what the incumbent delivers on the slice being
+compared. With the measurement in its place the bars become 19.3R, 35.6R and
+19.8R: NAS100 and US30 pass, XAUUSD still fails - correctly, it is a genuine
++2R improvement and the churn brake exists for exactly that.
 
-F1 and F2 now benchmark against ``_flip_benchmark``: the fresh same-window
-replay when there is one, the stamp when there is not.
+The fix is not "lower the bar", it is "measure it". A later US30 sweep found a
+weaker candidate (+21.9R against an incumbent scoring +29.8R on that slice)
+and is refused, as it should be.
+
+Beware the two different numbers here: ``baseline["net_r"]`` is the incumbent
+over the whole span (-22.6R for NAS100, -30.1R for XAUUSD, -17.9R for US30),
+while ``baseline["holdout"]["net_r"]`` is the incumbent on the holdout slice.
+The gates compare the holdout slice, so that is the one that belongs beside a
+candidate's holdout. Reading the span number as "the incumbent loses money"
+overstates the case by a wide margin - these configs are not losing on the
+slice they are judged on.
 """
 from __future__ import annotations
 
@@ -79,9 +89,16 @@ def _nas100() -> SymbolConfig:
     return cfg
 
 
-# ------------------------------------------------------------- the live case
+# ---------------------------------------------------------- the shape of it
 
 def test_a_losing_incumbent_no_longer_blocks_a_winning_candidate():
+    """Synthetic: an incumbent that genuinely loses on the compared slice.
+
+    None of the three live cases were this - see the module docstring, they
+    scored +16.8R to +31.0R on their own holdout slices. This pins the
+    direction the stamp made impossible: a bar of 79.1R cannot be cleared by
+    anything honest, whatever the incumbent is really worth.
+    """
     cfg = _nas100()
     opt = _opt(cfg)
     opt._fresh_incumbent_holdout = lambda c: {"net_r": -22.6, "score": -8.0,
@@ -238,11 +255,11 @@ def test_the_benchmark_falls_back_rather_than_inventing_a_number():
 # ------------------------------------- the same disease, one gate further in
 
 def test_beats_incumbent_reads_the_same_benchmark():
-    """US30, 11.09 00:29. The candidate cleared F6 and F1 and died here:
-    "mevcut ayardan zayif", at +21.9R holdout against an incumbent the same
-    run measured at -17.9R.
+    """US30, 11.09 00:29: the candidate cleared F6 and F1 and reached here.
 
-    The tail of _beats_incumbent already preferred a replay over the stamp,
+    That particular refusal turned out to be right - +21.9R against an
+    incumbent scoring +29.8R on the same slice - but it was reached for the
+    wrong reason. The tail of _beats_incumbent already preferred a replay over the stamp,
     but ``_holdout_costed(allow_fetch=False)`` returns None on a narrow run
     whose bars were never cached - and then the stamp decided anyway.
     """
