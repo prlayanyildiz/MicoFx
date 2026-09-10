@@ -137,7 +137,27 @@ def main(argv: list[str] | None = None) -> int:
           f"{'izgara':>12} {'sn':>6}")
     print("-" * 76)
 
+    # The incumbent's own number, measured with the live family in place. A
+    # cross-family run swaps cfg.strategy, and walk_forward then reports a
+    # baseline for *that* swap - the live parameters driving a family they were
+    # never tuned for, which scores like nonsense (US30 burst params running
+    # range_fade: -75.6). Comparing a challenger against that flatters it by
+    # eighty points. The incumbent is measured once, unswapped, and every
+    # challenger is compared to that.
     baseline = None
+    if any(f != cfg.strategy for f in families):
+        own = dict(shipped["strategy_grids"].get(cfg.strategy) or shipped["grid"])
+        own = {k: v for k, v in own.items() if k not in drop}
+        try:
+            ref = run_one(cfg, args.tf, own, snap, opt, args.seed)
+        except Exception as exc:                       # noqa: BLE001 - a tool
+            raise SystemExit(f"incumbent taban olculemedi: {exc}") from exc
+        if ref.get("baseline"):
+            baseline = float(ref["baseline"].get("score") or 0.0)
+        print(f"  incumbent taban ({cfg.strategy}, canli parametrelerle): "
+              f"{baseline if baseline is not None else 'olculemedi'}")
+        print()
+
     best_overall = (None, float("-inf"))
     for fam in families:
         grid = dict(shipped["strategy_grids"].get(fam) or shipped["grid"])
@@ -151,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{fam:16} HATA {exc}")
             continue
         secs = time.time() - started
-        if baseline is None and res.get("baseline"):
+        if baseline is None and res.get("baseline") and fam == cfg.strategy:
             baseline = float(res["baseline"].get("score") or 0.0)
         if not res.get("ok"):
             print(f"{fam:16} {'-':>9} {'-':>9} {'-':>9} {'-':>6} "
