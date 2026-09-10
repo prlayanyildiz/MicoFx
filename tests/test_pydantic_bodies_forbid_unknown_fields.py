@@ -20,7 +20,6 @@ from micofx.web.app import create_app
 
 class _System:
     slippage_points = 20
-    backup_dir_allow_unc = False
 
     def to_dict(self):
         return {}

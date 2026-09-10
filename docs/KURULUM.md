@@ -159,15 +159,9 @@ izin ver" kapali olabilir (bkz. adim 3).
 
 ---
 
-## Yedek gorevi — YOK (operator karari 10.09)
+## Yedek — YOK
 
-`KUR.bat` artik yedek gorevi **kurmuyor**. `MicoFX Aksam Yedegi` bu
-makinede kaldirildi ve `backup_enabled` varsayilani `false`.
+Yedekleme ozelligi 10.09'da tamamen kaldirildi (operator karari). Kurulum
+hicbir gorev olusturmaz, panelde Yedek blogu yoktur.
 
-Bunun onemi: `data/micofx.db` **Git'e girmez**. Her sembol ayari, her
-optimizasyon sonucu ve AI denetleyicinin ogrendigi her sey yalnizca o
-dosyada durur - GitHub kodu tutar, bunlarin hicbirini tutmaz. Yani o
-dosyanin artik otomatik kopyasi yok; tek kopya.
-
-Elle yedek istersen: once `backup_enabled`'i ac (hands-off alan,
-panelden yazilmaz), sonra venv python'u ile `backup.py`'yi calistir.
+`data/micofx.db` Git'e girmez ve artik otomatik kopyasi da yok; tek kopya.

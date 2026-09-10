@@ -78,20 +78,16 @@ uygulanir; degilse mevcut ayar korunur.
 | `docs/` | [Kullanim](docs/KULLANIM.md) · [Kurulum ayrintilari](docs/KURULUM.md) |
 | `MASTER_PROMPT.md` | Gelistirici / agent kaynagi |
 
-## Yedek — KAPALI (operator karari 10.09)
+## Yedek — YOK
 
-Otomatik yedek **yok**. `MicoFX Aksam Yedegi` gorevi kaldirildi, `KUR.ps1`
-artik onu kurmuyor ve `backup_enabled` varsayilani `false`.
+Yedekleme ozelligi 10.09'da **tamamen kaldirildi** (operator karari):
+`backup.py`, zamanlanmis gorev, `SystemConfig.backup_*` alanlari, panelin
+Yedek blogu ve kurulum adimi. Geri eklenmemeli.
 
-Bunun bedeli, kararin durdugu yerde yazili olsun: **`data/micofx.db` Git'e
-girmez.** Her sembol ayari, her optimizasyon sonucu ve AI denetleyicinin
-ogrendigi her sey yalnizca o dosyada durur ve artik **tek kopya**. GitHub
-kodu tutar, bunlarin hicbirini tutmaz.
-
-`backup.py` depoda duruyor ve elle calistirilirsa hala calisir - ama
-`backup_enabled` kapali oldugu icin hicbir sey yazmadan cikar. Yedek istersen
-once o anahtari ac (hands-off alan; panelden yazilmaz).
-
+Bedeli: **`data/micofx.db` Git'e girmez.** Her sembol ayari, her
+optimizasyon sonucu ve denetleyicinin ogrendigi her sey yalnizca o
+dosyada ve artik **tek kopya** - kod tarafinda ikincisini uretecek
+hicbir sey yok. Kopya istiyorsan disaridan al.
 
 ## Daha fazla
 

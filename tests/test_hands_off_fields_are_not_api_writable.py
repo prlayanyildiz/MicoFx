@@ -213,13 +213,6 @@ def test_daily_flatten_and_edge_sizing_are_not_writable():
     assert store.system.size_by_edge == before_edge
 
 
-def test_unc_latch_is_not_http_writable():
-    tc, store, _ = _client()
-    res = tc.post("/api/system", json={"backup_dir_allow_unc": True})
-    assert res.status_code == 400
-    assert store.system.backup_dir_allow_unc is False
-
-
 def test_supervisor_knobs_are_not_writable():
     tc, store, engine = _client()
     res = tc.post("/api/ai/settings", json={"quarantine_hours": 24})

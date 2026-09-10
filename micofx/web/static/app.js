@@ -1807,12 +1807,6 @@ const MT5_PATH_FIELDS = [
   { k: "autostart_mt5", label: "MT5 otomatik baslat / baglan", t: "bool" },
 ];
 
-const BACKUP_FIELDS = [
-  { k: "backup_dir", label: "Yedek konumu", t: "text", wide: true },
-  { k: "backup_dir_secondary", label: "Ikinci yedek konumu", t: "text", wide: true },
-  { k: "backup_keep", label: "Tutulacak yedek sayisi", t: "int", min: 1, max: 30 },
-];
-
 function buildSysField(f) {
   let input;
   if (f.t === "bool") {
@@ -1871,11 +1865,6 @@ function renderSystem() {
   if (pathBox && !pathBox.dataset.built) {
     MT5_PATH_FIELDS.forEach((f) => pathBox.appendChild(buildSysField(f)));
     pathBox.dataset.built = "1";
-  }
-  const bak = $("#sys-backup");
-  if (bak && !bak.dataset.built) {
-    BACKUP_FIELDS.forEach((f) => bak.appendChild(buildSysField(f)));
-    bak.dataset.built = "1";
   }
 
   $$("[data-sys-key]").forEach((input) => {

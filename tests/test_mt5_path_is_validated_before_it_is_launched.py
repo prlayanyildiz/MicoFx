@@ -7,15 +7,19 @@ given, and ``ensure_terminal_process`` then runs it:
     subprocess.Popen([str(exe)], cwd=str(exe.parent), ...)
 
 ``autostart_mt5`` ships True, so an accepted POST is a launched process. The
-handler stored the field with no validation of any kind - while ``backup_dir``
-one screen above gets an absolute-path check, a drive-root check and a UNC
-latch. The two fields have the same threat shape and only one was guarded.
+handler stored the field with no validation of any kind, while the neighbour
+it shared a threat shape with - the archive directory, since removed - got an
+absolute-path check, a drive-root check and a network-share latch. Only one of
+the two was guarded.
 
-The rules mirror ``backup_dir``: absolute local path or UNC, no drive root,
-and - the part specific to this field - if a file is named it must be
+The rules now: absolute local path, no drive root, no network share, and - the
+part specific to this field - if a file is named it must be
 ``terminal64.exe``. A directory stays legal because that is what the live book
-carries (``C:\\Program Files\\MetaTrader 5``) and ``_exe_from_path`` resolves it.
-Emptying the field stays legal; empty means "refuse auto-attach".
+carries (``C:\\Program Files\\MetaTrader 5 - 1``) and ``_exe_from_path``
+resolves it. Emptying the field stays legal; empty means "refuse auto-attach".
+
+The share latch lived on the removed backup block, so as of 10.09 a UNC path
+has no key at all: it is refused outright.
 """
 from __future__ import annotations
 
@@ -38,8 +42,6 @@ class _System:
     slippage_points = 20
     mt5_terminal_path = r"C:\Program Files\MetaTrader 5"
     autostart_mt5 = True
-    backup_dir_allow_unc = False
-    backup_keep = 7
 
     def to_dict(self):
         return {"mt5_terminal_path": self.mt5_terminal_path}
@@ -130,7 +132,8 @@ def test_a_drive_root_is_refused():
     assert _post("C:\\")[0].status_code == 400
 
 
-def test_a_unc_path_is_refused_while_the_latch_is_off():
+def test_a_unc_path_is_refused_outright():
+    """There is no longer a flag that would let one through."""
     assert _post(r"\\nas\mt5\terminal64.exe")[0].status_code == 400
 
 

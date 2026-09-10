@@ -220,8 +220,6 @@ _SYSTEM_RISK_BOUNDS = {
     "max_concurrent_risk_pct": (0.0, 100.0, True),  # 0 = disabled, valid
     "daily_profit_pct": (0.0, 100.0, True),  # 0 = disabled, valid
     "max_total_positions": (1, 200, True),
-    # Panel-writable with UI-only bounds; backup.py prunes to this count.
-    "backup_keep": (1, 365, True),
     # 0 disables due(); upper bound one day.
     "autopilot_interval_sec": (0.0, 86400.0, True),
     # 0 = use live broker leverage for kasa; with kasa OFF, positive N is
@@ -565,7 +563,6 @@ _OPERATOR_SYSTEM_FIELDS = frozenset({
     "charge_costs",
     "block_high_cost",
     "max_cost_pct_of_risk",
-    "backup_dir", "backup_dir_secondary", "backup_keep",
     "mt5_terminal_path", "autostart_mt5", "autostart_bot",
     "autopilot_enabled", "autopilot_interval_sec", "kasa_auto_enabled",
     "target_leverage",
@@ -2028,39 +2025,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _reject_hands_off_fields(patch, _OPERATOR_SYSTEM_FIELDS)
         _reject_non_finite_values(patch)
         _validate_risk_bounds(patch, _SYSTEM_RISK_BOUNDS)
-        # Both destinations go through the identical gate: the secondary one
-        # receives the same archive, settings DB and all, so "it is only a
-        # copy" buys it no leniency.
-        for field in ("backup_dir", "backup_dir_secondary"):
-            if field not in patch or not patch[field]:
-                continue
-            path = str(patch[field]).strip()
-            is_unc = path.startswith("\\\\") or path.startswith("//")
-            # Not a full path-safety audit - just enough to catch a typo/blank
-            # value silently pointing the nightly backup at nothing. Must be a
-            # local absolute path (drive letter) or a UNC share, and not the
-            # bare drive root (never want backups written directly to C:\).
-            valid = (
-                (len(path) >= 3 and path[1] == ":" and path[2] in "\\/" and len(path) > 3)
-                or is_unc
-            )
-            if not valid:
-                raise HTTPException(
-                    400, f"{field} gecersiz: {path!r} - tam bir yol olmali "
-                         f"(orn. C:\\MicoFX_Yedek), surucu koku olamaz")
-            if is_unc:
-                # A UNC destination sends the whole project - code AND the
-                # settings DB - over the network to whatever share is named.
-                # Fine for an intentional NAS backup; the latch is Store-only
-                # (not an HTTP key) so a panel POST cannot flip it on.
-                if not store.system.backup_dir_allow_unc:
-                    raise HTTPException(
-                        400, f"{field} UNC ({path!r}) - backup_dir_allow_unc kapali "
-                             f"(agdaki bir paylasima proje + veritabani kopyalanacak)")
-        # Same threat shape as backup_dir one screen up, and until 31.08 this
-        # one had no check at all: the value is handed to _exe_from_path and
-        # then to subprocess.Popen by ensure_terminal_process, with
-        # autostart_mt5 shipping True. An accepted POST is a launched process.
+        # Until 31.08 this had no check at all: the value is handed to
+        # _exe_from_path and then to subprocess.Popen by
+        # ensure_terminal_process, with autostart_mt5 shipping True. An
+        # accepted POST is a launched process.
         if "mt5_terminal_path" in patch:
             raw = str(patch["mt5_terminal_path"] or "").strip()
             if raw:
@@ -2071,7 +2039,10 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
                     raise HTTPException(
                         400, f"mt5_terminal_path gecersiz: {raw!r} - tam bir yol "
                              f"olmali (orn. C:\\Program Files\\MetaTrader 5)")
-                if is_unc and not store.system.backup_dir_allow_unc:
+                # The unlatch flag lived on the removed backup block, so as
+                # of 10.09 UNC has no key at all: a terminal is never launched
+                # from a network share.
+                if is_unc:
                     raise HTTPException(
                         400, f"mt5_terminal_path UNC ({raw!r}) - agdaki bir "
                              f"paylasimdan terminal calistirilmaz")

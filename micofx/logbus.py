@@ -155,7 +155,7 @@ class LogBus:
         # current rate), which is exactly why the failure would be unexplainable
         # when it happened.
         #
-        # backup.py already does this for the same reason, with a .part it
+        # The removed backup.py did this for the same reason: a .part it
         # promotes only once the archive is complete. os.replace is atomic
         # within a volume on Windows as well as POSIX.
         tmp = self._file.with_suffix(self._file.suffix + ".part")

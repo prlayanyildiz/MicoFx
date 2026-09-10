@@ -150,7 +150,7 @@ Docs: `README.md` (hub), `docs/KULLANIM.md`, `docs/KURULUM.md`, this file.
 <ROOT>/
   README.md / MASTER_PROMPT.md
   docs/KULLANIM.md / docs/KURULUM.md
-  run.py / backup.py / requirements.txt
+  run.py / requirements.txt
   MICOFX.bat                                # operator: start/stop/restart/sync/bridge
   KUR.bat / KUR.ps1                         # the only installer
   start.bat / start_silent.vbs / start_console.bat / stop.bat / restart.bat
@@ -194,12 +194,16 @@ Settings keys include: `system`, `opt_params`, `supervisor`, `supervisor_state`,
 
 `opt_params` = defaults.optimizer merged with stored overrides.
 
-### Backup invariants (`backup.py`)
+### There is no backup
 
-- `data/micofx.db` is gitignored. The nightly archive is its **only** copy — GitHub holds none of it.
-- `EXCLUDE_DIRS` ⊇ `.pytest_tmp` (alongside `.venv`, `__pycache__`, `.pytest_cache`, `.git`). Test debris must never enter an archive.
-- The archive has exactly one canonical DB path: `data/micofx.db`, written via sqlite's online-backup API (consistent snapshot, not a raw copy). A second `*micofx.db` entry is a decoy → **warn, do not fail the run**.
-- `C:` and `D:` are usually one physical disk. `backup_dir_secondary` must be a different physical drive or a cloud folder, and is a **copy** of the primary zip — never a second build.
+The backup feature was removed whole on 10.09 (operator's call): `backup.py`,
+the scheduled task, the five `SystemConfig.backup_*` fields, the panel block
+and the installer step. Do not bring any of it back.
+
+The price is the invariant that matters now: **`data/micofx.db` is gitignored
+and has no automatic copy.** Every symbol setting, every optimiser result and
+everything the supervisor learned lives in that one file, and nothing in the
+code will ever make a second one. Treat it accordingly.
 
 ---
 

@@ -176,16 +176,22 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
 - Hands-off keys (system plumbing, cost toggles, AI knobs, strategy guts)
   return **400** on POST. Search `apply()` still writes `OPT_FIELDS`.
   Do not dump them into `_INTERNAL_ONLY_FIELDS` (pending-exit staging).
-- **No automatic backup** (operator 10.09: "backup.py surecini bastan sona
-  iptal edelim... bununla alakali da surec calismasin"). The
-  `MicoFX Aksam Yedegi` scheduled task is unregistered, `KUR.ps1` step 5 no
-  longer creates it, and `backup_enabled` ships `false`. Do not re-add the
-  task or flip the default back unasked.
+- **There is no backup feature.** Removed whole 10.09 (operator: "yedekle
+  alakali tum kalintilari temizle", after "backup.py surecini bastan sona
+  iptal edelim"). Gone: `backup.py`, the `MicoFX Aksam Yedegi` scheduled
+  task, `KUR.ps1`'s step 5, `SystemConfig.backup_*` (all five fields), the
+  `/api/system` path validation and UNC latch, the panel's Yedek block and
+  its `field_help` entries, the shipped config keys, and nine tests. Do not
+  reintroduce any of it unasked.
   What it costs, recorded where the decision is: `data/micofx.db` is not in
   Git, so every symbol config, optimiser result and supervisor verdict now
-  exists in **one copy**. `backup.py` stays in the tree and still works run
-  by hand; nothing schedules it. Pinned by
-  `tests/test_installer_no_longer_creates_the_backup_task.py`.
+  exists in **exactly one copy**, with nothing in the codebase able to make
+  another. Two old archives still sit in `C:\MicoFX_Yedek` - they were left
+  deliberately, being the only copies of any earlier DB state.
+  Pinned by `tests/test_there_is_no_backup_feature.py`, which checks the whole
+  surface (script, config keys, model fields, imports, installer task, log)
+  because the feature was trimmed in pieces twice before and grew back both
+  times from a leftover default key.
 - **7 families.** `ichimoku` retired 02.09 (no symbol/TF holdout win).
   `stoch_flip`, `dual_t3`, `t3_flip`, `parabolic_flip` retired 01.09
   (flip/zero-win class). `nr_break` / `roc_pace` **fully deleted** 03.09

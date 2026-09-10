@@ -10,7 +10,7 @@ live book.
 Same class one field over: ``flat_before_close_min`` is symbol-writable with
 no entry in the risk table (the panel's ``max: 240`` is UI-only, so it is not
 a bound), and ``10**9`` there blocks entries on that symbol forever.
-``backup_keep`` is system-writable the same way.
+The system side is checked through the remaining panel-writable dials.
 
 The mechanism already exists - these fields just were not in the tables.
 """
@@ -34,7 +34,6 @@ HEAD = {"Origin": "http://testserver"}
 class _System:
     slippage_points = 20
     mt5_terminal_path = ""
-    backup_keep = 7
 
     def to_dict(self):
         return {}
@@ -185,6 +184,3 @@ def test_the_flatten_window_the_panel_offers_is_accepted():
     assert res.status_code == 200, res.text
 
 
-def test_an_absurd_backup_keep_is_refused():
-    res = _tc().post("/api/system", json={"backup_keep": 10 ** 9}, headers=HEAD)
-    assert res.status_code == 400, res.text

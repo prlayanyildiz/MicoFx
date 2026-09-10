@@ -32,11 +32,9 @@ HANDS_OFF_SYS = (
     "min_free_margin", "slippage_points",
     "poll_interval_sec", "opt_max_workers",
     "autostart_mt5_wait_sec",
-    "backup_enabled",
     "size_by_edge", "daily_loss_flatten",
 )
 
-KEEP_BACKUP = ("backup_dir", "backup_dir_secondary", "backup_keep")
 KEEP_MT5_PATH = "mt5_terminal_path"
 KEEP_MT5_AUTOSTART = "autostart_mt5"
 
@@ -55,7 +53,7 @@ def _keys(name: str) -> set[str]:
 
 def test_hands_off_system_dials_are_not_on_the_panel():
     keys = _keys("SYS_FIELDS") | _keys("SYS_FIELDS_ADVANCED")
-    keys |= _keys("BACKUP_FIELDS") | _keys("MT5_PATH_FIELDS")
+    keys |= _keys("MT5_PATH_FIELDS")
     for k in HANDS_OFF_SYS:
         assert k not in keys, f"{k} still has a panel control"
     for k in KEEP_SYS:
@@ -70,14 +68,6 @@ def test_mt5_path_is_editable_on_the_connection_panel():
     assert 'id="sys-mt5-path"' in HTML
     assert "sys-mt5-path" in APP_JS
     assert "Ayarlanan yol" not in APP_JS
-
-
-def test_backup_path_and_keep_live_on_bot_control():
-    for k in KEEP_BACKUP:
-        assert k in _keys("BACKUP_FIELDS")
-        assert k not in _keys("SYS_FIELDS")
-    assert 'id="sys-backup"' in HTML
-    assert "sys-backup" in APP_JS
 
 
 def test_search_gate_internals_are_not_on_the_panel():

@@ -117,10 +117,6 @@ const FIELD_HELP = {
   "mt5_terminal_path": "terminal64.exe yolu. Bos = varsayilan kurulum.",
   "autostart_mt5": "Acikken bot, ayarlanan terminal64.exe yoksa baslatir ve baglanir. Acilis ve kopma sonrasi. Yol bosken calismaz.",
   "autostart_mt5_wait_sec": "MT5 basladiktan sonra baglanti icin beklenecek saniye.",
-  "backup_enabled": "Aksam yedegini yazar. Kapaliysa gorev calisir ama dosya yazmaz. Yol bu makinede yoksa (orn. D:) ya yolu degistir ya da kapat.",
-  "backup_dir": "Aksam yedeginin yazildigi klasor.",
-  "backup_dir_secondary": "Ayni yedegin ikinci kopyasi. Bos = kapali. Farkli fiziksel disk / bulut tutun.",
-  "backup_keep": "Saklanan yedek adedi; eskiler silinir.",
 
   "use_sessions": "Aciksa yalniz asagidaki saat ve gunlerde giris. trade_all_hours bunu ezer.",
   "flat_before_close_min": "Seans kapanisina bu kadar dakika kala yeni giris yok. 0 = kapali.",

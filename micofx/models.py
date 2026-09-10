@@ -792,47 +792,6 @@ class SystemConfig:
     # trade_all_hours from holding positions overnight. 0 disables it.
     day_end_flatten_min: int = 0
 
-    # ---- backup ----
-    # Where the scheduled evening backup (backup.py, run via Windows Task
-    # Scheduler) drops its timestamped zip. Read at run time, not baked into
-    # the script, so changing it here is the only place that needs editing.
-    # Master switch for the nightly backup. The Windows task still fires; it
-    # is ``backup.py`` that reads this and exits without writing, which keeps
-    # turning backups off a one-click change in the panel instead of a Task
-    # Scheduler edit that needs a UAC prompt and cannot be reversed from the
-    # UI. Off is a deliberate state, not a failure: the task exits 0.
-    backup_enabled: bool = False
-    # Deliberately a path that exists on every Windows machine. A drive letter
-    # that only exists here (D:, or a USB stick that is not plugged in) turns
-    # the nightly backup into a nightly crash on any other install, so the
-    # shipped default must never assume one - the operator picks the real
-    # destination in the panel.
-    backup_dir: str = "C:\\MicoFX_Yedek"
-    # A second, independent destination, written in the same run. Empty
-    # disables it.
-    #
-    # This exists because "C: live, D: archive" is not actually two copies
-    # when C: and D: are partitions of one SSD, which is the common case and
-    # is the case on the machine this was written for - the drive letters look
-    # like redundancy and provide none. It matters more here than for most
-    # projects: data/micofx.db is gitignored, so every symbol config, every
-    # optimizer result and the supervisor's whole learned state live only in
-    # that file. GitHub carries the code and none of that.
-    #
-    # A path under OneDrive (or any synced/removable location) gets the
-    # archive off the physical disk without another moving part. Failure to
-    # write here is reported but never fails the run - the primary copy still
-    # happened, and a backup task that exits non-zero because the cloud folder
-    # was briefly locked would just train the operator to ignore it.
-    backup_dir_secondary: str = ""
-    backup_keep: int = 5              # how many most-recent backups to retain, per destination
-    # A UNC destination sends the whole project (code + the settings DB) over
-    # the network to whatever share is named - fine for an intentional NAS
-    # backup, but a live exfiltration path if something with API access ever
-    # gets to set backup_dir without the operator meaning it to. Off by
-    # default; local drive-letter paths need no such flag.
-    backup_dir_allow_unc: bool = False
-
     # ---- execution ----
     slippage_points: int = 20
     close_on_stop: bool = False

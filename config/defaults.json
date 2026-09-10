@@ -24,12 +24,7 @@
     "autopilot_enabled": true,
     "autopilot_interval_sec": 900,
     "kasa_auto_enabled": true,
-    "target_leverage": 0.0,
-    "backup_enabled": false,
-    "backup_dir": "C:\\MicoFX_Yedek",
-    "backup_dir_secondary": "",
-    "backup_keep": 5,
-    "backup_dir_allow_unc": false
+    "target_leverage": 0.0
   },
   "group_presets": {
     "forex": {

@@ -117,8 +117,8 @@ class Store:
             self._db = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=15.0)
             self._db.row_factory = sqlite3.Row
             with self._lock:
-                # A second process holding the DB for a moment (backup.py's
-                # own Store, a OneDrive/antivirus scan touching the file) used
+                # A second process holding the DB for a moment (a sidecar
+                # Store, a OneDrive/antivirus scan touching the file) used
                 # to surface as an immediate "database is locked" that took
                 # down whatever thread was writing. Waiting is the correct
                 # answer to contention this short; only a genuinely stuck
