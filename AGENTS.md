@@ -128,6 +128,33 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
   families' 0%. `super_trend` had the same defect one notch higher (2.0,
   which clears the guard but is still under every live value) and took the
   same `2.8`. Neither family's tight end moved.
+- **Do not take the gate axes out of the search grids.** Proposed 10.09 on a
+  coverage argument (`burst` is 42M combos at a 2000 budget = 0.005%, and
+  `max_spread_atr` × `cost_rank_max` × `adx_min` × `min_body_ratio` is a 160×
+  multiplier that `scripts/axis_exec.py` tunes again afterwards). Peer-ACK'd
+  YES/Yellow by Cursor and Gemini, then **measured and refuted** — the A/B
+  Gemini required is the only reason it did not land. GER40 M30, same bars,
+  same 2000 budget, same seed, only the grid differing:
+
+      channel_break  13.897 -> 13.723    11,025,000 -> 275,625
+      keltner_break   5.786 ->  5.662         6,480 ->     720
+      super_trend     5.332 ->  0.679         3,888 ->     432
+
+  The last two lean grids fit under the budget, so they are searched
+  **exhaustively** - sampling luck and `combo_seed` cannot explain the loss,
+  and super_trend still fell 8x. Candidates clearing the gates collapsed
+  197 -> 17.
+
+  Mechanism: `Params.from_config` inherits an axis that is not in the grid
+  from the **live cfg** (verified - it works correctly). GER40's live cfg is
+  tuned for `channel_break`, so with the gates out of the grid every
+  `keltner_break` / `super_trend` challenger is measured at a rival family's
+  gates. Families are ranked head to head, so this cripples the challenger by
+  construction. The gate axes are part of the edge, not a duplicate of the
+  post-hoc tuner.
+
+  The coverage number stands and is still unexplained; this particular fix
+  for it does not. Do not re-propose it without a *different* mechanism.
 - Do not holdout-capture with positions open. `POST /api/holdout/capture`
   is **409** while this process's magics still have tickets. Do not start
   a live search unasked.
