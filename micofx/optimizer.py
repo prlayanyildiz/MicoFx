@@ -1681,6 +1681,17 @@ class Optimizer:
         self._set(combo_total=combo_total)
         combo_done = 0
         finished = 0
+        # run_combo_budget prices one clock per symbol, but _plan_symbol sweeps
+        # every window in _session_search_shortlist (up to _SESSION_SEARCH_MAX,
+        # 3), so the bar read 283% on a live 3-symbol run: 952000 done against
+        # 336000 total. The shortlist is only knowable inside _plan_symbol - it
+        # costs a charged holdout per candidate window - so the estimate cannot
+        # be fixed up front without pricing a worst case that then over-reports
+        # for every symbol whose shortlist comes back short. Instead each
+        # symbol's estimated share is replaced by what its plan actually queued,
+        # the moment that plan exists.
+        per_symbol_est = combo_total // max(1, len(targets))
+        default_sweep = backtest.sweep_budget(max_combos, refine_rounds)
 
         def close_out(plan: dict[str, Any]) -> None:
             nonlocal finished
@@ -1698,8 +1709,7 @@ class Optimizer:
             plan["attempts"].append(outcome)
             plan["outstanding"] -= 1
             fam = str(job.get("strategy") or "")
-            combo_done += sweep_cost.get(
-                fam, backtest.sweep_budget(max_combos, refine_rounds))
+            combo_done += sweep_cost.get(fam, default_sweep)
             best = max((a["best"]["score"] for p in plans.values()
                         for a in p["attempts"] if a.get("ok")), default=None)
             active = sorted(s for s, p in plans.items() if p["outstanding"] > 0)
@@ -1718,6 +1728,15 @@ class Optimizer:
                                      timeframes, refine_rounds, allow, alloc)
             plans[symbol] = plan
             plan["outstanding"] = len(plan["jobs"])
+            # This symbol's real spend is now known: one sweep_cost per queued
+            # job, across however many session windows the shortlist held. Swap
+            # it for the one-clock estimate so the bar tracks the work instead
+            # of overshooting it.
+            nonlocal combo_total
+            planned = sum(sweep_cost.get(str(j.get("strategy") or ""), default_sweep)
+                          for j in plan["jobs"])
+            combo_total += planned - per_symbol_est
+            self._set(combo_total=combo_total)
             if not plan["jobs"]:
                 close_out(plan)          # nothing to wait for
             return plan["jobs"]

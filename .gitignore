@@ -53,9 +53,11 @@ _restart.json
 # gercek bir dosya olusuyor ve icine uyarilar dokuluyor. Urun degil, kaza.
 nul
 
-# A bridge script writes its state file with Set-Content's arguments swapped:
-# the hash becomes the FILE NAME and the state path becomes the contents. Five
-# of these landed at the repo root on 10.09 and one reached a commit. The
-# state file it means to write (cursor/_cursor_session_claude_hash.txt) does
-# not exist at all, so that script's change detection never persists.
+# Cursor's inline bridge watcher wrote its state file with Set-Content's
+# arguments swapped: the hash became the FILE NAME and the state path became
+# the contents. Five landed at the repo root on 10.09 and one reached a commit.
+# Cursor has since fixed the call - the version running after the reboot binds
+# -Path correctly - and the last leftover was deleted 10.09 23:2x. The pattern
+# stays as a net: the failure is silent, produces a 64-character file nobody
+# would recognise, and only shows up as a state file that never persists.
 [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]*[0-9A-F]
