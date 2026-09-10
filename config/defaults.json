@@ -247,6 +247,36 @@
   },
   "symbols": [
     {
+      "symbol": "US30",
+      "group": "index",
+      "magic": 990101,
+      "broker_symbol": "US30",
+      "timeframe": "M30",
+      "sessions": [
+        {
+          "start": "01:00",
+          "end": "23:59",
+          "days": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        {
+          "start": "01:00",
+          "end": "23:55",
+          "days": [
+            5
+          ]
+        }
+      ],
+      "use_sessions": false,
+      "max_spread_atr": 0.12,
+      "max_positions": 2,
+      "enabled": false
+    },
+    {
       "symbol": "GER40",
       "group": "index",
       "magic": 990011,
@@ -254,12 +284,19 @@
         {
           "start": "03:15",
           "end": "22:59",
-          "days": [1, 2, 3, 4]
+          "days": [
+            1,
+            2,
+            3,
+            4
+          ]
         },
         {
           "start": "03:15",
           "end": "23:55",
-          "days": [5]
+          "days": [
+            5
+          ]
         }
       ],
       "max_spread_atr": 0.05,
@@ -296,12 +333,19 @@
         {
           "start": "01:01",
           "end": "23:59",
-          "days": [1, 2, 3, 4]
+          "days": [
+            1,
+            2,
+            3,
+            4
+          ]
         },
         {
           "start": "01:01",
           "end": "23:55",
-          "days": [5]
+          "days": [
+            5
+          ]
         }
       ],
       "max_spread_atr": 0.25,

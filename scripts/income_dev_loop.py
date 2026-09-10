@@ -39,7 +39,7 @@ ORIGIN = PANEL
 # SpotBrent, BRENTOIL-PERP all deleted and all in RETIRED_SYMBOLS).
 # Must match config/defaults.json's shipped list, which
 # tests/test_the_book_is_spelled_once.py checks.
-BOOK = ("GER40", "NAS100", "XAUUSD")
+BOOK = ("GER40", "NAS100", "US30", "XAUUSD")
 BRIDGE = ROOT / ".bridge"
 
 

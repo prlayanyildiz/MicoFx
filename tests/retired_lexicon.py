@@ -61,10 +61,11 @@ RETIRED_SYMBOLS = (
     # just cut - the same hole this tuple was created for on 05.09.
     "JPN225",
     "BTCUSD",
-    # 10.09 21:35 / 21:37, same session: the book went 5 -> 4 and BRENTOIL-PERP
-    # came in disabled. SpotBrent left carrying the worst fill in the book
+    # 10.09 21:37: SpotBrent left carrying the worst fill in the book
     # (50 signals -> 5 trades, 10%).
-    "US30",
+    # US30 went out with it at 21:35 and the operator brought it BACK at
+    # 23:3x ("US30 geri ekledim"), disabled and unvalidated on magic 990101,
+    # with a search running on it. It is live book again, so it is not here.
     "SpotBrent",
     # Added 10.09 21:38 and deleted the same evening, before it ever
     # traded: every session window the search tried scored NEGATIVE
