@@ -27,6 +27,10 @@ from scripts.night_bleed_guard import maybe_alert as bleed_alert  # noqa: E402
 from scripts.night_bleed_guard import snapshot as bleed_snapshot  # noqa: E402
 from scripts.panel_health_watch import maybe_alert as panel_alert  # noqa: E402
 from scripts.panel_health_watch import panel_ok  # noqa: E402
+
+# The panel handshake is shared now (scripts/panel_session.py); this used to
+# reach into xau_temp_reenable for its private copy of it.
+from scripts.panel_session import opener as xau_session  # noqa: E402
 from scripts.session_open_silence import maybe_alert as silence_alert  # noqa: E402
 from scripts.session_open_silence import snapshot as silence_snapshot  # noqa: E402
 from scripts.stale_runtime_watch import maybe_alert as stale_alert  # noqa: E402
@@ -47,7 +51,6 @@ from scripts.xau_streak_watch import (  # noqa: E402
     scan_book,
 )
 from scripts.xau_temp_reenable import FLAG as XAU_TEMP_FLAG  # noqa: E402
-from scripts.xau_temp_reenable import _session as xau_session  # noqa: E402
 from scripts.xau_temp_reenable import broker_hour as xau_broker_hour  # noqa: E402
 from scripts.xau_temp_reenable import reenable as xau_temp_reenable  # noqa: E402
 

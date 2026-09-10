@@ -7,11 +7,18 @@ already at target → clears flag.
 from __future__ import annotations
 
 import argparse
-import http.cookiejar
 import json
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:            # run-by-path needs the repo root
+    sys.path.insert(0, str(ROOT))
+# Imported under this module's own name: it is the seam callers and
+# tests patch, and renaming it silently removed that seam.
+from scripts.panel_session import opener as _session  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
@@ -21,13 +28,6 @@ REENABLE = ROOT / ".bridge" / "XAU_SL_07_REENABLE"
 STREAK_STATE = ROOT / ".bridge" / "XAU_STREAK_STATE.json"
 SYMBOL = "XAUUSD"
 TARGET_SL = 0.7
-
-
-def _session(panel: str = PANEL):
-    cj = http.cookiejar.CookieJar()
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    op.open(panel + "/")
-    return op
 
 
 def _symbol_row(op, panel: str = PANEL) -> dict:

@@ -31,13 +31,49 @@ from micofx.holdout_cost import charged_holdout
 from micofx.models import SymbolConfig
 from micofx.mt5client import timeframe_seconds
 from scripts.session_exec import live_trade_sessions
-from scripts.trail_exec import _neighbor_supported
 
 # Shared accept thresholds. All four axes carried these same four numbers.
 MIN_DELTA_R = 5.0
 MIN_PF = 1.05
 MAX_PF_DROP = 0.06
 MAX_NEIGHBOR_GAP_R = 15.0
+
+
+def _neighbor_supported(
+    step: float,
+    scored: dict[float, dict[str, Any] | None],
+    challenger_r: float,
+    *,
+    max_gap_r: float = MAX_NEIGHBOR_GAP_R,
+) -> bool:
+    """A challenger flanked by a cliff on both sides is a spike, not an edge.
+
+    Lived in trail_exec, which axis_exec had to reach back into - a cycle the
+    moment trail_exec wanted anything from here. It is the shared rule, so it
+    lives with the shared rule; trail_exec imports it back.
+    """
+    caps = sorted(float(c) for c in scored if scored.get(c) is not None)
+    if step not in caps and not any(abs(c - step) < 1e-9 for c in caps):
+        return False
+    idx = min(range(len(caps)), key=lambda i: abs(caps[i] - step))
+    neighbors: list[float] = []
+    if idx > 0:
+        neighbors.append(caps[idx - 1])
+    if idx + 1 < len(caps):
+        neighbors.append(caps[idx + 1])
+    if not neighbors:
+        return False
+    for n in neighbors:
+        hold = scored.get(n) or scored.get(float(n))
+        if not isinstance(hold, dict):
+            continue
+        try:
+            nr = float(hold.get("net_r") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if challenger_r - nr <= max_gap_r + 1e-9:
+            return True
+    return False
 
 
 @dataclass(frozen=True)

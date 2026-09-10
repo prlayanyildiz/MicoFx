@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -245,15 +246,27 @@ def _aggregate_entry_blocks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return aggregate_entry_block_rows(rows)
 
 
-def spread_auto_targets(
+def _dominant_block_targets(
     entry_rows: list[dict[str, Any]],
     open_symbols: set[str],
     active: set[str],
+    *,
+    pressure: Callable[[dict[str, Any]], int],
+    min_pressure: int,
+    min_signals: int,
+    fill_when_dominant: float,
+    fill_when_alone: float,
 ) -> list[str]:
-    """Flat enabled symbols where spread is the dominant blocker with evidence.
+    """Flat enabled symbols where one gate dominates the blocks, with evidence.
 
-    Soft/capacity unique-blocks (seans, bar_doldu, kademe) do not veto a
-    retry-storm spread calibrate — they are intentional governors.
+    Spread and chase asked this identical question with four different
+    numbers, so it was written twice. Soft / capacity unique-blocks (seans,
+    bar_doldu, kademe) do not veto a retry-storm calibrate - they are
+    intentional governors, which is why the comparison is against
+    ``competing_block_top`` and not against every block.
+
+    Two rungs on purpose: a gate that outranks its competitors is acted on at
+    a higher fill rate than one that is merely over its own floor.
     """
     out: list[str] = []
     for row in entry_rows:
@@ -261,19 +274,31 @@ def spread_auto_targets(
         if sym not in active or sym in open_symbols:
             continue
         blocks = row.get("blocks") or {}
-        spread_n = spread_pressure(row)
+        pressure_n = pressure(row)
         signals = int(row.get("signals") or 0)
         fill = float(row.get("fill_rate") or 0.0)
-        if spread_n < _SPREAD_AUTO_MIN or signals < 5:
+        if pressure_n < min_pressure or signals < min_signals:
             continue
         top = competing_block_top(blocks)
         # Retries can outrank unique blocks (US30 seans_disi=6 vs spread
         # blocks=2 but pressure=17 from retries).
-        if spread_n >= max(top, _SPREAD_AUTO_MIN) and fill < 0.35:
+        if pressure_n >= max(top, min_pressure) and fill < fill_when_dominant:
             out.append(sym)
-        elif spread_n >= _SPREAD_AUTO_MIN and fill < 0.25:
+        elif pressure_n >= min_pressure and fill < fill_when_alone:
             out.append(sym)
     return out
+
+
+def spread_auto_targets(
+    entry_rows: list[dict[str, Any]],
+    open_symbols: set[str],
+    active: set[str],
+) -> list[str]:
+    """Flat enabled symbols where spread is the dominant blocker with evidence."""
+    return _dominant_block_targets(
+        entry_rows, open_symbols, active,
+        pressure=spread_pressure, min_pressure=_SPREAD_AUTO_MIN,
+        min_signals=5, fill_when_dominant=0.35, fill_when_alone=0.25)
 
 
 def chase_auto_targets(
@@ -282,23 +307,10 @@ def chase_auto_targets(
     active: set[str],
 ) -> list[str]:
     """Flat enabled symbols where chase (kovalama) dominates with evidence."""
-    out: list[str] = []
-    for row in entry_rows:
-        sym = str(row.get("symbol") or "")
-        if sym not in active or sym in open_symbols:
-            continue
-        blocks = row.get("blocks") or {}
-        chase_n = chase_pressure(row)
-        signals = int(row.get("signals") or 0)
-        fill = float(row.get("fill_rate") or 0.0)
-        if chase_n < _CHASE_AUTO_MIN or signals < 4:
-            continue
-        top = competing_block_top(blocks)
-        if chase_n >= max(top, _CHASE_AUTO_MIN) and fill < 0.40:
-            out.append(sym)
-        elif chase_n >= _CHASE_AUTO_MIN and fill < 0.30:
-            out.append(sym)
-    return out
+    return _dominant_block_targets(
+        entry_rows, open_symbols, active,
+        pressure=chase_pressure, min_pressure=_CHASE_AUTO_MIN,
+        min_signals=4, fill_when_dominant=0.40, fill_when_alone=0.30)
 
 
 def _load_compute_kasa():

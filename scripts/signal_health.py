@@ -9,21 +9,18 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:            # run-by-path needs the repo root
+    sys.path.insert(0, str(ROOT))
+# Imported under this module's own name: it is the seam callers and
+# tests patch, and renaming it silently removed that seam.
+from scripts.panel_session import headers as _session  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / "logs" / "micofx.log"
 PANEL = "http://127.0.0.1:8900"
 ACTIVE = ("GER40", "JPN225", "NAS100", "US30")
 # During open index sessions, no primary-leg signal for this long is worth flagging.
 QUIET_HOURS = 2.5
-
-
-def _session() -> dict[str, str]:
-    req = urllib.request.Request(f"{PANEL}/", method="GET")
-    resp = urllib.request.urlopen(req, timeout=10)
-    cookies = resp.headers.get_all("Set-Cookie") or []
-    h = {"Origin": PANEL}
-    if cookies:
-        h["Cookie"] = "; ".join(x.split(";")[0] for x in cookies)
-    return h
 
 
 def _last_signals() -> dict[str, float]:

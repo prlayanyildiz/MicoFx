@@ -5,13 +5,20 @@ Fires only when open tickets for a name exceed that symbol's live
 """
 from __future__ import annotations
 
-import http.cookiejar
 import json
+import sys
 import urllib.request
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:            # run-by-path needs the repo root
+    sys.path.insert(0, str(ROOT))
+# Imported under this module's own name: it is the seam callers and
+# tests patch, and renaming it silently removed that seam.
+from scripts.panel_session import opener as _panel_opener  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
@@ -76,13 +83,6 @@ def snapshot_from_positions(
     caps: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     return evaluate(counts_by_symbol(positions), caps)
-
-
-def _panel_opener(panel: str = PANEL):
-    cj = http.cookiejar.CookieJar()
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    op.open(panel + "/")
-    return op
 
 
 def fetch_positions(panel: str = PANEL) -> list[dict[str, Any]]:

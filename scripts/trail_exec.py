@@ -5,9 +5,6 @@ steps collapse while the challenger prints a hollow +R (04.09 measure).
 """
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
 from copy import deepcopy
 from typing import Any
 
@@ -15,6 +12,11 @@ from micofx.bar_snapshot import read, snapshot_path
 from micofx.holdout_cost import charged_holdout
 from micofx.models import SymbolConfig
 from micofx.mt5client import timeframe_seconds
+from scripts.axis_exec import (
+    Axis,
+    _neighbor_supported,
+    apply_axis_upgrade,
+)
 from scripts.session_exec import live_trade_sessions
 
 # Dense enough to catch local plateaus; includes live extras (JPN 2.8/3.2/3.6).
@@ -29,37 +31,6 @@ _MIN_PF = 1.05
 _MAX_PF_DROP = 0.10
 # Challenger must have ≥1 scored neighbor within this many R (else edge spike).
 _MAX_NEIGHBOR_GAP_R = 15.0
-
-
-def _neighbor_supported(
-    step: float,
-    scored: dict[float, dict[str, Any] | None],
-    challenger_r: float,
-    *,
-    max_gap_r: float = _MAX_NEIGHBOR_GAP_R,
-) -> bool:
-    caps = sorted(float(c) for c in scored if scored.get(c) is not None)
-    if step not in caps and not any(abs(c - step) < 1e-9 for c in caps):
-        return False
-    idx = min(range(len(caps)), key=lambda i: abs(caps[i] - step))
-    neighbors: list[float] = []
-    if idx > 0:
-        neighbors.append(caps[idx - 1])
-    if idx + 1 < len(caps):
-        neighbors.append(caps[idx + 1])
-    if not neighbors:
-        return False
-    for n in neighbors:
-        hold = scored.get(n) or scored.get(float(n))
-        if not isinstance(hold, dict):
-            continue
-        try:
-            nr = float(hold.get("net_r") or 0.0)
-        except (TypeError, ValueError):
-            continue
-        if challenger_r - nr <= max_gap_r + 1e-9:
-            return True
-    return False
 
 
 def best_trail_upgrade(
@@ -203,49 +174,19 @@ def propose_trail_start_upgrade(row: dict[str, Any]) -> dict[str, Any] | None:
         field="trail_start_atr", value_key="trail_start_atr")
 
 
+_STEP_AXIS = Axis(field="trail_step_atr", live_key="live_step",
+                  candidates=TRAIL_STEP_CANDIDATES, label="trail_step")
+
+
 def apply_trail_upgrade(
-    headers: dict[str, str],
-    *,
-    panel: str,
-    row: dict[str, Any],
+    headers: dict[str, str], *, panel: str, row: dict[str, Any],
 ) -> tuple[bool, str]:
-    """Force OPT apply of trail_step_atr only (EXIT_RISK — caller must be flat)."""
-    sym = str(row.get("symbol") or "")
-    pick = propose_trail_upgrade(row)
-    if pick is None:
-        try:
-            cur = float(row.get("trail_step_atr") or 0.0)
-        except (TypeError, ValueError):
-            cur = 0.0
-        return True, f"{sym} trail_step degismedi ({cur:g})"
-
-    step = float(pick["trail_step_atr"])
-    try:
-        live_score = float(row.get("opt_score") or 0.0)
-    except (TypeError, ValueError):
-        live_score = 0.0
-    payload = {
-        "symbol": sym,
-        "params": {"trail_step_atr": step},
-        "score": live_score,
-        "force": True,
-    }
-    body = json.dumps(payload).encode()
-    h = {**headers, "Origin": panel, "Content-Type": "application/json"}
-    try:
-        req = urllib.request.Request(
-            f"{panel}/api/opt/apply", data=body, headers=h, method="POST")
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            json.loads(resp.read().decode())
-    except urllib.error.HTTPError as exc:
-        return False, f"{sym} trail_step fail: {exc.read().decode()[:100]}"
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return False, f"{sym} trail_step fail: {exc}"
-
-    return True, (
-        f"{sym} trail_step {pick['live_step']:g}->{step:g} "
-        f"({pick['live_net_r']:+.1f}R->{pick['net_r']:+.1f}R)"
-    )
+    """Force gate-only apply. The POST half is shared
+    (axis_exec.apply_axis_upgrade); the *rule* that picks the value
+    stays in this file, because it is not the shared one.
+    """
+    return apply_axis_upgrade(_STEP_AXIS, headers, panel=panel, row=row,
+                              propose=propose_trail_upgrade)
 
 
 def best_trail_start_upgrade(
@@ -276,46 +217,18 @@ def best_trail_start_upgrade(
     }
 
 
+_START_AXIS = Axis(field="trail_start_atr", live_key="live_start",
+                   candidates=TRAIL_START_CANDIDATES, label="trail_start")
+
+
 def apply_trail_start_upgrade(
-    headers: dict[str, str],
-    *,
-    panel: str,
-    row: dict[str, Any],
+    headers: dict[str, str], *, panel: str, row: dict[str, Any],
 ) -> tuple[bool, str]:
-    """Force OPT apply of trail_start_atr only (EXIT_RISK — caller must be flat)."""
-    sym = str(row.get("symbol") or "")
-    pick = propose_trail_start_upgrade(row)
-    if pick is None:
-        try:
-            cur = float(row.get("trail_start_atr") or 0.0)
-        except (TypeError, ValueError):
-            cur = 0.0
-        return True, f"{sym} trail_start degismedi ({cur:g})"
+    """Force gate-only apply. The POST half is shared
+    (axis_exec.apply_axis_upgrade); the *rule* that picks the value
+    stays in this file, because it is not the shared one.
+    """
+    return apply_axis_upgrade(_START_AXIS, headers, panel=panel, row=row,
+                              propose=propose_trail_start_upgrade)
 
-    start = float(pick["trail_start_atr"])
-    try:
-        live_score = float(row.get("opt_score") or 0.0)
-    except (TypeError, ValueError):
-        live_score = 0.0
-    payload = {
-        "symbol": sym,
-        "params": {"trail_start_atr": start},
-        "score": live_score,
-        "force": True,
-    }
-    body = json.dumps(payload).encode()
-    h = {**headers, "Origin": panel, "Content-Type": "application/json"}
-    try:
-        req = urllib.request.Request(
-            f"{panel}/api/opt/apply", data=body, headers=h, method="POST")
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            json.loads(resp.read().decode())
-    except urllib.error.HTTPError as exc:
-        return False, f"{sym} trail_start fail: {exc.read().decode()[:100]}"
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return False, f"{sym} trail_start fail: {exc}"
 
-    return True, (
-        f"{sym} trail_start {pick['live_start']:g}->{start:g} "
-        f"({pick['live_net_r']:+.1f}R->{pick['net_r']:+.1f}R)"
-    )

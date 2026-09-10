@@ -7,12 +7,16 @@ Cursor 04.09: live PID kept pre-freeze autopilot; AP was disabled and
 from __future__ import annotations
 
 import argparse
-import http.cookiejar
 import json
+import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+# Imported under this module's own name: it is the seam callers and
+# tests patch, and renaming it silently removed that seam.
+from scripts.panel_session import opener as _session  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
@@ -20,13 +24,6 @@ RESUME_FLAG = ROOT / ".bridge" / "AUTOPILOT_RESUME_AFTER_RESTART"
 DONE_FLAG = ROOT / ".bridge" / "FREEZE_BIND_DONE.txt"
 XAU_SL_PENDING = ROOT / ".bridge" / "XAU_SL_07_PENDING"
 XAU_SL_REENABLE = ROOT / ".bridge" / "XAU_SL_07_REENABLE"
-
-
-def _session(panel: str = PANEL):
-    cj = http.cookiejar.CookieJar()
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    op.open(panel + "/")
-    return op
 
 
 def book_flat(op, panel: str = PANEL) -> tuple[bool, int]:
@@ -67,7 +64,6 @@ def verify_bind(
     poll_sec: float = 3.0,
 ) -> tuple[bool, str]:
     """After restart: AP on, resume flag gone, exec pipeline frozen."""
-    import sys
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     deadline = time.time() + float(timeout_sec)

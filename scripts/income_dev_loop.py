@@ -900,35 +900,18 @@ def render_markdown(report: dict[str, Any], applied: list[str]) -> str:
 
 def _run_family_audit(headers: dict[str, str]) -> list[str]:
     """Report-only — never force-apply a different family (04.09 SpotBrent/NAS)."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "family_audit", ROOT / "scripts" / "family_audit.py")
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(mod)
-    return mod.audit_report(headers)
+    return _load_exec("family_audit", ROOT / "scripts" / "family_audit.py").audit_report(headers)
 
 
 def _run_signal_health(headers: dict[str, str]) -> list[str]:
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "signal_health", ROOT / "scripts" / "signal_health.py")
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(mod)
-    return mod.check_signal_health(headers)
+    return _load_exec(
+        "signal_health", ROOT / "scripts" / "signal_health.py").check_signal_health(headers)
 
 
 def _run_holdout_live_sync(headers: dict[str, str]) -> list[str]:
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
+    return _load_exec(
         "holdout_live_sync",
-        ROOT / "scripts" / "holdout_live_sync.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(mod)
-    return mod.sync_flat_symbols(headers)
+        ROOT / "scripts" / "holdout_live_sync.py").sync_flat_symbols(headers)
 
 
 def _run_session_upgrades(headers: dict[str, str]) -> list[str]:

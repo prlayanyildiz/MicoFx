@@ -10,11 +10,18 @@ mocked POSTs (tests must not touch ``cursor/FOR_CLAUDE.md``).
 from __future__ import annotations
 
 import argparse
-import http.cookiejar
 import json
+import sys
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:            # run-by-path needs the repo root
+    sys.path.insert(0, str(ROOT))
+# Imported under this module's own name: it is the seam callers and
+# tests patch, and renaming it silently removed that seam.
+from scripts.panel_session import opener as _session  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
@@ -22,13 +29,6 @@ FLAG = ROOT / ".bridge" / "XAU_TEMP_DISABLE_UNTIL_EU"
 INBOX = ROOT / "cursor" / "FOR_CLAUDE.md"
 WAKE = ROOT / ".bridge" / "WAKE.txt"
 EU_OPEN_HOUR = 8  # broker wall hour (GER/US30 windows start ~08:00)
-
-
-def _session(panel: str = PANEL):
-    cj = http.cookiejar.CookieJar()
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    op.open(panel + "/")
-    return op
 
 
 def broker_hour(op, panel: str = PANEL) -> int | None:

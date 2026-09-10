@@ -1,17 +1,9 @@
 """max_spread_atr upgrades from charged holdout — entry gate only."""
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
-from copy import deepcopy
 from typing import Any
 
-from micofx.bar_snapshot import read, snapshot_path
-from micofx.holdout_cost import charged_holdout
-from micofx.models import SymbolConfig
-from micofx.mt5client import timeframe_seconds
-from scripts.session_exec import live_trade_sessions
+from scripts.axis_exec import Axis, apply_axis_upgrade, score_axis
 
 # Shared cost-axis grid (same spirit as defaults / F50).
 MSA_CANDIDATES: tuple[float, ...] = (0.03, 0.05, 0.08, 0.10, 0.12, 0.18)
@@ -88,46 +80,10 @@ def best_msa_upgrade(
     return best
 
 
-def _score_msa(row: dict[str, Any], caps: tuple[float, ...]) -> dict[float, dict[str, Any] | None]:
-    sym = str(row.get("symbol") or "")
-    tf = str(row.get("timeframe") or "")
-    path = snapshot_path(sym, tf)
-    if not path.exists():
-        return {}
-    try:
-        snap = read(path)
-    except Exception:
-        return {}
-    live_sess = live_trade_sessions(row)
-    out: dict[float, dict[str, Any] | None] = {}
-    for cap in caps:
-        overlay = deepcopy(row)
-        for k in ("available", "digits", "description"):
-            overlay.pop(k, None)
-        overlay["max_spread_atr"] = float(cap)
-        if not bool(row.get("use_sessions", True)):
-            overlay["use_sessions"] = False
-        else:
-            overlay["sessions"] = live_sess
-            overlay["use_sessions"] = True
-        try:
-            cfg = SymbolConfig.from_dict(overlay)
-            res, _, _ = charged_holdout(
-                bars=snap["bars"], cfg=cfg,
-                point=float(snap["info"]["point"]),
-                tick_value=float(snap["info"]["tick_value"]),
-                tick_size=float(snap["info"]["tick_size"]),
-                spread_scale=float(snap["spread_scale"]),
-                min_stop=float(snap["min_stop"]),
-                segments=int(snap["segments"]),
-                trade_all_hours=bool(snap["trade_all_hours"]),
-                day_end_flatten_min=int(snap["day_end_flatten_min"]),
-                tf_seconds=timeframe_seconds(tf),
-            )
-            out[float(cap)] = res.as_dict()
-        except Exception:
-            out[float(cap)] = None
-    return out
+def _score_msa(row: dict[str, Any],
+               caps: tuple[float, ...]) -> dict[float, dict[str, Any] | None]:
+    """Byte-identical to the shared replay once the field name is the axis'."""
+    return score_axis(_MSA_AXIS, row, caps)
 
 
 def propose_msa_upgrade(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -155,46 +111,18 @@ def propose_msa_upgrade(row: dict[str, Any]) -> dict[str, Any] | None:
     return pick
 
 
+_MSA_AXIS = Axis(field="max_spread_atr", live_key="live_msa",
+                 candidates=MSA_CANDIDATES, label="msa")
+
+
 def apply_msa_upgrade(
-    headers: dict[str, str],
-    *,
-    panel: str,
-    row: dict[str, Any],
+    headers: dict[str, str], *, panel: str, row: dict[str, Any],
 ) -> tuple[bool, str]:
-    """Force gate-only msa write + charged restamp (narrow or widen)."""
-    sym = str(row.get("symbol") or "")
-    pick = propose_msa_upgrade(row)
-    if pick is None:
-        try:
-            cur = float(row.get("max_spread_atr") or 0.0)
-        except (TypeError, ValueError):
-            cur = 0.0
-        return True, f"{sym} msa degismedi ({cur:g})"
+    """Force gate-only apply. The POST half is shared
+    (axis_exec.apply_axis_upgrade); the *rule* that picks the value
+    stays in this file, because it is not the shared one.
+    """
+    return apply_axis_upgrade(_MSA_AXIS, headers, panel=panel, row=row,
+                              propose=propose_msa_upgrade)
 
-    cap = float(pick["max_spread_atr"])
-    try:
-        live_score = float(row.get("opt_score") or 0.0)
-    except (TypeError, ValueError):
-        live_score = 0.0
-    payload = {
-        "symbol": sym,
-        "params": {"max_spread_atr": cap},
-        "score": live_score,
-        "force": True,
-    }
-    body = json.dumps(payload).encode()
-    h = {**headers, "Origin": panel, "Content-Type": "application/json"}
-    try:
-        req = urllib.request.Request(
-            f"{panel}/api/opt/apply", data=body, headers=h, method="POST")
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            json.loads(resp.read().decode())
-    except urllib.error.HTTPError as exc:
-        return False, f"{sym} msa fail: {exc.read().decode()[:100]}"
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return False, f"{sym} msa fail: {exc}"
 
-    return True, (
-        f"{sym} msa {pick['live_msa']:g}->{cap:g} "
-        f"({pick['live_net_r']:+.1f}R->{pick['net_r']:+.1f}R)"
-    )

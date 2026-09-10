@@ -6,24 +6,23 @@ income check after bar+scale gate bind (Py/Grok 06.09).
 """
 from __future__ import annotations
 
-import http.cookiejar
 import json
-import urllib.request
+import sys
 from datetime import datetime
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:            # run-by-path needs the repo root
+    sys.path.insert(0, str(ROOT))
+# Imported under this module's own name: it is the seam callers and
+# tests patch, and renaming it silently removed that seam.
+from scripts.panel_session import opener as _session  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
 STATE = ROOT / ".bridge" / "FILL_PULSE_STATE.json"
 WAKE = ROOT / ".bridge" / "WAKE.txt"
 INBOX = ROOT / "cursor" / "FOR_CLAUDE.md"
-
-
-def _session():
-    cj = http.cookiejar.CookieJar()
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    op.open(PANEL + "/")
-    return op
 
 
 def _load() -> dict:

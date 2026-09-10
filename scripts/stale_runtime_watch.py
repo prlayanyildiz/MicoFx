@@ -7,13 +7,20 @@ is written **only when the book is flat** — never mid-trade.
 """
 from __future__ import annotations
 
-import http.cookiejar
 import json
+import sys
 import time
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:            # run-by-path needs the repo root
+    sys.path.insert(0, str(ROOT))
+# Imported under this module's own name: it is the seam callers and
+# tests patch, and renaming it silently removed that seam.
+from scripts.panel_session import opener as _session  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
@@ -136,13 +143,6 @@ def evaluate(
         "engine_started_at": started_f,
         "n_modules": len(current),
     }
-
-
-def _session(panel: str = PANEL):
-    cj = http.cookiejar.CookieJar()
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    op.open(panel + "/")
-    return op
 
 
 def fetch_n_open(panel: str = PANEL) -> int:

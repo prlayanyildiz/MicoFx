@@ -9,18 +9,15 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:            # run-by-path needs the repo root
+    sys.path.insert(0, str(ROOT))
+# Imported under this module's own name: it is the seam callers and
+# tests patch, and renaming it silently removed that seam.
+from scripts.panel_session import headers as session  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
 FAM = frozenset({"burst", "mtf_pullback", "channel_break"})
-
-
-def session() -> dict[str, str]:
-    req = urllib.request.Request(f"{PANEL}/", method="GET")
-    resp = urllib.request.urlopen(req, timeout=10)
-    cookies = resp.headers.get_all("Set-Cookie") or []
-    h = {"Origin": PANEL}
-    if cookies:
-        h["Cookie"] = "; ".join(x.split(";")[0] for x in cookies)
-    return h
 
 
 def _get(path: str, h: dict[str, str]) -> dict[str, Any]:
