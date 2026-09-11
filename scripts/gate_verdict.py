@@ -1,5 +1,11 @@
 """What the live config would have earned at a different entry-cost gate.
 
+**This tool DESCRIBES the holdout. It does not choose.** It ranked on
+holdout R/day and printed "en iyi kapi" until 11.09, and that is how
+NAS100 got adx_min=10 / min_body_ratio=0.1 into a live config - the best
+cell on the one slice it was ranked on, and worse than the incumbent on
+the other four. The holdout is the referee; selecting on it consumes it.
+
 Arm 1 of the 11.09 three-arm strategy review. The live record says the loss
 is selectivity: split by MFE against each symbol's own lock threshold, 210 of
 366 trades (57%) never move at all - net -160.17R at 10% winners - while the
@@ -173,17 +179,31 @@ def main(argv: list[str] | None = None) -> int:
 
     good = [r for r in out["rows"] if r["trades"] > 0]
     if good:
+        # NOT max(r_day). This tool ranked on holdout R/day until 11.09 and
+        # that is how NAS100 got adx_min=10 / min_body_ratio=0.1 written into
+        # a live config: best on the holdout, WORSE on the other four slices
+        # (validation +0.0808 against the incumbent's +0.1341, and negative on
+        # one selection segment). Picking on the referee is the exact mistake
+        # symbol_engine.py's docstring warns about, and this tool was the one
+        # committing it. It now reports and does not choose.
         best = max(good, key=lambda r: r["r_day"])
         cur = next((r for r in good if abs(r["gate"] - live_gate) < 1e-9), None)
         print(flush=True)
-        print(f"en iyi kapi: {best['gate']:.3f} -> {best['r_day']:+.4f} R/gun "
-              f"({best['trades']} islem, PF {best['pf']:.2f})")
+        print(f"holdout'un en iyisi (SECIM DEGIL): {best['gate']:.3f} -> "
+              f"{best['r_day']:+.4f} R/gun ({best['trades']} islem, "
+              f"PF {best['pf']:.2f})")
         if cur:
             print(f"canli kapi : {cur['gate']:.3f} -> {cur['r_day']:+.4f} R/gun "
                   f"({cur['trades']} islem, PF {cur['pf']:.2f})")
             delta = best["r_day"] - cur["r_day"]
-            print(f"fark       : {delta:+.4f} R/gun"
-                  + ("  (siki kapi daha iyi)" if delta > 0 else "  (canli kapi zaten iyi)"))
+            print(f"fark       : {delta:+.4f} R/gun")
+        print()
+        print("UYARI: yukaridaki tablo holdout'u TARIF eder, bir secim degildir.")
+        print("Holdout hakemdir; ona gore secmek onu tuketir. Bir degeri canliya")
+        print("yazmadan once bes dilimin hepsinde olcun ve EN KOTU dilime bakin -")
+        print("11.09'da bu tabloya bakip NAS100'e yazilan deger dort dilimde daha")
+        print("kotuydu. Egri sekli de onemli: iki dusuk komsu arasindaki tek bir")
+        print("sivri uc, kenar degil gurultudur.")
     if args.out:
         Path(args.out).write_text(json.dumps(out, indent=2), encoding="utf-8")
     return 0

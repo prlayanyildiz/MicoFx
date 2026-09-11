@@ -112,6 +112,24 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
   `POST /api/opt/run` still starts a search. Family/TF apply while this
   magic has a ticket queues `pending_primary_patch` (same door as
   `pending_exit_patch`); engine lands it when flat. Do not drop the winner.
+- **Never rank on the holdout. It is the referee, and selecting on it
+  consumes it.** `scripts/gate_verdict.py` ranked on holdout R/day and printed
+  "en iyi kapi" until 11.09. That is how NAS100 got `adx_min=10` /
+  `min_body_ratio=0.1` written live. Scored on all five slices afterwards:
+
+      adx/body   sel-1    sel-2    sel-3   valid   HOLD    worst
+      0 / 0.2    0.0311  +0.0066   0.0716  0.1341  0.1452  +0.0066   <- incumbent
+      10 / 0.1   0.0379  -0.0325   0.0467  0.0808  0.1719  -0.0325   <- what landed
+
+  Best on the one slice it was ranked on, worse on the other four, and
+  negative on a selection segment. Reverted the same day. The tool now
+  describes the holdout and refuses to name a winner.
+  **Read the worst slice, not the best number**, and read the curve's shape:
+  a lone spike between two lower neighbours is noise, not edge.
+  **And check the value is IN THE GRID.** `adx_min=10` is not
+  (`[0, 15, 20, 12, 18, 25]`), nor is `max_spread_atr=0.06` - an off-grid live
+  value is one the search can neither re-derive nor refute, so it sits there
+  forever unexamined.
 - **The selection score is NOT an optimisation target. Measured 11.09.**
   Coordinate descent (`scripts/symbol_engine.py`) walks the grid axis by axis
   instead of sampling it, ranking on `walk_forward`'s own score. It raised the
