@@ -48,7 +48,12 @@ AI_FIXES = {
 # 0.6 sits between rungs of a six-part ratio and is enforced as 4/6. Same
 # behaviour, stated honestly, so the next reader is not misled the way 0.7
 # misled everyone.
-OPT_FIXES = {"min_positive_ratio": round(4 / 6, 4)}
+# 0.6666, NOT round(4/6, 4) = 0.6667. Rounding 4/6 to four places lands just
+# ABOVE the rung and is then enforced as 5/6 (83%) - the exact value that
+# emptied the book as 0.7. I installed 0.6667 on 11.09 and the API's own note
+# caught it within seconds. A number that sits between rungs must be written
+# on the LOW side of the one it means.
+OPT_FIXES = {"min_positive_ratio": 0.6666}
 # max_spread_atr: measured this session, 0.25 down to 0.05 return an identical
 # +102.36R over 665 holdout trades, so this changes nothing the backtest can
 # see - but 0.25 sits above the whole search grid (top 0.15), so a search
@@ -145,8 +150,22 @@ def main(argv: list[str] | None = None) -> int:
             got = res.get("params") or {}
             for key, want in OPT_FIXES.items():
                 print(f"  {key}: {got.get(key)} (istenen {want})", flush=True)
-            if res.get("note"):
-                print(f"  not: {res['note']}", flush=True)
+            note = str(res.get("note") or "")
+            if note:
+                print(f"  not: {note}", flush=True)
+                # The note says what the value will ACTUALLY mean. If that is
+                # stricter than what was asked for, this is the 0.6667 mistake
+                # happening again and the run must not report success.
+                want = float(OPT_FIXES.get("min_positive_ratio") or 0)
+                import re as _re
+                m = _re.search(r"(\d+)/(\d+)", note)
+                if m and want:
+                    effective = int(m.group(1)) / int(m.group(2))
+                    if effective > want + 1e-9:
+                        print(f"  DURDU: {want:g} istendi ama {effective:.4f} "
+                              f"uygulanacak - basamagin ALT tarafina yazin",
+                              flush=True)
+                        ok = False
         except urllib.error.HTTPError as exc:
             print(f"  opt params REDDEDILDI: {exc.code} "
                   f"{exc.read().decode()[:200]}", flush=True)
