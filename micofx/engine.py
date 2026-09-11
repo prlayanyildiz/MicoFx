@@ -367,6 +367,58 @@ class SymbolState:
         }
 
 
+def entry_context(state: Any, side: str, entry: float,
+                  lookback: int = 50) -> dict[str, Any]:
+    """What the market looked like when this entry was taken.
+
+    Measured 11.09: the three features the autopsy recorded - adx, atr_pct,
+    spread_atr - do NOT separate the signals that work from the 57% that never
+    move. Within each symbol the medians sit within a few percent of each
+    other, and on GER40 the spread difference runs the WRONG way. The pooled
+    result that looked like a separator was a composition effect across
+    symbols with different costs.
+
+    So the answer to "why do 57% of entries go nowhere" is not in the record,
+    and cannot be until the record holds the context the strategies actually
+    decide on. Everything here is already on the symbol state or one
+    subtraction away from it; nothing new is computed for the sake of it.
+
+    ``range_pos`` is the one derived value: where the fill sits between the
+    lookback window's high and low, 0 at the bottom and 1 at the top. Buying
+    at the top of a range and selling at the bottom is the classic way a
+    breakout signal becomes a dead trade, and nothing in the current record
+    could show it.
+    """
+    out: dict[str, Any] = {}
+    try:
+        out["htf"] = str(getattr(state, "htf", "") or "") or None
+        rising = getattr(state, "t3_rising", None)
+        out["t3_rising"] = None if rising is None else bool(rising)
+        if rising is not None and side:
+            # With the trend or against it, as one boolean the analysis can
+            # group on without re-deriving the convention every time.
+            out["with_trend"] = bool(rising) == (str(side).lower() == "buy")
+        for key in ("k", "d"):
+            value = getattr(state, key, None)
+            if value is not None:
+                out[f"stoch_{key}"] = round(float(value), 1)
+        out["session_at_fill"] = str(getattr(state, "session", "") or "") or None
+        out["signal_source"] = str(getattr(state, "signal_source", "") or "") or None
+        last_sig = float(getattr(state, "last_signal_at", 0.0) or 0.0)
+        if last_sig > 0:
+            out["since_last_signal_sec"] = max(0, int(time.time() - last_sig))
+        bars = getattr(state, "bars", None)
+        if bars is not None and len(bars) >= lookback and entry:
+            hi = float(max(bars.high[-lookback:]))
+            lo = float(min(bars.low[-lookback:]))
+            if hi > lo:
+                out["range_pos"] = round((float(entry) - lo) / (hi - lo), 4)
+    except Exception:                                  # noqa: BLE001
+        # A missing attribute must never cost a fill its autopsy row.
+        pass
+    return out
+
+
 def after_stop_excursions(
     side: str,
     entry: float,
@@ -1511,6 +1563,7 @@ class Engine:
                 # unattributable. Costs two strings per fill.
                 strategy=str(cfg.strategy or ""),
                 timeframe=str(cfg.timeframe or ""),
+                **entry_context(state, side, fill_px),
                 tf_seconds=timeframe_seconds(cfg.timeframe),
                 side=side,
                 entry=fill_px,
@@ -2461,6 +2514,16 @@ class Engine:
             # a trade closes the symbol may already carry a different family.
             "strategy": str(book.get("strategy") or "") or None,
             "timeframe": str(book.get("timeframe") or "") or None,
+            # Entry context - see entry_context() for why these exist.
+            "htf": book.get("htf"),
+            "t3_rising": book.get("t3_rising"),
+            "with_trend": book.get("with_trend"),
+            "stoch_k": book.get("stoch_k"),
+            "stoch_d": book.get("stoch_d"),
+            "range_pos": book.get("range_pos"),
+            "session_at_fill": book.get("session_at_fill"),
+            "signal_source": book.get("signal_source"),
+            "since_last_signal_sec": book.get("since_last_signal_sec"),
             "profit": _round(self._autopsy_float(profit), 2),
             # Frozen prices so the hour after the stop can be scored later
             # without parsing TRADE lines. Missing values stay None; the
@@ -3801,6 +3864,7 @@ class Engine:
                 # unattributable. Costs two strings per fill.
                 strategy=str(cfg.strategy or ""),
                 timeframe=str(cfg.timeframe or ""),
+                **entry_context(state, side, fill_px),
                 tf_seconds=timeframe_seconds(cfg.timeframe),
                 side=side,
                 entry=fill_px,
