@@ -120,3 +120,31 @@ def test_opt_params_post_refuses_an_empty_or_retired_bag():
         res = tc.post("/api/opt/params", json={"timeframes": [tf]})
         assert res.status_code == 400, f"{tf} kabul edildi: {res.text}"
     assert store.saved_opt is None
+
+
+def test_the_panel_offers_exactly_the_bars_the_code_allows():
+    """``OPT_TF_OPTIONS`` asked a human to keep two lists in step.
+
+    Operator, 11.09: "m5 opt sayfasinda yok" - correct, and deliberate: the
+    comment above that constant says offering a retired bar would let the
+    panel set a timeframe the entry gate refuses
+    (``strategy_allows_timeframe`` -> ``READABLE_TIMEFRAMES``), i.e. a
+    silently dead symbol. It ends "Keep in step with models.TIMEFRAMES", and
+    nothing checked that it was. Two hand-maintained lists with a comment
+    between them is the same shape as every other drift this file guards.
+
+    Both directions matter. A bar in the panel but not in the code is a dead
+    symbol; a bar in the code but not in the panel is a search the operator
+    cannot reach - which is exactly how ``strategies`` and
+    ``min_positive_ratio`` sat unreachable until 11.09.
+    """
+    import re
+
+    js = (ROOT / "micofx" / "web" / "static" / "app.js").read_text("utf-8")
+    m = re.search(r"const OPT_TF_OPTIONS\s*=\s*\[([^\]]*)\]", js)
+    assert m, "OPT_TF_OPTIONS bulunamadi - adi mi degisti?"
+    offered = [t.strip().strip('"\'') for t in m.group(1).split(",") if t.strip()]
+    assert offered == TIMEFRAMES, (
+        f"panel {offered} sunuyor, kod {TIMEFRAMES} kabul ediyor")
+    for tf in RETIRED_TIMEFRAMES:
+        assert tf not in offered, f"panel emekli bari sunuyor: {tf}"
