@@ -112,6 +112,29 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
   `POST /api/opt/run` still starts a search. Family/TF apply while this
   magic has a ticket queues `pending_primary_patch` (same door as
   `pending_exit_patch`); engine lands it when flat. Do not drop the winner.
+- **The selection score is NOT an optimisation target. Measured 11.09.**
+  Coordinate descent (`scripts/symbol_engine.py`) walks the grid axis by axis
+  instead of sampling it, ranking on `walk_forward`'s own score. It raised the
+  score enormously and destroyed the holdout on two symbols of three:
+  GER40 score 2.5 -> 7.2 with holdout +0.0684 -> **+0.1030** R/day;
+  NAS100 score 0.23 -> **18.5 (79x)** with holdout +0.1719 -> **+0.0851**;
+  XAUUSD score 6.4 -> 28.4 with holdout +0.3689 -> **+0.1555**, PF 1.39 ->
+  1.14 and drawdown 13.8 -> **30.4**. One positive in three is chance.
+  Two consequences, and the second one overturns a claim made earlier the
+  same day:
+  (1) Any search that optimises this score hard enough will overfit. The
+  bigger the score jump, the worse the holdout - that ratio is the warning
+  sign to watch.
+  (2) `max_combos=2000` against a multi-billion grid is **regularisation, not
+  a bottleneck**. I called the grid-to-budget ratio "the real bottleneck" at
+  midday; removing the limit made the system measurably worse. More search is
+  not the fix; a selection criterion that survives out of sample is. That is
+  what the literature on deflated Sharpe / probability of backtest overfitting
+  (Bailey & Lopez de Prado) and combinatorial purged CV is for, and it is the
+  open question here.
+  The tool stays because the experiment is worth repeating, and because a
+  coordinate walk is the cheapest way to ask "is this config a plateau or a
+  spike". It must not be used to write a live config on score alone.
 - **A flip gate benchmarks what the incumbent earns NOW, never a stamp.**
   F1/F2 read `_flip_benchmark`, which prefers the sweep's own
   `baseline["holdout"]` (the live config replayed on that sweep's holdout
