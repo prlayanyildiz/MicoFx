@@ -110,13 +110,19 @@ function Start-ClaudeTick([string]$reason) {
         Write-Log "Claude spawn SKIP: .bridge/MOLA present"
         return
     }
+    # Every name in this prompt is an instruction a headless agent acts
+    # on every five minutes, so a retired one is worse here than in a
+    # doc. It suggested "GOLD_PERP add adayi" and banned "SpotBrent
+    # acma" long after both left the book (GOLD_PERP and SpotBrent are
+    # in RETIRED_SYMBOLS) - naming the lexicon instead keeps it true as
+    # the book changes.
     $wake = Get-SharedPrompt
     $prompt = @"
 MicoFx KOPRU INCOME tick ($reason). Aktif + agresif ol.
 1) Oku: cursor/GOREV_TAHTASI.md (SIMDI satirlar) + cursor/FOR_CLAUDE.md ust blok + logs/income_loop_latest.md.
-2) Her tick en az bir somut is: costed sweep, holdout vs canli fark, trail/adx/cost_rank kuyruk olcumu, entry-block analizi, veya GOLD_PERP add adayi. Bos 'bekliyorum' yazma.
+2) Her tick en az bir somut is: costed sweep, holdout vs canli fark, trail/adx/cost_rank kuyruk olcumu, entry-block analizi, veya fill/exit iyilestirmesi. Bos 'bekliyorum' yazma.
 3) Mutabakat + sayi: Claude -> Cursor basligi ile claude/FOR_CURSOR.md USTUNE yaz. Cursor apply eder.
-4) Yasak: yeni aile, daily_loss_pct acma, SpotBrent acma, commit/push (Cursor yapar), MT5 sidecar initialize.
+4) Yasak: yeni aile, daily_loss_pct acma, emekli sembol/bar acma (tests/retired_lexicon.py), commit/push (Cursor yapar), MT5 sidecar initialize.
 5) Python: C:\MicoFX-venv\Scripts\python.exe. Repo: C:\Users\Administrator\MicoFx.
 $wake
 "@

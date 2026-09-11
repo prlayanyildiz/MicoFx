@@ -53,11 +53,13 @@ _restart.json
 # gercek bir dosya olusuyor ve icine uyarilar dokuluyor. Urun degil, kaza.
 nul
 
-# Cursor's inline bridge watcher wrote its state file with Set-Content's
-# arguments swapped: the hash became the FILE NAME and the state path became
-# the contents. Five landed at the repo root on 10.09 and one reached a commit.
-# Cursor has since fixed the call - the version running after the reboot binds
-# -Path correctly - and the last leftover was deleted 10.09 23:2x. The pattern
-# stays as a net: the failure is silent, produces a 64-character file nobody
-# would recognise, and only shows up as a state file that never persists.
+# An inline bridge watcher writes its state file with Set-Content's arguments
+# swapped: the hash becomes the FILE NAME and the state path becomes the
+# contents. Five landed at the repo root on 10.09 and one reached a commit. I
+# wrote here on 10.09 that Cursor had fixed it - wrong: another appeared 11.09
+# 08:2x from a freshly armed watcher. It was swept, not fixed. The repo's own
+# leg is claude/session_watch.ps1 now, which names every parameter and takes a
+# mutex; the pattern stays as a net until nothing arms an inline one, because
+# the failure is silent and produces a 64-character file nobody recognises.
+# Pinned by tests/test_every_bridge_watcher_is_single_instance.py.
 [0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]*[0-9A-F]
