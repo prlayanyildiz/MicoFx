@@ -48,7 +48,17 @@ from micofx.models import SymbolConfig  # noqa: E402
 from micofx.mt5client import timeframe_seconds  # noqa: E402
 from micofx.paths import DATA_DIR, DB_PATH, load_defaults  # noqa: E402
 
-DEFAULT_GATES = (0.25, 0.15, 0.10, 0.08, 0.05, 0.03, 0.02, 0.015, 0.01)
+# Per axis, because "a gate" is not one scale. max_spread_atr is a share of
+# ATR; atr_pct_min is a PERCENTILE (0-1) of the symbol's own ATR distribution -
+# models.py calls it "ATR percentile floor", and the autopsy's ``atr_pct``
+# (ATR/price, ~0.0017) is a different quantity with a confusingly similar
+# name. Mixing them costs a factor of 150.
+DEFAULT_GATES = {
+    "max_spread_atr": (0.25, 0.15, 0.10, 0.08, 0.05, 0.03, 0.02, 0.015, 0.01),
+    "atr_pct_min": (0.0, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5),
+    "adx_min": (0.0, 10.0, 15.0, 18.0, 20.0, 22.0, 25.0, 30.0),
+    "min_body_ratio": (0.0, 0.1, 0.2, 0.3, 0.4, 0.5),
+}
 
 
 def _ro_db() -> sqlite3.Connection:
@@ -83,10 +93,11 @@ def snap_for(symbol: str, tf: str) -> dict:
     raise SystemExit(f"snapshot yok: {safe}.npz")
 
 
-def measure(cfg: SymbolConfig, snap: dict, opt: dict, gate: float) -> dict | None:
-    """The live config on the holdout slice, with max_spread_atr pinned."""
+def measure(cfg: SymbolConfig, snap: dict, opt: dict, gate: float,
+            axis: str = "max_spread_atr") -> dict | None:
+    """The live config on the holdout slice, with one axis pinned."""
     res = walk_forward(
-        cfg=cfg, grid={"max_spread_atr": [gate]}, bars=snap["bars"],
+        cfg=cfg, grid={axis: [gate]}, bars=snap["bars"],
         point=float(snap["info"]["point"]),
         tf_seconds=timeframe_seconds(cfg.timeframe),
         min_trades=int(opt["min_trades"]), segments=int(opt["segments"]),
@@ -121,8 +132,11 @@ def measure(cfg: SymbolConfig, snap: dict, opt: dict, gate: float) -> dict | Non
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--symbol", required=True)
+    ap.add_argument("--axis", default="max_spread_atr",
+                    choices=sorted(DEFAULT_GATES),
+                    help="which entry gate to sweep, one axis at a time")
     ap.add_argument("--gates", default="",
-                    help="comma-separated max_spread_atr values")
+                    help="comma-separated values for that axis")
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
 
@@ -130,22 +144,22 @@ def main(argv: list[str] | None = None) -> int:
     opt = live_opt_params()
     snap = snap_for(args.symbol, cfg.timeframe)
     gates = ([float(g) for g in args.gates.split(",") if g.strip()]
-             if args.gates else list(DEFAULT_GATES))
-    live_gate = float(getattr(cfg, "max_spread_atr", 0.0) or 0.0)
+             if args.gates else list(DEFAULT_GATES[args.axis]))
+    live_gate = float(getattr(cfg, args.axis, 0.0) or 0.0)
     if live_gate and live_gate not in gates:
         gates.append(live_gate)
     gates = sorted(set(gates), reverse=True)
 
     print(f"=== {args.symbol} {cfg.strategy}/{cfg.timeframe}  "
-          f"canli kapi max_spread_atr={live_gate}", flush=True)
+          f"canli {args.axis}={live_gate}", flush=True)
     print(f"{'kapi':>8} {'R/gun':>9} {'net R':>9} {'islem':>6} {'PF':>6} "
           f"{'dd':>7}  {'dogrulandi':>10}", flush=True)
     print("-" * 64, flush=True)
 
-    out = {"symbol": args.symbol, "live_gate": live_gate,
+    out = {"symbol": args.symbol, "axis": args.axis, "live_gate": live_gate,
            "strategy": cfg.strategy, "timeframe": cfg.timeframe, "rows": []}
     for gate in gates:
-        row = measure(cfg, snap, opt, gate)
+        row = measure(cfg, snap, opt, gate, args.axis)
         mark = "  <-- CANLI" if abs(gate - live_gate) < 1e-9 else ""
         if row is None or "error" in row:
             print(f"{gate:>8.3f} {'-':>9} {'-':>9} {'-':>6} {'-':>6} {'-':>7}"

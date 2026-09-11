@@ -175,6 +175,11 @@ _SYMBOL_RISK_BOUNDS = {
     # 0 = no per-symbol limit (risk.position_cap); the ceiling of 5 was
     # removed 11.09 with it. 100 is a sanity stop, not a policy.
     "max_positions": (0, 100, True),
+    # 0 = gate off for all three. ADX is an index, body ratio and the ATR
+    # percentile floor are fractions of 1.
+    "adx_min": (0.0, 100.0, True),
+    "min_body_ratio": (0.0, 1.0, True),
+    "atr_pct_min": (0.0, 1.0, True),
     # Panel-writable and, until 31.08, the only writable symbol field with no
     # bound here at all - the ``max: 240`` on the card is UI-only, so a POST
     # carrying 10**9 was accepted and blocked every entry on that symbol for
@@ -587,6 +592,22 @@ _OPERATOR_SYMBOL_FIELDS = frozenset({
     "mfe_lock1_at_r", "mfe_lock1_to_r", "mfe_lock2_at_r", "mfe_lock2_to_r",
     "stale_flat_bars", "stale_max_abs_r", "max_positions",
     "brst_range_z", "brst_close_pct", "chan_lookback", "kelt_ema_len", "kelt_atr_mult",
+    # Entry-quality gates, opened 11.09 with a measurement behind each one.
+    # These ARE OPT_FIELDS, so a later apply() can overwrite them - that is
+    # correct and left alone: the flip gates now benchmark against a measured
+    # incumbent, so an overwrite means the search found something genuinely
+    # better. What it does not mean is that the search would have found THESE:
+    # measured jointly on the holdout, GER40 adx_min 10->15 with
+    # min_body_ratio 0->0.4 is +0.0684 -> +0.0780 R/day at PF 1.43 -> 1.59,
+    # and NAS100 adx_min 0->10 with min_body_ratio 0.2->0.1 is
+    # +0.1452 -> +0.1719 R/day at PF 1.16 -> 1.19 and MORE trades (1144 vs
+    # 1127). Both validated. The search missed them because the grid is
+    # astronomically wider than the budget - XAUUSD's mtf_pullback grid is
+    # 4.79 BILLION combinations against max_combos=2000, four ten-millionths
+    # of a percent - so a specific two-axis pairing is unreachable by
+    # sampling. Fixing that ratio is the real work; this is the measurement
+    # landing in the meantime.
+    "adx_min", "min_body_ratio", "atr_pct_min",
 })
 # NOT here, deliberately: ``symbol_daily_loss_pct``. A 05.09 audit reported it
 # as "a protection that cannot be armed" - true as a description (no path sets
