@@ -633,11 +633,16 @@ _OPERATOR_GRID_AXES = frozenset({"max_spread_atr", "cost_rank_max"})
 # the evidence bar rather than removing it.
 _OPERATOR_AI_FIELDS = frozenset({"enabled", "prefer_strong_on_dd",
                                  "hard_block_only_quarantine",
-                                 "bad_hour_min_trades"})
+                                 "bad_hour_min_trades",
+                                 "edge_decay_min_trades"})
 _AI_BOUNDS = {
     # Three trades is not evidence; one is noise. The shipped 6 stays
     # settable, and so does a much stricter bar for a bigger book.
     "bad_hour_min_trades": (3, 500, True),
+    # Found by scripts/dead_gate_scan.py on its first run: stored 100 against
+    # a shipped 50, while the busiest symbol in the supervisor's own 30-day
+    # lookback had 98 trades. Edge-decay detection had never once fired.
+    "edge_decay_min_trades": (10, 2000, True),
 }
 
 
