@@ -67,10 +67,19 @@ RETIRED_SYMBOLS = (
     "BTCUSD",
     # 10.09 21:37: SpotBrent left carrying the worst fill in the book
     # (50 signals -> 5 trades, 10%).
-    # US30 went out with it at 21:35 and the operator brought it BACK at
-    # 23:3x ("US30 geri ekledim"), disabled and unvalidated on magic 990101,
-    # with a search running on it. It is live book again, so it is not here.
+    # US30 went out with it at 21:35, came back 23:3x, and went out again for
+    # good on 11.09 ("us30 verimsizse sil spread 20 onda"). It was the worst
+    # symbol in the book on three independent axes and agreed with itself:
+    # widest cost by far (median traded spread 0.0694 ATR against NAS100's
+    # 0.0167 and XAUUSD's 0.0144, four times the next index), least
+    # diversifying (returns correlate +0.799 with NAS100 and +0.744 with
+    # GER40, while XAUUSD sits at ~0.15), and lowest yield (backtest holdout
+    # +0.0495 R/day, the bottom of the book; live -4.00R at PF 0.93 over 98
+    # trades). The correlation is what settles it: with the per-symbol
+    # position cap removed the same day, three index legs at 0.69-0.80 stack
+    # one bet, and US30 is the one paying the most to do it.
     "SpotBrent",
+    "US30",
     # Added 10.09 21:38 and deleted the same evening, before it ever
     # traded: every session window the search tried scored NEGATIVE
     # (-16.1 all-hours, -14.6 on 00:00-09:00) and the one candidate that

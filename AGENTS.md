@@ -20,19 +20,25 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
    after a clear ask is not an ACK. Yellow/red that used to wait on the
    human now wait on **peer ACK** unless the operator overrides in chat.
-2. **Book is 4 symbols, all trading: `GER40 NAS100 US30 XAUUSD`.** The book went 7 -> 3 -> 4 in one evening (10.09), all
-   operator calls. **Staying deleted**: JPN225 + BTCUSD (10:42),
-   SpotBrent (21:37), BRENTOIL-PERP (22:2x - added and cut the same
-   evening, before it ever traded: every session window the search tried
+2. **Book is 3 symbols: `GER40 NAS100 XAUUSD`.** It went 7 -> 3 -> 4 -> 3
+   across 10-11.09, all operator calls. **Staying deleted**: JPN225 + BTCUSD
+   (10.09 10:42), SpotBrent (21:37), BRENTOIL-PERP (22:2x - added and cut the
+   same evening, before it ever traded: every session window the search tried
    scored negative, -16.1 on all-hours, and its one selection-clearing
-   candidate was refused for a negative costed holdout). Those four are in
-   `tests/retired_lexicon.py: RETIRED_SYMBOLS`, so a seed-overwrite cannot
-   rebuild them. **US30 came back** at 23:3x ("US30 geri ekledim") on magic
-   990101, index/M30, `use_sessions=false`. It arrived disabled and
-   unvalidated; the operator applied `keltner_break`/M30 (holdout +26.2R,
-   PF 1.15) by hand at 23:41 on 11.09 and enabled it, so it is validated and
-   trading. Do **not** re-add the retired four unasked, and do
-   **not** disable, delete, or “close for bleed” any of the four.
+   candidate was refused for a negative costed holdout), and **US30** (out
+   21:35, back 23:3x, out for good 11.09 - "us30 verimsizse sil spread 20
+   onda"). All five are in `tests/retired_lexicon.py: RETIRED_SYMBOLS`, so a
+   seed-overwrite cannot rebuild them.
+   US30 lost on three independent axes that agreed: **cost** - median traded
+   spread 0.0694 ATR against NAS100's 0.0167 and XAUUSD's 0.0144, four times
+   the next index; **correlation** - +0.799 with NAS100 and +0.744 with GER40
+   while XAUUSD sits at ~0.15, so it was the least diversifying row in the
+   book; **yield** - backtest holdout +0.0495 R/day, the bottom, and live
+   -4.00R at PF 0.93 over 98 trades. The correlation is what settled it: the
+   per-symbol position cap came off the same day, and three index legs at
+   0.69-0.80 stack one bet.
+   Do **not** re-add the retired five unasked, and do
+   **not** disable, delete, or “close for bleed” the three that remain.
    Improve fill / exits / gates / sizing / search instead (“kapatma
    geliştir”).
    The old “7 symbols, +393.5 R holdout” line described account
@@ -52,9 +58,10 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    expanded equity tiers — `kasa_sizing.py` basamakları: under $2K=1.15-1.3x,
    $2K-$3.5K=1.5x, $3.5K-$6K=1.75x, $8K≈1.95x, $10.5K=2.2x tier,
    $13.5K+=2.5x tavan; Yellow ACK Cursor+Gemini 08.09),
-   while `max_concurrent_risk_pct = 25%` and
-   symbol `max_positions` (1..5) allow high-edge scale-ins without
-   starving free margin. **Gemini (Antigravity)** is the active peer;
+   while `max_concurrent_risk_pct = 25%` is now the ONLY book-wide brake on
+   stacking: symbol `max_positions` lost its 1..5 clip 11.09 and 0 means
+   unlimited (see the scale-in clause below for the evidence that was
+   overruled). **Gemini (Antigravity)** is the active peer;
    **Claude** joins NOW (operator directive 08.09 — do not defer to Thursday).
    Push to GitHub when a peer-ACK'd package lands (operator 07.09).
 4. **Safety floor still binds the process:** one Python, live owns
@@ -355,9 +362,27 @@ Fail-first: write the test, watch it fail, then implement.
   `force=True`. `execution.flush()` sits on the same side of `join`.
   Do not flush either blob before `_stop.set()` â€” the last in-flight
   cycle then hits a fresh window and drops its rows.
-- Live count allows **scale-in tickets up to `cfg.max_positions` (clipped 1..5)**
-  (operator + peer ACK 07.09; live caps are edge-weighted: XAUUSD=5, SpotBrent=4,
-  GER40=3, BTCUSD=3, US30=2, JPN225=2, NAS100=2).
+- Live count allows **scale-in tickets up to `cfg.max_positions`, and the
+  1..5 clip is GONE (operator 11.09: "max poz limit ve sinirini kaldir").**
+  `risk.position_cap` owns it: **0 = no per-symbol limit**, any positive value
+  is honoured as written. One helper, so the decision can be found and
+  reversed in one place.
+  What governs instead: book-wide `max_concurrent_risk_pct` (25%, re-armed
+  31.08 as exactly this backstop), one new fill per symbol per closed bar,
+  0.75 ATR spacing profit-direction only, no hedging, `daily_loss_pct`,
+  margin share.
+  **The evidence against stacking was not refuted, it was overruled** - record
+  it so nobody re-derives it as news: (1) 13.08, JPN225 took eight SELLs into
+  a rising market, five stacked tickets gave back 38.44 while the two trailed
+  ones made +34.80 (NAS100 held seven BUYs, GER40 five) - "not ten times the
+  risk, ten times the same risk"; (2) `walk_forward` validates exactly ONE
+  position, so every searched number - PF, expectancy, above all `max_dd_r` -
+  describes a one-position system; (3) measured 11.09, 85 scale-in tickets
+  returned **-24.03R** at a 29.4% win rate, 30% of the whole loss;
+  (4) the index legs are the same bet - US30/NAS100 correlate **+0.799**,
+  US30/GER40 +0.744, NAS100/GER40 +0.691 (XAUUSD is independent at ~0.15).
+  (Was: operator + peer ACK 07.09, edge-weighted caps XAUUSD=5, SpotBrent=4,
+  GER40=3, BTCUSD=3, US30=2, JPN225=2, NAS100=2.)
   Guarded against 13.08 restack via: (1) ATR spacing >= 0.75 ATR from nearest open
   ticket (strictly profit-direction only — BUY: eff_px >= max(opens)+0.75ATR, SELL: eff_px <= min(opens)-0.75ATR;
   was 1.0 ATR until 08.09 — entry_blocks showed risk_kademe_aralik blocking 0.7–0.85 ATR trends;
@@ -368,8 +393,8 @@ Fail-first: write the test, watch it fail, then implement.
   (4) book-wide `max_concurrent_risk_pct` (expanded to 25.0%, 07.09 Cursor ACK)
   and daily loss bounds remain the stack governor when several full tickets are open,
   (5) no hedging (opposite side blocked). **Symbol** `max_positions` (DB payload,
-  per-symbol 1-5) is live and read by the engine. **System POST**
-  `/api/system max_positions` returns 400 (HTTP-off). Search still scores `max_open=1` for honest WFO.
+  per-symbol 0-100, 0 = unlimited) is live and read by the engine. **System
+  POST** `/api/system max_positions` returns 400 (HTTP-off). Search still scores `max_open=1` for honest WFO.
 - Symbol-specific MFE profit locks (07.09 evening Antigravity + Cursor ACK;
   earlier same-day 1.0–1.5 bands left ~$885 / 69 givebacks that peaked ≥0.70R
   then full-SL'd): `XAUUSD` (0.75→0.15 / 1.2→0.5), `NAS100` (0.70→0.15 / 1.1→0.4),

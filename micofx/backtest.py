@@ -477,11 +477,14 @@ def stop_fill_price(is_buy: bool, sl: float, bar_open: float,
 
 
 def max_open_from_cfg(cfg) -> int:
-    """Search still scores one open ticket. Live default matches that count.
+    """Search still scores one open ticket — intentionally, not because live is 1.
 
-    Operator 27.08 dropped per-symbol ``max_positions`` from search.
-    Live ``can_open`` is 1 ticket/name (leftover cfg.max_positions unread).
-    Paper stays one-at-a-time so existing scores stay honest.
+    Operator 27.08 dropped per-symbol ``max_positions`` from the search so
+    existing WFO scores stay comparable. Live ``can_open`` *does* read
+    ``cfg.max_positions`` (risk.py); paper does not. That mismatch was the
+    measured kademe bleed (11.09 autopsy: +scale-ins -24.03R). Live book is
+    now ``max_positions=1`` to match this scorer until a max_open>1 paper
+    measurement says otherwise. ``cfg`` is unused on purpose.
     """
     return 1
 

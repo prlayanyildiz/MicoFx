@@ -247,21 +247,22 @@ def test_lot_for_preserves_full_risk_per_ticket():
     assert "kademe 5" in note_multi
 
 
-def test_http_api_accepts_symbol_max_positions_1_to_5():
+def test_http_api_accepts_symbol_max_positions_0_to_100():
     cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=1)
     store = _FakeStore({"XAUUSD": cfg})
     client = _FakeClient()
     app = create_app(store, client, engine=None, optimizer=None)
     tc = TestClient(app)
 
-    # Valid values 1..5
-    for val in (1, 3, 5):
+    # The 1..5 card cap went 11.09 (operator: "max poz limit ve sinirini
+    # kaldir"). 0 is unlimited, the repo's own idiom for off.
+    for val in (1, 3, 5, 6, 10, 0):
         res = tc.post("/api/symbols/XAUUSD", json={"max_positions": val})
         assert res.status_code == 200, res.text
         assert store.symbols["XAUUSD"].max_positions == val
 
-    # Invalid values
-    for bad in (0, -1, 6, 10):
+    # A sanity stop remains, so a typo cannot ask for ten thousand tickets.
+    for bad in (-1, 101, 10_000):
         res = tc.post("/api/symbols/XAUUSD", json={"max_positions": bad})
         assert res.status_code == 400, f"Expected 400 for {bad}"
 

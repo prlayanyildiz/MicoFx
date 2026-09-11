@@ -362,6 +362,8 @@ async function loadAutopsies() {
     const tr = el("tr");
     tr.innerHTML = `
       <td class="sym">${esc(r.symbol || "")}</td>
+      <td class="dim" title="${esc(STRATEGY_LABEL[r.strategy] || r.strategy || "")}">${esc(r.strategy || "-")}</td>
+      <td class="dim">${esc(r.timeframe || "-")}</td>
       <td class="num dim mono">${r.ticket != null ? esc(String(r.ticket)) : "-"}</td>
       <td><span class="pill ${r.exit_reason === "trail" ? "on" : "off"}">${esc(r.exit_reason || "-")}</span></td>
       <td class="num dim">${r.held_min != null ? num(r.held_min, 1) : "-"}</td>
@@ -377,7 +379,7 @@ async function loadAutopsies() {
         : '<span class="dim">-</span>'}</td>`;
     return tr;
   });
-  rowsInto($("#autopsy-table"), rows, "Henuz kapanis otopsisi yok", 9);
+  rowsInto($("#autopsy-table"), rows, "Henuz kapanis otopsisi yok", 11);
   if (note) {
     const n = Number(data.after_1h_n || 0);
     note.innerHTML = esc(data.note || "")

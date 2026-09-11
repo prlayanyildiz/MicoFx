@@ -377,6 +377,34 @@ class DailyGuard:
         return Verdict(True)
 
 
+# Per-symbol ticket cap. **0 means no limit** (operator 11.09: "max poz limit
+# ve sinirini kaldir"), and the old hard ceiling of 5 is gone with it, so a
+# stored 10 now means 10.
+#
+# What still governs, because this was never the only thing holding the line:
+# book-wide ``max_concurrent_risk_pct`` (25%, deliberately re-armed 31.08 as
+# the backstop for exactly this), one new fill per symbol per closed bar,
+# 0.75 ATR spacing from the nearest open ticket in the profit direction only,
+# no hedging, ``daily_loss_pct`` and the margin share.
+#
+# The operator has the evidence against stacking and chose throughput anyway:
+# the 13.08 incident (JPN225 eight SELLs into a rising market, five stacked
+# tickets giving back 38.44 while two trailed ones made +34.80), the fact that
+# walk_forward validates exactly one position so every searched number
+# describes a one-position system, and the 11.09 measurement of 85 scale-in
+# tickets at -24.03R. Their call; this records it rather than re-arguing it.
+POSITION_CAP_UNLIMITED = 1_000_000
+
+
+def position_cap(cfg) -> int:
+    """Tickets this symbol may hold at once. 0 on the row = unlimited."""
+    try:
+        raw = int(getattr(cfg, "max_positions", 0) or 0)
+    except (TypeError, ValueError):
+        raw = 0
+    return POSITION_CAP_UNLIMITED if raw <= 0 else max(1, raw)
+
+
 class RiskManager:
     # How far edge weighting may push a single symbol away from the pack.
     # Ceiling raised 1.8->2.2 on request: proven symbols (XAUUSD etc.) get
@@ -464,7 +492,7 @@ class RiskManager:
             if not getattr(cfg, "enabled", True):
                 continue
             broker = self.client.resolve(cfg.symbol) or cfg.symbol
-            cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+            cap = position_cap(cfg)
             if pos_counts.get(broker, 0) >= cap:
                 continue
             if self._cannot_open(cfg.symbol):
@@ -772,7 +800,7 @@ class RiskManager:
         # max_margin_pct are unread — remaining book margin × auto 1R size.
         if sl_distance <= 0:
             return 0.0, "lot sifir (stop yok), islem atlandi"
-        pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+        pos_cap = position_cap(cfg)
         raw, multiplier, note_edge_capped, money_per_unit = self._risk_raw_lot(
             cfg, sl_distance, balance, multiplier, edge)
         if money_per_unit <= 0:
@@ -1049,7 +1077,7 @@ class RiskManager:
         same_symbol = [p for p in mine if p["symbol"] == self.client.resolve(cfg.symbol)]
         if any((str(p.get("side") or "").strip().lower() in ("buy", "al")) != (norm_side == "buy") for p in same_symbol):
             return Verdict(False, "ters yonde acik pozisyon var")
-        cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+        cap = position_cap(cfg)
         if len(same_symbol) >= cap:
             return Verdict(False, f"sembol pozisyon limiti ({cap})")
         if same_symbol:
@@ -1285,7 +1313,7 @@ class RiskManager:
                 lot_note = "risk (ATR bekleniyor)"
             elif sl_mult > float(cfg.sl_atr_mult or 0) + 1e-9:
                 lot_note = f"risk (SL x{sl_mult:g} shakeout, lot x{cfg.sl_atr_mult:g})"
-            pos_cap = max(1, min(5, int(getattr(cfg, "max_positions", 1) or 1)))
+            pos_cap = position_cap(cfg)
             slot_left = max(0, pos_cap - len(open_now)) if cfg.enabled else 0
             margin = self.client.margin_for(cfg.symbol, lot, "buy")
             if margin <= 0 and slot_left and sl_dist > 0:

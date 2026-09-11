@@ -128,10 +128,20 @@ def test_the_cooldown_only_ever_pushes_the_resume_later():
 # ------------------------------------------------- what enforces it live
 
 def test_the_live_gate_reads_the_symbol_slot_cap():
-    """Scale-in up to cfg.max_positions (clipped 1..5). System max_positions stays unread."""
+    """Scale-in up to cfg.max_positions, uncapped since 11.09. System
+    max_positions stays unread.
+
+    The clip to 1..5 came off on the operator's instruction ("max poz limit ve
+    sinirini kaldir") and 0 now means unlimited. The docstring above this file
+    still describes why a limit existed, and that reasoning has not been
+    refuted - it has been overruled, with the numbers in front of it. One
+    helper owns the decision so it can be found and reversed in one place.
+    """
     assert "sembol pozisyon limiti (" in RISK
     assert "sys_cfg.max_positions" not in RISK
-    assert "min(5, int(getattr(cfg, \"max_positions\"" in RISK
+    assert "def position_cap(cfg)" in RISK
+    assert "position_cap(cfg)" in RISK
+    assert "min(5," not in RISK, "the old 1..5 clip is back without a decision"
 
 
 def test_the_opposite_direction_block_is_still_there():

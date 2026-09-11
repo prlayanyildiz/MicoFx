@@ -175,6 +175,8 @@ const FIELD_HELP = {
   "th.cap.AcikKZ": "Bu sembolun acik pozisyonlarinin yuzmemis K/Z'i.",
 
   "th.autopsy.Sembol": "Kapanan islemin sembolu.",
+  "th.autopsy.Aile": "Fill aninda damgalanan strateji ailesi (kapanista sembolun ailesi degismis olabilir).",
+  "th.autopsy.TF": "Fill aninda damgalanan zaman dilimi.",
   "th.autopsy.Ticket": "Broker bilet numarasi.",
   "th.autopsy.Sebep": "Cikisi ne yapti: sl (stop), trail (takip eden stop), flatten (zorunlu kapanis).",
   "th.autopsy.Sure": "Acik kaldigi dakika.",

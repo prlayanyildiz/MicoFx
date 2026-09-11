@@ -519,13 +519,19 @@ def test_patch_refuses_max_positions():
     assert store.symbols["XAUUSD"].max_positions == before
 
 
-def test_patch_refuses_max_positions_inside_the_old_card_cap():
+def test_patch_refuses_max_positions_above_the_sanity_stop():
+    """The 1..5 card cap went 11.09 (operator: "max poz limit ve sinirini
+    kaldir"); 6 is legal now and 0 means unlimited. What remains is a sanity
+    stop at 100, so a typo cannot ask for ten thousand tickets."""
     symbols = {"XAUUSD": _cfg("XAUUSD", magic=990021)}
     tc, store = _client(symbols, [])
     before = store.symbols["XAUUSD"].max_positions
-    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 6})
+    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 101})
     assert res.status_code == 400, res.text
     assert store.symbols["XAUUSD"].max_positions == before
+    res = tc.post("/api/symbols/XAUUSD", json={"max_positions": 6})
+    assert res.status_code == 200, res.text
+    assert store.symbols["XAUUSD"].max_positions == 6
 
 
 def test_patch_refuses_nan_in_top_level_exit_field():

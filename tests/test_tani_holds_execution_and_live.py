@@ -44,7 +44,7 @@ def test_autopsy_table_shows_cash_kar():
         "async function ", 1)[0]
     assert "r.profit" in body
     assert 'rowsInto($("#autopsy-table")' in body
-    assert ", 9)" in body or ", 9," in body
+    assert ", 11)" in body or ", 11," in body
 
 
 def test_autopsy_note_says_masada_is_winners_only():

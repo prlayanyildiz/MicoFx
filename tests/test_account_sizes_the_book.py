@@ -361,19 +361,35 @@ def test_can_open_refuses_a_second_same_side_ticket():
     assert "sembol pozisyon limiti" in blocked.reason
 
 
-def test_can_open_ignores_leftover_symbol_max_positions():
-    """DB leftover > 5 is clipped to 5. Search scored max_open=1."""
-    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=10)
+def test_can_open_honours_the_symbol_slot_count_as_written():
+    """The stored number means what it says. It used to be clipped to 5.
+
+    Operator 11.09: "max poz limit ve sinirini kaldir". A stored 10 is now ten
+    slots, and 0 is unlimited - the book-wide max_concurrent_risk_pct (25%,
+    re-armed 31.08 as exactly this backstop), one fill per symbol per closed
+    bar, the 0.75 ATR profit-direction spacing and daily_loss_pct are what
+    hold the line now.
+    """
+    cfg = SymbolConfig(symbol="XAUUSD", magic=1, max_positions=6)
     store = _LotStore(cfg)
     store.system.max_positions = 1
     risk = RiskManager.__new__(RiskManager)
     risk.store = store
     risk.client = _LotClient()
-    existing = [{"ticket": 100 + i, "symbol": "XAUUSD", "magic": 1, "side": "buy"} for i in range(5)]
+    existing = [{"ticket": 100 + i, "symbol": "XAUUSD", "magic": 1, "side": "buy"} for i in range(6)]
     account = {"equity": 10_000.0, "margin_free": 10_000.0, "margin": 0.0}
     blocked = risk.can_open(cfg, "buy", 0.1, existing, account)
     assert not blocked.ok
-    assert "sembol pozisyon limiti (5)" in blocked.reason
+    assert "sembol pozisyon limiti (6)" in blocked.reason, blocked.reason
+
+
+def test_a_zero_slot_count_means_no_symbol_limit():
+    """0 is the repo's own idiom for off (max_lot, daily_loss_pct, harvest)."""
+    from micofx.risk import POSITION_CAP_UNLIMITED, position_cap
+
+    assert position_cap(SymbolConfig(symbol="X", magic=1, max_positions=0)) ==         POSITION_CAP_UNLIMITED
+    assert position_cap(SymbolConfig(symbol="X", magic=1, max_positions=3)) == 3
+    assert position_cap(SymbolConfig(symbol="X", magic=1, max_positions=10)) == 10
 
 
 def test_can_open_ignores_leftover_symbol_margin_pct():

@@ -247,36 +247,6 @@
   },
   "symbols": [
     {
-      "symbol": "US30",
-      "group": "index",
-      "magic": 990101,
-      "broker_symbol": "US30",
-      "timeframe": "M30",
-      "sessions": [
-        {
-          "start": "01:00",
-          "end": "23:59",
-          "days": [
-            1,
-            2,
-            3,
-            4
-          ]
-        },
-        {
-          "start": "01:00",
-          "end": "23:55",
-          "days": [
-            5
-          ]
-        }
-      ],
-      "use_sessions": false,
-      "max_spread_atr": 0.12,
-      "max_positions": 2,
-      "enabled": false
-    },
-    {
       "symbol": "GER40",
       "group": "index",
       "magic": 990011,

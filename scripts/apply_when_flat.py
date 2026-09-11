@@ -49,12 +49,23 @@ AI_FIXES = {
 # behaviour, stated honestly, so the next reader is not misled the way 0.7
 # misled everyone.
 OPT_FIXES = {"min_positive_ratio": round(4 / 6, 4)}
-# Measured this session: 0.25 down to 0.05 return an identical +102.36R over
-# 665 trades on the holdout, so this changes nothing the backtest can see -
-# but 0.25 is above the whole search grid (top 0.15), which means a search can
-# only ever lower it and never restore it. Inside the grid the axis is live
-# again.
-SYMBOL_FIXES = {"XAUUSD": {"max_spread_atr": 0.05}}
+# max_spread_atr: measured this session, 0.25 down to 0.05 return an identical
+# +102.36R over 665 holdout trades, so this changes nothing the backtest can
+# see - but 0.25 sits above the whole search grid (top 0.15), so a search
+# could only ever lower it and never restore it. Inside the grid the axis is
+# live again.
+# max_positions 0: the per-symbol cap and its 1..5 clip came off on the
+# operator's instruction ("max poz limit ve sinirini kaldir"); 0 is the repo's
+# idiom for off. The book-wide max_concurrent_risk_pct (25%) governs now.
+SYMBOL_FIXES = {
+    "XAUUSD": {"max_spread_atr": 0.05, "max_positions": 0},
+    "GER40": {"max_positions": 0},
+    "NAS100": {"max_positions": 0},
+}
+# US30 leaves the book for good (operator: "us30 verimsizse sil spread 20
+# onda"). It is already disabled, so this only fires once its last ticket has
+# closed - deleting a row with an open ticket would orphan the ticket.
+DELETE_SYMBOLS = ("US30",)
 
 
 def _get(op, path: str) -> dict:
@@ -145,6 +156,27 @@ def main(argv: list[str] | None = None) -> int:
                           flush=True)
             except urllib.error.HTTPError as exc:
                 print(f"  {sym} REDDEDILDI: {exc.code} "
+                      f"{exc.read().decode()[:200]}", flush=True)
+                ok = False
+
+        for sym in DELETE_SYMBOLS:
+            try:
+                state = _get(op, "/api/state")
+                if any(str(pos.get("symbol")) == sym
+                       for pos in (state.get("positions") or [])):
+                    print(f"  {sym}: hala acik bileti var, SILINMEDI", flush=True)
+                    ok = False
+                    continue
+                req = urllib.request.Request(
+                    f"{PANEL}/api/symbols/{sym}", method="DELETE",
+                    headers={"Origin": PANEL})
+                op.open(req, timeout=30).read()
+                left = [r.get("symbol") for r in
+                        (_get(op, "/api/symbols").get("symbols") or [])]
+                print(f"  {sym} silindi - kitap: {left}", flush=True)
+                ok = ok and sym not in left
+            except urllib.error.HTTPError as exc:
+                print(f"  {sym} SILINEMEDI: {exc.code} "
                       f"{exc.read().decode()[:200]}", flush=True)
                 ok = False
 

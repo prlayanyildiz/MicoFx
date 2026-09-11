@@ -172,7 +172,9 @@ _SYMBOL_RISK_BOUNDS = {
     "commission_per_lot": (0.0, 10000.0, True),
     "max_lot": (0.0, 100.0, True),
     "max_margin_pct": (0.0, 100.0, True),
-    "max_positions": (1, 5, True),
+    # 0 = no per-symbol limit (risk.position_cap); the ceiling of 5 was
+    # removed 11.09 with it. 100 is a sanity stop, not a policy.
+    "max_positions": (0, 100, True),
     # Panel-writable and, until 31.08, the only writable symbol field with no
     # bound here at all - the ``max: 240`` on the card is UI-only, so a POST
     # carrying 10**9 was accepted and blocked every entry on that symbol for
