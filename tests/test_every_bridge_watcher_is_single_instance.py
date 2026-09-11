@@ -93,3 +93,31 @@ def test_no_hash_named_debris_is_lying_around():
     found = [p.name for p in ROOT.iterdir()
              if p.is_file() and re.fullmatch(r"[0-9A-F]{64}", p.name)]
     assert found == [], f"hash adli artik: {found}"
+
+
+def test_every_watcher_is_actually_in_the_repo():
+    """The premise of this whole file, and it was false when it was written.
+
+    All three peer-folder watchers lived in wholesale-ignored directories
+    (`claude/`, `cursor/`, `antigravity/`), so the assertions above passed here
+    and would have failed on any fresh clone. Worse, the two that predate this
+    file had never been reviewable at all - which is how one of them ran for
+    days writing a 64-character filename instead of a state file.
+
+    The mailbox messages stay ignored; the code that runs does not. Note the
+    ignore patterns had to become `dir/*` rather than `dir/`, because git
+    cannot re-include a file whose parent DIRECTORY is excluded - a `!` line
+    under `claude/` silently does nothing.
+    """
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", *WATCHERS],
+        cwd=ROOT, capture_output=True, text=True, timeout=60,
+    )
+    assert tracked.returncode == 0, tracked.stderr
+    seen = {line.replace("\\", "/") for line in tracked.stdout.split()}
+    missing = sorted(set(WATCHERS) - seen)
+    assert missing == [], (
+        "gitignore'da kalan watcher (temiz klonda bu dosya kirilir): "
+        f"{missing}")

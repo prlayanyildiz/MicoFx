@@ -28,14 +28,29 @@ _probe_*.py
 # kurmak istiyor, bizim hangi ajana ne yazdigimizi degil. Hepsi ayni sinif,
 # hepsi disarida.
 .claude/
-claude/
+claude/*
 .cursor/
-cursor/
+cursor/*
 chatgpt/
-antigravity/
+antigravity/*
 .bridge/
 .codex/
 CLAUDE_ONERILERI.md
+
+# ...with one exception. The three bridge WATCHERS are not working material,
+# they are long-running infrastructure on the operator's machine: each polls a
+# mailbox and emits a wake token, and a duplicate of any of them doubles every
+# wake. That class of bug cost a morning on 11.09 (three watchers on one leg,
+# one of them corrupting a state file) and none of the three had ever been
+# reviewable, because the folders they live in were ignored wholesale. The
+# messages stay out; the code that runs stays in.
+#
+# Note the patterns above are "dir/*" rather than "dir/": git cannot re-include
+# a file whose parent DIRECTORY is excluded, so a "!" line under "claude/"
+# would have silently done nothing.
+!claude/session_watch.ps1
+!cursor/watch_bridges.ps1
+!antigravity/WATCH.ps1
 # Google Drive masaustu istemcisi bu iki klasoru senkronladigi her klasorde
 # acar. Depoda isleri yok; git status onlarla kirlenmesin.
 .tmp.driveupload/
