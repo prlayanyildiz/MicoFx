@@ -48,6 +48,32 @@ READABLE_TIMEFRAMES = ["M15", "M30"]
 # expectancy, slice robustness, and drawdown all degrade (BTCUSD maxDD
 # 21.9 -> 48.4, JPN225 25.0 -> 82.5, JPN225 E +0.170 -> -0.135). The cost
 # saving is real (-14 to -31% per trade) and still loses.
+# RE-MEASURED 11.09 and the retirement STANDS. Two things had changed since
+# 05.09 and both argued for a re-test: the book gained range_fade/sweep_fade,
+# and half the original verdict rested on the two positive symbols sitting
+# "far under their live bar" - a bar that 10-11.09 showed to be a stale stamp
+# worth four to five times what an incumbent really delivers. So it was run
+# again on the terms this note demands, R/day, all seven families, both bars,
+# same budget, offline from the archived M5 snapshots
+# (scripts/m5_verdict.py, holdout_bars/_retired_M5):
+#
+#   symbol  live config              best M5            best live-bar cand.
+#   GER40   channel_break/M30 +0.0684  none validated    super_trend  +0.0507
+#   NAS100  mtf_pullback/M30  +0.1452  none validated    mtf_pullback +0.0603
+#   US30    keltner_break/M30 +0.0495  none validated    burst        +0.0270
+#   XAUUSD  mtf_pullback/M15  +0.3689  keltner +0.0579   mtf_pullback +0.2400
+#
+# M5 loses 4/4. On three symbols not one of seven families produces a
+# VALIDATED candidate at all; on the fourth it is a sixth of the live config
+# and a quarter of the best candidate on the live bar.
+#
+# The part worth remembering, because it is why M5 keeps coming back (it
+# returned 03.09 and was retired again two days later): 26 of 27 M5 sweeps
+# produced a candidate and failed the validation slice. The raw holdout
+# numbers are seductive - GER40 burst +0.284 R/day, US30 burst +0.319,
+# XAUUSD mtf_pullback +0.743, four to ten times the live R/day - and none of
+# them hold up out of sample. A big M5 holdout number is the symptom, not the
+# find. Quote a VALIDATED R/day or do not reopen this.
 SEARCH_TIMEFRAMES = ["M15", "M30"]
 GROUPS = ["forex", "index", "commodity", "crypto", "stock"]
 

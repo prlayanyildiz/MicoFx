@@ -37,6 +37,10 @@ RETIRED_FAMILIES = (
 # M5 joined 05.09: zero holdout win on any live symbol, and the panel's own
 # option list was still offering it - a live re-infection path. Every guard
 # built on this tuple was blind to M5 until it was named here.
+# M5 re-measured 11.09 with seven families and the corrected flip gates:
+# 4/4 loss, no validated candidate at all on GER40/NAS100/US30. The
+# numbers are in models.py beside SEARCH_TIMEFRAMES; the tool that
+# produces them is scripts/m5_verdict.py.
 RETIRED_TIMEFRAMES = ("H1", "H4", "M10", "M5", "M1", "M3")
 
 # Symbols that left the traded book. Added 05.09: nothing guarded the shipped

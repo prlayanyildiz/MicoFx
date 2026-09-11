@@ -20,8 +20,7 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
    after a clear ask is not an ACK. Yellow/red that used to wait on the
    human now wait on **peer ACK** unless the operator overrides in chat.
-2. **Book is 4 rows, 3 of them trading: `GER40 NAS100 XAUUSD` enabled,
-   `US30` disabled.** The book went 7 -> 3 -> 4 in one evening (10.09), all
+2. **Book is 4 symbols, all trading: `GER40 NAS100 US30 XAUUSD`.** The book went 7 -> 3 -> 4 in one evening (10.09), all
    operator calls. **Staying deleted**: JPN225 + BTCUSD (10:42),
    SpotBrent (21:37), BRENTOIL-PERP (22:2x - added and cut the same
    evening, before it ever traded: every session window the search tried
@@ -29,12 +28,11 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    candidate was refused for a negative costed holdout). Those four are in
    `tests/retired_lexicon.py: RETIRED_SYMBOLS`, so a seed-overwrite cannot
    rebuild them. **US30 came back** at 23:3x ("US30 geri ekledim") on magic
-   990101, index/M30, `use_sessions=false`, disabled and `validated=None`
-   with a search running on it - so `_require_optimised_before_enabling`
-   refuses to switch it on until a search picks its config. That refusal is
-   the guard; do not hand-enable it. Do **not** re-add the retired four
-   unasked, and do
-   **not** disable, delete, or “close for bleed” the three that trade.
+   990101, index/M30, `use_sessions=false`. It arrived disabled and
+   unvalidated; the operator applied `keltner_break`/M30 (holdout +26.2R,
+   PF 1.15) by hand at 23:41 on 11.09 and enabled it, so it is validated and
+   trading. Do **not** re-add the retired four unasked, and do
+   **not** disable, delete, or “close for bleed” any of the four.
    Improve fill / exits / gates / sizing / search instead (“kapatma
    geliştir”).
    The old “7 symbols, +393.5 R holdout” line described account
@@ -461,7 +459,23 @@ Fail-first: write the test, watch it fail, then implement.
   Measured
   0/7 symbols would pick it (five outright negative) at +6-32% cost per
   trade; H1 (emekli / retired) was re-measured the same day and lost 6/6 on
-  R/day, so it stays gone. Reopening
+  R/day, so it stays gone.
+  **Re-measured 11.09 and it stands - 4/4 loss.** Worth doing because the
+  book had gained two families and because half the 05.09 verdict leaned on
+  the two positive symbols sitting "far under their live bar", and that bar
+  turned out to be an inflated stamp. Seven families, both bars, same budget,
+  offline from the archived snapshots (`scripts/m5_verdict.py`), on R/day:
+  GER40 +0.0684 live vs **no validated candidate on the retired bar**,
+  NAS100 +0.1452 vs **none**, US30 +0.0495 vs **none**, XAUUSD +0.3689 vs
+  +0.0579. Three of four symbols cannot produce a single validated candidate
+  on that retired bar out of seven families.
+  Remember the shape of the trap, because it is what pulled this retired bar
+  back in on 03.09: 26 of 27 sweeps DID produce a candidate and failed the
+  validation slice, and their raw holdout numbers run four to ten times the
+  live R/day (GER40 `burst` +0.284, US30 `burst` +0.319, XAUUSD
+  `mtf_pullback` +0.743). A big holdout number on a retired bar is the
+  symptom, not the find - quote a **validated** R/day or leave it retired.
+  Reopening
   needs `models.TIMEFRAMES` **and** `config/defaults.json optimizer.timeframes`
   - and that is all. `store.opt_params()` unions the shipped list into the
   stored blob on every read, so the stored `opt_params.timeframes` does NOT
