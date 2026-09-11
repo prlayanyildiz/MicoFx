@@ -622,7 +622,23 @@ _OPERATOR_OPT_FIELDS = frozenset({
 # does not reach a live book either: Store.opt_params merges {**shipped,
 # **stored} per axis, so a stored axis keeps its values forever.
 _OPERATOR_GRID_AXES = frozenset({"max_spread_atr", "cost_rank_max"})
-_OPERATOR_AI_FIELDS = frozenset({"enabled", "prefer_strong_on_dd", "hard_block_only_quarantine"})
+# `bad_hour_min_trades` joined 11.09 as the third stored value found
+# silently disabling a whole mechanism (after opt `min_positive_ratio`
+# 0.7 and `strategies` at 5 of 7 families). It held **80** against a
+# shipped default of 6, and `_bad_hours` buckets PER SYMBOL - 32 to 98
+# trades over 30 days spread across 24 hours, so two to six per bucket.
+# The supervisor's bad-hour blocker could not fire on this book at any
+# volume it will ever see, while UTC 3/11/12/13/16 held -60.78R, 77% of
+# the whole loss, on 27% of the trades. Bounded below so the door tunes
+# the evidence bar rather than removing it.
+_OPERATOR_AI_FIELDS = frozenset({"enabled", "prefer_strong_on_dd",
+                                 "hard_block_only_quarantine",
+                                 "bad_hour_min_trades"})
+_AI_BOUNDS = {
+    # Three trades is not evidence; one is noise. The shipped 6 stays
+    # settable, and so does a much stricter bar for a bigger book.
+    "bad_hour_min_trades": (3, 500, True),
+}
 
 
 # strategy_allows_timeframe() falls back to "allow every timeframe" for a
@@ -2605,6 +2621,7 @@ def create_app(store: Store, client: MT5Client, engine: Engine, optimizer: Optim
         _reject_hands_off_fields(body, _OPERATOR_AI_FIELDS)
         _reject_non_finite_values(body)
         _reject_wrong_type_against(body, AI_SETTINGS_DEFAULTS)
+        _validate_risk_bounds(body, _AI_BOUNDS)
         settings = engine.supervisor.update_settings(body)
         LOG.emit("AI denetleyici ayarlari guncellendi.", "AI")
         return {"ok": True, "settings": settings}

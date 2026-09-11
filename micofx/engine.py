@@ -1503,6 +1503,14 @@ class Engine:
                 else float(state.spread_atr or 0),
                 adx=state.adx,
                 atr_pct=atr_pct,
+                # Which family and bar actually produced this trade. The live
+                # record could not answer "which strategy loses money"
+                # without it: the autopsy carried the symbol, and a symbol's
+                # family changes under it (US30 went mtf_pullback ->
+                # keltner_break on 11.09), so 427 rows of history are
+                # unattributable. Costs two strings per fill.
+                strategy=str(cfg.strategy or ""),
+                timeframe=str(cfg.timeframe or ""),
                 tf_seconds=timeframe_seconds(cfg.timeframe),
                 side=side,
                 entry=fill_px,
@@ -2449,6 +2457,10 @@ class Engine:
             "spread_atr": _round(self._autopsy_float(book.get("spread_atr")), 4),
             "adx": _round(self._autopsy_float(book.get("adx")), 2),
             "atr_pct": _round(self._autopsy_float(book.get("atr_pct")), 6),
+            # Stamped at fill, not read from the config at close: by the time
+            # a trade closes the symbol may already carry a different family.
+            "strategy": str(book.get("strategy") or "") or None,
+            "timeframe": str(book.get("timeframe") or "") or None,
             "profit": _round(self._autopsy_float(profit), 2),
             # Frozen prices so the hour after the stop can be scored later
             # without parsing TRADE lines. Missing values stay None; the
@@ -3781,6 +3793,14 @@ class Engine:
                 spread_atr=float(state.spread_atr or 0),
                 adx=state.adx,
                 atr_pct=atr_pct,
+                # Which family and bar actually produced this trade. The live
+                # record could not answer "which strategy loses money"
+                # without it: the autopsy carried the symbol, and a symbol's
+                # family changes under it (US30 went mtf_pullback ->
+                # keltner_break on 11.09), so 427 rows of history are
+                # unattributable. Costs two strings per fill.
+                strategy=str(cfg.strategy or ""),
+                timeframe=str(cfg.timeframe or ""),
                 tf_seconds=timeframe_seconds(cfg.timeframe),
                 side=side,
                 entry=fill_px,
