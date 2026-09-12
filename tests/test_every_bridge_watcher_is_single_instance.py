@@ -88,6 +88,13 @@ def test_the_claude_leg_watches_the_inbox_not_its_own_outbox():
         r"(?m)^\s*#.*$", "", src), "kendi gelen kutusunu izliyor"
 
 
+@pytest.mark.parametrize("rel", sorted(WATCHERS))
+def test_each_watcher_honours_bridges_cancelled(rel: str):
+    """Operator cancelled all peer bridges — arming must exit before the loop."""
+    src = _src(rel)
+    assert "BRIDGES_CANCELLED.json" in src, f"{rel}: cancel flag yok"
+
+
 def test_no_hash_named_debris_is_lying_around():
     """The symptom of the swapped write. It came back once already."""
     found = [p.name for p in ROOT.iterdir()

@@ -59,9 +59,10 @@ OPT_FIXES = {"min_positive_ratio": 0.6666}
 # see - but 0.25 sits above the whole search grid (top 0.15), so a search
 # could only ever lower it and never restore it. Inside the grid the axis is
 # live again.
-# max_positions 0: the per-symbol cap and its 1..5 clip came off on the
-# operator's instruction ("max poz limit ve sinirini kaldir"); 0 is the repo's
-# idiom for off. The book-wide max_concurrent_risk_pct (25%) governs now.
+# max_positions 1: autopsy scale-in bleed re-measured 12.09 on the live 3
+# (−17.9R / ~34% of live loss). Operator "yap" on the bottleneck package
+# overrides the earlier unlimited (0) charter for this book. Book-wide
+# max_concurrent_risk_pct (25%) still governs concurrent risk $.
 # adx_min / min_body_ratio: measured jointly on the holdout 11.09, both
 # validated. GER40 10->15 with 0->0.4 moves +0.0684 -> +0.0780 R/day at
 # PF 1.43 -> 1.59; NAS100 0->10 with 0.2->0.1 moves +0.1452 -> +0.1719 R/day
@@ -69,9 +70,9 @@ OPT_FIXES = {"min_positive_ratio": 0.6666}
 # than either alone. XAUUSD measured unchanged on all three, so it is left
 # alone rather than nudged for symmetry.
 SYMBOL_FIXES = {
-    "XAUUSD": {"max_spread_atr": 0.05, "max_positions": 0},
-    "GER40": {"max_positions": 0, "adx_min": 15.0, "min_body_ratio": 0.4},
-    "NAS100": {"max_positions": 0, "adx_min": 10.0, "min_body_ratio": 0.1},
+    "XAUUSD": {"max_spread_atr": 0.05, "max_positions": 1},
+    "GER40": {"max_positions": 1, "adx_min": 15.0, "min_body_ratio": 0.4},
+    "NAS100": {"max_positions": 1, "adx_min": 10.0, "min_body_ratio": 0.1},
 }
 # US30 leaves the book for good (operator: "us30 verimsizse sil spread 20
 # onda"). It is already disabled, so this only fires once its last ticket has

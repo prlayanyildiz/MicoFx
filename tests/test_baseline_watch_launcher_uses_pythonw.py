@@ -21,3 +21,9 @@ def test_launcher_binds_venv_pythonw_not_python():
 def test_launcher_waits_for_the_whole_watch_tree():
     assert "function Wait-BaselineWatchGone" in PS1
     assert "Wait-Process -Id $procId" not in PS1
+
+
+def test_launcher_pid_scan_ignores_pytest():
+    """pytest argv contains the watch path; must not look like a live watch."""
+    assert "notmatch" in PS1 or "-notmatch" in PS1
+    assert "pytest" in PS1

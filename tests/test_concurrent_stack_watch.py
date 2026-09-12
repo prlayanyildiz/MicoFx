@@ -24,6 +24,18 @@ def test_evaluate_respects_max_positions_caps():
     assert bad["max_concurrent"] == 3
 
 
+def test_evaluate_zero_cap_is_unlimited():
+    # Live idiom: max_positions=0 → never an offender
+    assert evaluate({"XAUUSD": 8}, caps={"XAUUSD": 0})["fire"] is False
+    assert evaluate({"XAUUSD": 8}, caps={"XAUUSD": 0})["caps"]["XAUUSD"] is None
+
+
+def test_evaluate_cap_one_fires_on_second_ticket():
+    bad = evaluate({"NAS100": 2}, caps={"NAS100": 1})
+    assert bad["fire"] is True
+    assert bad["offenders"] == {"NAS100": 2}
+
+
 def test_evaluate_unknown_symbol_allows_up_to_five():
     # No cap map → book max 5 (do not false-alarm legal stacks)
     assert evaluate({"US30": 2})["fire"] is False

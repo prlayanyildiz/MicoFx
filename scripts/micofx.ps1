@@ -33,6 +33,11 @@ switch ($Cmd.ToLowerInvariant()) {
         exit 0
     }
     "bridge" {
+        $cancel = Join-Path $Root ".bridge\BRIDGES_CANCELLED.json"
+        if (Test-Path -LiteralPath $cancel) {
+            Write-Host "MicoFX: kopruler iptal (.bridge/BRIDGES_CANCELLED.json) - no-op."
+            exit 0
+        }
         $ps = Join-Path $Root "scripts\start_bridge_daemon.ps1"
         # Same one-liner as KOPRU_AC.bat. Mutex in the daemon no-ops if live.
         Start-Process -FilePath "powershell.exe" -WindowStyle Minimized -ArgumentList @(

@@ -1,7 +1,9 @@
 """Concurrent per-symbol ticket alarm.
 
 Fires only when open tickets for a name exceed that symbol's live
-``max_positions`` (1..5). Legal scale-ins are not breaches. Report-only.
+``max_positions``. ``0`` = unlimited (never an offender). Unknown names
+still default to a soft book max of 5 so leftover stacks do not silent-pass.
+Legal scale-ins under the live cap are not breaches. Report-only.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from scripts.panel_session import opener as _panel_opener  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 PANEL = "http://127.0.0.1:8900"
 STATE_PATH = ROOT / ".bridge" / "CONCURRENT_STACK_STATE.json"
+_UNKNOWN_SOFT_CAP = 5
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -49,29 +52,41 @@ def counts_by_symbol(positions: list[dict[str, Any]]) -> dict[str, int]:
     return dict(c)
 
 
-def _clip_cap(raw: Any) -> int:
+def normalize_cap(raw: Any) -> int | None:
+    """Live ``max_positions``: ``None`` = unlimited (0 / missing), else ≥1."""
     try:
-        n = int(raw or 1)
+        n = int(raw if raw is not None else 0)
     except (TypeError, ValueError):
-        n = 1
-    return max(1, min(5, n))
+        n = 0
+    if n <= 0:
+        return None
+    return n
 
 
 def evaluate(
     counts: dict[str, int],
     caps: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """``fire`` when count > per-symbol max_positions (default cap 5 if unknown)."""
+    """``fire`` when count > per-symbol max_positions (0 = unlimited)."""
     caps = caps or {}
     offenders: dict[str, int] = {}
+    shown: dict[str, int | None] = {}
     for k, v in counts.items():
-        limit = _clip_cap(caps[k]) if k in caps else 5
-        if int(v) > limit:
-            offenders[k] = int(v)
+        if k in caps:
+            limit = normalize_cap(caps[k])
+            shown[k] = limit
+            if limit is None:
+                continue
+            if int(v) > limit:
+                offenders[k] = int(v)
+        else:
+            shown[k] = _UNKNOWN_SOFT_CAP
+            if int(v) > _UNKNOWN_SOFT_CAP:
+                offenders[k] = int(v)
     mx = max((int(v) for v in counts.values()), default=0)
     return {
         "counts": {k: int(v) for k, v in counts.items()},
-        "caps": {k: _clip_cap(caps[k]) for k in counts if k in caps},
+        "caps": shown,
         "offenders": offenders,
         "max_concurrent": mx,
         "fire": bool(offenders),
@@ -119,7 +134,10 @@ def fetch_max_positions(panel: str = PANEL) -> dict[str, int]:
         sym = str(row.get("symbol") or "")
         if not sym:
             continue
-        out[sym] = _clip_cap(row.get("max_positions"))
+        try:
+            out[sym] = int(row.get("max_positions") or 0)
+        except (TypeError, ValueError):
+            out[sym] = 0
     return out
 
 
@@ -224,7 +242,8 @@ def maybe_alert(
     body = (
         f"# Cursor -> Claude -- {ts} -- CONCURRENT STACK ALARM ({detail}).\n\n"
         "Fire = open tickets exceed that symbol's live ``max_positions`` "
-        "(1..5). Legal scale-ins are OK. Config dokunma; investigate tickets.\n\n"
+        "(0=unlimited). Legal scale-ins under the cap are OK. Config dokunma; "
+        "investigate tickets.\n\n"
         "MICO MOLA yok.\n"
     )
     try:

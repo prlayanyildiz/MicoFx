@@ -8,6 +8,11 @@
 # Poll 5s. Do NOT watch cursor/FOR_GEMINI.md (that is Gemini's inbox).
 $ErrorActionPreference = "Continue"
 $root = "C:\Users\Administrator\MicoFx"
+$CancelFlag = Join-Path $root ".bridge\BRIDGES_CANCELLED.json"
+if (Test-Path -LiteralPath $CancelFlag) {
+    Write-Host "[CURSOR_BRIDGES] cancelled (.bridge/BRIDGES_CANCELLED.json) - exit."
+    exit 0
+}
 $wakeFile = Join-Path $root ".bridge\WAKE.txt"
 $inboxGemini = Join-Path $root "antigravity\FOR_GEMINI.md"
 $inboxGeminiAlt = Join-Path $root "antigravity\FOR_CURSOR.md"

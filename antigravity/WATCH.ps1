@@ -3,6 +3,11 @@
 # Single-instance mutex (08.09 audit: dual PIDs were double-waking Gemini).
 $ErrorActionPreference = "Continue"
 $root = "C:\Users\Administrator\MicoFx"
+$CancelFlag = Join-Path $root ".bridge\BRIDGES_CANCELLED.json"
+if (Test-Path -LiteralPath $CancelFlag) {
+    Write-Host "[GEMINI_BRIDGE] cancelled (.bridge/BRIDGES_CANCELLED.json) - exit."
+    exit 0
+}
 $inbox = Join-Path $root "cursor\FOR_GEMINI.md"
 $state = Join-Path $root "antigravity\_watch_hash.txt"
 $pingFile = Join-Path $root ".bridge\last_ping_gemini.txt"

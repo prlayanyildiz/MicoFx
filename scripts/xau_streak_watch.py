@@ -27,6 +27,8 @@ REVIEW_AT = 5   # hybrid SL scan ready for human/Claude review — no auto land
 ESCALATE_AT = 8  # Claude 04:35: 3 flag + 5 more
 EXP_WINDOW = 10
 EXP_ALERT_R = -0.30  # Claude 04:35: live exp < -0.30R / 10 trades
+# Same soft floor the retired nas_sweep_fade_watch used (merged 12.09).
+NET_ALERT_R = -3.0
 
 
 def is_winner(row: dict[str, Any]) -> bool:
@@ -92,13 +94,18 @@ def recent_expectancy(
             vals.append(float(row.get("r_realised") or 0.0))
         except (TypeError, ValueError):
             continue
-    exp = (sum(vals) / len(vals)) if vals else 0.0
+    net = sum(vals) if vals else 0.0
+    exp = (net / len(vals)) if vals else 0.0
+    enough = bool(vals) and len(vals) >= min(5, int(n))
+    soft = enough and (exp < EXP_ALERT_R or net <= NET_ALERT_R)
     return {
         "n": len(vals),
         "window": int(n),
         "expectancy_r": round(exp, 4),
-        "alert": bool(vals) and len(vals) >= min(5, int(n)) and exp < EXP_ALERT_R,
+        "net_r": round(net, 4),
+        "alert": soft,
         "threshold_r": EXP_ALERT_R,
+        "net_threshold_r": NET_ALERT_R,
     }
 
 

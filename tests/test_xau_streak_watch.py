@@ -67,6 +67,16 @@ def test_recent_expectancy_alerts_below_threshold():
     assert recent_expectancy(rows2, n=10)["alert"] is False
 
 
+def test_recent_expectancy_alerts_on_net_floor():
+    """Exactly −0.30R mean → exp gate closed; net ≤ −3.0 still fires."""
+    from scripts.xau_streak_watch import recent_expectancy
+
+    rows = [_row("XAUUSD", -0.30, i) for i in range(10)]
+    exp = recent_expectancy(rows, n=10)
+    assert exp["net_r"] == -3.0
+    assert exp["alert"] is True
+
+
 def test_streak_stops_at_last_winner():
     rows = [
         _row("XAUUSD", 2.0, 1),

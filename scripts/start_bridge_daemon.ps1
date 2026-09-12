@@ -6,6 +6,11 @@
 # Survives chat close. Mutex single-instance.
 $ErrorActionPreference = "Continue"
 $Root = "C:\Users\Administrator\MicoFx"
+$CancelFlag = Join-Path $Root ".bridge\BRIDGES_CANCELLED.json"
+if (Test-Path -LiteralPath $CancelFlag) {
+    Write-Host "Bridges cancelled (.bridge/BRIDGES_CANCELLED.json) - exit."
+    exit 0
+}
 $MutexName = "Global\MicoFX.BridgeDaemon"
 $Log = Join-Path $Root "logs\bridge_daemon.log"
 $WakeFile = Join-Path $Root ".bridge\WAKE.txt"

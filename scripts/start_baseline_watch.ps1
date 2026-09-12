@@ -16,11 +16,13 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Root "logs") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Root ".bridge") | Out-Null
 
 function Get-BaselineWatchPids {
+    # Match the watch script as a run target — not pytest collecting the same path.
     @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object {
             $_.Name -match '^python' -and
             $_.CommandLine -and
-            $_.CommandLine -like '*baseline_accumulate_watch.py*'
+            $_.CommandLine -like '*baseline_accumulate_watch.py*' -and
+            $_.CommandLine -notmatch '(?i)(-m\s+pytest|pytest\.exe|\bpytest\b)'
         } |
         Select-Object -ExpandProperty ProcessId)
 }

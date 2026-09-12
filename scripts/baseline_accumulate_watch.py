@@ -313,7 +313,16 @@ def once(panel: str = PANEL) -> tuple[bool, bool, bool, int | None]:
             _log(n)
     except Exception as exc:
         _log(f"cb_path fail: {exc}")
+    # Quiet-book signal health (same ACTIVE as live 3 — not a second process).
+    try:
+        from scripts.signal_health import check_signal_health
+
+        for n in check_signal_health():
+            _log(n)
+    except Exception as exc:
+        _log(f"signal_health fail: {exc}")
     # Book streak / expectancy (suppressed until baseline target).
+    # Soft exp/net floors (incl. retired nas_sweep_fade_watch) live here.
     try:
         enabled = fetch_enabled_symbols(panel)
         # Always include XAU even when night-disabled.

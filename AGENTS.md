@@ -13,13 +13,12 @@ MASTER_PROMPT, with explicit directive: *"anayasa benim kısıtlı bilgimle
 oluştu en iyi sistemi için olması gereken neyse yapın. herkesin
 değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
 
-1. **Mutual approval.** A material change (anayasa, risk, sizing,
-   unfreeze, session, opt apply, live flatten, leverage-adjacent)
-   needs a brief ACK from the other bridge peer(s) before land —
-   Cursor ↔ Gemini via `FOR_GEMINI.md`, Cursor ↔ Claude via
-   `FOR_CLAUDE.md` / `FOR_CURSOR.md`. Same-day ping is enough; silence
-   after a clear ask is not an ACK. Yellow/red that used to wait on the
-   human now wait on **peer ACK** unless the operator overrides in chat.
+1. **Solo Cursor (12.09).** Operator cancelled all peer bridges
+   (`FOR_GEMINI` / `FOR_CLAUDE` / Antigravity): Claude and Gemini are
+   offline. **Cursor lands alone** — no peer ACK wait. Yellow/red that
+   used to wait on peers now land under operator chat authority. Safety
+   floor (item 4) still binds. Do not resurrect bridge ACK as a blocker
+   unasked; bridge files may exist as archives only.
 2. **Book is 3 symbols: `GER40 NAS100 XAUUSD`.** It went 7 -> 3 -> 4 -> 3
    across 10-11.09, all operator calls. **Staying deleted**: JPN225 + BTCUSD
    (10.09 10:42), SpotBrent (21:37), BRENTOIL-PERP (22:2x - added and cut the
@@ -57,16 +56,16 @@ değiştirebilirsiniz yeterki çok iyi.kar eden bir otomatik sistem olsun."*
    sizing scales dynamically with equity (`LOT_MULT_MAX = 2.5`,
    expanded equity tiers — `kasa_sizing.py` basamakları: under $2K=1.15-1.3x,
    $2K-$3.5K=1.5x, $3.5K-$6K=1.75x, $8K≈1.95x, $10.5K=2.2x tier,
-   $13.5K+=2.5x tavan; Yellow ACK Cursor+Gemini 08.09),
-   while `max_concurrent_risk_pct = 25%` is now the ONLY book-wide brake on
-   stacking: symbol `max_positions` lost its 1..5 clip 11.09 and 0 means
-   unlimited (see the scale-in clause below for the evidence that was
-   overruled). **Gemini (Antigravity)** is the active peer;
-   **Claude** joins NOW (operator directive 08.09 — do not defer to Thursday).
-   Push to GitHub when a peer-ACK'd package lands (operator 07.09).
+   $13.5K+=2.5x tavan),
+   while `max_concurrent_risk_pct = 25%` is the book-wide risk brake.
+   Per-symbol `max_positions` is live again at **1** on the book (12.09:
+   scale-in autopsy −17.9R / ~34% of live loss; operator override of the
+   earlier unlimited-0 charter). `0` still means unlimited in code.
+   Push to GitHub when a material package lands (operator 07.09; no peer
+   ACK required while bridges are cancelled).
 4. **Safety floor still binds the process:** one Python, live owns
    DB/MT5, Origin on writes, no second `mt5.initialize()`, no LLM in
-   engine/optimizer/supervisor. Peer ACK does not waive these.
+   engine/optimizer/supervisor. Solo authority does not waive these.
 5. **No account lock — the bot follows the terminal.** Removed 10.09
    (operator: "hedefteki mt5 hesap neyse o olsun"). `account_lock.py`,
    `Engine._enforce_account_lock`, `POST /api/account-lock` and
@@ -324,13 +323,14 @@ Fail-first: write the test, watch it fail, then implement.
  `{**shipped, **stored}` per axis, so a stored axis keeps its values
  unless the shipped list has extras (those append: trail_step 2.8).
  Only a brand-new axis back-fills the whole list.
-- **Yellow** (peer ACK): supervisor knobs, AI soft-size, session widen,
-  opt run/apply, unfreeze checklist, concurrent/lot bumps.
-  **Red** (peer ACK + explicit risk note in the brief): leverage,
+- **Yellow** (solo Cursor while bridges cancelled 12.09): supervisor knobs,
+  AI soft-size, session widen, opt run/apply, unfreeze checklist,
+  concurrent/lot bumps — land with a measured note in chat/log; no peer wait.
+  **Red** (solo + explicit risk note in the brief): leverage,
   daily_loss, live flatten-all, and anything that changes *which* MT5
   account or which symbols trade (the account lock that used to make the
   first of those a controlled step is gone — see charter item 5).
-  Operator chat still overrides peers.
+  Operator chat still overrides everything.
 - HTTP writes match the panel. Symbol POST: sessions +
   `enabled` / `group` / `broker_symbol`.
   `partial_at_r` (0 only, F44).
@@ -355,26 +355,21 @@ Fail-first: write the test, watch it fail, then implement.
   still defaults true.
 - Holdout `capture = net_r / sum(mfe_r)` is a visible column. **Not** a
   score input and **not** an apply gate.
-- Cursor is project lead and codes, **full authority vs Claude and
-  Antigravity (Gemini)**. Claude/Gemini scan and write briefs; Cursor
-  decides and lands. Yellow/red wait on **peer ACK** (operator chat
-  overrides). Thursday: Cursor **and Claude** join the recurring loop
-  with Gemini.
+- Cursor is project lead and codes with **solo full authority** while
+  Claude/Gemini bridges are cancelled (operator 12.09). Do not block
+  lands on peer ACK. Re-arm bridges only if the operator asks.
 - Commit/push only when the operator asks. Named files; no secrets; no
   `--no-verify`. `cursor/`, `claude/`, `antigravity/` are gitignored.
 
 ## Important locations (only non-obvious)
 
 - Runtime: `data/micofx.db`, `logs/micofx.log` (gitignored).
-- Bridge (gitignored):
+- Bridge (gitignored; **cancelled 12.09** — archive only, not a land gate):
   - Claude: Cursor → `cursor/FOR_CLAUDE.md`; Claude → `claude/FOR_CURSOR.md`.
   - Gemini: Antigravity → `antigravity/FOR_GEMINI.md` (and/or
     `FOR_CURSOR.md`); Cursor → `cursor/FOR_GEMINI.md`.
-  - Shared wake `.bridge/WAKE.txt`. Cursor arms
-    `cursor/watch_bridges.ps1` (watches `antigravity/FOR_GEMINI.md` +
-    Claude inbox; emits `AGENT_LOOP_WAKE_gemini_bridge` within 5s).
-    Antigravity arms `antigravity/WATCH.ps1` (watches
-    `cursor/FOR_GEMINI.md`). Do not watch a file you write.
+  - Shared wake `.bridge/WAKE.txt`. Do not arm peer watchers unasked
+    while bridges are cancelled.
 - Installer: `KUR.bat` â†’ `KUR.ps1`. Launchers stay at repo root.
 - Audit notes (not executable): `OPTIMIZATIONS.md`. Trust the closed
   ledger at the top.

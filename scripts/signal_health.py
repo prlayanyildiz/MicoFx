@@ -18,7 +18,8 @@ from scripts.panel_session import headers as _session  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 LOG = ROOT / "logs" / "micofx.log"
 PANEL = "http://127.0.0.1:8900"
-ACTIVE = ("GER40", "JPN225", "NAS100", "US30")
+# Live book only (retired US30/JPN225 stay out).
+ACTIVE = ("GER40", "NAS100", "XAUUSD")
 # During open index sessions, no primary-leg signal for this long is worth flagging.
 QUIET_HOURS = 2.5
 

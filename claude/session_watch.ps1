@@ -26,6 +26,11 @@
 
 $ErrorActionPreference = 'Continue'
 $root  = 'C:\Users\Administrator\MicoFx'
+$CancelFlag = Join-Path $root '.bridge\BRIDGES_CANCELLED.json'
+if (Test-Path -LiteralPath $CancelFlag) {
+    Write-Host '[CLAUDE_SESSION] cancelled (.bridge/BRIDGES_CANCELLED.json) - exit.'
+    exit 0
+}
 $inbox = Join-Path $root 'claude\FOR_CURSOR.md'
 $state = Join-Path $root 'cursor\_cursor_session_claude_hash.txt'
 $ping  = Join-Path $root '.bridge\last_ping_cursor.txt'
